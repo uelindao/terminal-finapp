@@ -1,0 +1,17 @@
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Senhas e Chaves de API (CRÍTICO)
+.streamlit/secrets.toml
+.env
+
+# Banco de Dados Local (Não queremos subir o histórico do seu PC)
+data/
+*.db
+*.sqlite3
+
+# Ambientes Virtuais (Se você usar)
+venv/
+env/

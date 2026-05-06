@@ -1,0 +1,1 @@
+# Arquivo vazio. Indica que o diretório 'database' é um pacote Python.
