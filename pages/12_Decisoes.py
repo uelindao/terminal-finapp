@@ -4,6 +4,11 @@ import pandas as pd
 import datetime
 from google import genai
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado

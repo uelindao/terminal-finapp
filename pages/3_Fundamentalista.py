@@ -10,6 +10,11 @@ from utils.style import aplicar_tema
 from database.db import get_cache_ia, salvar_cache_ia, get_historico_multiplos
 from utils.tickers import get_opcoes_selectbox, ticker_from_label
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # --- Configuração da Página ---
 st.set_page_config(page_title="Análise Fundamentalista", layout="wide", initial_sidebar_state="collapsed")
 

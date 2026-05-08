@@ -7,6 +7,11 @@ import datetime
 from fredapi import Fred
 from bcb import sgs
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label
 

@@ -7,6 +7,11 @@ from plotly.subplots import make_subplots
 import datetime
 from google import genai
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importa as dependências do projeto e o novo catálogo de tickers
 from utils.style import aplicar_tema
 from database.db import listar_watchlist, get_cache_ia, salvar_cache_ia

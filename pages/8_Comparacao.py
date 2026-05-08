@@ -7,6 +7,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 from google import genai
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importa o Design System, Banco de Dados e o Catálogo de Tickers
 from utils.style import aplicar_tema
 from database.db import get_connection, get_cache_ia, salvar_cache_ia

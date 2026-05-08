@@ -7,6 +7,11 @@ import yfinance as yf
 import datetime
 from google import genai
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importa o nosso Design System centralizado
 from utils.style import aplicar_tema
 

@@ -11,6 +11,11 @@ from google import genai
 from scipy.stats import spearmanr
 import datetime
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importa dependências do projeto e o novo catálogo central
 from utils.style import aplicar_tema
 from database.db import (

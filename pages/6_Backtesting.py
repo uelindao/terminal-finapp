@@ -5,6 +5,11 @@ import numpy as np
 import plotly.graph_objects as go
 import datetime
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importa o Design System centralizado e o Catálogo de Tickers
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_multiselect_backtesting, BR_ACOES

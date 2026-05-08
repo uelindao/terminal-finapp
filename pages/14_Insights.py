@@ -7,6 +7,11 @@ from google import genai
 from fredapi import Fred
 from bcb import sgs
 
+from utils.auth import check_password
+
+if not check_password():
+    st.stop()
+
 # Importações do projeto
 from utils.style import aplicar_tema
 from database.db import (
