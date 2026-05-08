@@ -1,204 +1,316 @@
 import sqlite3
-import os
+import datetime
+import json
 
 def get_connection():
-    """
-    Garante que a pasta 'data' existe e retorna uma conexão com o SQLite.
-    row_factory = sqlite3.Row permite acessar as colunas pelo nome (ex: row['ticker']).
-    """
-    if not os.path.exists('data'):
-        os.makedirs('data')
-        
-    conn = sqlite3.connect('data/finapp.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+    # Conecta ao banco (cria se não existir)
+    return sqlite3.connect('data/finapp.db', check_same_thread=False)
 
 def init_db():
-    """Cria o schema do banco de dados relacional caso as tabelas não existam."""
     conn = get_connection()
-    cursor = conn.cursor()
+    c = conn.cursor()
     
-    # 1. Tabela da Watchlist
-    cursor.execute('''
+    # Tabela Watchlist
+    c.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL UNIQUE,
+            ticker TEXT PRIMARY KEY,
             nome TEXT,
             mercado TEXT,
             notas TEXT,
-            adicionado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            adicionado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     ''')
     
-    # 2. Tabela do Motor de Alertas
-    cursor.execute('''
+    # Tabela Alertas
+    c.execute('''
         CREATE TABLE IF NOT EXISTS alertas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            threshold REAL NOT NULL,
+            ticker TEXT,
+            tipo TEXT,
+            threshold REAL,
             ativo INTEGER DEFAULT 1,
-            disparado_em DATETIME,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            disparado_em TIMESTAMP
+        )
     ''')
     
-    # 3. Tabela de Cache da Inteligência Artificial
-    cursor.execute('''
+    # --- CORREÇÃO AUTOMÁTICA DO SCHEMA DE CACHE ---
+    c.execute("PRAGMA table_info(cache_analise_ia)")
+    colunas = [col[1] for col in c.fetchall()]
+    if colunas and 'resposta' not in colunas:
+        c.execute("DROP TABLE cache_analise_ia")
+
+    # Tabela Cache IA
+    c.execute('''
         CREATE TABLE IF NOT EXISTS cache_analise_ia (
-            ticker TEXT NOT NULL,
-            tipo_analise TEXT NOT NULL,
-            conteudo TEXT NOT NULL,
-            gerado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (ticker, tipo_analise)
-        );
+            ticker TEXT,
+            tipo TEXT,
+            resposta TEXT,
+            gerado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ticker, tipo)
+        )
     ''')
-    
-    # 4. Tabela de Cache de Cotações
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cache_preco (
-            ticker TEXT NOT NULL,
-            data DATE NOT NULL,
-            abertura REAL, maxima REAL, minima REAL,
-            fechamento REAL, fechamento_ajustado REAL, volume INTEGER,
-            PRIMARY KEY (ticker, data)
-        );
-    ''')
-    
-    # 5. Tabela de Cache de Indicadores Macro
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cache_macro (
-            indicador TEXT NOT NULL,
-            fonte TEXT NOT NULL,
-            data DATE NOT NULL,
-            valor REAL,
-            PRIMARY KEY (indicador, data)
-        );
-    ''')
-    
-    # 6. Tabela de Salões de Comparação
-    cursor.execute('''
+
+    # Tabela de Comps Salvas
+    c.execute('''
         CREATE TABLE IF NOT EXISTS comparacoes_salvas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            tickers TEXT NOT NULL,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            nome TEXT,
+            tickers TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Tabela Health Scores
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS health_scores (
+            ticker          TEXT NOT NULL,
+            score           REAL NOT NULL,
+            score_fund      REAL,
+            score_tec       REAL,
+            alertas_venda   TEXT,
+            calculado_em    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ticker)
+        )
+    ''')
+
+    # Tabela Historico Multiplos
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS historico_multiplos (
+            ticker  TEXT NOT NULL,
+            data    DATE NOT NULL,
+            pl      REAL,
+            pvp     REAL,
+            roe     REAL,
+            margem  REAL,
+            dy      REAL,
+            div_ebitda REAL,
+            PRIMARY KEY (ticker, data)
+        )
+    ''')
+    
+    # Tabela Portfolio Pesos
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS portfolio_pesos (
+            ticker  TEXT PRIMARY KEY,
+            peso    REAL NOT NULL DEFAULT 0,
+            preco_medio REAL,
+            quantidade  REAL,
+            atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Tabela Decisões (NOVA)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS decisoes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker      TEXT NOT NULL,
+            tipo        TEXT NOT NULL, 
+            data_decisao DATE NOT NULL,
+            preco_decisao REAL NOT NULL,
+            quantidade  REAL,
+            tese        TEXT,
+            resultado   TEXT,
+            registrado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
     ''')
     
     conn.commit()
     conn.close()
 
-# ==========================================
-# CRUD - WATCHLIST
-# ==========================================
-
-def adicionar_ativo(ticker, nome="", mercado=""):
+# --- WATCHLIST ---
+def adicionar_ativo(ticker, nome, mercado):
     conn = get_connection()
-    cursor = conn.cursor()
-    # INSERT OR IGNORE previne erro caso o usuário tente adicionar o mesmo ticker duas vezes
-    cursor.execute('''
-        INSERT OR IGNORE INTO watchlist (ticker, nome, mercado)
-        VALUES (?, ?, ?)
-    ''', (ticker, nome, mercado))
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO watchlist (ticker, nome, mercado) VALUES (?, ?, ?)", 
+              (ticker, nome, mercado))
     conn.commit()
     conn.close()
 
 def remover_ativo(ticker):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM watchlist WHERE ticker = ?', (ticker,))
+    c = conn.cursor()
+    c.execute("DELETE FROM watchlist WHERE ticker = ?", (ticker,))
+    c.execute("DELETE FROM alertas WHERE ticker = ?", (ticker,))
+    c.execute("DELETE FROM portfolio_pesos WHERE ticker = ?", (ticker,))
     conn.commit()
     conn.close()
 
 def listar_watchlist():
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM watchlist ORDER BY adicionado_em DESC')
-    rows = cursor.fetchall()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM watchlist ORDER BY adicionado_em DESC")
+    rows = c.fetchall()
     conn.close()
-    return [dict(row) for row in rows] # Converte para lista de dicionários padrão
+    return [dict(r) for r in rows]
 
 def atualizar_notas(ticker, notas):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE watchlist SET notas = ? WHERE ticker = ?', (notas, ticker))
+    c = conn.cursor()
+    c.execute("UPDATE watchlist SET notas = ? WHERE ticker = ?", (notas, ticker))
     conn.commit()
     conn.close()
 
-# ==========================================
-# CRUD - ALERTAS
-# ==========================================
-
+# --- ALERTAS ---
 def criar_alerta(ticker, tipo, threshold):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO alertas (ticker, tipo, threshold)
-        VALUES (?, ?, ?)
-    ''', (ticker, tipo, threshold))
+    c = conn.cursor()
+    c.execute("INSERT INTO alertas (ticker, tipo, threshold) VALUES (?, ?, ?)", 
+              (ticker, tipo, threshold))
     conn.commit()
     conn.close()
 
-def listar_alertas(ticker=None):
+def listar_alertas():
     conn = get_connection()
-    cursor = conn.cursor()
-    if ticker:
-        cursor.execute('SELECT * FROM alertas WHERE ticker = ? ORDER BY criado_em DESC', (ticker,))
-    else:
-        cursor.execute('SELECT * FROM alertas ORDER BY criado_em DESC')
-    rows = cursor.fetchall()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM alertas ORDER BY criado_em DESC")
+    rows = c.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
 
 def desativar_alerta(alerta_id):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE alertas SET ativo = 0 WHERE id = ?', (alerta_id,))
+    c = conn.cursor()
+    c.execute("UPDATE alertas SET ativo = 0 WHERE id = ?", (alerta_id,))
     conn.commit()
     conn.close()
 
 def marcar_disparado(alerta_id):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE alertas SET disparado_em = CURRENT_TIMESTAMP WHERE id = ?', (alerta_id,))
+    c = conn.cursor()
+    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("UPDATE alertas SET disparado_em = ?, ativo = 0 WHERE id = ?", (agora, alerta_id))
     conn.commit()
     conn.close()
 
-# ==========================================
-# CACHE - INTELIGÊNCIA ARTIFICIAL
-# ==========================================
-
-def get_cache_ia(ticker, tipo_analise, max_horas=24):
-    """
-    Retorna o relatório da IA apenas se foi gerado nas últimas N horas.
-    Isso economiza tokens caros de API.
-    """
+# --- CACHE IA ---
+def salvar_cache_ia(ticker, tipo, resposta):
     conn = get_connection()
-    cursor = conn.cursor()
-    
-    # O motor de data/hora do SQLite faz a matemática de expiração nativamente
-    cursor.execute('''
-        SELECT conteudo 
-        FROM cache_analise_ia 
-        WHERE ticker = ? AND tipo_analise = ? 
-        AND gerado_em >= datetime('now', ?)
-    ''', (ticker, tipo_analise, f'-{max_horas} hours'))
-    
-    row = cursor.fetchone()
+    c = conn.cursor()
+    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT OR REPLACE INTO cache_analise_ia (ticker, tipo, resposta, gerado_em) VALUES (?, ?, ?, ?)", 
+              (ticker, tipo, resposta, agora))
+    conn.commit()
+    conn.close()
+
+def get_cache_ia(ticker, tipo, max_horas=24):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT resposta, gerado_em FROM cache_analise_ia WHERE ticker = ? AND tipo = ?", (ticker, tipo))
+    row = c.fetchone()
     conn.close()
     
     if row:
-        return row['conteudo']
+        gerado_em = datetime.datetime.strptime(row['gerado_em'], "%Y-%m-%d %H:%M:%S")
+        agora = datetime.datetime.now()
+        if (agora - gerado_em).total_seconds() <= max_horas * 3600:
+            return row['resposta']
     return None
 
-def salvar_cache_ia(ticker, tipo_analise, conteudo):
+# --- POPULAR WATCHLIST INICIAL ---
+def popular_watchlist_inicial():
+    from utils.tickers import BR_ACOES, BR_FIIS, BRASIL_LABELS
     conn = get_connection()
     cursor = conn.cursor()
-    # O REPLACE atualiza a linha inteira se a chave primária composta já existir
-    cursor.execute('''
-        REPLACE INTO cache_analise_ia (ticker, tipo_analise, conteudo, gerado_em)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (ticker, tipo_analise, conteudo))
+    cursor.execute("SELECT COUNT(*) FROM watchlist")
+    count = cursor.fetchone()[0]
+
+    if count == 0:
+        todos = [
+            (t, BRASIL_LABELS.get(t, t).split(" — ")[-1].strip(), "B3 (Brasil)")
+            for t in (BR_ACOES + BR_FIIS)
+        ]
+        cursor.executemany(
+            "INSERT OR IGNORE INTO watchlist (ticker, nome, mercado) VALUES (?, ?, ?)",
+            todos
+        )
+        conn.commit()
+    conn.close()
+
+# --- HEALTH SCORE ENGINE ---
+def salvar_health_score(ticker, score, score_fund, score_tec, alertas_list):
+    conn = get_connection()
+    conn.execute('''
+        REPLACE INTO health_scores
+        (ticker, score, score_fund, score_tec, alertas_venda, calculado_em)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (ticker, score, score_fund, score_tec, json.dumps(alertas_list)))
+    conn.commit()
+    conn.close()
+
+def get_health_scores() -> list[dict]:
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute('SELECT * FROM health_scores ORDER BY score ASC').fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def salvar_multiplos_historicos(ticker, dados: dict):
+    from datetime import date
+    conn = get_connection()
+    conn.execute('''
+        INSERT OR REPLACE INTO historico_multiplos
+        (ticker, data, pl, pvp, roe, margem, dy, div_ebitda)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (ticker, date.today().isoformat(),
+          dados.get('pl'), dados.get('pvp'), dados.get('roe'),
+          dados.get('margem'), dados.get('dy'), dados.get('div_ebitda')))
+    conn.commit()
+    conn.close()
+
+def get_historico_multiplos(ticker) -> list[dict]:
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        'SELECT * FROM historico_multiplos WHERE ticker = ? ORDER BY data',
+        (ticker,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# --- PORTFOLIO PESOS ---
+def salvar_peso(ticker, peso, preco_medio=None, quantidade=None):
+    conn = get_connection()
+    conn.execute('''
+        INSERT OR REPLACE INTO portfolio_pesos
+        (ticker, peso, preco_medio, quantidade, atualizado_em)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (ticker, peso, preco_medio, quantidade))
+    conn.commit()
+    conn.close()
+
+def get_pesos() -> list[dict]:
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute('SELECT * FROM portfolio_pesos').fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# --- HISTÓRICO DE DECISÕES ---
+def registrar_decisao(ticker, tipo, data_decisao, preco_decisao, quantidade, tese):
+    conn = get_connection()
+    conn.execute('''
+        INSERT INTO decisoes (ticker, tipo, data_decisao, preco_decisao, quantidade, tese)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (ticker, tipo, data_decisao, preco_decisao, quantidade, tese))
+    conn.commit()
+    conn.close()
+
+def listar_decisoes(ticker=None) -> list[dict]:
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    if ticker:
+        rows = conn.execute('SELECT * FROM decisoes WHERE ticker = ? ORDER BY data_decisao DESC', (ticker,)).fetchall()
+    else:
+        rows = conn.execute('SELECT * FROM decisoes ORDER BY data_decisao DESC').fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def atualizar_resultado(decision_id, resultado):
+    conn = get_connection()
+    conn.execute('UPDATE decisoes SET resultado = ? WHERE id = ?', (resultado, decision_id))
     conn.commit()
     conn.close()

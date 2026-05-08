@@ -4,28 +4,70 @@ import pandas as pd
 import numpy as np
 from google import genai
 import time
+import json
+from datetime import datetime, timedelta
 
-# Importa o Design System e o Banco de Dados
+# Importa o Design System, Banco de Dados e Email
 from utils.style import aplicar_tema
 from database.db import (
     init_db, adicionar_ativo, remover_ativo, listar_watchlist, atualizar_notas,
     criar_alerta, listar_alertas, desativar_alerta, marcar_disparado,
-    get_cache_ia, salvar_cache_ia
+    get_cache_ia, salvar_cache_ia, get_connection, popular_watchlist_inicial, 
+    get_health_scores, get_pesos
 )
+from utils.health_engine import calcular_health_score
+from utils.email_sender import enviar_alerta_email, enviar_relatorio_semanal
 
-# --- Configuração da Página (DEVE SER O PRIMEIRO COMANDO) ---
-st.set_page_config(page_title="Terminal FinApp | Watchlist", layout="wide", initial_sidebar_state="expanded")
+# --- Configuração da Página ---
+st.set_page_config(page_title="Terminal FinApp | Home", layout="wide", initial_sidebar_state="expanded")
 
-# --- Inicializa o Banco de Dados ---
+# --- Inicializa o Banco de Dados Globalmente ---
 init_db()
+popular_watchlist_inicial() 
+
+# ==========================================
+# GERAÇÃO DO RELATÓRIO SEMANAL (Briefing 5)
+# ==========================================
+# Chave do relatório: semana atual (ex: "2026-W19")
+semana_atual = datetime.now().strftime("%Y-W%W")
+cache_relatorio = get_cache_ia("RELATORIO", semana_atual, max_horas=168)  # 7 dias
+
+if not cache_relatorio:
+    # Marca como gerado para não repetir na mesma semana
+    salvar_cache_ia("RELATORIO", semana_atual, "gerado")
+
+    # Coleta dados da watchlist em background
+    watchlist_report = listar_watchlist()
+    pesos     = {p['ticker']: p for p in get_pesos()}
+    scores    = {h['ticker']: h for h in get_health_scores()}
+
+    dados_carteira = []
+    for item in watchlist_report:
+        t = item['ticker']
+        try:
+            hist = yf.Ticker(t).history(period="35d")
+            preco = hist['Close'].iloc[-1]
+            var1d = ((preco/hist['Close'].iloc[-2])-1)*100
+            var1m = ((preco/hist['Close'].iloc[0])-1)*100
+        except:
+            preco = var1d = var1m = 0
+
+        dados_carteira.append({
+            'ticker': t,
+            'score': scores.get(t, {}).get('score', 50),
+            'var_1d': var1d,
+            'var_1m': var1m,
+            'peso': pesos.get(t, {}).get('peso', 0),
+        })
+
+    st.session_state['relatorio_semanal'] = dados_carteira
+    st.session_state['relatorio_pronto'] = True
 
 # --- Injeta o CSS Centralizado ---
 aplicar_tema()
 
-st.markdown("### 👁️ WATCHLIST & RADAR DE ALERTAS")
-
 # ==========================================
-# FUNÇÕES DE APOIO
+# FUNÇÕES DE APOIO GERAIS E DASHBOARD
 # ==========================================
 def detectar_mercado(ticker):
     t = ticker.upper()
@@ -42,9 +84,131 @@ MAPA_ALERTAS_UI_DB = {
     'DY acima de %': 'dy_acima'
 }
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_market_status():
+    tickers_map = {
+        '^BVSP': 'IBOVESPA',
+        '^GSPC': 'S&P 500',
+        '^IXIC': 'NASDAQ',
+        '^FTSE': 'FTSE 100',
+        'BTC-USD': 'BITCOIN',
+        'GC=F': 'OURO'
+    }
+    tickers = list(tickers_map.keys())
+    data = []
+    try:
+        hist = yf.download(tickers, period="5d", auto_adjust=True, progress=False)
+        df_close = hist['Close'] if isinstance(hist.columns, pd.MultiIndex) else hist
+        df_close = df_close.ffill() 
+        
+        for t in tickers:
+            nome = tickers_map[t]
+            try:
+                s = df_close[t].dropna()
+                if len(s) >= 2:
+                    curr = s.iloc[-1]
+                    prev = s.iloc[-2]
+                    var = ((curr / prev) - 1) * 100
+                    data.append({'nome': nome, 'valor': curr, 'var': var})
+                elif len(s) == 1:
+                    data.append({'nome': nome, 'valor': s.iloc[-1], 'var': 0.0})
+                else:
+                    data.append({'nome': nome, 'valor': 0.0, 'var': 0.0})
+            except Exception:
+                data.append({'nome': nome, 'valor': 0.0, 'var': 0.0})
+    except Exception:
+        for t in tickers:
+            data.append({'nome': tickers_map[t], 'valor': 0.0, 'var': 0.0})
+    return data
+
+def get_recent_ai():
+    try:
+        import sqlite3
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT ticker, tipo, gerado_em FROM cache_analise_ia ORDER BY gerado_em DESC LIMIT 5")
+        rows = c.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
 # ==========================================
-# SEÇÃO 1: ADICIONAR ATIVO
+# BANNER RELATÓRIO SEMANAL
 # ==========================================
+if st.session_state.get('relatorio_pronto'):
+    with st.expander("📊 RELATÓRIO SEMANAL DISPONÍVEL", expanded=True):
+        st.write("O seu relatório de performance e saúde da carteira desta semana foi gerado em background pelo sistema.")
+        col1, col2, col3 = st.columns([2, 2, 6])
+        with col1:
+            if st.button("📧 ENVIAR POR EMAIL", type="primary"):
+                dados = st.session_state.get('relatorio_semanal', [])
+                if enviar_relatorio_semanal(dados):
+                    st.success("✅ Relatório enviado com sucesso para o seu email!")
+                    # Limpa o state para não mostrar o botão de novo caso feche a aba
+                    st.session_state['relatorio_pronto'] = False
+                else:
+                    st.error("Falha no envio. Verifique as suas configurações no secrets.toml.")
+        with col2:
+            if st.button("DISPENSAR"):
+                st.session_state['relatorio_pronto'] = False
+                st.rerun()
+
+# ==========================================
+# HEADER 1: DASHBOARD DE MERCADO
+# ==========================================
+st.markdown("### 🌐 PANORAMA GLOBAL DE MERCADO")
+market_data = fetch_market_status()
+
+if market_data:
+    cols = st.columns(len(market_data))
+    for i, item in enumerate(market_data):
+        if item['nome'] == 'BITCOIN':
+            valor_fmt = f"${item['valor']:,.0f}"
+        else:
+            valor_fmt = f"{item['valor']:,.2f}"
+            
+        cols[i].metric(item['nome'], valor_fmt, f"{item['var']:+.2f}%")
+        
+st.markdown("---")
+
+# ==========================================
+# HEADER 2: ACESSO RÁPIDO & HISTÓRICO DE IA
+# ==========================================
+c_links, c_ia = st.columns([1, 1])
+
+with c_links:
+    st.markdown("#### ⚡ NAVEGAÇÃO RÁPIDA")
+    col_link1, col_link2 = st.columns(2)
+    with col_link1:
+        st.page_link("pages/1_Macro_Global.py", label="Macro Global", icon="🌍")
+        st.page_link("pages/3_Fundamentalista.py", label="Fundamentalista", icon="📊")
+        st.page_link("pages/4_Analise_Tecnica.py", label="Análise Técnica", icon="📈")
+        st.page_link("pages/8_Comparacao.py", label="Comparação", icon="⚖️")
+    with col_link2:
+        st.page_link("pages/2_Screener_IA.py", label="Screener IA", icon="🕵️")
+        st.page_link("pages/5_IA_Sentimento.py", label="IA Sentimento", icon="🧠")
+        st.page_link("pages/6_Backtesting.py", label="Backtesting", icon="🔙")
+        st.page_link("pages/7_Overlay.py", label="Overlay Macro", icon="🔭")
+
+with c_ia:
+    st.markdown("#### 🧠 ÚLTIMAS ANÁLISES GERADAS PELA IA")
+    recent_ai = get_recent_ai()
+    if recent_ai:
+        for r in recent_ai:
+            data_formatada = r['gerado_em'][:16] 
+            st.markdown(f"- 🤖 **{r['ticker']}** — *{r['tipo'].capitalize()}* — {data_formatada}")
+    else:
+        st.info("Nenhuma análise de inteligência artificial em cache no momento.")
+
+st.markdown("---")
+
+# ==========================================
+# CORE: WATCHLIST & RADAR DE ALERTAS
+# ==========================================
+st.markdown("### 👁️ WATCHLIST PÚBLICA & RADAR DE ALERTAS")
+
 with st.container():
     c_input, c_btn, c_vazio = st.columns([3, 2, 5])
     with c_input:
@@ -70,6 +234,18 @@ with st.container():
 # ==========================================
 watchlist = listar_watchlist()
 alertas_db = listar_alertas()
+
+# -- Botão de Atualizar Health Scores --
+if st.button("🔄 ATUALIZAR HEALTH SCORES", type="primary"):
+    with st.spinner("Calculando scores de saúde de todos os ativos (este processo pode demorar um pouco)..."):
+        for item in watchlist:
+            try:
+                calcular_health_score(item['ticker'])
+            except Exception as e:
+                pass
+    st.success("Scores atualizados com sucesso!")
+    time.sleep(1)
+    st.rerun()
 
 live_data = {}
 if watchlist:
@@ -103,7 +279,7 @@ if watchlist:
                 live_data[t] = {'preco': 0, 'var_1d': 0, 'var_1m': 0, 'pl': 0, 'dy': 0}
 
 # ==========================================
-# SEÇÃO 3: VERIFICADOR DE ALERTAS
+# VERIFICADOR DE ALERTAS
 # ==========================================
 alertas_disparados_agora = []
 
@@ -133,9 +309,10 @@ if alertas_disparados_agora:
     st.rerun() 
 
 # ==========================================
-# SEÇÃO 2: GRID DE CARDS
+# GRID DE CARDS COM HEALTH SCORES
 # ==========================================
-st.markdown("---")
+health_data = {h['ticker']: h for h in get_health_scores()}
+
 if not watchlist:
     st.info("Sua watchlist está vazia. Adicione um ativo acima.")
 else:
@@ -154,9 +331,33 @@ else:
         
         cor_1m = "#00FF00" if dado['var_1m'] >= 0 else "#FF0000"
         sinal_1m = "+" if dado['var_1m'] >= 0 else ""
+
+        # --- Injeção do Health Score ---
+        score_info = health_data.get(t, {})
+        score = score_info.get('score', None)
+        
+        if score is not None:
+            cor_score = "#00FF00" if score >= 65 else ("#FF9900" if score >= 40 else "#FF0000")
+            label_score = "SAUDÁVEL" if score >= 65 else ("ATENÇÃO" if score >= 40 else "⚠️ VENDA")
+            barra = "█" * int(score/10) + "░" * (10 - int(score/10))
+            
+            html_score = f'''
+            <div style="margin-top:8px; border-top:1px solid #222; padding-top:6px;">
+                <div style="font-size:0.7rem; color:#888; font-family:Courier New;">
+                    HEALTH SCORE
+                </div>
+                <div style="color:{cor_score}; font-family:Courier New; font-size:0.85rem;">
+                    {barra} {score:.0f}/100
+                </div>
+                <div style="color:{cor_score}; font-size:0.7rem; font-family:Courier New;">
+                    {label_score}
+                </div>
+            </div>
+            '''
+        else:
+            html_score = ""
         
         with cols[col_idx]:
-            # HTML blindado em bloco único contra o bug de espaçamento do Markdown
             html_card = (
                 f'<div style="background-color:#111111; padding:15px; border-radius:8px; border-top:3px solid #FF9900; margin-bottom:10px;">'
                 f'<div style="display:flex; justify-content:space-between;">'
@@ -167,7 +368,9 @@ else:
                 f'<div style="font-size:0.9rem; margin-top:5px;">'
                 f'1D: <span style="color:{cor_1d}; font-weight:bold;">{sinal_1d}{dado["var_1d"]:.2f}%</span> | '
                 f'1M: <span style="color:{cor_1m}; font-weight:bold;">{sinal_1m}{dado["var_1m"]:.2f}%</span>'
-                f'</div></div>'
+                f'</div>'
+                f'{html_score}'
+                f'</div>'
             )
             st.markdown(html_card, unsafe_allow_html=True)
             
@@ -176,7 +379,33 @@ else:
                 st.rerun()
 
 # ==========================================
-# SEÇÕES 4 & 5: GERENCIADOR E NOTAS (Expanders)
+# AVISOS DE VENDA E ATENÇÃO COM DISPARO DE EMAIL
+# ==========================================
+alertas_venda = []
+for h in health_data.values():
+    score = h.get('score', 100)
+    if score < 40:
+        al = json.loads(h.get('alertas_venda', '[]'))
+        if al:
+            alertas_venda.append((h['ticker'], score, al))
+            
+            flag_enviado = get_cache_ia(h['ticker'], 'email_alerta_enviado', max_horas=20)
+            if not flag_enviado:
+                enviado = enviar_alerta_email(h['ticker'], score, al)
+                if enviado:
+                    salvar_cache_ia(h['ticker'], 'email_alerta_enviado', 'sim')
+                    st.toast(f"📧 Email de alerta de venda enviado para {h['ticker']}!")
+
+if alertas_venda:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.error("⚠️ **ATENÇÃO! ATIVOS COM HEALTH SCORE CRÍTICO (ABAIXO DE 40):**")
+    for t, s, al in alertas_venda:
+        st.warning(f"**{t}** (Score: {s:.0f})")
+        for a in al:
+            st.write(f"- {a}")
+
+# ==========================================
+# GERENCIADOR E NOTAS (Expanders)
 # ==========================================
 st.markdown("---")
 st.markdown("#### ⚙️ GERENCIAMENTO E NOTAS")
@@ -223,7 +452,7 @@ for item in watchlist:
                     st.success("Tese atualizada.")
 
 # ==========================================
-# SEÇÃO 6: RESUMO VIA IA
+# RESUMO VIA IA
 # ==========================================
 st.markdown("---")
 if st.button("🤖 GERAR RESUMO DA CARTEIRA", type="primary"):

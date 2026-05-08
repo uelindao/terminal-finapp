@@ -7,9 +7,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 from google import genai
 
-# Importa o Design System e o Banco de Dados
+# Importa o Design System, Banco de Dados e o Catálogo de Tickers
 from utils.style import aplicar_tema
 from database.db import get_connection, get_cache_ia, salvar_cache_ia
+from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Análise Comparativa", layout="wide", initial_sidebar_state="collapsed")
@@ -96,8 +97,10 @@ st.markdown("<br>", unsafe_allow_html=True)
 # MULTISELECT PRINCIPAL
 col_busca, col_add = st.columns([7, 3])
 with col_busca:
-    # Coleta todos os tickers possíveis para não dar erro no Streamlit
-    todos_tickers_base = ["PETR4.SA", "VALE3.SA", "ITUB4.SA", "ABEV3.SA", "WEGE3.SA", "AAPL", "MSFT"]
+    # Coleta todos os tickers possíveis a partir da nossa nova base centralizada
+    todos_tickers_base = list(dict.fromkeys(
+        BRASIL_TODOS + XSTOCKS_TODOS + BR_INDICES + ["^GSPC", "^IXIC", "^BVSP"]
+    ))
     para_opcoes = set(todos_tickers_base + st.session_state.comps_tickers)
     for t_list in TEMPLATES_SETORIAIS.values():
         para_opcoes.update(t_list)
