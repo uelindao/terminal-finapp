@@ -1,0 +1,459 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import json
+import time
+import requests
+from datetime import datetime
+import logging
+
+# silenciar alertas vermelhos do yahoo finance no terminal
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+# importações do ecossistema finapp
+from utils.auth import require_auth, render_user_badge, render_painel_admin, get_current_user
+from utils.style import aplicar_tema
+from database.db import (
+    init_db, popular_watchlist_inicial, listar_watchlist, 
+    remover_ativo, adicionar_ativo, atualizar_notas, 
+    get_health_scores, get_pesos, get_connection,
+    listar_watchlists, criar_watchlist, renomear_watchlist,
+    deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao
+)
+from utils.health_engine import calcular_health_score
+from utils.tickers import mapear_ticker_base
+
+from utils.components import (
+    page_header, section_title, metric_card, 
+    watchlist_card, empty_state, progress_steps, 
+    status_card, inject_keyboard_shortcuts, auto_refresh_indicator
+)
+from utils.formatters import fmt_preco, fmt_pct
+
+# 1. configuração da página (tem de ser o primeiro comando)
+st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
+
+# 2. barreira de segurança multi-usuário
+if not require_auth():
+    st.stop()
+
+# 3. renderizações pós-login
+render_user_badge()
+aplicar_tema()
+inject_keyboard_shortcuts()
+
+init_db()
+popular_watchlist_inicial()
+
+def buscar_ativo_yahoo(query):
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+    headers = {'user-agent': 'Mozilla/5.0'}
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        return r.json().get('quotes', [])
+    except:
+        return []
+
+# ==========================================
+# header e painéis de utilizador
+# ==========================================
+page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
+
+render_painel_admin()
+
+with st.expander("👤 meu perfil", expanded=False):
+    user = get_current_user()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**usuário:** {user['username']}")
+        st.markdown(f"**nome:** {user['nome'] or '—'}")
+        st.markdown(f"**perfil:** {'administrador' if user['is_admin'] else 'usuário'}")
+    with c2:
+        with st.form("form_minha_senha", clear_on_submit=True):
+            st.markdown("**alterar senha:**")
+            senha_atual = st.text_input("senha atual:", type="password")
+            senha_nova  = st.text_input("nova senha:", type="password")
+            senha_conf  = st.text_input("confirmar:", type="password")
+
+            if st.form_submit_button("alterar senha"):
+                from database.db import autenticar_usuario, alterar_senha
+                if autenticar_usuario(user['username'], senha_atual):
+                    if senha_nova == senha_conf and len(senha_nova) >= 4:
+                        alterar_senha(user['user_id'], senha_nova)
+                        st.success("✅ senha alterada com sucesso!")
+                    elif senha_nova != senha_conf:
+                        st.error("as senhas não coincidem.")
+                    else:
+                        st.error("senha deve ter pelo menos 4 caracteres.")
+                else:
+                    st.error("senha atual incorreta.")
+
+st.markdown("---")
+
+# ==========================================
+# navegação rápida e status global
+# ==========================================
+section_title("🧭 navegação rápida")
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1: st.page_link("pages/1_Research.py", label="micro (research)", icon="🔬")
+with c2: st.page_link("pages/2_Discovery.py", label="oportunidades", icon="🎯")
+with c3: st.page_link("pages/3_Macro.py", label="macro global", icon="🌍")
+with c4: st.page_link("pages/4_Portfolio.py", label="meu portfólio", icon="💼")
+with c5: st.page_link("pages/5_Solana.py", label="on-chain (rwa)", icon="⛓️")
+
+st.markdown("---")
+section_title("📊 status global")
+auto_refresh_indicator(5)
+
+with st.container():
+    @st.cache_data(ttl=300, show_spinner=False)
+    def buscar_indices():
+        tickers = {"ibovespa": "^BVSP", "s&p 500": "^GSPC", "nasdaq": "^IXIC", "bitcoin": "BTC-USD", "dólar": "BRL=X"}
+        resultados = {}
+        try:
+            hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
+            for nome, tk in tickers.items():
+                try:
+                    s = hist[tk].dropna()
+                    if len(s) >= 2:
+                        preco = float(s.iloc[-1])
+                        var = ((preco / float(s.iloc[-2])) - 1) * 100
+                        resultados[nome] = {"preco": preco, "var": var}
+                except: pass
+        except: pass
+        return resultados
+
+    indices = buscar_indices()
+    if indices:
+        cols = st.columns(len(indices))
+        for i, (nome, dados) in enumerate(indices.items()):
+            cor_d = "bull" if dados['var'] >= 0 else "bear"
+            sinal = "▲" if dados['var'] >= 0 else "▼"
+            moeda = "r$ " if nome == "dólar" else ""
+            with cols[i]:
+                metric_card(
+                    label=nome,
+                    valor=fmt_preco(dados['preco'], moeda),
+                    delta=f"{sinal} {abs(dados['var']):.2f}%",
+                    cor_delta=cor_d
+                )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# resumo do portfólio
+# ==========================================
+pesos_atuais = get_pesos()
+ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
+
+if ativos_alocados:
+    with st.expander("💼 resumo do seu portfólio (mark-to-market)", expanded=False):
+        tickers_com_peso = list(ativos_alocados.keys())
+        with st.spinner("sincronizando marcação a mercado..."):
+            live_data_port = {}
+            try:
+                tickers_base_port = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
+                hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
+                
+                if isinstance(hist_port, pd.Series): 
+                    hist_port = hist_port.to_frame(name=tickers_base_port[0])
+                hist_port = hist_port.ffill()
+                
+                for t in tickers_com_peso:
+                    t_base = mapear_ticker_base(t)
+                    try: live_data_port[t] = float(hist_port[t_base].dropna().iloc[-1])
+                    except: live_data_port[t] = 0.0
+            except: pass
+
+            custo_total = 0.0
+            valor_atual = 0.0
+            for t, dados in ativos_alocados.items():
+                qtd = float(dados.get('quantidade', 0))
+                pm = float(dados.get('preco_medio', 0))
+                preco_live = live_data_port.get(t, 0.0)
+                custo_total += (qtd * pm)
+                valor_atual += (qtd * preco_live)
+
+            pnl_valor = valor_atual - custo_total
+            pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0.0
+
+            c1, c2, c3 = st.columns(3)
+            with c1: metric_card("custo alocado total", fmt_preco(custo_total, "$"))
+            with c2: metric_card("património atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear")
+            with c3: metric_card("lucro/prejuízo global", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
+            st.caption("🔍 para aprofundar na alocação e risco, aceda à aba 'meu portfólio'.")
+
+# ==========================================
+# watchlist inteligente e seletor
+# ==========================================
+section_title("👁️ watchlist & radar de alertas")
+
+# seletor de watchlist
+watchlists_disponiveis = listar_watchlists()
+if not watchlists_disponiveis:
+    get_watchlist_padrao()
+    watchlists_disponiveis = listar_watchlists()
+
+# inicializar memória da watchlist ativa no session state para não perder o foco
+if 'watchlist_ativa_id' not in st.session_state:
+    st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+
+opcoes_wl = {
+    f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id']
+    for wl in watchlists_disponiveis
+}
+
+# procurar o índice atual para manter a seleção travada
+idx_ativo = 0
+for i, wl in enumerate(watchlists_disponiveis):
+    if wl['id'] == st.session_state['watchlist_ativa_id']:
+        idx_ativo = i
+        break
+
+col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
+
+with col_sel_wl:
+    sel_wl_label = st.selectbox(
+        "watchlist ativa:",
+        list(opcoes_wl.keys()),
+        index=idx_ativo,
+        key="sel_watchlist_ativa_ui",
+        label_visibility="collapsed"
+    )
+    # atualizar a memória com a nova seleção
+    st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
+    watchlist_id_ativo = st.session_state['watchlist_ativa_id']
+
+with col_btn_nova:
+    if st.button("➕ nova watchlist", use_container_width=True):
+        st.session_state['criar_wl_modal'] = True
+
+with col_btn_cfg:
+    if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
+        st.session_state['cfg_wl_modal'] = True
+
+# ── modais ───────────────────────
+@st.dialog("➕ criar nova watchlist")
+def modal_criar_watchlist():
+    icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
+    cores_opcoes = {
+        "âmbar (padrão)": "#FF9900",
+        "verde": "#00C853",
+        "azul": "#00B0FF",
+        "vermelho": "#FF1744",
+        "roxo": "#E040FB",
+    }
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        nome_nova = st.text_input("nome:", placeholder="ex: dividendos br")
+    with c2:
+        icone_nova = st.selectbox("ícone:", icones_opcoes)
+
+    descricao_nova = st.text_input("descrição (opcional):", placeholder="ex: ações de alta renda")
+    cor_label = st.selectbox("cor:", list(cores_opcoes.keys()))
+    cor_nova = cores_opcoes[cor_label]
+
+    c_ok, c_cancel = st.columns(2)
+    if c_ok.button("criar", type="primary", use_container_width=True):
+        if nome_nova.strip():
+            novo_id = criar_watchlist(nome_nova.strip(), descricao_nova, cor_nova, icone_nova)
+            st.session_state['watchlist_ativa_id'] = novo_id
+            st.success(f"{icone_nova} watchlist '{nome_nova.lower()}' criada!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.warning("digite um nome.")
+    if c_cancel.button("cancelar", use_container_width=True):
+        st.rerun()
+
+if st.session_state.get('criar_wl_modal'):
+    st.session_state.pop('criar_wl_modal')
+    modal_criar_watchlist()
+
+@st.dialog("⚙️ configurar watchlist")
+def modal_cfg_watchlist():
+    wl_atual = next((wl for wl in watchlists_disponiveis if wl['id'] == watchlist_id_ativo), None)
+    if not wl_atual:
+        st.rerun()
+        return
+
+    st.markdown(f"**editando:** {wl_atual['icone']} {wl_atual['nome']}")
+
+    icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
+    novo_nome = st.text_input("nome:", value=wl_atual['nome'])
+    nova_desc = st.text_input("descrição:", value=wl_atual.get('descricao',''))
+    novo_icone = st.selectbox("ícone:", icones_opcoes, index=icones_opcoes.index(wl_atual.get('icone','⭐')) if wl_atual.get('icone','⭐') in icones_opcoes else 0)
+
+    col_a, col_b, col_c = st.columns(3)
+    if col_a.button("💾 salvar", type="primary", use_container_width=True):
+        renomear_watchlist(watchlist_id_ativo, novo_nome, nova_desc, novo_icone)
+        st.success("watchlist atualizada!")
+        time.sleep(1)
+        st.rerun()
+
+    if col_b.button("⭐ definir padrão", use_container_width=True):
+        definir_watchlist_padrao(watchlist_id_ativo)
+        st.success("definida como padrão!")
+        time.sleep(1)
+        st.rerun()
+
+    pode_deletar = len(watchlists_disponiveis) > 1
+    if col_c.button("🗑️ deletar", use_container_width=True, disabled=not pode_deletar, help="deleta a watchlist e todos os ativos nela"):
+        deletar_watchlist(watchlist_id_ativo)
+        st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+        st.success("watchlist deletada.")
+        time.sleep(1)
+        st.rerun()
+
+    if not pode_deletar:
+        st.caption("não é possível deletar a única watchlist.")
+
+if st.session_state.get('cfg_wl_modal'):
+    st.session_state.pop('cfg_wl_modal')
+    modal_cfg_watchlist()
+
+# ── buscar e adicionar ativo (agora com formulário para suportar o enter) ──
+expandir_busca = bool(st.session_state.get('resultados_busca'))
+
+with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
+    with st.form("form_busca_ativo", clear_on_submit=False):
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            termo = st.text_input("digite o nome da empresa ou ativo:", key="input_busca", label_visibility="collapsed", placeholder="buscar ativo (ex: aapl, wege3)...")
+        with c2:
+            btn_buscar = st.form_submit_button("buscar", use_container_width=True, type="primary")
+            
+    if btn_buscar and termo:
+        with st.spinner("procurando na api global..."):
+            resultados = buscar_ativo_yahoo(termo)
+            st.session_state['resultados_busca'] = resultados
+            if not resultados:
+                st.warning("nenhum ativo encontrado.")
+                
+    if st.session_state.get('resultados_busca'):
+        opcoes_formatadas = []
+        ativos_validos = []
+        for q in st.session_state['resultados_busca']:
+            tk = q.get('symbol'); nm = q.get('shortname') or q.get('longname')
+            if tk and nm:
+                bolsa = q.get('exchDisp', 'desconhecida')
+                opcoes_formatadas.append(f"{tk} | {nm.lower()} ({bolsa.lower()})")
+                ativos_validos.append(q)
+        
+        if opcoes_formatadas:
+            st.markdown("---")
+            cs1, cs2, cs3 = st.columns([4, 3, 2])
+            with cs1:
+                escolha = st.selectbox("selecione o ativo correto:", opcoes_formatadas, label_visibility="collapsed")
+                idx = opcoes_formatadas.index(escolha)
+                ativo_escolhido = ativos_validos[idx]
+            with cs2:
+                opcoes_destino = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disponiveis}
+                # tenta manter o destino na mesma watchlist que estamos a ver
+                idx_dest = list(opcoes_destino.values()).index(watchlist_id_ativo) if watchlist_id_ativo in opcoes_destino.values() else 0
+                
+                destino_wl_nome = st.selectbox("adicionar à:", list(opcoes_destino.keys()), index=idx_dest, label_visibility="collapsed")
+                destino_wl_id = opcoes_destino[destino_wl_nome]
+            with cs3:
+                if st.button("salvar na watchlist", type="primary", use_container_width=True):
+                    tk = ativo_escolhido['symbol']
+                    nm = ativo_escolhido.get('shortname') or ativo_escolhido.get('longname', tk)
+                    bolsa_str = ativo_escolhido.get('exchDisp', '').lower()
+                    tipo_str = ativo_escolhido.get('quoteType', '').lower()
+                    if "são paulo" in bolsa_str or tk.endswith(".SA"): mercado = "brasil"
+                    elif "nyse" in bolsa_str or "nasdaq" in bolsa_str: mercado = "eua"
+                    elif "cryptocurrency" in tipo_str: mercado = "criptomoedas"
+                    else: mercado = "outros"
+                    adicionar_ativo(tk, nm, mercado, watchlist_id=destino_wl_id)
+                    st.success(f"{tk.lower()} adicionado!")
+                    st.session_state['resultados_busca'] = []
+                    time.sleep(1); st.rerun()
+
+st.markdown("<br>", unsafe_allow_html=True)
+col_btn_score, _ = st.columns([2, 8])
+with col_btn_score:
+    if st.button("🚨 atualizar health scores", type="primary", use_container_width=True):
+        ativos_atuais = listar_watchlist(watchlist_id=watchlist_id_ativo)
+        if ativos_atuais:
+            progress_steps(["inicializando", "coletando dados", "calculando scores"], current=1)
+            barra = st.progress(0); txt = st.empty(); total = len(ativos_atuais)
+            for idx, item in enumerate(ativos_atuais):
+                t = item['ticker']
+                txt.caption(f"a analisar {t.lower()}...")
+                
+                t_base = mapear_ticker_base(t)
+                calcular_health_score(t_base)
+                
+                barra.progress((idx + 1) / total)
+            txt.empty(); barra.empty()
+            progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
+            time.sleep(1); st.rerun()
+
+# ── grid da watchlist ativa ─────────────────────────────
+watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
+if not watchlist:
+    empty_state(icone="⭐", titulo="watchlist vazia", descricao="a sua lista de monitorização está vazia. utilize a barra de pesquisa acima para adicionar ativos.")
+else:
+    tickers_ativos = [item['ticker'] for item in watchlist]
+    live_data = {}
+    health_data = {h['ticker']: h for h in get_health_scores()}
+
+    with st.spinner("sincronizando cotações em tempo real..."):
+        try:
+            tickers_base = list(set([mapear_ticker_base(t) for t in tickers_ativos]))
+            data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
+            
+            if not data.empty and 'Close' in data.columns:
+                hist = data['Close']
+                if isinstance(hist, pd.Series): 
+                    hist = hist.to_frame(name=tickers_base[0])
+                hist = hist.ffill()
+                
+                for t in tickers_ativos:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        if t_base in hist.columns:
+                            s = hist[t_base].dropna()
+                            if len(s) >= 2:
+                                p_atual = float(s.iloc[-1]); p_ontem = float(s.iloc[-2]); p_1m = float(s.iloc[0])
+                                live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
+                    except: pass
+        except: pass
+
+    mercados = {}
+    for item in watchlist:
+        m = item['mercado']
+        if m not in mercados: mercados[m] = []
+        mercados[m].append(item)
+        
+    for mercado, ativos in mercados.items():
+        st.markdown(f"##### 📍 {mercado.lower()}")
+        cols = st.columns(4)
+        for idx, item in enumerate(ativos):
+            t = item['ticker']
+            d = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
+            
+            t_base = mapear_ticker_base(t)
+            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '[]'})
+            
+            try: lista_alertas = json.loads(h_info['alertas_venda'])
+            except: lista_alertas = []
+
+            with cols[idx % 4]:
+                watchlist_card(
+                    ticker=t, nome=item['nome'], preco=d['preco'], var_1d=d['var_1d'],
+                    moeda="r$" if t_base.endswith(".SA") else "$",
+                    health_score=h_info['score'], alertas=lista_alertas
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("🗑️ remover", key=f"del_{t}", use_container_width=True):
+                        remover_ativo(t, watchlist_id=watchlist_id_ativo)
+                        st.rerun()
+                with c2:
+                    nova_nota = st.popover(f"📝 notas", use_container_width=True)
+                    with nova_nota:
+                        txt = st.text_area("anotações da tese:", value=item['notas'] or "", key=f"nota_{t}")
+                        if st.button("salvar", key=f"btn_nota_{t}"):
+                            atualizar_notas(t, txt); st.rerun()
+                st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)

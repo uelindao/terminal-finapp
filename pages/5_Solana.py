@@ -9,8 +9,24 @@ import sqlite3
 
 from utils.auth import check_password
 
-if not check_password():
+import streamlit as st
+# (mantenha os outros imports do python e das suas pastas aqui...)
+
+# 1. substitua a importação antiga por esta:
+from utils.auth import require_auth, render_user_badge
+from utils.style import aplicar_tema
+
+# 2. o set_page_config TEM de vir antes do require_auth
+st.set_page_config(page_title="terminal finapp", layout="wide")
+
+# 3. nova barreira de segurança multi-usuário
+if not require_auth():
     st.stop()
+
+# 4. renderiza o nome do utilizador no menu lateral e aplica o tema
+render_user_badge()
+aplicar_tema()
+# (continue com o resto do código: inject_keyboard_shortcuts(), page_header, etc...)
 
 # Importações do projeto
 from utils.style import aplicar_tema

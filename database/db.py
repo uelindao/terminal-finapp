@@ -1,241 +1,400 @@
 import sqlite3
 import json
-import os
 from datetime import datetime
+import hashlib
 
-# garante que a pasta 'data' existe no servidor antes de tentar criar ou ler o banco
-os.makedirs('data', exist_ok=True)
+db_name = "finterminal.db"
 
 def get_connection():
-    # liga ao banco de dados permitindo o uso em múltiplas threads (necessário para o streamlit)
-    conn = sqlite3.connect('data/finapp.db', check_same_thread=False)
+    conn = sqlite3.connect(db_name)
     conn.row_factory = sqlite3.Row
     return conn
+
+def get_user_id() -> int:
+    """
+    retorna o user_id da sessão atual.
+    fallback para 1 (admin) se não autenticado.
+    """
+    try:
+        import streamlit as st
+        return st.session_state.get('user_id', 1)
+    except:
+        return 1
+
+# ==========================================
+# autenticação e gestão de utilizadores
+# ==========================================
+
+def _hash_senha(senha: str, salt: str = "finterminal_2025") -> str:
+    return hashlib.sha256(f"{salt}{senha}".encode()).hexdigest()
+
+def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is_admin: bool = False) -> bool:
+    conn = get_connection()
+    try:
+        conn.execute('''
+            INSERT INTO usuarios (username, senha_hash, nome, email, is_admin)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (username.lower().strip(), _hash_senha(senha), nome, email, 1 if is_admin else 0))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+def autenticar_usuario(username: str, senha: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute('''
+            SELECT id, username, nome, email, is_admin
+            FROM usuarios
+            WHERE username = ? AND senha_hash = ?
+        ''', (username.lower().strip(), _hash_senha(senha))).fetchone()
+
+        if row:
+            conn.execute('UPDATE usuarios SET ultimo_login = CURRENT_TIMESTAMP WHERE id = ?', (row['id'],))
+            conn.commit()
+            return dict(row)
+        return None
+    finally:
+        conn.close()
+
+def listar_usuarios() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute('SELECT id, username, nome, email, is_admin, criado_em, ultimo_login FROM usuarios ORDER BY criado_em').fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def alterar_senha(user_id: int, nova_senha: str) -> None:
+    conn = get_connection()
+    conn.execute('UPDATE usuarios SET senha_hash = ? WHERE id = ?', (_hash_senha(nova_senha), user_id))
+    conn.commit()
+    conn.close()
+
+def deletar_usuario(user_id: int) -> None:
+    conn = get_connection()
+    tabelas = ['watchlist', 'alertas', 'portfolio_pesos', 'decisoes', 'comparacoes_salvas', 'config_solana', 'custom_mints', 'watchlists']
+    for tabela in tabelas:
+        try:
+            conn.execute(f'DELETE FROM {tabela} WHERE user_id = ?', (user_id,))
+        except:
+            pass
+    conn.execute('DELETE FROM usuarios WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def _criar_admin_padrao():
+    conn = get_connection()
+    count = conn.execute('SELECT COUNT(*) FROM usuarios WHERE is_admin=1').fetchone()[0]
+    if count == 0:
+        try:
+            import streamlit as st
+            senha_padrao = st.secrets.get('admin', {}).get('password', 'admin123')
+        except:
+            senha_padrao = 'admin123'
+            
+        conn.execute('''
+            INSERT INTO usuarios (username, senha_hash, nome, is_admin)
+            VALUES ('admin', ?, 'administrador', 1)
+        ''', (_hash_senha(senha_padrao),))
+        conn.commit()
+    conn.close()
+
+# ==========================================
+# inicialização da base de dados
+# ==========================================
 
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-    
-    # tabela da watchlist principal
+
+    # utilizadores
     c.execute('''
-        CREATE TABLE IF NOT EXISTS watchlist (
+        CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT UNIQUE NOT NULL,
-            nome TEXT NOT NULL,
-            mercado TEXT NOT NULL,
-            notas TEXT,
-            adicionado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            username TEXT NOT NULL UNIQUE,
+            senha_hash TEXT NOT NULL,
+            nome TEXT,
+            email TEXT,
+            is_admin INTEGER DEFAULT 0,
+            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ultimo_login DATETIME
         )
     ''')
-    
-    # tabela de alertas e gatilhos
+
+    # coleções de watchlists
     c.execute('''
-        CREATE TABLE IF NOT EXISTS alertas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            threshold REAL NOT NULL,
-            ativo INTEGER DEFAULT 1,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            disparado_em TIMESTAMP
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            nome        TEXT NOT NULL,
+            descricao   TEXT DEFAULT '',
+            cor         TEXT DEFAULT '#FF9900',
+            icone       TEXT DEFAULT '⭐',
+            padrao      INTEGER DEFAULT 0,
+            criado_em   DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    c.execute('CREATE TABLE IF NOT EXISTS watchlist (ticker TEXT, nome TEXT, mercado TEXT, adicionado_em DATETIME DEFAULT CURRENT_TIMESTAMP, notas TEXT, user_id INTEGER DEFAULT 1, PRIMARY KEY (ticker, user_id))')
+    c.execute('CREATE TABLE IF NOT EXISTS portfolio_pesos (ticker TEXT, peso REAL, preco_medio REAL, quantidade REAL, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1, PRIMARY KEY (ticker, user_id))')
+    c.execute('CREATE TABLE IF NOT EXISTS health_scores (ticker TEXT PRIMARY KEY, score REAL, alertas_venda TEXT, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    c.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, threshold REAL, criado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
+    c.execute('CREATE TABLE IF NOT EXISTS decisoes (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, data_decisao TEXT, preco_decisao REAL, quantidade REAL, tese TEXT, resultado TEXT, data_resultado TEXT, user_id INTEGER DEFAULT 1)')
+    c.execute('CREATE TABLE IF NOT EXISTS cache_analise_ia (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, conteudo TEXT, gerado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
+    c.execute('CREATE TABLE IF NOT EXISTS comparacoes_salvas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, tickers TEXT NOT NULL, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
+
+    # rotina de migração: adicionar user_id
+    tabelas_pessoais = ['watchlist', 'alertas', 'portfolio_pesos', 'decisoes', 'comparacoes_salvas', 'config_solana', 'custom_mints']
+    for tabela in tabelas_pessoais:
+        try:
+            c.execute(f'ALTER TABLE {tabela} ADD COLUMN user_id INTEGER DEFAULT 1')
+        except:
+            pass
+
+    # rotina de migração: adicionar watchlist_id na tabela watchlist
+    try:
+        c.execute('ALTER TABLE watchlist ADD COLUMN watchlist_id INTEGER DEFAULT NULL')
+    except Exception:
+        pass 
+
+    conn.commit()
+    conn.close()
     
-    # tabela de cache para evitar gastos excessivos com a api da ia
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS cache_analise_ia (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            contexto TEXT,
-            conteudo TEXT NOT NULL,
-            gerado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # tabela dos health scores quantitativos
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS health_scores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT UNIQUE NOT NULL,
-            score REAL NOT NULL,
-            alertas_venda TEXT,
-            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # tabela com as posições, quantidades e preços médios da sua carteira
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS portfolio_pesos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT UNIQUE NOT NULL,
-            peso REAL DEFAULT 0.0,
-            preco_medio REAL DEFAULT 0.0,
-            quantidade REAL DEFAULT 0.0,
-            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
+    _criar_admin_padrao()
+    _migrar_watchlist_para_default()
+
+def _migrar_watchlist_para_default():
+    """migração única: ativos sem watchlist_id são atribuídos à watchlist padrão do seu user_id."""
+    conn = get_connection()
+    users = conn.execute('SELECT DISTINCT user_id FROM watchlist WHERE watchlist_id IS NULL').fetchall()
+
+    for row in users:
+        uid = row['user_id']
+        wl = conn.execute('SELECT id FROM watchlists WHERE user_id=? LIMIT 1', (uid,)).fetchone()
+
+        if not wl:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO watchlists (user_id, nome, icone, cor, padrao) 
+                VALUES (?, 'principal', '⭐', '#FF9900', 1)
+            ''', (uid,))
+            wl_id = cursor.lastrowid
+        else:
+            wl_id = wl['id']
+
+        conn.execute('UPDATE watchlist SET watchlist_id=? WHERE user_id=? AND watchlist_id IS NULL', (wl_id, uid))
+
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# gestão de watchlists (coleções)
+# ==========================================
+
+def criar_watchlist(nome: str, descricao: str = "", cor: str = "#FF9900", icone: str = "⭐") -> int:
+    user_id = get_user_id()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO watchlists (user_id, nome, descricao, cor, icone)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, nome, descricao, cor, icone))
+    novo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return novo_id
+
+def listar_watchlists() -> list[dict]:
+    user_id = get_user_id()
+    conn = get_connection()
+    rows = conn.execute('''
+        SELECT w.*, COUNT(i.ticker) as total_ativos
+        FROM watchlists w
+        LEFT JOIN watchlist i ON i.watchlist_id = w.id AND i.user_id = w.user_id
+        WHERE w.user_id = ?
+        GROUP BY w.id
+        ORDER BY w.padrao DESC, w.criado_em ASC
+    ''', (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def renomear_watchlist(watchlist_id: int, novo_nome: str, nova_descricao: str = "", novo_icone: str = "⭐", nova_cor: str = "#FF9900") -> None:
+    conn = get_connection()
+    conn.execute('''
+        UPDATE watchlists
+        SET nome=?, descricao=?, icone=?, cor=?
+        WHERE id=? AND user_id=?
+    ''', (novo_nome, nova_descricao, novo_icone, nova_cor, watchlist_id, get_user_id()))
+    conn.commit()
+    conn.close()
+
+def deletar_watchlist(watchlist_id: int) -> None:
+    conn = get_connection()
+    user_id = get_user_id()
+    conn.execute('DELETE FROM watchlist WHERE watchlist_id=? AND user_id=?', (watchlist_id, user_id))
+    conn.execute('DELETE FROM watchlists WHERE id=? AND user_id=?', (watchlist_id, user_id))
+    conn.commit()
+    conn.close()
+
+def get_watchlist_padrao() -> int | None:
+    user_id = get_user_id()
+    conn = get_connection()
+    row = conn.execute('SELECT id FROM watchlists WHERE user_id=? ORDER BY padrao DESC, criado_em ASC LIMIT 1', (user_id,)).fetchone()
+
+    if row:
+        conn.close()
+        return row['id']
+
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO watchlists (user_id, nome, icone, cor, padrao)
+        VALUES (?, 'principal', '⭐', '#FF9900', 1)
+    ''', (user_id,))
+    novo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return novo_id
+
+def definir_watchlist_padrao(watchlist_id: int) -> None:
+    user_id = get_user_id()
+    conn = get_connection()
+    conn.execute('UPDATE watchlists SET padrao=0 WHERE user_id=?', (user_id,))
+    conn.execute('UPDATE watchlists SET padrao=1 WHERE id=? AND user_id=?', (watchlist_id, user_id))
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# operações crud de ativos na watchlist
+# ==========================================
+
+def adicionar_ativo(ticker: str, nome: str = "", mercado: str = "", watchlist_id: int = None) -> None:
+    user_id = get_user_id()
+    if watchlist_id is None:
+        watchlist_id = get_watchlist_padrao()
+    conn = get_connection()
+    # se o ativo já existe na mesma watchlist, ignora
+    conn.execute('''
+        INSERT OR IGNORE INTO watchlist (ticker, nome, mercado, user_id, watchlist_id)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (ticker, nome, mercado, user_id, watchlist_id))
+    conn.commit()
+    conn.close()
+
+def remover_ativo(ticker: str, watchlist_id: int = None) -> None:
+    user_id = get_user_id()
+    conn = get_connection()
+    if watchlist_id:
+        conn.execute('DELETE FROM watchlist WHERE ticker=? AND user_id=? AND watchlist_id=?', (ticker, user_id, watchlist_id))
+    else:
+        conn.execute('DELETE FROM watchlist WHERE ticker=? AND user_id=?', (ticker, user_id))
+    conn.commit()
+    conn.close()
+
+def listar_watchlist(watchlist_id: int = None) -> list[dict]:
+    user_id = get_user_id()
+    conn = get_connection()
+    if watchlist_id is not None:
+        rows = conn.execute('SELECT * FROM watchlist WHERE user_id=? AND watchlist_id=? ORDER BY adicionado_em DESC', (user_id, watchlist_id)).fetchall()
+    else:
+        rows = conn.execute('SELECT * FROM watchlist WHERE user_id=? ORDER BY adicionado_em DESC', (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def atualizar_notas(ticker, notas):
+    user_id = get_user_id()
+    conn = get_connection()
+    conn.execute('UPDATE watchlist SET notas=? WHERE ticker=? AND user_id=?', (notas, ticker, user_id))
+    conn.commit()
+    conn.close()
+
+def mover_ativo_para_watchlist(ticker: str, destino_id: int) -> None:
+    user_id = get_user_id()
+    conn = get_connection()
+    conn.execute('UPDATE watchlist SET watchlist_id=? WHERE ticker=? AND user_id=?', (destino_id, ticker, user_id))
     conn.commit()
     conn.close()
 
 def popular_watchlist_inicial():
+    user_id = get_user_id()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) as count FROM watchlist")
-    count = c.fetchone()['count']
-    
+    count = conn.execute('SELECT COUNT(*) FROM watchlist WHERE user_id=?', (user_id,)).fetchone()[0]
     if count == 0:
-        ativos_iniciais = [
-            ('ITUB4.SA', 'Itaú Unibanco', 'brasil'),
-            ('WEGE3.SA', 'WEG', 'brasil'),
-            ('AAPL', 'Apple', 'eua'),
-            ('BTC-USD', 'Bitcoin', 'criptomoedas')
-        ]
-        c.executemany("INSERT INTO watchlist (ticker, nome, mercado) VALUES (?, ?, ?)", ativos_iniciais)
+        wl_id = get_watchlist_padrao()
+        ativos = [('PETR4.SA', 'petrobras', 'brasil'), ('ITUB4.SA', 'itaú unibanco', 'brasil'), ('AAPL', 'apple inc.', 'eua')]
+        for t, n, m in ativos:
+            conn.execute('INSERT INTO watchlist (ticker, nome, mercado, user_id, watchlist_id) VALUES (?,?,?,?,?)', (t, n, m, user_id, wl_id))
         conn.commit()
     conn.close()
 
-def adicionar_ativo(ticker, nome, mercado):
-    conn = get_connection()
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO watchlist (ticker, nome, mercado) VALUES (?, ?, ?)", (ticker, nome, mercado))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass # ignora silenciosamente se o ativo já estiver na lista
-    finally:
-        conn.close()
+# ==========================================
+# outras operações crud
+# ==========================================
 
-def remover_ativo(ticker):
+def salvar_peso(ticker, peso, preco_medio=None, quantidade=None):
+    user_id = get_user_id()
     conn = get_connection()
-    c = conn.cursor()
-    # apaga o ticker de todas as tabelas para manter o banco limpo
-    c.execute("DELETE FROM watchlist WHERE ticker = ?", (ticker,))
-    c.execute("DELETE FROM portfolio_pesos WHERE ticker = ?", (ticker,))
-    c.execute("DELETE FROM health_scores WHERE ticker = ?", (ticker,))
-    c.execute("DELETE FROM alertas WHERE ticker = ?", (ticker,))
+    conn.execute('''
+        INSERT OR REPLACE INTO portfolio_pesos (ticker, peso, preco_medio, quantidade, user_id)
+        VALUES (?,?,?,?,?)
+    ''', (ticker, peso, preco_medio, quantidade, user_id))
     conn.commit()
     conn.close()
 
-def listar_watchlist():
+def get_pesos():
+    user_id = get_user_id()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM watchlist ORDER BY mercado, ticker")
-    rows = c.fetchall()
+    rows = conn.execute('SELECT * FROM portfolio_pesos WHERE user_id=?', (user_id,)).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
 
-def atualizar_notas(ticker, notas):
+def registrar_decisao(ticker, tipo, data, preco, quantidade, tese):
+    user_id = get_user_id()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE watchlist SET notas = ? WHERE ticker = ?", (notas, ticker))
+    conn.execute('''
+        INSERT INTO decisoes (ticker, tipo, data_decisao, preco_decisao, quantidade, tese, user_id)
+        VALUES (?,?,?,?,?,?,?)
+    ''', (ticker, tipo, data, preco, quantidade, tese, user_id))
     conn.commit()
     conn.close()
 
-def criar_alerta(ticker, tipo, threshold):
+def listar_decisoes(ticker=None):
+    user_id = get_user_id()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("INSERT INTO alertas (ticker, tipo, threshold) VALUES (?, ?, ?)", (ticker, tipo, float(threshold)))
-    conn.commit()
+    if ticker:
+        rows = conn.execute('SELECT * FROM decisoes WHERE ticker=? AND user_id=? ORDER BY data_decisao DESC', (ticker, user_id)).fetchall()
+    else:
+        rows = conn.execute('SELECT * FROM decisoes WHERE user_id=? ORDER BY data_decisao DESC', (user_id,)).fetchall()
     conn.close()
+    return [dict(r) for r in rows]
 
-def listar_alertas():
+def atualizar_resultado(id_decisao, resultado):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM alertas ORDER BY criado_em DESC")
-    rows = c.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-def desativar_alerta(alerta_id):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE alertas SET ativo = 0 WHERE id = ?", (alerta_id,))
-    conn.commit()
-    conn.close()
-
-def marcar_disparado(alerta_id):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE alertas SET disparado_em = CURRENT_TIMESTAMP WHERE id = ?", (alerta_id,))
-    conn.commit()
-    conn.close()
-
-def salvar_cache_ia(ticker, tipo, conteudo, contexto="geral"):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO cache_analise_ia (ticker, tipo, contexto, conteudo) 
-        VALUES (?, ?, ?, ?)
-    ''', (ticker, tipo, contexto, conteudo))
-    conn.commit()
-    conn.close()
-
-def get_cache_ia(ticker, tipo, max_horas=24):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute('''
-        SELECT conteudo, gerado_em 
-        FROM cache_analise_ia 
-        WHERE ticker = ? AND tipo = ? 
-        ORDER BY gerado_em DESC LIMIT 1
-    ''', (ticker, tipo))
-    row = c.fetchone()
-    conn.close()
-    
-    if row:
-        try:
-            gerado_em = datetime.strptime(row['gerado_em'], '%Y-%m-%d %H:%M:%S')
-            diferenca = datetime.utcnow() - gerado_em
-            if diferenca.total_seconds() <= max_horas * 3600:
-                return row['conteudo']
-        except:
-            pass
-    return None
-
-def salvar_health_score(ticker, score, alertas_venda):
-    conn = get_connection()
-    c = conn.cursor()
-    alertas_json = json.dumps(alertas_venda)
-    c.execute('''
-        INSERT INTO health_scores (ticker, score, alertas_venda, atualizado_em) 
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(ticker) DO UPDATE SET 
-            score = excluded.score, 
-            alertas_venda = excluded.alertas_venda,
-            atualizado_em = CURRENT_TIMESTAMP
-    ''', (ticker, score, alertas_json))
+    data_res = datetime.today().strftime('%Y-%m-%d') if resultado else None
+    conn.execute('UPDATE decisoes SET resultado=?, data_resultado=? WHERE id=?', (resultado, data_res, id_decisao))
     conn.commit()
     conn.close()
 
 def get_health_scores():
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM health_scores")
-    rows = c.fetchall()
+    rows = conn.execute('SELECT * FROM health_scores').fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
 
-def salvar_peso(ticker, peso, preco_medio, quantidade):
+def salvar_health_score(ticker, score, alertas):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO portfolio_pesos (ticker, peso, preco_medio, quantidade, atualizado_em) 
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(ticker) DO UPDATE SET 
-            peso = excluded.peso,
-            preco_medio = excluded.preco_medio,
-            quantidade = excluded.quantidade,
-            atualizado_em = CURRENT_TIMESTAMP
-    ''', (ticker, float(peso), float(preco_medio), float(quantidade)))
+    conn.execute('INSERT OR REPLACE INTO health_scores (ticker, score, alertas_venda, atualizado_em) VALUES (?,?,?,CURRENT_TIMESTAMP)', (ticker, score, json.dumps(alertas)))
     conn.commit()
     conn.close()
 
-def get_pesos():
+def salvar_cache_ia(ticker, tipo, conteudo):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM portfolio_pesos")
-    rows = c.fetchall()
+    conn.execute('INSERT INTO cache_analise_ia (ticker, tipo, conteudo) VALUES (?,?,?)', (ticker, tipo, conteudo))
+    conn.commit()
     conn.close()
-    return [dict(row) for row in rows]
+
+def get_cache_ia(ticker, tipo):
+    conn = get_connection()
+    row = conn.execute('SELECT conteudo, gerado_em FROM cache_analise_ia WHERE ticker=? AND tipo=? ORDER BY gerado_em DESC LIMIT 1', (ticker, tipo)).fetchone()
+    conn.close()
+    return dict(row) if row else None
