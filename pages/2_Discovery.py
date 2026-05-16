@@ -10,6 +10,7 @@ import time
 from fredapi import Fred
 from bcb import sgs
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── silenciar alertas vermelhos do yahoo finance no terminal ──
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -19,14 +20,15 @@ from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from database.db import (
     listar_watchlist, get_health_scores, adicionar_ativo, 
-    get_connection, listar_watchlists, criar_watchlist, get_watchlist_padrao
+    get_connection, listar_watchlists, criar_watchlist, get_watchlist_padrao,
+    get_todos_fundamentos_cache, salvar_fundamento_cache, init_db
 )
 from utils.tickers import (
-    SCREENER_B3, SCREENER_US, XSTOCKS_INDICES, 
+    SCREENER_B3, SCREENER_US, XSTOCKS_INDICES, FII_TODOS,
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts
+from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card
 from utils.charts import base_layout
 
 # 1. configuração da página
@@ -41,10 +43,23 @@ render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
 
-page_header("🎯 discovery — descoberta de oportunidades", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
+init_db()
+CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
+
+c_head1, c_head2, c_head3 = st.columns([6, 2, 2])
+with c_head1:
+    page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
+with c_head2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 sync cache b3 / fii", use_container_width=True, type="primary", help="sincroniza ações e fiis brasileiros."):
+        st.session_state['run_sync_b3'] = True
+with c_head3:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 sync cache eua", use_container_width=True, type="primary", help="sincroniza ativos do mercado americano."):
+        st.session_state['run_sync_us'] = True
+
 st.markdown("---")
 
-# 4. motor de tradução de setores (sem fazer novos pedidos à api)
 def traduzir_setor(setor_raw: str) -> str:
     mapa_setores = {
         'Energy': '⛽ energia', 'Financial Services': '🏦 financeiro',
@@ -56,119 +71,81 @@ def traduzir_setor(setor_raw: str) -> str:
     }
     return mapa_setores.get(setor_raw, setor_raw.lower() if setor_raw else '—')
 
-# 5. modais (popups) nativos
-@st.dialog("📊 detalhes do ativo", width="large")
-def modal_ativo(ticker: str):
-    """modal com múltiplos e gráfico de preço ao clicar num ativo."""
-    t_base = mapear_ticker_base(ticker)
+# ==========================================
+# ROTINAS DE SINCRONIZAÇÃO ASSÍNCRONA
+# ==========================================
+if st.session_state.get('run_sync_b3'):
+    st.info("A iniciar sincronização massiva B3 (Ações + FIIs) em background...")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    with st.spinner(f"a carregar dados de {ticker.lower()}..."):
+    from utils.scrapers import buscar_dados_b3
+    
+    def fetch_and_save_b3(t):
         try:
-            acao = yf.Ticker(t_base)
-            hist = acao.history(period="6mo")
-            preco = acao.fast_info.last_price
+            dados = buscar_dados_b3(t)
+            salvar_fundamento_cache(t, dados)
+            return True
+        except: return False
 
-            # motor híbrido de captura de fundamentos
-            if t_base.endswith('.SA'):
-                from utils.scrapers import buscar_dados_b3
-                f_dados = buscar_dados_b3(t_base)
-                nome = f_dados['nome'] if f_dados['nome'] != '—' else ticker
-                setor = f_dados['setor']
-                pl = f_dados['p/l']
-                pvp = f_dados['p/vp']
-                roe = f_dados['roe%']
-                dy = f_dados['dy%']
-                ev_ebitda = f_dados['ev/ebitda']
-                margem = f_dados['margem%']
-                beta = None
-            else:
-                info = acao.info
-                nome = info.get('shortName', ticker)
-                setor = traduzir_setor(info.get('sector', '—'))
-                pl = info.get('trailingPE', None)
-                pvp = info.get('priceToBook', None)
-                roe_r = info.get('returnOnEquity', None)
-                roe = roe_r * 100 if roe_r else None
-                dy_r = info.get('dividendYield', None)
-                dy = dy_r * 100 if dy_r else None
-                ev_ebitda = info.get('enterpriseToEbitda', None)
-                margem_r = info.get('profitMargins', None)
-                margem = margem_r * 100 if margem_r else None
-                beta = info.get('beta', None)
+    lista_completa = SCREENER_B3 + FII_TODOS
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_and_save_b3, t): t for t in lista_completa}
+        total = len(lista_completa)
+        concluidos = 0
+        for future in as_completed(futures):
+            concluidos += 1
+            progress_bar.progress(concluidos / total)
+            status_text.text(f"Sincronizando: {futures[future]} ({concluidos}/{total})...")
+            
+    st.session_state['run_sync_b3'] = False
+    st.success("✅ Cache Nacional atualizada! Recarregando...")
+    time.sleep(1.5)
+    st.rerun()
 
-            moeda = "r$" if t_base.endswith('.SA') else "$"
+if st.session_state.get('run_sync_us'):
+    st.info("A iniciar extração massiva EUA em background...")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    def fetch_and_save_us(t_base):
+        try:
+            info = yf.Ticker(t_base).info
+            dados = {
+                'nome': info.get('shortName', t_base),
+                'setor': traduzir_setor(info.get('sector', '—')),
+                'p/l': info.get('trailingPE', info.get('forwardPE', None)),
+                'p/vp': info.get('priceToBook', None),
+                'roe%': (info.get('returnOnEquity') * 100) if info.get('returnOnEquity') is not None else None,
+                'dy%': (info.get('dividendYield') * 100) if info.get('dividendYield') is not None else 0,
+                'market_cap': info.get('marketCap', 0),
+                'ev/ebitda': info.get('enterpriseToEbitda', None),
+                'margem%': (info.get('profitMargins') * 100) if info.get('profitMargins') is not None else None,
+                'beta': info.get('beta', None)
+            }
+            salvar_fundamento_cache(t_base, dados)
+            return True
+        except: return False
 
-            st.markdown(
-                f'<div style="font-family:Courier New;">'
-                f'<span style="color:#FF9900; font-size:1.3rem; font-weight:bold;">{ticker.lower()}</span>'
-                f'<span style="color:#555; margin-left:10px;">{nome.lower()}</span><br>'
-                f'<span style="color:#333; font-size:0.75rem;">{setor.lower()}</span>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                f'<div style="font-size:1.6rem; font-weight:bold; color:#FFF; font-family:Courier New;">'
-                f'{moeda} {preco:,.2f}</div>',
-                unsafe_allow_html=True
-            )
-            st.markdown("---")
-
-            def fmt(v, suf=""): return f"{v:.2f}{suf}" if v is not None else "n/d"
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("p/l", fmt(pl))
-            c2.metric("p/vp", fmt(pvp))
-            c3.metric("roe", fmt(roe, "%"))
-            c4.metric("dy", fmt(dy, "%"))
-
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("ev/ebitda", fmt(ev_ebitda))
-            c6.metric("margem líq.", fmt(margem, "%"))
-            c7.metric("beta", fmt(beta))
-            c8.metric("setor", setor.lower()[:12] if setor != '—' else "—")
-
-            if not hist.empty:
-                if hist.index.tz is not None: hist.index = hist.index.tz_localize(None)
-                fig = go.Figure(go.Scatter(
-                    x=hist.index, y=hist['Close'], fill='tozeroy', fillcolor='rgba(255,153,0,0.06)',
-                    line=dict(color='#FF9900', width=1.5), hovertemplate="%{x|%d/%m}<br><b>%{y:.2f}</b><extra></extra>"
-                ))
-                fig.update_layout(
-                    paper_bgcolor='#0d0d0d', plot_bgcolor='#0d0d0d', height=200, margin=dict(l=0,r=0,t=10,b=0),
-                    showlegend=False, xaxis=dict(showgrid=True, gridcolor='#1e1e1e', tickfont=dict(size=9)),
-                    yaxis=dict(showgrid=True, gridcolor='#1e1e1e', tickfont=dict(size=9))
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            col_a, col_b, col_c = st.columns(3)
-            watchlists_disp = listar_watchlists()
-            opcoes_wl_modal = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disp}
-
-            with col_a:
-                dest_wl = st.selectbox("adicionar à:", list(opcoes_wl_modal.keys()), key=f"wl_modal_{ticker}")
-            with col_b:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("➕ watchlist", key=f"add_wl_modal_{ticker}", use_container_width=True, type="primary"):
-                    wl_dest_id = opcoes_wl_modal[dest_wl]
-                    mercado_t = "brasil" if t_base.endswith('.SA') else "eua"
-                    adicionar_ativo(ticker, nome, mercado_t, watchlist_id=wl_dest_id)
-                    st.success(f"✅ {ticker.lower()} adicionado!")
-            with col_c:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("📊 abrir no research", key=f"research_{ticker}", use_container_width=True):
-                    st.session_state['research_ticker_externo'] = ticker
-                    st.switch_page("pages/1_Research.py")
-
-        except Exception as e:
-            st.error(f"erro ao carregar dados da ação. detalhe: {e}")
+    us_tickers_unicos = list(set([mapear_ticker_base(t) for t in SCREENER_US + XSTOCKS_INDICES]))
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_and_save_us, t): t for t in us_tickers_unicos}
+        total = len(us_tickers_unicos)
+        concluidos = 0
+        for future in as_completed(futures):
+            concluidos += 1
+            progress_bar.progress(concluidos / total)
+            status_text.text(f"Sincronizando EUA: {futures[future]} ({concluidos}/{total})...")
+            
+    st.session_state['run_sync_us'] = False
+    st.success("✅ Cache EUA atualizada! Recarregando...")
+    time.sleep(1.5)
+    st.rerun()
 
 @st.dialog("➕ salvar na watchlist")
 def modal_salvar_screener(ticker: str, nome: str, mercado: str):
-    """modal de seleção de destino ao guardar um ativo do screener."""
     st.markdown(f"**ativo:** {ticker.lower()} - {nome.lower()}")
-    
     acao_wl = st.radio("destino:", ["watchlist existente", "criar nova watchlist"], horizontal=True, key=f"radio_dest_{ticker}")
-    
     watchlists_disp = listar_watchlists()
     dest_id = None
     
@@ -181,478 +158,568 @@ def modal_salvar_screener(ticker: str, nome: str, mercado: str):
     
     if st.button("💾 confirmar", type="primary", use_container_width=True, key=f"btn_conf_{ticker}"):
         if acao_wl == "criar nova watchlist":
-            if nome_nova_wl.strip():
-                dest_id = criar_watchlist(nome_nova_wl.strip(), icone="🎯", cor="#00C853")
-            else:
-                st.warning("digite um nome para a nova watchlist.")
-                return
+            if nome_nova_wl.strip(): dest_id = criar_watchlist(nome_nova_wl.strip(), icone="🎯", cor="#00C853")
+            else: return st.warning("digite um nome para a nova watchlist.")
         
         adicionar_ativo(ticker, nome, mercado, watchlist_id=dest_id)
         st.success(f"✅ {ticker.lower()} salvo com sucesso!")
-        time.sleep(1)
-        st.rerun()
+        time.sleep(1); st.rerun()
 
 # 6. interface de separadores (tabs)
-tab_setup, tab_screener, tab_comps = st.tabs([
-    "🎯 setup ideal",
-    "🕵️ screener quantitativo",
-    "⚖️ comparação de múltiplos"
-])
+tab_setup, tab_magic, tab_radar, tab_screener = st.tabs(["🎯 setup ideal (health engine)", "🏆 magic formula (greenblatt)", "🎯 radar de confluência", "🕵️ screener quantitativo"])
 
 # ==========================================
 # tab 1 — setup ideal
 # ==========================================
 with tab_setup:
-    st.write("ativos que combinam fundamentos sólidos com desconto técnico.")
+    st.write("análise cruzada utilizando o novo algoritmo dinâmico de score e momentum para ações e fiis.")
 
-    c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+    c1, c2, c3 = st.columns([3, 2, 2])
     with c1:
         watchlists_disp = listar_watchlists()
         tickers_watchlist = [i['ticker'] for i in listar_watchlist()]
         
-        if len(watchlists_disp) > 1:
-            opcoes_universo = (
-                ["universo completo", "watchlist + screener br"] +
-                [f"{wl['icone']} {wl['nome']}" for wl in watchlists_disp]
-            )
-        else:
-            opcoes_universo = ["minha watchlist", "watchlist + screener br", "universo completo"]
+        opcoes_universo = ["Brasil - Ações", "Brasil - FIIs", "EUA - Ações"] + [f"{wl['icone']} {wl['nome']}" for wl in watchlists_disp]
+        universo_sel = st.selectbox("universo de busca:", opcoes_universo)
 
-        universo_sel = st.radio("universo:", opcoes_universo, horizontal=True)
-
-    with c2:
-        score_min = st.slider("health score mínimo:", 40, 90, 70, 5)
+    with c2: score_min = st.slider("health score mínimo:", 40, 90, 65, 5)
     with c3:
-        rsi_max = st.slider("rsi máximo (sobrevendido):", 20, 55, 40, 5)
-        st.session_state['rsi_max'] = rsi_max
-    with c4:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_setup = st.button("🔍 varrer agora", type="primary", use_container_width=True)
-
-    with st.expander("ℹ️ entendendo os quadrantes de análise"):
-        q1, q2, q3, q4 = st.columns(4)
-        q1.success("🎯 **setup ideal**\nscore alto + rsi baixo\nmelhor ponto de entrada")
-        q2.warning("⏳ **aguardar pullback**\nscore alto + rsi alto\nboa empresa, preço esticado")
-        q3.error("⚠️ **duplo risco**\nscore baixo + rsi alto\nevitar — caro e fraco")
-        q4.info("📉 **queda merecida**\nscore baixo + rsi baixo\nfraco estruturalmente")
+        btn_setup = st.button("🔍 varrer com health engine", type="primary", use_container_width=True)
 
     if btn_setup:
-        if universo_sel == "universo completo":
-            universo = list(dict.fromkeys(tickers_watchlist + SCREENER_B3 + SCREENER_US[:15]))
-        elif "screener" in universo_sel:
-            universo = list(dict.fromkeys(tickers_watchlist + SCREENER_B3[:20]))
-        elif any(wl['nome'] in universo_sel for wl in watchlists_disp):
-            wl_match = next((wl for wl in watchlists_disp if wl['nome'] in universo_sel), None)
-            if wl_match:
-                universo = [i['ticker'] for i in listar_watchlist(watchlist_id=wl_match['id'])]
+        if universo_sel == "Brasil - Ações": 
+            universo = list(dict.fromkeys(SCREENER_B3))
+        elif universo_sel == "Brasil - FIIs": 
+            universo = list(dict.fromkeys(FII_TODOS))
+        elif universo_sel == "EUA - Ações": 
+            universo = list(dict.fromkeys(SCREENER_US))
         else:
-            universo = tickers_watchlist
+            wl_match = next((wl for wl in watchlists_disp if wl['nome'] in universo_sel), None)
+            if wl_match: 
+                universo = [i['ticker'] for i in listar_watchlist(watchlist_id=wl_match['id'])]
+            else: 
+                universo = tickers_watchlist
 
         resultados = []
-        barra = st.progress(0)
-        status = st.empty()
-        health_db = {h['ticker']: h for h in get_health_scores()}
+        barra = st.progress(0); status = st.empty()
 
         for i, t in enumerate(universo):
-            status.text(f"a analisar {t.lower()} ({i+1}/{len(universo)})...")
+            status.text(f"engine a processar {t.lower()} ({i+1}/{len(universo)})...")
             barra.progress((i+1)/len(universo))
             t_base = mapear_ticker_base(t)
 
             try:
-                h = health_db.get(t_base)
-                if h: score = h['score']
-                else: score = calcular_health_score(t_base)['score']
-
-                acao = yf.Ticker(t_base)
-                hist_t = acao.history(period="3mo")
-                if hist_t.empty or len(hist_t) < 15: continue
-
-                delta = hist_t['Close'].diff()
-                ganho = delta.clip(lower=0).rolling(14).mean()
-                perda = (-delta.clip(upper=0)).rolling(14).mean()
-                rsi = (100 - (100 / (1 + (ganho / perda)))).iloc[-1]
-
-                preco = hist_t['Close'].iloc[-1]
-                var_1d = ((preco / hist_t['Close'].iloc[-2]) - 1) * 100
+                resultado_engine = calcular_health_score(t_base)
+                score = resultado_engine['score']
+                status_acao = resultado_engine.get('status', '⚪ AGUARDAR')
                 
-                if t_base.endswith('.SA'):
-                    from utils.scrapers import buscar_dados_b3
-                    f_dados = buscar_dados_b3(t_base)
-                    setor = f_dados['setor']
-                else:
-                    info_dict = acao.info
-                    setor = traduzir_setor(info_dict.get('sector', '—'))
+                acao = yf.Ticker(t_base)
+                preco = acao.fast_info.last_price
+                var_1d = ((preco / acao.fast_info.previous_close) - 1) * 100 if acao.fast_info.previous_close else 0
+                
+                f_dados = CACHE_FUNDAMENTOS.get(t_base, {})
+                setor = f_dados.get('setor', 'imobiliário' if t_base in FII_TODOS else '—')
+                nome = f_dados.get('nome', t)
 
-                if score >= score_min and rsi <= rsi_max: quadrante, cor = "🎯 setup ideal", "#00C853"
-                elif score >= score_min and rsi > rsi_max: quadrante, cor = "⏳ aguardar pullback", "#FF9900"
-                elif score < score_min and rsi > rsi_max: quadrante, cor = "⚠️ duplo risco", "#FF1744"
-                else: quadrante, cor = "📉 queda merecida", "#555555"
-
-                oportunidade = (score / 100) * (1 - rsi / 100) * 100
-
-                resultados.append({
-                    'ticker': t, 'setor': setor, 'quadrante': quadrante, 
-                    'score saúde': round(score, 1), 'rsi': round(rsi, 1),
-                    'score oportunidade': round(oportunidade, 1),
-                    'preço': preco, 'var 1d%': round(var_1d, 2),
-                    'na watchlist': t in tickers_watchlist, '_cor': cor
-                })
-            except Exception:
-                pass 
+                if score >= score_min:
+                    resultados.append({
+                        'ticker': t, 'nome': nome, 'setor': setor, 
+                        'status engine': status_acao,
+                        'score saúde': round(score, 1),
+                        'preço': preco, 'var 1d%': round(var_1d, 2),
+                        'na watchlist': t in tickers_watchlist
+                    })
+            except Exception: pass 
 
         barra.empty(); status.empty()
         st.session_state['setup_resultados'] = resultados
         st.session_state['setup_ia_result'] = None
 
     if 'setup_resultados' in st.session_state and st.session_state['setup_resultados']:
-        resultados = st.session_state['setup_resultados']
-        df_setup = pd.DataFrame(resultados).sort_values('score oportunidade', ascending=False)
-        df_setup = df_setup[['ticker', 'setor', 'quadrante', 'score saúde', 'rsi', 'score oportunidade', 'preço', 'var 1d%', 'na watchlist', '_cor']]
-
-        ideais = df_setup[df_setup['quadrante'] == "🎯 setup ideal"]
-        pullback = df_setup[df_setup['quadrante'] == "⏳ aguardar pullback"]
-        risco = df_setup[df_setup['quadrante'] == "⚠️ duplo risco"]
-
-        st.markdown(f"**resultado:** {len(ideais)} setup ideal | {len(pullback)} aguardar pullback | {len(risco)} duplo risco")
-
-        opcoes_disponiveis = df_setup['quadrante'].unique().tolist()
-        defaults_seguros = [q for q in ["🎯 setup ideal", "⏳ aguardar pullback"] if q in opcoes_disponiveis]
-
-        filtro_q = st.multiselect("filtrar por quadrante:", opcoes_disponiveis, default=defaults_seguros)
-        df_filtrado = df_setup[df_setup['quadrante'].isin(filtro_q)]
-
-        def colorir_quadrante(val):
-            cores = {"🎯 setup ideal": "color: #00C853; font-weight: bold", "⏳ aguardar pullback": "color: #FF9900; font-weight: bold", "⚠️ duplo risco": "color: #FF1744; font-weight: bold", "📉 queda merecida": "color: #888888"}
-            return cores.get(val, "")
-
-        st.dataframe(
-            df_filtrado.drop(columns=['_cor']).style.applymap(colorir_quadrante, subset=['quadrante']).format({'score saúde': '{:.1f}', 'rsi': '{:.1f}', 'score oportunidade': '{:.1f}', 'preço': '{:.2f}', 'var 1d%': '{:+.2f}%'}),
-            use_container_width=True, hide_index=True
-        )
-
-        st.markdown("##### 🔍 ver detalhes de um ativo")
-        ticker_popup = st.selectbox("selecione um ativo para ver os múltiplos:", [""] + df_filtrado['ticker'].tolist(), key="sel_popup_ativo", label_visibility="collapsed")
-        if ticker_popup:
-            if st.button(f"📊 ver {ticker_popup.lower()}", key="btn_abrir_popup", type="primary"):
-                modal_ativo(ticker_popup)
+        df_setup = pd.DataFrame(st.session_state['setup_resultados']).sort_values('score saúde', ascending=False)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        for idx, row in df_setup.reset_index(drop=True).iterrows():
+            cols = st.columns([1, 2, 3, 3, 2, 1.5, 1.5, 2])
+            with cols[0]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FF9900; padding-top: 8px;'>{idx+1}</div>", unsafe_allow_html=True)
+            with cols[1]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FFFFFF; padding-top: 8px;'>{row['ticker']}</div>", unsafe_allow_html=True)
+            with cols[2]:
+                nome_trunc = str(row['nome'])[:20] + ('...' if len(str(row['nome'])) > 20 else '')
+                st.markdown(f"<div style='font-size: 0.85rem; color: #555; padding-top: 8px;'>{nome_trunc}</div>", unsafe_allow_html=True)
+            with cols[3]:
+                status_color = "#888888"
+                if "🟢" in row['status engine']: status_color = "#00C853"
+                elif "🟡" in row['status engine']: status_color = "#FF9900"
+                elif "🟠" in row['status engine']: status_color = "#FF7043"
+                elif "🔴" in row['status engine']: status_color = "#FF1744"
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem; font-weight: bold; color: {status_color};'>{row['status engine']}</div>", unsafe_allow_html=True)
+            with cols[4]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>{row['setor']}</div>", unsafe_allow_html=True)
+            with cols[5]:
+                st.markdown(f"<div style='padding-top: 8px; font-weight: bold;'>HS: {row['score saúde']:.1f}</div>", unsafe_allow_html=True)
+            with cols[6]:
+                var_color = "#00C853" if row['var 1d%'] >= 0 else "#FF1744"
+                st.markdown(f"<div style='padding-top: 8px; color: {var_color};'>{row['var 1d%']:+.2f}%</div>", unsafe_allow_html=True)
+            with cols[7]:
+                if st.button("＋ watchlist", key=f"btn_wl_setup_{row['ticker']}_{idx}", use_container_width=True):
+                    modal_salvar_screener(row['ticker'], row['nome'], "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua")
+            st.markdown("<hr style='border-top: 1px solid #1e1e1e; margin: 0.5rem 0;'>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("##### ✅ selecionar ativos e gerir watchlists")
-
-        tickers_disponiveis = df_filtrado['ticker'].tolist()
-        selecionados = []
-
-        c_all, c_none, _ = st.columns([2, 2, 8])
-        if c_all.button("marcar todos", key="sel_all"): st.session_state['sel_todos'] = True
-        if c_none.button("desmarcar", key="sel_none"): st.session_state['sel_todos'] = False
-
-        cols_check = st.columns(4)
-        for i, ticker in enumerate(tickers_disponiveis):
-            row = df_filtrado[df_filtrado['ticker'] == ticker].iloc[0]
-            cor_q = {"🎯 setup ideal": "🟢", "⏳ aguardar pullback": "🟡", "⚠️ duplo risco": "🔴", "📉 queda merecida": "⚫"}
-            emoji = cor_q.get(row['quadrante'], "⚪")
-            label = f"{emoji} {ticker.lower()} ({row['setor'][:10]})"
-
-            default_val = st.session_state.get('sel_todos', False)
-            if cols_check[i % 4].checkbox(label, value=default_val, key=f"chk_{ticker}"):
-                selecionados.append(ticker)
-
-        if selecionados:
-            st.markdown(f"**{len(selecionados)} ativos selecionados**")
-            col_wl1, col_wl2 = st.columns([5, 3])
-            with col_wl1:
-                acao_wl = st.radio("destino:", ["adicionar à watchlist existente", "criar nova watchlist"], horizontal=True, key="radio_destino_wl")
-            with col_wl2:
-                watchlists_disp = listar_watchlists()
-                if acao_wl == "adicionar à watchlist existente":
-                    opcoes_dest = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disp}
-                    sel_dest = st.selectbox("watchlist:", list(opcoes_dest.keys()), key="dest_wl_exist")
-                    dest_id = opcoes_dest[sel_dest]
-                else:
-                    nome_nova_wl = st.text_input("nome da nova watchlist:", placeholder="ex: oportunidades maio", key="nome_nova_wl_disc")
-
-            if st.button("💾 salvar seleção", type="primary", use_container_width=True, key="btn_salvar_selecao"):
-                if acao_wl == "criar nova watchlist" and nome_nova_wl.strip():
-                    dest_id = criar_watchlist(nome_nova_wl.strip(), icone="🎯", cor="#00C853")
-
-                for t in selecionados:
-                    t_base = mapear_ticker_base(t)
-                    try:
-                        mercado_t = "brasil" if t_base.endswith('.SA') else "eua"
-                        if t_base.endswith('.SA'):
-                            from utils.scrapers import buscar_dados_b3
-                            nome_t = buscar_dados_b3(t_base)['nome']
-                        else:
-                            info_t = yf.Ticker(t_base).info
-                            nome_t = info_t.get('shortName', t)
-                        adicionar_ativo(t, nome_t, mercado_t, watchlist_id=dest_id)
-                    except:
-                        adicionar_ativo(t, t, "", watchlist_id=dest_id)
-
-                st.success(f"✅ {len(selecionados)} ativos salvos!")
-
-        if not ideais.empty:
-            if st.button("🤖 ia: analisar setup ideais"):
-                with st.spinner("gemini a analisar as oportunidades..."):
+        if not df_setup[df_setup['status engine'].str.contains("🟢")].empty:
+            if st.button("🤖 ia: analisar top picks (acumulação forte)", use_container_width=True, type="primary"):
+                with st.spinner("gemini a elaborar o racional..."):
                     try:
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        tabela = ideais[['ticker','score saúde','rsi','score oportunidade']].to_csv(index=False)
-                        rsi_configurado = st.session_state.get('rsi_max', 40)
+                        alvos = df_setup[df_setup['status engine'].str.contains("🟢")]
+                        tabela = alvos[['ticker','score saúde','setor']].to_csv(index=False)
                         
                         prompt = f"""
-                        você é um gestor de portfólio. o sistema identificou estes ativos como "setup ideal" — fundamentos sólidos + desconto técnico:
-                        {tabela}
-                        score saúde: 0-100 (saúde fundamentalista da empresa)
-                        rsi: momentum (abaixo de {rsi_configurado} = sobrevendido)
+                        você é um gestor de portfólio sênior. 
+                        o sistema FinTerminal classificou estes ativos como "🟢 ACUMULAÇÃO FORTE" (excelente qualidade e preço atrativo).
                         
-                        inicie todas as frases e tópicos com letra minúscula. essa é a forma da nossa escrita.
-                        1. **top 3 picks** — qual merece mais atenção e por quê
-                        2. **risco comum** — o que esses ativos têm em comum
-                        3. **contexto de entrada** — o que monitorar
-                        sem recomendação de compra/venda. máximo 300 palavras.
+                        ativos detectados:
+                        {tabela}
+                        
+                        responda de forma técnica e suscinta (máx 300 palavras):
+                        1. **análise setorial**: por que esses setores estão oferecendo oportunidades agora?
+                        2. **fatores de risco**: o que pode invalidar o score alto desses ativos no médio prazo?
+                        
+                        inicie todas as frases e tópicos com letra minúscula.
                         """
                         resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
                         st.session_state['setup_ia_result'] = resp.text
-                    except Exception as e:
-                        st.error(f"erro na análise da ia: {e}")
+                    except Exception as e: 
+                        st.error(f"erro na conexão com a ia. tente novamente. detalhe: {e}")
             
             if st.session_state.get('setup_ia_result'):
-                status_card("análise de setup ideal", st.session_state['setup_ia_result'], "info")
-
-    elif 'setup_resultados' in st.session_state and not st.session_state['setup_resultados']:
-        st.warning("nenhum ativo encontrado com os critérios selecionados.")
+                status_card("parecer da ia sobre as oportunidades", st.session_state['setup_ia_result'], "info")
 
 # ==========================================
-# tab 2 — screener quantitativo
+# tab 2 — magic formula (greenblatt)
+# ==========================================
+with tab_magic:
+    section_title("🏆 magic formula — ranking de valor + qualidade")
+    status_card("metodologia greenblatt", "ranking combinado de dois critérios: earnings yield (ebit/ev) — quanto a empresa gera para cada R$ de valor de mercado; e roic — eficiência do capital empregado. empresas no top de ambos os rankings simultaneamente tendem a superar o mercado no longo prazo.", "info")
+    
+    cm_c1, cm_c2, cm_c3 = st.columns([3, 2, 2])
+    with cm_c1:
+        magic_universos = st.multiselect("universo de análise:", ["🇧🇷 b3 — ações", "🌎 eua — ações", "🏢 b3 — fiis"], default=["🇧🇷 b3 — ações"])
+    with cm_c2:
+        magic_top_n = st.slider("top N ativos:", min_value=5, max_value=30, value=15, step=5)
+    with cm_c3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_magic = st.button("🚀 rodar magic formula", type="primary", use_container_width=True)
+        
+    if btn_magic:
+        magic_lista = []
+        if "🇧🇷 b3 — ações" in magic_universos: magic_lista.extend(SCREENER_B3)
+        if "🌎 eua — ações" in magic_universos: magic_lista.extend(SCREENER_US)
+        if "🏢 b3 — fiis" in magic_universos: magic_lista.extend(FII_TODOS)
+        
+        if not magic_lista:
+            st.warning("selecione pelo menos um universo de análise.")
+        else:
+            with st.spinner("calculando rankings de earnings yield e roic..."):
+                magic_dados = []
+                for t in magic_lista:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        f_dados = CACHE_FUNDAMENTOS.get(t_base)
+                        if not f_dados:
+                            info = yf.Ticker(t_base).info
+                            f_dados = {
+                                'p/l': info.get('trailingPE', info.get('forwardPE', np.nan)),
+                                'p/vp': info.get('priceToBook', np.nan),
+                                'ev/ebitda': info.get('enterpriseToEbitda', np.nan),
+                                'market_cap': info.get('marketCap', 0),
+                                'roe%': (info.get('returnOnEquity') * 100) if info.get('returnOnEquity') else np.nan,
+                                'dy%': (info.get('dividendYield') * 100) if info.get('dividendYield') else 0,
+                                'nome': info.get('shortName', t), 
+                                'setor': traduzir_setor(info.get('sector', '—'))
+                            }
+                        magic_dados.append({
+                            'ticker': t,
+                            'nome': f_dados.get('nome', t),
+                            'setor': f_dados.get('setor', '—'),
+                            'ev/ebitda': pd.to_numeric(f_dados.get('ev/ebitda'), errors='coerce'),
+                            'roe%': pd.to_numeric(f_dados.get('roe%'), errors='coerce'),
+                            'dy%': pd.to_numeric(f_dados.get('dy%', 0), errors='coerce'),
+                            'p/vp': pd.to_numeric(f_dados.get('p/vp'), errors='coerce')
+                        })
+                    except Exception: pass
+                
+                df_magic = pd.DataFrame(magic_dados)
+                for col in ['ev/ebitda', 'roe%', 'dy%', 'p/vp']:
+                    df_magic[col] = pd.to_numeric(df_magic[col], errors='coerce')
+                    
+                df_magic = df_magic[(df_magic['ev/ebitda'] > 0) & (df_magic['roe%'] > 0)].dropna(subset=['ev/ebitda', 'roe%'])
+                df_magic['earnings yield (%)'] = (1 / df_magic['ev/ebitda']) * 100
+                df_magic['rank_ey'] = df_magic['earnings yield (%)'].rank(ascending=False, method='min')
+                df_magic['rank_roic'] = df_magic['roe%'].rank(ascending=False, method='min')
+                df_magic['rank_magic'] = df_magic['rank_ey'] + df_magic['rank_roic']
+                df_magic = df_magic.sort_values('rank_magic', ascending=True).head(magic_top_n)
+                df_magic['posição'] = range(1, len(df_magic) + 1)
+                st.session_state['magic_resultado'] = df_magic
+                
+    if 'magic_resultado' in st.session_state and not st.session_state['magic_resultado'].empty:
+        df_res_magic = st.session_state['magic_resultado']
+        section_title(f"top {len(df_res_magic)} ativos — magic formula ranking")
+        
+        cm_res1, cm_res2 = st.columns(2)
+        best_ey = df_res_magic.sort_values('earnings yield (%)', ascending=False).iloc[0]
+        best_roe = df_res_magic.sort_values('roe%', ascending=False).iloc[0]
+        with cm_res1:
+            metric_card("melhor earnings yield", f"{best_ey['ticker']} ({best_ey['earnings yield (%)']:.2f}%)")
+        with cm_res2:
+            metric_card("melhor roe% (roic proxy)", f"{best_roe['ticker']} ({best_roe['roe%']:.1f}%)")
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        for idx, row in df_res_magic.iterrows():
+            cols = st.columns([1, 2, 3, 2, 2, 2, 2, 2])
+            with cols[0]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FF9900; padding-top: 8px;'>{row['posição']}</div>", unsafe_allow_html=True)
+            with cols[1]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FFFFFF; padding-top: 8px;'>{row['ticker']}</div>", unsafe_allow_html=True)
+            with cols[2]:
+                nome_trunc = str(row['nome'])[:25] + ('...' if len(str(row['nome'])) > 25 else '')
+                st.markdown(f"<div style='font-size: 0.85rem; color: #555; padding-top: 8px;'>{nome_trunc}</div>", unsafe_allow_html=True)
+            with cols[3]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>{row['setor']}</div>", unsafe_allow_html=True)
+            with cols[4]:
+                st.markdown(f"<div style='padding-top: 8px;'>EY: {row['earnings yield (%)']:.2f}%</div>", unsafe_allow_html=True)
+            with cols[5]:
+                st.markdown(f"<div style='padding-top: 8px;'>ROE: {row['roe%']:.1f}%</div>", unsafe_allow_html=True)
+            with cols[6]:
+                st.markdown(f"<div style='padding-top: 8px;'>DY: {row['dy%']:.1f}%</div>", unsafe_allow_html=True)
+            with cols[7]:
+                if st.button("＋ watchlist", key=f"btn_wl_magic_{row['ticker']}_{idx}", use_container_width=True):
+                    modal_salvar_screener(row['ticker'], row['nome'], "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua")
+            
+            st.markdown("<hr style='border-top: 1px solid #1e1e1e; margin: 0.5rem 0;'>", unsafe_allow_html=True)
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🧠 ia: analisar o ranking magic formula", type="primary", use_container_width=True):
+            with st.spinner("analisando ranking e fundamentos..."):
+                try:
+                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                    dados_texto = df_res_magic.head(10).to_csv(index=False)
+                    prompt = f"analise este ranking top 10 da magic formula de greenblatt:\n{dados_texto}\nidentifique padrões setoriais, riscos e qual dos ativos tem a melhor combination qualidade-preço. responda em minúsculas e direto."
+                    res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                    status_card("análise ia — magic formula", res.text, "info")
+                except Exception as e:
+                    st.error(f"Erro na IA: {e}")
+
+# ==========================================
+# tab 3 — radar de confluência
+# ==========================================
+with tab_radar:
+    section_title("🎯 radar de confluência — health score × magic formula")
+    status_card("como funciona", "cruza dois sistemas independentes: o health engine (qualidade de balanço, momentum técnico e risco macro) com a magic formula de greenblatt (earnings yield e roic). ativos no topo de ambos simultaneamente representam a confluência mais forte — qualidade confirmada por múltiplos ângulos.", "info")
+    
+    c_rad1, c_rad2, c_rad3, c_rad4 = st.columns(4)
+    with c_rad1:
+        radar_universos = st.multiselect("universo:", ["🇧🇷 b3 — ações", "🌎 eua — ações", "🏢 b3 — fiis"], default=["🇧🇷 b3 — ações"])
+    with c_rad2:
+        radar_top_n = st.slider("top N resultados:", min_value=5, max_value=20, value=10, step=5)
+    with c_rad3:
+        peso_health = st.slider("peso health score (%):", min_value=20, max_value=80, value=60, step=10)
+        peso_magic = 100 - peso_health
+    with c_rad4:
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_radar = st.button("🔍 rodar radar", type="primary", use_container_width=True)
+        
+    st.caption(f"ponderação atual: health score {peso_health}% | magic formula {peso_magic}%")
+    
+    if btn_radar:
+        radar_lista = []
+        if "🇧🇷 b3 — ações" in radar_universos: radar_lista.extend(SCREENER_B3)
+        if "🌎 eua — ações" in radar_universos: radar_lista.extend(SCREENER_US)
+        if "🏢 b3 — fiis" in radar_universos: radar_lista.extend(FII_TODOS)
+        
+        if not radar_lista:
+            st.warning("selecione pelo menos um universo de análise.")
+        else:
+            with st.spinner("cruzando health scores com magic formula..."):
+                raw_scores = get_health_scores()
+                health_map = {item['ticker']: item['score'] for item in raw_scores}
+                
+                if not health_map:
+                    st.warning("rode o health engine primeiro na aba setup ideal para ter scores calculados.")
+                else:
+                    radar_dados = []
+                    for t in radar_lista:
+                        t_base = mapear_ticker_base(t)
+                        try:
+                            f_dados = CACHE_FUNDAMENTOS.get(t_base)
+                            if not f_dados:
+                                continue
+                                
+                            ev_ebitda = pd.to_numeric(f_dados.get('ev/ebitda'), errors='coerce')
+                            roe = pd.to_numeric(f_dados.get('roe%'), errors='coerce')
+                            
+                            if pd.isna(ev_ebitda) or ev_ebitda <= 0 or pd.isna(roe):
+                                continue
+                                
+                            health_score_val = health_map.get(t_base, health_map.get(t, None))
+                            if health_score_val is None:
+                                continue
+                                
+                            earnings_yield = (1 / ev_ebitda) * 100
+                            
+                            radar_dados.append({
+                                'ticker': t,
+                                'nome': f_dados.get('nome', t),
+                                'setor': f_dados.get('setor', '—'),
+                                'health score': health_score_val,
+                                'earnings yield (%)': earnings_yield,
+                                'roe%': roe,
+                                'dy%': pd.to_numeric(f_dados.get('dy%', 0), errors='coerce'),
+                                'p/vp': pd.to_numeric(f_dados.get('p/vp'), errors='coerce')
+                            })
+                        except Exception:
+                            continue
+                            
+                    if len(radar_dados) < 5:
+                        st.warning("poucos ativos com dados suficientes. sincronize o cache e rode o health engine primeiro.")
+                    else:
+                        df_radar = pd.DataFrame(radar_dados)
+                        rank_health = df_radar['health score'].rank(ascending=False, method='min')
+                        rank_magic_r = (1 / df_radar['earnings yield (%)']).rank(ascending=True, method='min') + df_radar['roe%'].rank(ascending=False, method='min')
+                        
+                        rank_health_norm = (rank_health / len(df_radar)) * 100
+                        rank_magic_norm = (rank_magic_r / (len(df_radar) * 2)) * 100
+                        
+                        df_radar['score_confluencia'] = ((peso_health / 100) * (100 - rank_health_norm)) + ((peso_magic / 100) * (100 - rank_magic_norm))
+                        
+                        df_radar = df_radar.sort_values('score_confluencia', ascending=False).head(radar_top_n)
+                        df_radar['posição'] = range(1, len(df_radar) + 1)
+                        
+                        st.session_state['radar_resultado'] = df_radar
+                        st.session_state['peso_health_radar'] = peso_health
+                        st.session_state['peso_magic_radar'] = peso_magic
+                        
+    if 'radar_resultado' in st.session_state and not st.session_state['radar_resultado'].empty:
+        df_rad = st.session_state['radar_resultado']
+        section_title("🏆 top ativos por confluência")
+        
+        c_rm1, c_rm2, c_rm3 = st.columns(3)
+        with c_rm1:
+            metric_card("ativos analisados", str(len(df_rad)))
+        with c_rm2:
+            metric_card("ponderação", f"HS {st.session_state.get('peso_health_radar', 60)}% / MF {st.session_state.get('peso_magic_radar', 40)}%")
+        with c_rm3:
+            metric_card("melhor confluência", df_rad.iloc[0]['ticker'])
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        for idx, row in df_rad.reset_index(drop=True).iterrows():
+            cols = st.columns([1, 2, 3, 2, 1.5, 1.5, 1.5, 1.5, 2])
+            with cols[0]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FF9900; padding-top: 8px;'>{row['posição']}</div>", unsafe_allow_html=True)
+            with cols[1]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FFFFFF; padding-top: 8px;'>{row['ticker']}</div>", unsafe_allow_html=True)
+            with cols[2]:
+                nome_trunc = str(row['nome'])[:20] + ('...' if len(str(row['nome'])) > 20 else '')
+                st.markdown(f"<div style='font-size: 0.85rem; color: #555; padding-top: 8px;'>{nome_trunc}</div>", unsafe_allow_html=True)
+            with cols[3]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>{row['setor']}</div>", unsafe_allow_html=True)
+            with cols[4]:
+                hs_val = row['health score']
+                hs_color = "#00C853" if hs_val >= 65 else ("#FF9900" if hs_val >= 40 else "#FF1744")
+                st.markdown(f"<div style='padding-top: 8px; font-weight: bold; color: {hs_color};'>HS: {hs_val:.0f}</div>", unsafe_allow_html=True)
+            with cols[5]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>EY: {row['earnings yield (%)']:.1f}%</div>", unsafe_allow_html=True)
+            with cols[6]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>ROE: {row['roe%']:.1f}%</div>", unsafe_allow_html=True)
+            with cols[7]:
+                st.markdown(f"<div style='padding-top: 8px; color: #00B0FF; font-weight: bold;'>{row['score_confluencia']:.1f}</div>", unsafe_allow_html=True)
+            with cols[8]:
+                if st.button("＋ watchlist", key=f"btn_wl_radar_{row['ticker']}_{idx}", use_container_width=True):
+                    modal_salvar_screener(row['ticker'], row['nome'], "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua")
+            st.markdown("<hr style='border-top: 1px solid #1e1e1e; margin: 0.5rem 0;'>", unsafe_allow_html=True)
+        
+        fig_scat = go.Figure()
+        fig_scat.add_trace(go.Scatter(
+            x=df_rad['health score'],
+            y=df_rad['earnings yield (%)'],
+            mode='markers+text',
+            text=df_rad['ticker'],
+            textposition='top center',
+            marker=dict(
+                size=12,
+                color=df_rad['score_confluencia'],
+                colorscale=[[0, "#FF1744"], [1, "#00C853"]],
+                showscale=True,
+                colorbar=dict(title="confluência")
+            )
+        ))
+        layout_scat = base_layout(height=450, title="mapa de confluência: health score vs earnings yield")
+        layout_scat['xaxis_title'] = "health score"
+        layout_scat['yaxis_title'] = "earnings yield (%)"
+        fig_scat.update_layout(**layout_scat)
+        st.plotly_chart(fig_scat, use_container_width=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🧠 ia: analisar as confluências detectadas", type="primary", use_container_width=True):
+            with st.spinner("analisando confluências..."):
+                try:
+                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                    csv_confl = df_rad.head(10).to_csv(index=False)
+                    prompt = f"analise este ranking de confluência (health score + magic formula):\n{csv_confl}\nqual ativo tem a tese mais sólida considerando os dois sistemas? quais setores estão concentrando as melhores confluências? qual o risco de cada um dos top 3? escreva em minúsculas e seja direto."
+                    res_conf = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                    status_card("análise ia — radar de confluência", res_conf.text, "info")
+                except Exception as e:
+                    st.error(f"Erro IA: {e}")
+
+# ==========================================
+# tab 4 — screener quantitativo
 # ==========================================
 with tab_screener:
     section_title("filtros quantitativos e classificação de ativos")
     
-    c_uni1, c_uni2, c_uni3 = st.columns(3)
-    with c_uni1: use_b3 = st.checkbox(f"🇧🇷 b3 ({len(SCREENER_B3)} ativos)", value=True, key="scr_b3")
-    with c_uni2: use_us = st.checkbox(f"🌎 xstocks / rwa ({len(SCREENER_US)} ativos)", value=True, key="scr_us")
-    with c_uni3: use_bench = st.checkbox(f"📊 etfs / benchmarks ({len(XSTOCKS_INDICES)} etfs)", value=False, key="scr_bench")
+    c_uni1, c_uni2, c_uni3, c_uni4 = st.columns(4)
+    with c_uni1: use_b3 = st.checkbox(f"🇧🇷 b3 ({len(SCREENER_B3)} ações)", value=True, key="scr_b3")
+    with c_uni2: use_fii = st.checkbox(f"🏢 fiis ({len(FII_TODOS)} fundos)", value=True, key="scr_fii")
+    with c_uni3: use_us = st.checkbox(f"🌎 xstocks/us ({len(SCREENER_US)} ativos)", value=False, key="scr_us")
+    with c_uni4: use_bench = st.checkbox(f"📊 etfs ({len(XSTOCKS_INDICES)} etfs)", value=False, key="scr_bench")
 
     universo_scr = []
     if use_b3: universo_scr.extend(SCREENER_B3)
+    if use_fii: universo_scr.extend(FII_TODOS)
     if use_us: universo_scr.extend(SCREENER_US)
     if use_bench: universo_scr.extend(XSTOCKS_INDICES)
 
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("⚙️ filtros customizados (pré-ranking)"):
         cf1, cf2, cf3, cf4 = st.columns(4)
-        with cf1: pl_max = st.slider("p/l máximo:", 0, 100, 30)
-        with cf2: roe_min = st.slider("roe mínimo (%):", 0, 50, 10)
+        with cf1: pl_max = st.slider("p/l máximo (ações):", 0, 100, 30)
+        with cf2: pvp_max = st.slider("p/vp máximo (geral):", 0.0, 5.0, 2.5, 0.1)
         with cf3: dy_min = st.slider("dy mínimo (%):", 0, 20, 0)
         with cf4: mcap_sel = st.selectbox("market cap mínimo:", ["qualquer", "> 1 bilhão", "> 10 bilhões", "> 100 bilhões"])
 
     estrategia = st.selectbox(
         "selecione a estratégia quantitativa de ranking:", 
-        ["fórmula mágica (greenblatt) - valor + qualidade", "deep value - menor p/vp", "high yield - maior dividend yield", "setup ideal (saúde forte + rsi sobrevendido)"]
+        ["fórmula mágica (greenblatt) - valor + qualidade", "deep value - menor p/vp", "high yield - maior dividend yield"]
     )
 
     if st.button("🚀 rodar screener", type="primary", use_container_width=True):
-        if not universo_scr:
-            st.warning("selecione pelo menos um universo de ativos para rastrear.")
+        if not universo_scr: st.warning("selecione pelo menos um universo de ativos para rastrear.")
         else:
             barra_progresso = st.progress(0)
             texto_status = st.empty()
             
-            texto_status.write("a transferir histórico em lote...")
-            try:
-                tickers_base_unicos = list(set([mapear_ticker_base(t) for t in universo_scr]))
-                
-                hist_base = yf.download(tickers_base_unicos, period="60d", auto_adjust=True, progress=False)['Close']
-                if isinstance(hist_base, pd.Series): 
-                    hist_base = hist_base.to_frame(name=tickers_base_unicos[0])
-                hist_base = hist_base.ffill()
-
-                rsis = {}
-                for t in universo_scr:
-                    t_base = mapear_ticker_base(t)
-                    try:
-                        close = hist_base[t_base].dropna()
-                        if len(close) >= 15:
-                            delta = close.diff()
-                            ganho = delta.clip(lower=0).rolling(14).mean()
-                            perda = (-delta.clip(upper=0)).rolling(14).mean()
-                            rsis[t] = (100 - (100 / (1 + (ganho / perda)))).iloc[-1]
-                        else: rsis[t] = np.nan
-                    except: rsis[t] = np.nan
-            except Exception:
-                rsis = {}
-                
             dados_scr = []
             total = len(universo_scr)
             
             for idx, t in enumerate(universo_scr):
-                texto_status.write(f"a analisar {t.lower()} ({idx+1}/{total})...")
+                texto_status.write(f"a mapear {t.lower()} ({idx+1}/{total})...")
                 t_base = mapear_ticker_base(t)
                 try:
-                    if t_base.endswith('.SA'):
-                        from utils.scrapers import buscar_dados_b3
-                        f_dados = buscar_dados_b3(t_base)
-                        pl = f_dados['p/l']
-                        pvp = f_dados['p/vp']
-                        mcap = f_dados['market_cap']
-                        roe = f_dados['roe%']
-                        dy = f_dados['dy%']
-                        nome = f_dados['nome']
-                        setor = f_dados['setor']
-                    else:
-                        info = yf.Ticker(t_base).info
-                        pl = info.get('trailingPE', info.get('forwardPE', np.nan))
-                        pvp = info.get('priceToBook', np.nan)
-                        mcap = info.get('marketCap', 0)
-                        roe = (info.get('returnOnEquity') * 100) if info.get('returnOnEquity') is not None else np.nan
-                        dy = (info.get('dividendYield') * 100) if info.get('dividendYield') is not None else 0
-                        nome = info.get('shortName', t)
-                        setor = traduzir_setor(info.get('sector', '—'))
+                    f_dados = CACHE_FUNDAMENTOS.get(t_base)
+                    if not f_dados:
+                        if t_base.endswith('.SA'):
+                            from utils.scrapers import buscar_dados_b3
+                            f_dados = buscar_dados_b3(t_base)
+                        else:
+                            info = yf.Ticker(t_base).info
+                            f_dados = {
+                                'p/l': info.get('trailingPE', info.get('forwardPE', np.nan)),
+                                'p/vp': info.get('priceToBook', np.nan),
+                                'market_cap': info.get('marketCap', 0),
+                                'roe%': (info.get('returnOnEquity') * 100) if info.get('returnOnEquity') else np.nan,
+                                'dy%': (info.get('dividendYield') * 100) if info.get('dividendYield') else 0,
+                                'ev/ebitda': info.get('enterpriseToEbitda', np.nan),
+                                'margem%': (info.get('profitMargins') * 100) if info.get('profitMargins') else np.nan,
+                                'nome': info.get('shortName', t), 'setor': traduzir_setor(info.get('sector', '—'))
+                            }
                     
-                    dados_scr.append({'ticker': t, 'nome': nome, 'setor': setor, 'p/l': pl, 'p/vp': pvp, 'roe%': roe, 'dy%': dy, 'market cap': mcap, 'rsi': rsis.get(t, np.nan)})
-                except Exception:
-                    pass 
+                    dados_scr.append({
+                        'ticker': t, 'nome': f_dados.get('nome', t), 'setor': f_dados.get('setor', '—'),
+                        'p/l': f_dados.get('p/l', np.nan), 'p/vp': f_dados.get('p/vp', np.nan), 'roe%': f_dados.get('roe%', np.nan),
+                        'dy%': f_dados.get('dy%', np.nan), 'market cap': f_dados.get('market_cap', 0),
+                        'ev/ebitda': f_dados.get('ev/ebitda', np.nan), 'margem%': f_dados.get('margem%', np.nan)
+                    })
+                except Exception: pass 
                 barra_progresso.progress((idx + 1) / total)
                 
             texto_status.empty(); barra_progresso.empty()
             
             df = pd.DataFrame(dados_scr)
-            if df.empty:
-                st.error("nenhum dado pôde ser coletado.")
+            if df.empty: st.error("nenhum dado pôde ser coletado.")
             else:
-                colunas_numericas = ['p/l', 'p/vp', 'roe%', 'dy%', 'market cap', 'rsi']
-                for col in colunas_numericas:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                for col in ['p/l', 'p/vp', 'roe%', 'dy%', 'market cap', 'ev/ebitda', 'margem%']:
+                    if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
 
-                df = df.dropna(subset=['p/l', 'roe%', 'p/vp']) 
-                if pl_max < 100: df = df[(df['p/l'] <= pl_max) & (df['p/l'] > 0)] 
-                if roe_min > 0: df = df[df['roe%'] >= roe_min]
-                if dy_min > 0: df = df[df['dy%'] >= dy_min]
-                if mcap_sel == "> 1 bilhão": df = df[df['market cap'] >= 1e9]
-                elif mcap_sel == "> 10 bilhões": df = df[df['market cap'] >= 10e9]
-                elif mcap_sel == "> 100 bilhões": df = df[df['market cap'] >= 100e9]
+                # Filtros inteligentes que ignoram P/L para FIIs
+                mask = (df['p/vp'] <= pvp_max) & (df['p/vp'] > 0) & (df['dy%'] >= dy_min)
+                
+                df_final = df[mask].copy()
+                
+                # Filtro de Market Cap
+                if mcap_sel == "> 1 bilhão": df_final = df_final[df_final['market cap'] >= 1e9]
+                elif mcap_sel == "> 10 bilhões": df_final = df_final[df_final['market cap'] >= 10e9]
+                elif mcap_sel == "> 100 bilhões": df_final = df_final[df_final['market cap'] >= 100e9]
 
-                if df.empty:
-                    st.warning("nenhuma empresa sobreviveu aos filtros escolhidos.")
+                if df_final.empty: st.warning("nenhuma empresa sobreviveu aos filtros.")
                 else:
-                    df['score'] = 0 
+                    df_final['score_rank'] = 0 
                     if "fórmula mágica" in estrategia:
-                        df['rank_pl'] = df['p/l'].rank(ascending=True) 
-                        df['rank_roe'] = df['roe%'].rank(ascending=False) 
-                        df['score'] = df['rank_pl'] + df['rank_roe']
-                        df_final = df.sort_values('score', ascending=True).head(5).drop(columns=['rank_pl', 'rank_roe'])
+                        df_final = df_final[(df_final['ev/ebitda'] > 0)].dropna(subset=['ev/ebitda'])
+                        df_final['earnings yield'] = (1 / df_final['ev/ebitda']) * 100
+                        df_final['roic proxy'] = df_final['roe%']
+                        df_final = df_final.dropna(subset=['earnings yield', 'roic proxy'])
+                        df_final['rank_ey'] = df_final['earnings yield'].rank(ascending=False)
+                        df_final['rank_roic'] = df_final['roic proxy'].rank(ascending=False)
+                        df_final['score_rank'] = df_final['rank_ey'] + df_final['rank_roic']
+                        df_resultado = df_final.sort_values('score_rank', ascending=True).head(15).drop(columns=['rank_ey', 'rank_roic'])
                     elif "deep value" in estrategia:
-                        df = df[df['p/vp'] > 0] 
-                        df['score'] = df['p/vp'].rank(ascending=True)
-                        df_final = df.sort_values('score', ascending=True).head(5)
+                        df_final['score_rank'] = df_final['p/vp'].rank(ascending=True)
+                        df_resultado = df_final.sort_values('score_rank', ascending=True).head(10)
                     elif "high yield" in estrategia:
-                        df['score'] = df['dy%'].rank(ascending=False)
-                        df_final = df.sort_values('score', ascending=True).head(5)
-                    elif "setup ideal" in estrategia:
-                        df = df[(df['rsi'] < 35) & (df['roe%'] > 10) & (df['p/l'] > 0) & (df['p/l'] < 25)]
-                        df['score'] = df['rsi'].rank(ascending=True) 
-                        df_final = df.sort_values('score', ascending=True).head(10)
+                        df_final['score_rank'] = df_final['dy%'].rank(ascending=False)
+                        df_resultado = df_final.sort_values('score_rank', ascending=True).head(10)
 
-                    st.session_state['screener_top5'] = df_final
+                    st.session_state['screener_top10'] = df_resultado
                     st.session_state['estrategia_usada'] = estrategia
 
-    if 'screener_top5' in st.session_state and not st.session_state['screener_top5'].empty:
-        df_final = st.session_state['screener_top5']
-        estrategia_usada = st.session_state['estrategia_usada']
+    if 'screener_top10' in st.session_state and not st.session_state['screener_top10'].empty:
+        df_res = st.session_state['screener_top10']
+        estr_u = st.session_state['estrategia_usada']
         
-        st.markdown(f"#### 🏆 top ativos: {estrategia_usada.lower()}")
-        
-        formatacao = {'p/l': '{:.2f}', 'p/vp': '{:.2f}', 'roe%': '{:.2f}%', 'dy%': '{:.2f}%', 'rsi': '{:.1f}', 'score': '{:.1f}', 'market cap': '${:,.0f}'}
-        
-        def destacar_score(col):
-            if col.name in ['score', 'rsi']: return ['background-color: #221100; color: #FF9900; font-weight: bold'] * len(col)
-            return [''] * len(col)
-            
-        cols_to_show = [c for c in df_final.columns if c not in ['rsi'] or "setup ideal" in estrategia_usada]
-        
-        st.dataframe(df_final[cols_to_show].style.format(formatacao).apply(destacar_score, axis=0), use_container_width=True, hide_index=True)
-
+        st.markdown(f"#### 🏆 top ativos detectados: {estr_u.lower()}")
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("##### ➕ salvar na watchlist")
         
-        cols_b = st.columns(5)
-        for idx, row in df_final.reset_index().iterrows():
-            t = row['ticker']; n = row['nome']
-            with cols_b[idx % 5]:
-                if st.button(f"salvar {t.lower()}", key=f"add_{t}", use_container_width=True):
-                    t_base = mapear_ticker_base(t)
-                    mercado_d = "brasil" if t_base.endswith('.SA') else "eua"
-                    modal_salvar_screener(t, n, mercado_d)
+        for idx, row in df_res.reset_index(drop=True).iterrows():
+            cols = st.columns([1, 2, 3, 2, 1.5, 1.5, 1.5, 1.5, 2])
+            with cols[0]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FF9900; padding-top: 8px;'>{idx+1}</div>", unsafe_allow_html=True)
+            with cols[1]:
+                st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FFFFFF; padding-top: 8px;'>{row['ticker']}</div>", unsafe_allow_html=True)
+            with cols[2]:
+                nome_trunc = str(row['nome'])[:20] + ('...' if len(str(row['nome'])) > 20 else '')
+                st.markdown(f"<div style='font-size: 0.85rem; color: #555; padding-top: 8px;'>{nome_trunc}</div>", unsafe_allow_html=True)
+            with cols[3]:
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>{row['setor']}</div>", unsafe_allow_html=True)
+            
+            if "fórmula mágica" in estr_u:
+                c4_label, c4_val = "EY", f"{row.get('earnings yield', 0):.1f}%"
+                c5_label, c5_val = "ROIC", f"{row.get('roic proxy', 0):.1f}%"
+            else:
+                c4_label, c4_val = "P/L", f"{row.get('p/l', 0):.2f}"
+                c5_label, c5_val = "ROE", f"{row.get('roe%', 0):.1f}%"
+                
+            c6_label, c6_val = "P/VP", f"{row.get('p/vp', 0):.2f}"
+            c7_label, c7_val = "DY", f"{row.get('dy%', 0):.1f}%"
 
-        st.markdown("---")
-        section_title("🧠 análise contextual — ia + macro")
-        
-        if st.button("analisar com contexto macro", type="primary", use_container_width=True):
-            with st.spinner("a buscar dados macroeconómicos e cruzar com os múltiplos..."):
-                try:
-                    hoje = datetime.datetime.today()
-                    inicio = hoje - datetime.timedelta(days=180)
-                    macro = {}
-                    
-                    try: macro['selic'] = sgs.get({'selic': 432}, start=inicio)['selic'].iloc[-1]
-                    except: macro['selic'] = None
-                    try: macro['ipca'] = sgs.get({'ipca': 433}, start=inicio)['ipca'].iloc[-1]
-                    except: macro['ipca'] = None
-                    try: macro['ipca_12m'] = sgs.get({'ipca_12m': 13522}, start=inicio)['ipca_12m'].iloc[-1]
-                    except: macro['ipca_12m'] = None
-
-                    if "FRED_API_KEY" in st.secrets:
-                        try:
-                            fred = Fred(api_key=st.secrets["FRED_API_KEY"])
-                            macro['fed'] = fred.get_series('FEDFUNDS', observation_start=inicio).dropna().iloc[-1]
-                            macro['dgs10'] = fred.get_series('DGS10', observation_start=inicio).dropna().iloc[-1]
-                            macro['vix'] = fred.get_series('VIXCLS', observation_start=inicio).dropna().iloc[-1]
-                        except: pass
-                    
-                    def fmt_m(v, is_vix=False): return f"{v:.1f}" if is_vix and v else (f"{v:.2f}%" if v else "n/d")
-                    
-                    tabela_txt = df_final[cols_to_show].to_csv(index=False, float_format='%.2f')
-                    
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    prompt = f"""
-                    você é um gestor de portfólio macro-fundamentalista sênior.
-
-                    cenário macroeconômico real e atual (dados oficiais bcb e fed):
-                    - taxa selic (brasil): {fmt_m(macro.get('selic'))}
-                    - ipca mensal (brasil): {fmt_m(macro.get('ipca'))}
-                    - ipca acumulado 12 meses (brasil): {fmt_m(macro.get('ipca_12m'))}
-                    - fed funds rate (eua): {fmt_m(macro.get('fed'))}
-                    - treasury 10y (eua): {fmt_m(macro.get('dgs10'))}
-                    - vix: {fmt_m(macro.get('vix'), True)}
-
-                    estratégia aplicada pelo algoritmo quantitativo: {estrategia_usada}
-
-                    top finalistas do screener:
-                    {tabela_txt}
-
-                    responda em português, formatação markdown, máximo 400 palavras.
-                    inicie todas as frases e tópicos com letra minúscula. essa é a forma da nossa escrita.
-
-                    ## diagnóstico do ambiente
-                    o cenário macro atual favorece ou desfavorece a estratégia '{estrategia_usada}'? por quê? (baseie-se estritamente nas taxas fornecidas acima, especialmente no juro real frente ao ipca 12m).
-
-                    ## ajuste de convicção por ativo
-                    para cada um dos ativos: aumentar, manter ou reduzir convicção dado o macro atual? (tabela: ticker | convicção | razão macroeconômica)
-
-                    ## risco macro ignorado pelo algoritmo
-                    cruzando os indicadores fornecidos com o setor das empresas da lista, qual o maior ponto cego desta carteira?
-                    """
-                    resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    st.session_state['screener_ia_result'] = resp.text
-                except Exception as e:
-                    st.error(f"erro ao consultar a ia: {e}")
-                    
-            if st.session_state.get('screener_ia_result'):
-                status_card("diagnóstico macro-fundamental", st.session_state['screener_ia_result'], "info")
-
-# ==========================================
-# tab 3 — comparação de múltiplos
-# ==========================================
-with tab_comps:
-    st.info("💡 a comparação de múltiplos avançada moveu-se para a aba de research. utilize essa aba para cruzar ativos e obter matrizes completas.")
+            with cols[4]: st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem;'><span style='color:#888'>{c4_label}:</span> {c4_val}</div>", unsafe_allow_html=True)
+            with cols[5]: st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem;'><span style='color:#888'>{c5_label}:</span> {c5_val}</div>", unsafe_allow_html=True)
+            with cols[6]: st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem;'><span style='color:#888'>{c6_label}:</span> {c6_val}</div>", unsafe_allow_html=True)
+            with cols[7]: st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem;'><span style='color:#888'>{c7_label}:</span> {c7_val}</div>", unsafe_allow_html=True)
+            with cols[8]:
+                if st.button("＋ watchlist", key=f"btn_wl_scr_{row['ticker']}_{idx}", use_container_width=True):
+                    modal_salvar_screener(row['ticker'], row['nome'], "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua")
+            st.markdown("<hr style='border-top: 1px solid #1e1e1e; margin: 0.5rem 0;'>", unsafe_allow_html=True)

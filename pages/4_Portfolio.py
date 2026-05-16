@@ -49,52 +49,93 @@ tab_posicoes, tab_backtest, tab_diario = st.tabs([
 # ==========================================
 with tab_posicoes:
     
-    # nota: carrega a lista mestre (todas as watchlists) para preencher a planilha
     watchlist = listar_watchlist()
     pesos_atuais = {p['ticker']: p for p in get_pesos()}
 
-    with st.expander("⚖️ composição do portfólio (planilha rápida)", expanded=True):
-        
-        dados_tabela = []
-        for item in watchlist:
-            t = item['ticker']
-            p_atual = pesos_atuais.get(t, {})
-            qtd = p_atual.get('quantidade')
-            qtd = float(qtd) if qtd is not None else 0.0
-            pm = p_atual.get('preco_medio')
-            pm = float(pm) if pm is not None else 0.0
-            dados_tabela.append({"ticker": t, "quantidade": qtd, "preço médio": pm})
+    tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
+    posicoes_ativas = []
+    
+    for t in tickers_unicos:
+        p_atual = pesos_atuais.get(t, {})
+        qtd = float(p_atual.get('quantidade', 0))
+        if qtd > 0:
+            pm = float(p_atual.get('preco_medio', 0))
+            posicoes_ativas.append({
+                "ticker": t,
+                "quantidade": qtd,
+                "preço médio": pm,
+                "valor estimado": qtd * pm
+            })
             
-        df_base = pd.DataFrame(dados_tabela)
+    if posicoes_ativas:
+        section_title("📋 posições ativas")
+        df_ativas = pd.DataFrame(posicoes_ativas)
         
-        if not df_base.empty:
-            df_editado = st.data_editor(
-                df_base,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="fixed",
-                column_config={
-                    "ticker": st.column_config.TextColumn("ativo (watchlist)", disabled=True),
-                    "quantidade": st.column_config.NumberColumn("quantidade atual", min_value=0.0, step=0.0001, format="%.4f"),
-                    "preço médio": st.column_config.NumberColumn("preço médio pago ($/r$)", min_value=0.0, step=0.0001, format="%.4f")
-                }
-            )
+        df_ativas_editado = st.data_editor(
+            df_ativas,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            column_config={
+                "ticker": st.column_config.TextColumn("ativo", disabled=True),
+                "quantidade": st.column_config.NumberColumn("quantidade", min_value=0.0, step=0.001, format="%.4f"),
+                "preço médio": st.column_config.NumberColumn("preço médio (R$/US$)", min_value=0.0, step=0.01, format="%.4f"),
+                "valor estimado": st.column_config.NumberColumn("valor estimado", disabled=True, format="%.2f")
+            }
+        )
+        
+        patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
+        num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
+        
+        c_txt, c_btn = st.columns([3, 1])
+        with c_txt:
+            st.markdown(f"<div style='font-family: Courier New; font-size: 0.85rem; color: #888; padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
+        with c_btn:
+            btn_salvar = st.button("💾 salvar alterações", type="primary", use_container_width=True)
             
-            if st.button("💾 salvar e rebalancear", type="primary", use_container_width=True):
-                df_editado['valor total'] = df_editado['quantidade'] * df_editado['preço médio']
-                patrimonio_total = df_editado['valor total'].sum()
+        if btn_salvar:
+            df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
+            patrimonio_total = df_ativas_editado['valor total'].sum()
+            
+            for _, row in df_ativas_editado.iterrows():
+                t = row['ticker']
+                qtd = row['quantidade']
+                pm = row['preço médio']
+                v_total = row['valor total']
+                peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
+                salvar_peso(t, peso_real, pm, qtd)
                 
-                for _, row in df_editado.iterrows():
-                    t = row['ticker']
-                    qtd = row['quantidade']
-                    pm = row['preço médio']
-                    peso_real = (row['valor total'] / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                    salvar_peso(t, peso_real, pm, qtd)
-                    
-                st.success("✅ portfólio atualizado! pesos calculados com precisão absoluta.")
+            st.success("✅ posições atualizadas.")
+            st.rerun()
+    else:
+        empty_state("📋", "nenhuma posição ativa", "adicione sua primeira posição abaixo.")
+
+    st.markdown("<hr style='margin: 1.5rem 0; opacity: 0.2;'>", unsafe_allow_html=True)
+    section_title("➕ adicionar ou editar posição")
+    
+    with st.form("form_add_posicao", clear_on_submit=True):
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            opcoes_wl = [w['ticker'] for w in watchlist]
+            ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
+        with col_f2:
+            qtd_form = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.4f")
+        with col_f3:
+            pm_form = st.number_input("preço médio pago (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
+            
+        ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_add = st.form_submit_button("adicionar ao portfólio", type="primary", use_container_width=True)
+        
+        if btn_add:
+            ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
+            if ticker_final and qtd_form > 0 and pm_form > 0:
+                salvar_peso(ticker_final, 0.0, pm_form, qtd_form)
+                st.success(f"✅ {ticker_final} adicionado. salve as alterações para recalcular os pesos.")
                 st.rerun()
-        else:
-            empty_state("⭐", "watchlist vazia", "adicione ativos no discovery ou na home primeiro para poder alocá-los.")
+            else:
+                st.warning("preencha ticker, quantidade maior que zero e preço médio maior que zero.")
 
     ativos_alocados = {t: d for t, d in pesos_atuais.items() if d['peso'] > 0}
     
@@ -103,23 +144,16 @@ with tab_posicoes:
 
         with st.spinner("a sincronizar cotações em tempo real para cálculo de p&l..."):
             live_data = {}
-            try:
-                # traduzimos os tickers para puxar do yahoo
-                tickers_base = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
-                hist = yf.download(tickers_base, period="5d", auto_adjust=True, progress=False)['Close']
-                
-                # blindagem contra o erro de tipo (series vs dataframe)
-                if isinstance(hist, pd.Series): 
-                    hist = hist.to_frame(name=tickers_base[0])
-                hist = hist.ffill()
-                
-                # devolvemos o preço ao ticker rwa original
-                for t in tickers_com_peso:
-                    t_base = mapear_ticker_base(t)
-                    try: live_data[t] = float(hist[t_base].dropna().iloc[-1])
-                    except: live_data[t] = 0.0
-            except Exception as e:
-                st.error("erro ao transferir dados da bolsa.")
+            for t in tickers_com_peso:
+                t_base = mapear_ticker_base(t)
+                try: 
+                    hist = yf.Ticker(t_base).history(period="5d")['Close'].dropna()
+                    if not hist.empty:
+                        live_data[t] = float(hist.iloc[-1])
+                    else:
+                        live_data[t] = 0.0
+                except: 
+                    live_data[t] = 0.0
 
         st.markdown("---")
         section_title("📊 performance e distribuição")
@@ -128,7 +162,6 @@ with tab_posicoes:
         custo_total_carteira = 0.0
         valor_atual_carteira = 0.0
         
-        # garante que os health scores são mapeados para a base também
         health_raw = get_health_scores()
         health_data = {h['ticker']: h.get('score', 50) for h in health_raw}
 
@@ -174,6 +207,16 @@ with tab_posicoes:
                 "p&l (%)": "{:+.2f}%", "peso atual (%)": "{:.2f}%"
             }),
             use_container_width=True, hide_index=True
+        )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        csv = df_portfolio.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 exportar carteira (csv)",
+            data=csv,
+            file_name="portfolio_finapp.csv",
+            mime="text/csv",
+            use_container_width=True
         )
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -281,24 +324,18 @@ with tab_backtest:
         else:
             with st.spinner("sincronizando séries históricas e ajustando proventos..."):
                 try:
-                    # traduzir os selecionados para o backtest
-                    selecionados_base = list(set([mapear_ticker_base(t) for t in selecionados]))
-                    dados_raw = yf.download(selecionados_base, period=periodo_opcoes[periodo_sel], auto_adjust=True, progress=False)
-                    
-                    df_precos = dados_raw['Close']
-                    
-                    # blindagem contra o erro de tipo (series vs dataframe)
-                    if isinstance(df_precos, pd.Series):
-                        df_precos = df_precos.to_frame(name=selecionados_base[0])
-
-                    df_precos = df_precos.dropna(how='all').ffill()
-                    
-                    # reconstruir o dataframe com os nomes rwa originais
-                    df_precos_exibicao = pd.DataFrame(index=df_precos.index)
+                    df_precos = pd.DataFrame()
                     for t in selecionados:
                         t_base = mapear_ticker_base(t)
-                        if t_base in df_precos.columns:
-                            df_precos_exibicao[t] = df_precos[t_base]
+                        try:
+                            hist = yf.Ticker(t_base).history(period=periodo_opcoes[periodo_sel])['Close'].dropna()
+                            if not hist.empty:
+                                if hasattr(hist.index, 'tz') and hist.index.tz is not None:
+                                    hist.index = hist.index.tz_localize(None)
+                                df_precos[t] = hist
+                        except: pass
+                        
+                    df_precos_exibicao = df_precos.dropna(how='all').ffill()
 
                     primeiro_preco = df_precos_exibicao.bfill().iloc[0]
                     df_norm = (df_precos_exibicao / primeiro_preco) * 100
@@ -386,8 +423,13 @@ with tab_diario:
             for d in decisoes:
                 t = d['ticker']
                 t_base = mapear_ticker_base(t)
-                try: preco_atual = yf.Ticker(t_base).fast_info.last_price
-                except: preco_atual = 0.0
+                try: 
+                    preco_atual = yf.Ticker(t_base).fast_info.last_price
+                except: 
+                    try:
+                        preco_atual = float(yf.Ticker(t_base).history(period="1d")['Close'].iloc[-1])
+                    except:
+                        preco_atual = 0.0
                     
                 retorno_pct = ((preco_atual / d['preco_decisao']) - 1) * 100 if d['preco_decisao'] and preco_atual else 0.0
                 if d['tipo'] in ['venda', 'redução']: retorno_pct = -retorno_pct

@@ -64,6 +64,7 @@ def puxar_historico_mestre():
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
                 'DGS10': 'DGS10', 'DGS2': 'DGS2', 'VIXCLS': 'VIXCLS',
                 'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N', 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
+                'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2'
             }
             dfs_global_dict = {}
             for nome, serie_id in series_fred.items():
@@ -93,7 +94,6 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
     if df.empty or coluna_y not in df.columns or df[coluna_y].dropna().empty:
         fig = px.line()
         fig.add_annotation(text=f"sem dados: {titulo}", x=0.5, y=0.5, showarrow=False, font=dict(color="#FF1744", size=14))
-        # correção: atribuição direta do dicionário para evitar keyerror
         layout['xaxis'] = dict(visible=False)
         layout['yaxis'] = dict(visible=False)
         fig.update_layout(**layout)
@@ -128,10 +128,60 @@ def renderizar_noticias(ticker, titulo_secao):
         else: empty_state("🗞️", "sem notícias", "feed vazio no momento.")
     except Exception as e: st.error(f"falha ao sincronizar feed de notícias.")
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_retornos_setoriais():
+    etfs_setoriais = {
+        "energia": "XLE", 
+        "financeiro": "XLF", 
+        "tecnologia": "XLK", 
+        "saúde": "XLV", 
+        "indústria": "XLI", 
+        "cons. básico": "XLP", 
+        "cons. discric.": "XLY", 
+        "materiais": "XLB", 
+        "utilities": "XLU", 
+        "imobiliário": "XLRE", 
+        "telecom": "XLC"
+    }
+    periodos = ["1mo", "3mo", "6mo", "1y"]
+    resultados = {}
+    for label, ticker in etfs_setoriais.items():
+        linha = []
+        for periodo in periodos:
+            try:
+                df = yf.download(ticker, period=periodo, auto_adjust=True, progress=False)
+                fechamento = df['Close']
+                if isinstance(fechamento, pd.DataFrame):
+                    fechamento = fechamento[ticker]
+                fechamento = fechamento.dropna()
+                if not fechamento.empty:
+                    retorno = ((fechamento.iloc[-1] / fechamento.iloc[0]) - 1) * 100
+                    linha.append(round(retorno, 2))
+                else:
+                    linha.append(None)
+            except Exception:
+                linha.append(None)
+        resultados[label] = linha
+    
+    return pd.DataFrame(resultados.values(), index=list(resultados.keys()), columns=["1 mês", "3 meses", "6 meses", "12 meses"])
+
+def diagnosticar_ciclo(t10y2y, vix, hy_spread):
+    if t10y2y is None or vix is None:
+        return "dados insuficientes", "#555555", "—"
+    if t10y2y < -0.2 and vix > 20:
+        return "🔴 contração / recessão", "#FF1744", "utilities (xlu), saúde (xlv), cons. básico (xlp)"
+    if t10y2y < 0.3 and vix < 20 and (hy_spread is not None and hy_spread < 4.5):
+        return "🟡 recuperação (early cycle)", "#FF9900", "financeiro (xlf), indústria (xli), cons. discric. (xly)"
+    if 0.3 <= t10y2y < 1.0 and vix < 18:
+        return "🟢 expansão (mid cycle)", "#00C853", "tecnologia (xlk), indústria (xli), energia (xle)"
+    if t10y2y >= 1.0 and vix < 20:
+        return "🟡 pico de ciclo (late cycle)", "#FF9900", "energia (xle), materiais (xlb), saúde (xlv)"
+    return "⚪ transição", "#888888", "posicionamento neutro — aguardar confirmação"
+
 # ==========================================
 # abas principais da página
 # ==========================================
-tab_global, tab_overlay = st.tabs(["🌐 painel global", "🔭 overlay macro × preços"])
+tab_global, tab_ciclo, tab_overlay = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "🔭 overlay macro × preços"])
 
 with tab_global:
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
@@ -226,8 +276,38 @@ with tab_global:
             with g2: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01JPM156N', "japan 10y yield (%)", "#FF1744"), use_container_width=True)
 
         elif aba_sel == "🌐 risco":
+            section_title("curva de juros eua & spreads de crédito")
+            
+            c1, c2, c3 = st.columns(3)
+            v_vix = valor_atual_seguro(df_global, 'VIXCLS')
+            v_t10y2y = valor_atual_seguro(df_global, 'T10Y2Y')
+            v_hy = valor_atual_seguro(df_global, 'BAMLH0A0HYM2')
+            
+            with c1:
+                metric_card("vix atual", f"{v_vix:.2f}" if v_vix is not None else "n/d")
+            with c2:
+                cor_t10 = "bull" if (v_t10y2y is not None and v_t10y2y > 0) else ("bear" if (v_t10y2y is not None and v_t10y2y < 0) else "")
+                metric_card("spread 10y-2y", fmt_pct(v_t10y2y, sinal=False) if v_t10y2y is not None else "n/d", cor_delta=cor_t10)
+            with c3:
+                metric_card("spread hy crédito", fmt_pct(v_hy, sinal=False) if v_hy is not None else "n/d")
+                
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if v_t10y2y is not None:
+                if v_t10y2y < 0:
+                    st.warning("⚠️ curva invertida: historicamente precede recessão em 12-18 meses. posicionamento defensivo recomendado.")
+                elif 0 <= v_t10y2y <= 0.5:
+                    st.info("📊 spread estreito: ciclo de crédito em atenção.")
+            
+            fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", "#00B0FF")
+            fig_t10.add_hline(y=0, line_color="#FF1744", line_dash="dash", line_width=1)
+            fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color="#FF1744", size=10, family="Courier New"), showarrow=False, yshift=-14)
+            st.plotly_chart(fig_t10, use_container_width=True)
+            
             st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", "#FF1744"), use_container_width=True)
             st.info("o vix mede a volatilidade esperada do s&p 500.")
+            
+            st.plotly_chart(criar_grafico_macro(df_global, 'BAMLH0A0HYM2', "spread crédito high yield (%)", "#E040FB"), use_container_width=True)
 
         elif aba_sel == "🛢️ commodities":
             g1, g2 = st.columns(2)
@@ -238,6 +318,55 @@ with tab_global:
             col_news1, col_news2 = st.columns(2)
             with col_news1: renderizar_noticias("SPY", "🇺🇸 radar global (spy etf)")
             with col_news2: renderizar_noticias("EWZ", "🇧🇷 radar brasil (ewz etf)")
+
+with tab_ciclo:
+    v_t10y2y = valor_atual_seguro(df_global_master, 'T10Y2Y')
+    v_vix = valor_atual_seguro(df_global_master, 'VIXCLS')
+    v_hy = valor_atual_seguro(df_global_master, 'BAMLH0A0HYM2')
+    
+    fase_ciclo, cor_ciclo, setores_ciclo = diagnosticar_ciclo(v_t10y2y, v_vix, v_hy)
+    
+    section_title("🔄 posicionamento no ciclo econômico")
+    
+    col_c1, col_c2 = st.columns([1, 2])
+    with col_c1:
+        metric_card("fase atual do ciclo", fase_ciclo)
+    with col_c2:
+        st.markdown(f'<div class="card" style="padding:15px; border-left:4px solid {cor_ciclo};"><div style="font-family:Courier New; font-size:0.72rem; color:#555; margin-bottom:5px;">setores favorecidos neste ciclo:</div><div style="font-family:Courier New; font-size:0.9rem; color:#E0E0E0;">{setores_ciclo}</div></div>', unsafe_allow_html=True)
+
+    section_title("📊 performance setorial s&p 500 (etfs)")
+    with st.spinner("carregando retornos setoriais..."):
+        df_setores = buscar_retornos_setoriais()
+        
+    if not df_setores.empty:
+        fig_heat = px.imshow(df_setores, color_continuous_scale=[[0, "#FF1744"], [0.5, "#111111"], [1, "#00C853"]], zmin=-15, zmax=15, text_auto=".1f", aspect="auto")
+        layout_heat = base_layout(height=420, title="retorno por setor e janela temporal (%)")
+        fig_heat.update_layout(**layout_heat)
+        fig_heat.update_traces(textfont=dict(family="Courier New", size=11, color="#FFFFFF"))
+        fig_heat.update_coloraxes(showscale=False)
+        st.plotly_chart(fig_heat, use_container_width=True)
+        st.caption("verde = retorno positivo no período | vermelho = retorno negativo | dados: etfs setoriais s&p 500 via yahoo finance")
+    else:
+        empty_state("📊", "sem dados setoriais", "não foi possível carregar os retornos dos etfs setoriais.")
+
+    section_title("🧠 síntese de rotação (ia)")
+    if st.button("gerar análise de rotação setorial >>", type="primary"):
+        with st.spinner("o agente está analisando o ciclo e os dados setoriais..."):
+            try:
+                client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                contexto_setores = ""
+                for index, row in df_setores.iterrows():
+                    v_1m = f"{row['1 mês']:.1f}%" if pd.notna(row['1 mês']) else "n/d"
+                    v_3m = f"{row['3 meses']:.1f}%" if pd.notna(row['3 meses']) else "n/d"
+                    v_6m = f"{row['6 meses']:.1f}%" if pd.notna(row['6 meses']) else "n/d"
+                    v_12m = f"{row['12 meses']:.1f}%" if pd.notna(row['12 meses']) else "n/d"
+                    contexto_setores += f"{index}: 1m={v_1m}, 3m={v_3m}, 6m={v_6m}, 12m={v_12m}. "
+                
+                prompt = f"aja como um estrategista de alocação de um fundo de investimentos multimercado. dados do ciclo econômico atual: fase identificada: {fase_ciclo}. yield curve 10y-2y: {v_t10y2y}%. vix: {v_vix}. spread high yield: {v_hy}%. retorno dos etfs setoriais: {contexto_setores}. escreva 4 bullet points curtos em português: 1. fase do ciclo e o que ela implica para alocação. 2. setor com melhor momentum (maior retorno consistente nas janelas). 3. setor para evitar ou reduzir. 4. recomendação de posicionamento para os próximos 3 meses. inicie todas as frases com letra minúscula. sem uso de cifrões."
+                response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                status_card("rotação setorial recomendada", response.text, "info")
+            except Exception as e:
+                st.error(f"erro no agente de ia: {e}")
 
 with tab_overlay:
     st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")

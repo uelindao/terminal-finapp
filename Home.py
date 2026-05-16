@@ -55,7 +55,7 @@ def buscar_ativo_yahoo(query):
         return []
 
 # ==========================================
-# header e painéis de utilizador
+# HEADER E PAINÉIS DE UTILIZADOR
 # ==========================================
 page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
 
@@ -91,7 +91,7 @@ with st.expander("👤 meu perfil", expanded=False):
 st.markdown("---")
 
 # ==========================================
-# navegação rápida e status global
+# NAVEGAÇÃO RÁPIDA E STATUS GLOBAL
 # ==========================================
 section_title("🧭 navegação rápida")
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -140,7 +140,7 @@ with st.container():
         st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# resumo do portfólio
+# RESUMO DO PORTFÓLIO
 # ==========================================
 pesos_atuais = get_pesos()
 ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
@@ -183,26 +183,20 @@ if ativos_alocados:
             st.caption("🔍 para aprofundar na alocação e risco, aceda à aba 'meu portfólio'.")
 
 # ==========================================
-# watchlist inteligente e seletor
+# WATCHLIST INTELIGENTE E SELETOR
 # ==========================================
 section_title("👁️ watchlist & radar de alertas")
 
-# seletor de watchlist
 watchlists_disponiveis = listar_watchlists()
 if not watchlists_disponiveis:
     get_watchlist_padrao()
     watchlists_disponiveis = listar_watchlists()
 
-# inicializar memória da watchlist ativa no session state para não perder o foco
 if 'watchlist_ativa_id' not in st.session_state:
     st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
 
-opcoes_wl = {
-    f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id']
-    for wl in watchlists_disponiveis
-}
+opcoes_wl = {f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id'] for wl in watchlists_disponiveis}
 
-# procurar o índice atual para manter a seleção travada
 idx_ativo = 0
 for i, wl in enumerate(watchlists_disponiveis):
     if wl['id'] == st.session_state['watchlist_ativa_id']:
@@ -212,14 +206,7 @@ for i, wl in enumerate(watchlists_disponiveis):
 col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
 
 with col_sel_wl:
-    sel_wl_label = st.selectbox(
-        "watchlist ativa:",
-        list(opcoes_wl.keys()),
-        index=idx_ativo,
-        key="sel_watchlist_ativa_ui",
-        label_visibility="collapsed"
-    )
-    # atualizar a memória com a nova seleção
+    sel_wl_label = st.selectbox("watchlist ativa:", list(opcoes_wl.keys()), index=idx_ativo, key="sel_watchlist_ativa_ui", label_visibility="collapsed")
     st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
     watchlist_id_ativo = st.session_state['watchlist_ativa_id']
 
@@ -231,17 +218,11 @@ with col_btn_cfg:
     if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
         st.session_state['cfg_wl_modal'] = True
 
-# ── modais ───────────────────────
+# ── MODAIS DA WATCHLIST ───────────────────────
 @st.dialog("➕ criar nova watchlist")
 def modal_criar_watchlist():
     icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
-    cores_opcoes = {
-        "âmbar (padrão)": "#FF9900",
-        "verde": "#00C853",
-        "azul": "#00B0FF",
-        "vermelho": "#FF1744",
-        "roxo": "#E040FB",
-    }
+    cores_opcoes = {"âmbar (padrão)": "#FF9900", "verde": "#00C853", "azul": "#00B0FF", "vermelho": "#FF1744", "roxo": "#E040FB"}
 
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -305,14 +286,11 @@ def modal_cfg_watchlist():
         time.sleep(1)
         st.rerun()
 
-    if not pode_deletar:
-        st.caption("não é possível deletar a única watchlist.")
-
 if st.session_state.get('cfg_wl_modal'):
     st.session_state.pop('cfg_wl_modal')
     modal_cfg_watchlist()
 
-# ── buscar e adicionar ativo (agora com formulário para suportar o enter) ──
+# ── BUSCAR E ADICIONAR ATIVO ──
 expandir_busca = bool(st.session_state.get('resultados_busca'))
 
 with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
@@ -344,53 +322,81 @@ with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
             st.markdown("---")
             cs1, cs2, cs3 = st.columns([4, 3, 2])
             with cs1:
-                escolha = st.selectbox("selecione o ativo correto:", opcoes_formatadas, label_visibility="collapsed")
+                escolha = st.selectbox("selecione o ativo correto:", opcoes_formatadas, label_visibility="collapsed", key="busca_ativo_correto")
                 idx = opcoes_formatadas.index(escolha)
                 ativo_escolhido = ativos_validos[idx]
             with cs2:
                 opcoes_destino = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disponiveis}
-                # tenta manter o destino na mesma watchlist que estamos a ver
                 idx_dest = list(opcoes_destino.values()).index(watchlist_id_ativo) if watchlist_id_ativo in opcoes_destino.values() else 0
-                
-                destino_wl_nome = st.selectbox("adicionar à:", list(opcoes_destino.keys()), index=idx_dest, label_visibility="collapsed")
+                destino_wl_nome = st.selectbox("adicionar à:", list(opcoes_destino.keys()), index=idx_dest, label_visibility="collapsed", key="busca_destino_wl")
                 destino_wl_id = opcoes_destino[destino_wl_nome]
             with cs3:
-                if st.button("salvar na watchlist", type="primary", use_container_width=True):
+                if st.button("salvar na watchlist", type="primary", use_container_width=True, key="btn_salvar_novo_ativo"):
                     tk = ativo_escolhido['symbol']
                     nm = ativo_escolhido.get('shortname') or ativo_escolhido.get('longname', tk)
                     bolsa_str = ativo_escolhido.get('exchDisp', '').lower()
                     tipo_str = ativo_escolhido.get('quoteType', '').lower()
+                    
                     if "são paulo" in bolsa_str or tk.endswith(".SA"): mercado = "brasil"
                     elif "nyse" in bolsa_str or "nasdaq" in bolsa_str: mercado = "eua"
                     elif "cryptocurrency" in tipo_str: mercado = "criptomoedas"
                     else: mercado = "outros"
+                    
                     adicionar_ativo(tk, nm, mercado, watchlist_id=destino_wl_id)
                     st.success(f"{tk.lower()} adicionado!")
                     st.session_state['resultados_busca'] = []
-                    time.sleep(1); st.rerun()
+                    time.sleep(1)
+                    st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
-col_btn_score, _ = st.columns([2, 8])
-with col_btn_score:
-    if st.button("🚨 atualizar health scores", type="primary", use_container_width=True):
-        ativos_atuais = listar_watchlist(watchlist_id=watchlist_id_ativo)
-        if ativos_atuais:
-            progress_steps(["inicializando", "coletando dados", "calculando scores"], current=1)
-            barra = st.progress(0); txt = st.empty(); total = len(ativos_atuais)
-            for idx, item in enumerate(ativos_atuais):
-                t = item['ticker']
-                txt.caption(f"a analisar {t.lower()}...")
-                
-                t_base = mapear_ticker_base(t)
-                calcular_health_score(t_base)
-                
-                barra.progress((idx + 1) / total)
-            txt.empty(); barra.empty()
-            progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
-            time.sleep(1); st.rerun()
 
-# ── grid da watchlist ativa ─────────────────────────────
+# ── ATUALIZAR SCORES ───────────────────────
+col_btn, _ = st.columns([2, 8])
+if col_btn.button("🚨 atualizar scores", use_container_width=True, type="primary"):
+    ativos_atuais = listar_watchlist(watchlist_id=watchlist_id_ativo)
+    if ativos_atuais:
+        progress_steps(["inicializando", "coletando dados", "calculando scores"], current=1)
+        barra = st.progress(0)
+        txt = st.empty()
+        total = len(ativos_atuais)
+        for idx, item in enumerate(ativos_atuais):
+            t = item['ticker']
+            txt.caption(f"a analisar {t.lower()}...")
+            calcular_health_score(mapear_ticker_base(t))
+            barra.progress((idx + 1) / total)
+        txt.empty()
+        barra.empty()
+        progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
+        time.sleep(1)
+        st.rerun()
+
+# ── FUNÇÃO MODAL DO MEMORIAL ───────────────────────
+@st.dialog("🧮 memorial de cálculo")
+def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
+    st.markdown(f"#### ativo: {ticker_nome.lower()}")
+    
+    cor_score = "#00C853" if score_final >= 70 else ("#FF9900" if score_final >= 40 else "#FF1744")
+    st.markdown(f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; color:{cor_score}; text-align:center; padding:10px; background:#111; border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>", unsafe_allow_html=True)
+    
+    if breakdown_dict:
+        st.markdown("**🧱 pilares de pontuação:**")
+        for pilar, pts in breakdown_dict.items():
+            if pts == 0 and "Penalidade" in pilar:
+                continue 
+            
+            cor_pts = "#00C853" if pts > 0 else ("#FF1744" if pts < 0 else "#666")
+            st.markdown(f"<div style='display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:4px 0;'><span style='color:#ccc;'>{pilar.lower()}</span> <span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>{pts:+.0f} pts</span></div>", unsafe_allow_html=True)
+    else:
+        st.info("💡 memorial não disponível. clique em '🚨 atualizar health scores' no topo da página para recalcular este ativo na nova versão.")
+        
+    if alertas_lista:
+        st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
+        for a in alertas_lista:
+            st.markdown(f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; padding-left:10px; border-left:2px solid #444;'>{a}</div>", unsafe_allow_html=True)
+
+# ── GRID DA WATCHLIST ATIVA ─────────────────────────────
 watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
+
 if not watchlist:
     empty_state(icone="⭐", titulo="watchlist vazia", descricao="a sua lista de monitorização está vazia. utilize a barra de pesquisa acima para adicionar ativos.")
 else:
@@ -415,15 +421,20 @@ else:
                         if t_base in hist.columns:
                             s = hist[t_base].dropna()
                             if len(s) >= 2:
-                                p_atual = float(s.iloc[-1]); p_ontem = float(s.iloc[-2]); p_1m = float(s.iloc[0])
+                                p_atual = float(s.iloc[-1])
+                                p_ontem = float(s.iloc[-2])
+                                p_1m = float(s.iloc[0])
                                 live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
-                    except: pass
-        except: pass
+                    except:
+                        pass
+        except:
+            pass
 
     mercados = {}
     for item in watchlist:
         m = item['mercado']
-        if m not in mercados: mercados[m] = []
+        if m not in mercados:
+            mercados[m] = []
         mercados[m].append(item)
         
     for mercado, ativos in mercados.items():
@@ -434,10 +445,26 @@ else:
             d = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
             
             t_base = mapear_ticker_base(t)
-            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '[]'})
+            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas": [], "breakdown": {}}'})
             
-            try: lista_alertas = json.loads(h_info['alertas_venda'])
-            except: lista_alertas = []
+            # DECODIFICAÇÃO ROBUSTA PROTEGIDA
+            try: 
+                raw_data = h_info['alertas_venda']
+                parsed_data = json.loads(raw_data)
+                
+                # Se ainda for string (devido ao histórico corrompido de JSON duplo), decodifica novamente
+                if isinstance(parsed_data, str):
+                    parsed_data = json.loads(parsed_data)
+                
+                if isinstance(parsed_data, dict):
+                    lista_alertas = parsed_data.get('alertas', [])
+                    breakdown = parsed_data.get('breakdown', {})
+                else:
+                    lista_alertas = parsed_data if isinstance(parsed_data, list) else []
+                    breakdown = {}
+            except: 
+                lista_alertas = []
+                breakdown = {}
 
             with cols[idx % 4]:
                 watchlist_card(
@@ -445,15 +472,22 @@ else:
                     moeda="r$" if t_base.endswith(".SA") else "$",
                     health_score=h_info['score'], alertas=lista_alertas
                 )
-                c1, c2 = st.columns(2)
+                
+                # Botões de Ação do Card
+                c1, c2, c3 = st.columns(3)
                 with c1:
-                    if st.button("🗑️ remover", key=f"del_{t}", use_container_width=True):
+                    if st.button("🗑️", key=f"del_{t}", use_container_width=True, help="remover ativo"):
                         remover_ativo(t, watchlist_id=watchlist_id_ativo)
                         st.rerun()
                 with c2:
-                    nova_nota = st.popover(f"📝 notas", use_container_width=True)
+                    nova_nota = st.popover("📝", use_container_width=True)
                     with nova_nota:
                         txt = st.text_area("anotações da tese:", value=item['notas'] or "", key=f"nota_{t}")
                         if st.button("salvar", key=f"btn_nota_{t}"):
-                            atualizar_notas(t, txt); st.rerun()
+                            atualizar_notas(t, txt, watchlist_id=watchlist_id_ativo)
+                            st.rerun()
+                with c3:
+                    if st.button("🧮", key=f"calc_{t}", use_container_width=True, help="memorial de cálculo"):
+                        exibir_memorial(t, h_info['score'], breakdown, lista_alertas)
+                        
                 st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)

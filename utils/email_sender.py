@@ -3,11 +3,21 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import streamlit as st
 from datetime import datetime
+import threading
+
+def _enviar_assincrono(msg, remetente, app_password, destinatario):
+    """Função interna que roda em uma thread separada para não bloquear a UI."""
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(remetente, app_password)
+            smtp.sendmail(remetente, destinatario, msg.as_string())
+    except Exception as e:
+        print(f"Erro ao enviar email em background: {e}")
 
 def enviar_alerta_email(ticker: str, score: float, alertas: list[str]) -> bool:
     """
-    Envia email de alerta de venda para o usuário.
-    Retorna True se enviado com sucesso, False caso contrário.
+    Envia email de alerta de venda para o usuário de forma assíncrona.
+    Retorna True (o envio em si ocorre em background).
     """
     try:
         remetente    = st.secrets["email"]["remetente"]
@@ -64,19 +74,15 @@ def enviar_alerta_email(ticker: str, score: float, alertas: list[str]) -> bool:
     msg['To']      = destinatario
     msg.attach(MIMEText(html, 'html'))
 
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(remetente, app_password)
-            smtp.sendmail(remetente, destinatario, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Erro ao enviar email: {e}")
-        return False
+    # Inicia a thread para enviar o email sem travar o Streamlit
+    threading.Thread(target=_enviar_assincrono, args=(msg, remetente, app_password, destinatario)).start()
+    
+    return True
 
 
 def enviar_relatorio_semanal(dados_carteira: list[dict]) -> bool:
     """
-    Envia relatório semanal completo da carteira.
+    Envia relatório semanal completo da carteira de forma assíncrona.
     dados_carteira: lista de dicts com ticker, score, var_1d, var_1m, alertas
     """
     try:
@@ -156,11 +162,7 @@ def enviar_relatorio_semanal(dados_carteira: list[dict]) -> bool:
     msg['To']      = destinatario
     msg.attach(MIMEText(html, 'html'))
 
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(remetente, app_password)
-            smtp.sendmail(remetente, destinatario, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Erro ao enviar relatório: {e}")
-        return False
+    # Inicia a thread para enviar o email sem travar o Streamlit
+    threading.Thread(target=_enviar_assincrono, args=(msg, remetente, app_password, destinatario)).start()
+    
+    return True
