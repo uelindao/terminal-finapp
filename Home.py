@@ -33,6 +33,10 @@ from utils.formatters import fmt_preco, fmt_pct
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
 
+# 1.5 CRIAR AS TABELAS NO BANCO DE DADOS ANTES DE QUALQUER COISA (CORREÇÃO PARA A NUVEM)
+init_db()
+popular_watchlist_inicial()
+
 # 2. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
@@ -41,9 +45,6 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
-
-init_db()
-popular_watchlist_inicial()
 
 def buscar_ativo_yahoo(query):
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
