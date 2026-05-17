@@ -165,8 +165,80 @@ def modal_salvar_screener(ticker: str, nome: str, mercado: str):
         st.success(f"✅ {ticker.lower()} salvo com sucesso!")
         time.sleep(1); st.rerun()
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_momentum(tickers_tuple: tuple) -> list[dict]:
+    """Calcula força relativa de 52 semanas para uma lista de tickers."""
+    tickers = list(tickers_tuple)
+    resultados = []
+
+    def processar(t):
+        try:
+            t_base = mapear_ticker_base(t)
+            acao = yf.Ticker(t_base)
+            hist = acao.history(period="1y", auto_adjust=True)
+            if hist.empty or len(hist) < 50:
+                return None
+
+            close = hist['Close']
+            preco_atual = close.iloc[-1]
+            preco_1y = close.iloc[0]
+            preco_6m = close.iloc[len(close)//2]
+            preco_3m = close.iloc[int(len(close)*0.75)]
+            preco_1m = close.iloc[-21] if len(close) >= 21 else close.iloc[0]
+
+            ret_1y = (preco_atual / preco_1y - 1) * 100
+            ret_6m = (preco_atual / preco_6m - 1) * 100
+            ret_3m = (preco_atual / preco_3m - 1) * 100
+            ret_1m = (preco_atual / preco_1m - 1) * 100
+
+            mm50  = close.rolling(50).mean().iloc[-1]
+            mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean()
+
+            acima_mm50  = preco_atual > mm50
+            acima_mm200 = preco_atual > mm200
+
+            high_52w = close.max()
+            low_52w  = close.min()
+            dist_high = (preco_atual / high_52w - 1) * 100
+
+            score_mom = 0
+            if ret_1y > 0:  score_mom += 25
+            if ret_6m > 0:  score_mom += 25
+            if ret_3m > 0:  score_mom += 20
+            if ret_1m > 0:  score_mom += 10
+            if acima_mm50:  score_mom += 10
+            if acima_mm200: score_mom += 10
+
+            f_dados = CACHE_FUNDAMENTOS.get(t_base, {})
+
+            return {
+                'ticker': t,
+                'nome': f_dados.get('nome', t_base),
+                'setor': traduzir_setor(f_dados.get('setor', '—')),
+                'preço atual': round(preco_atual, 2),
+                'ret 1m (%)': round(ret_1m, 2),
+                'ret 3m (%)': round(ret_3m, 2),
+                'ret 6m (%)': round(ret_6m, 2),
+                'ret 1y (%)': round(ret_1y, 2),
+                'dist. topo 52w (%)': round(dist_high, 2),
+                'acima mm50': '✅' if acima_mm50 else '❌',
+                'acima mm200': '✅' if acima_mm200 else '❌',
+                'score momentum': score_mom,
+            }
+        except:
+            return None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futuros = {ex.submit(processar, t): t for t in tickers}
+        for fut in as_completed(futuros):
+            res = fut.result()
+            if res:
+                resultados.append(res)
+
+    return sorted(resultados, key=lambda x: x['score momentum'], reverse=True)
+
 # 6. interface de separadores (tabs)
-tab_setup, tab_magic, tab_radar, tab_screener = st.tabs(["🎯 setup ideal (health engine)", "🏆 magic formula (greenblatt)", "🎯 radar de confluência", "🕵️ screener quantitativo"])
+tab_setup, tab_magic, tab_radar, tab_momentum, tab_screener = st.tabs(["🎯 setup ideal (health engine)", "🏆 magic formula (greenblatt)", "🎯 radar de confluência", "🚀 momentum (força relativa)", "🕵️ screener quantitativo"])
 
 # ==========================================
 # tab 1 — setup ideal
@@ -576,7 +648,136 @@ with tab_radar:
                     st.error(f"Erro IA: {e}")
 
 # ==========================================
-# tab 4 — screener quantitativo
+# tab 4 — momentum screener
+# ==========================================
+with tab_momentum:
+    section_title("🚀 momentum screener — força relativa")
+
+    status_card(
+        "metodologia",
+        "score de momentum de 0 a 100 baseado em 6 critérios: retorno 1y, 6m, 3m e 1m (positivo = ponto), preço acima da MM50 e MM200. ativos com score alto têm momentum técnico consistente em múltiplas janelas.",
+        tipo="info"
+    )
+
+    mc1, mc2, mc3 = st.columns([3, 2, 2])
+    with mc1:
+        mom_universos = st.multiselect(
+            "universo:",
+            ["🇧🇷 b3 — ações", "🌎 eua — ações", "🏢 b3 — fiis"],
+            default=["🇧🇷 b3 — ações"],
+            key="mom_universos"
+        )
+    with mc2:
+        mom_top_n = st.slider("top N ativos:", 5, 30, 15, 5, key="mom_top_n")
+    with mc3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True)
+
+    score_minimo = st.slider("score mínimo de momentum:", 0, 100, 50, 10, key="mom_score_min")
+
+    if btn_momentum:
+        mom_lista = []
+        if "🇧🇷 b3 — ações" in mom_universos: mom_lista += SCREENER_B3
+        if "🌎 eua — ações" in mom_universos: mom_lista += SCREENER_US
+        if "🏢 b3 — fiis" in mom_universos: mom_lista += FII_TODOS
+
+        if not mom_lista:
+            st.warning("selecione pelo menos um universo.")
+        else:
+            with st.spinner(f"calculando momentum de {len(mom_lista)} ativos..."):
+                resultados_mom = calcular_momentum(tuple(mom_lista))
+                df_mom = pd.DataFrame(resultados_mom)
+                df_mom = df_mom[df_mom['score momentum'] >= score_minimo]
+                df_mom = df_mom.head(mom_top_n)
+                st.session_state['momentum_resultado'] = df_mom
+
+    if 'momentum_resultado' in st.session_state and not st.session_state['momentum_resultado'].empty:
+        df_m = st.session_state['momentum_resultado']
+
+        section_title(f"top {len(df_m)} ativos por momentum")
+
+        mm1, mm2, mm3 = st.columns(3)
+        with mm1:
+            metric_card("melhor momentum", df_m.iloc[0]['ticker'], f"score {df_m.iloc[0]['score momentum']}/100", "bull")
+        with mm2:
+            metric_card("retorno médio 1y", f"{df_m['ret 1y (%)'].mean():.1f}%", "", "bull" if df_m['ret 1y (%)'].mean() > 0 else "bear")
+        with mm3:
+            acima_200 = (df_m['acima mm200'] == '✅').sum()
+            metric_card("acima da mm200", f"{acima_200}/{len(df_m)}", "tendência de alta", "bull" if acima_200 > len(df_m)//2 else "amber")
+
+        cols_mostrar = ['ticker', 'nome', 'setor', 'ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)', 'acima mm50', 'acima mm200', 'score momentum']
+
+        def colorir_momentum(val):
+            if isinstance(val, (int, float)):
+                if val > 0: return 'color: #00C853'
+                if val < 0: return 'color: #FF1744'
+            return ''
+
+        st.dataframe(
+            df_m[cols_mostrar].style
+                .applymap(colorir_momentum, subset=['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)'])
+                .format({'ret 1m (%)': '{:+.2f}%', 'ret 3m (%)': '{:+.2f}%', 'ret 6m (%)': '{:+.2f}%', 'ret 1y (%)': '{:+.2f}%', 'dist. topo 52w (%)': '{:+.2f}%', 'score momentum': '{:.0f}'}),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        section_title("📊 mapa de retornos por janela temporal")
+
+        fig_mom = go.Figure()
+        janelas = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)']
+        labels = ['1 mês', '3 meses', '6 meses', '1 ano']
+
+        for _, row in df_m.head(10).iterrows():
+            fig_mom.add_trace(go.Scatter(
+                x=labels,
+                y=[row[j] for j in janelas],
+                mode='lines+markers',
+                name=row['ticker'],
+                line=dict(width=1.5),
+                hovertemplate=f"{row['ticker']}<br>%{{x}}: %{{y:+.1f}}%<extra></extra>"
+            ))
+
+        fig_mom.add_hline(y=0, line_color="#333", line_dash="dash", line_width=1)
+        fig_mom.update_layout(**base_layout(height=400, title="retorno acumulado por janela — top 10 ativos"))
+        st.plotly_chart(fig_mom, use_container_width=True)
+
+        st.markdown("---")
+
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            for _, row in df_m.iterrows():
+                c1, c2, c3 = st.columns([2, 3, 2])
+                c1.markdown(f"**{row['ticker']}**")
+                score = row['score momentum']
+                cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
+                barra = "█" * (score // 10) + "░" * (10 - score // 10)
+                c2.markdown(f'<span style="font-family:Courier New; font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
+                if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True):
+                    mercado = "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua"
+                    modal_salvar_screener(row['ticker'], row['nome'], mercado)
+
+        with col_a2:
+            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
+                with st.spinner("analisando momentum..."):
+                    try:
+                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                        dados_texto = df_m[cols_mostrar].head(10).to_csv(index=False)
+                        prompt = f"""você é um analista técnico e quantitativo sênior. analise os dados de momentum abaixo e responda em 4 bullet points curtos em português:
+1. qual ativo tem o momentum mais consistente e por quê.
+2. quais setores estão liderando o movimento.
+3. algum ativo próximo do topo de 52 semanas que pode estar em breakout.
+4. riscos: algum ativo com momentum positivo mas fundamentos fracos que pode ser uma armadilha.
+
+dados:\n{dados_texto}
+
+inicie todas as frases com letra minúscula. seja direto e objetivo."""
+                        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                        status_card("análise de momentum — ia", response.text, tipo="info")
+                    except Exception as e:
+                        st.error(f"erro no agente de ia: {e}")
+
+# ==========================================
+# tab 5 — screener quantitativo
 # ==========================================
 with tab_screener:
     section_title("filtros quantitativos e classificação de ativos")
