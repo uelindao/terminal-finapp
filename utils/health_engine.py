@@ -1,6 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
 from database.db import salvar_health_score, get_todos_fundamentos_cache
 from utils.tickers import FII_TODOS
 
@@ -17,11 +18,33 @@ def _is_fii(ticker: str) -> bool:
         return True
     return False
 
+def fetch_with_retry(func, max_retries=3, delay=2):
+    """Executa chamadas ao Yahoo com tentativas e pausas progressivas para driblar o limite de taxa."""
+    for i in range(max_retries):
+        try:
+            res = func()
+            if isinstance(res, pd.DataFrame) and res.empty and i < max_retries - 1:
+                time.sleep(delay)
+                continue
+            return res
+        except Exception as e:
+            if "Too Many Requests" in str(e) or "Rate limited" in str(e):
+                if i < max_retries - 1:
+                    time.sleep(delay * (i + 1))
+                else:
+                    raise e
+            else:
+                if i < max_retries - 1:
+                    time.sleep(delay)
+                else:
+                    raise e
+    return None
+
 def calcular_piotroski(acao):
     try:
-        financials = acao.financials
-        balance_sheet = acao.balance_sheet
-        cashflow = acao.cashflow
+        financials = fetch_with_retry(lambda: acao.financials, max_retries=2, delay=1)
+        balance_sheet = fetch_with_retry(lambda: acao.balance_sheet, max_retries=2, delay=1)
+        cashflow = fetch_with_retry(lambda: acao.cashflow, max_retries=2, delay=1)
 
         def get_val(df, possiveis_nomes, col_idx=0):
             if df is None or df.empty:
@@ -111,18 +134,24 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
     juros_altos_br = macro_context.get('selic', 10.5) > 10.0
     vix_alto = macro_context.get('vix', 15.0) > 20.0
     
-    # Detecção de Mercado
     is_fii = _is_fii(ticker)
     is_br = ticker.endswith('.SA') and not is_fii
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
         acao = yf.Ticker(ticker)
-        info = acao.info
-        hist = acao.history(period="1y")
+        
+        hist = fetch_with_retry(lambda: acao.history(period="1y"), max_retries=3, delay=2)
         
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})
+        
+        # Tenta buscar info do Yahoo apenas se necessário e com segurança
+        info = {}
+        try:
+            info = fetch_with_retry(lambda: acao.info, max_retries=2, delay=1) or {}
+        except:
+            pass
         
         pvp = dados_base.get('p/vp') or info.get('priceToBook', None)
         dy = dados_base.get('dy%') or (info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0)
@@ -131,10 +160,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
         alertas = []
         breakdown = {}
         
-        if hist.empty or len(hist) < 50:
-            payload = {"alertas": ["histórico insuficiente para análise técnica"], "breakdown": {}}
+        if hist is None or hist.empty or len(hist) < 50:
+            payload = {"alertas": ["⚠️ Yahoo Finance limitou os dados. Histórico insuficiente."], "breakdown": {}}
             salvar_health_score(ticker, 50, payload)
-            return {'score': 50, 'alertas': ["histórico insuficiente"]}
+            return {'score': 50, 'alertas': ["erro no download"], 'status': "⚪ ERRO DE CONEXÃO"}
 
         close = hist['Close']
         mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean()
@@ -155,9 +184,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
             alertas.append("⚠️ ativo volátil em cenário de stress (VIX alto).")
             penalidade_vix = -10
 
-        # ==========================================
-        # MOTOR 1: FUNDOS IMOBILIÁRIOS (FIIs)
-        # ==========================================
         if is_fii:
             score_pvp = 0
             if pvp is not None and pvp > 0:
@@ -192,9 +218,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 "Momento Técnico": score_tec
             }
 
-        # ==========================================
-        # MOTOR 2 e 3: AÇÕES (B3 vs EUA)
-        # ==========================================
         else:
             f_score, f_detalhamento = calcular_piotroski(acao)
             
@@ -204,7 +227,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
             ev_ebitda = dados_base.get('ev/ebitda') or info.get('enterpriseToEbitda', None)
             debt_equity = info.get('debtToEquity', None)
 
-            # --- Qualidade e Rentabilidade ---
             score_q = 0
             if roe is not None:
                 if roe > 20: score_q += 15
@@ -218,7 +240,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
             else: score_q += 7
             
-            # --- Valuation Adaptativo (B3 vs EUA) ---
             score_v = 0
             if pl is not None and pl > 0:
                 limite_pl_bom = 18 if is_us else 10
@@ -236,7 +257,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 elif pvp <= limite_pvp_medio: score_v += 10
                 elif pvp > limite_pvp_medio: alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
-            # --- Solvência e Risco ---
             score_r = 0
             penalizacao_divida = 2 if (is_br and juros_altos_br) else 1 
             
@@ -259,7 +279,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
             
             score_r_final = max(0, score_r)
 
-            # --- Geração de Caixa / Yield Adaptativo ---
             score_y = 0
             exigencia_yield = 2.5 if is_us else (6.0 if juros_altos_br else 4.0)
             
@@ -294,9 +313,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 for k, v in f_detalhamento.items():
                     breakdown[f"  ↳ {k}"] = v
 
-        # ==========================================
-        # DIAGNÓSTICO FINAL COMPARTILHADO
-        # ==========================================
         status_acao = ""
         score = min(max(int(score), 0), 100) 
 
