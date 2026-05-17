@@ -1,17 +1,8 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 from database.db import salvar_health_score, get_todos_fundamentos_cache
 from utils.tickers import FII_TODOS
-
-# ── MÁSCARA PARA BYPASS NO STREAMLIT CLOUD E BLOQUEIOS DO YAHOO ──
-_session = requests.Session()
-_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-})
 
 def _is_fii(ticker: str) -> bool:
     """Determina se o ativo é um Fundo Imobiliário (FII)."""
@@ -126,7 +117,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
-        acao = yf.Ticker(ticker, session=_session)
+        acao = yf.Ticker(ticker)
         info = acao.info
         hist = acao.history(period="1y")
         
