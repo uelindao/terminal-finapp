@@ -1,327 +1,500 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
-from database.db import salvar_health_score, get_todos_fundamentos_cache
-from utils.tickers import FII_TODOS
+import json
+import time
+import requests
+from datetime import datetime
+import logging
 
-def _is_fii(ticker: str) -> bool:
-    """Determina se o ativo é um Fundo Imobiliário (FII)."""
-    nao_fiis = [
-        'TAEE11.SA', 'SANB11.SA', 'KLBN11.SA', 'ALUP11.SA', 'BPAC11.SA', 
-        'ENGI11.SA', 'BOVA11.SA', 'IVVB11.SA', 'HASH11.SA', 'SMAL11.SA',
-        'NASH11.SA', 'DIVO11.SA', 'BIDI11.SA', 'SULA11.SA', 'IGTI11.SA'
-    ]
-    if ticker in FII_TODOS:
-        return True
-    if ticker.endswith('11.SA') and ticker not in nao_fiis:
-        return True
-    return False
+# silenciar alertas vermelhos do yahoo finance no terminal
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
-def calcular_piotroski(acao):
+# importações do ecossistema finapp
+from utils.auth import require_auth, render_user_badge, render_painel_admin, get_current_user
+from utils.style import aplicar_tema
+from database.db import (
+    init_db, popular_watchlist_inicial, listar_watchlist, 
+    remover_ativo, adicionar_ativo, atualizar_notas, 
+    get_health_scores, get_pesos, get_connection,
+    listar_watchlists, criar_watchlist, renomear_watchlist,
+    deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao
+)
+from utils.health_engine import calcular_health_score
+from utils.tickers import mapear_ticker_base
+
+from utils.components import (
+    page_header, section_title, metric_card, 
+    watchlist_card, empty_state, progress_steps, 
+    status_card, inject_keyboard_shortcuts, auto_refresh_indicator
+)
+from utils.formatters import fmt_preco, fmt_pct
+
+# 1. configuração da página (tem de ser o primeiro comando)
+st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
+
+# 2. barreira de segurança multi-usuário
+if not require_auth():
+    st.stop()
+
+# 3. renderizações pós-login
+render_user_badge()
+aplicar_tema()
+inject_keyboard_shortcuts()
+
+init_db()
+popular_watchlist_inicial()
+
+def buscar_ativo_yahoo(query):
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+    headers = {'user-agent': 'Mozilla/5.0'}
     try:
-        financials = acao.financials
-        balance_sheet = acao.balance_sheet
-        cashflow = acao.cashflow
+        r = requests.get(url, headers=headers, timeout=5)
+        return r.json().get('quotes', [])
+    except:
+        return []
 
-        def get_val(df, possiveis_nomes, col_idx=0):
-            if df is None or df.empty:
-                return None
-            for nome in possiveis_nomes:
-                if nome in df.index and len(df.columns) > col_idx:
-                    val = df.loc[nome, df.columns[col_idx]]
-                    if isinstance(val, pd.Series):
-                        val = val.iloc[0]
-                    if pd.notna(val):
-                        return float(val)
-            return None
+# ==========================================
+# HEADER E PAINÉIS DE UTILIZADOR
+# ==========================================
+page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
 
-        total_assets_atual = get_val(balance_sheet, ["Total Assets"], 0)
-        total_assets_anterior = get_val(balance_sheet, ["Total Assets"], 1)
-        net_income = get_val(financials, ["Net Income", "Net Income Common Stockholders"], 0)
-        net_income_anterior = get_val(financials, ["Net Income", "Net Income Common Stockholders"], 1)
-        operating_cashflow = get_val(cashflow, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"], 0)
-        long_debt_atual = get_val(balance_sheet, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], 0)
-        long_debt_anterior = get_val(balance_sheet, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], 1)
-        current_assets_atual = get_val(balance_sheet, ["Current Assets"], 0)
-        current_assets_anterior = get_val(balance_sheet, ["Current Assets"], 1)
-        current_liab_atual = get_val(balance_sheet, ["Current Liabilities"], 0)
-        current_liab_anterior = get_val(balance_sheet, ["Current Liabilities"], 1)
-        shares_atual = get_val(balance_sheet, ["Ordinary Shares Number", "Share Issued"], 0)
-        shares_anterior = get_val(balance_sheet, ["Ordinary Shares Number", "Share Issued"], 1)
-        gross_profit_atual = get_val(financials, ["Gross Profit"], 0)
-        gross_profit_anterior = get_val(financials, ["Gross Profit"], 1)
-        revenue_atual = get_val(financials, ["Total Revenue", "Revenue"], 0)
-        revenue_anterior = get_val(financials, ["Total Revenue", "Revenue"], 1)
+render_painel_admin()
 
-        f1 = 1 if total_assets_atual is not None and total_assets_atual > 0 and net_income is not None and (net_income / total_assets_atual) > 0 else 0
-        
-        f2 = 1 if operating_cashflow is not None and operating_cashflow > 0 else 0
-        
-        roa_atual = (net_income / total_assets_atual) if net_income is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        roa_anterior = (net_income_anterior / total_assets_anterior) if net_income_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f3 = 1 if roa_atual is not None and roa_anterior is not None and roa_atual > roa_anterior else 0
-        
-        f4 = 1 if operating_cashflow is not None and total_assets_atual is not None and total_assets_atual > 0 and net_income is not None and (operating_cashflow / total_assets_atual) > (net_income / total_assets_atual) else 0
-        
-        leverage_atual = (long_debt_atual / total_assets_atual) if long_debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        leverage_anterior = (long_debt_anterior / total_assets_anterior) if long_debt_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f5 = 1 if leverage_atual is not None and leverage_anterior is not None and leverage_atual < leverage_anterior else 0
-        
-        current_ratio_atual = (current_assets_atual / current_liab_atual) if current_assets_atual is not None and current_liab_atual is not None and current_liab_atual > 0 else None
-        current_ratio_anterior = (current_assets_anterior / current_liab_anterior) if current_assets_anterior is not None and current_liab_anterior is not None and current_liab_anterior > 0 else None
-        f6 = 1 if current_ratio_atual is not None and current_ratio_anterior is not None and current_ratio_atual > current_ratio_anterior else 0
-        
-        f7 = 1 if shares_atual is not None and shares_anterior is not None and shares_atual <= shares_anterior else 0
-        
-        gross_margin_atual = (gross_profit_atual / revenue_atual) if gross_profit_atual is not None and revenue_atual is not None and revenue_atual > 0 else None
-        gross_margin_anterior = (gross_profit_anterior / revenue_anterior) if gross_profit_anterior is not None and revenue_anterior is not None and revenue_anterior > 0 else None
-        f8 = 1 if gross_margin_atual is not None and gross_margin_anterior is not None and gross_margin_atual > gross_margin_anterior else 0
-        
-        asset_turnover_atual = (revenue_atual / total_assets_atual) if revenue_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        asset_turnover_anterior = (revenue_anterior / total_assets_anterior) if revenue_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f9 = 1 if asset_turnover_atual is not None and asset_turnover_anterior is not None and asset_turnover_atual > asset_turnover_anterior else 0
+with st.expander("👤 meu perfil", expanded=False):
+    user = get_current_user()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**usuário:** {user['username']}")
+        st.markdown(f"**nome:** {user['nome'] or '—'}")
+        st.markdown(f"**perfil:** {'administrador' if user['is_admin'] else 'usuário'}")
+    with c2:
+        with st.form("form_minha_senha", clear_on_submit=True):
+            st.markdown("**alterar senha:**")
+            senha_atual = st.text_input("senha atual:", type="password")
+            senha_nova  = st.text_input("nova senha:", type="password")
+            senha_conf  = st.text_input("confirmar:", type="password")
 
-        f_score_total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
-        
-        detalhamento = {
-            "F1 ROA positivo": f1,
-            "F2 FCF positivo": f2,
-            "F3 ROA crescendo": f3,
-            "F4 qualidade lucro (FCF > ROA)": f4,
-            "F5 dívida reduzindo": f5,
-            "F6 liquidez melhorando": f6,
-            "F7 sem diluição": f7,
-            "F8 margem bruta crescendo": f8,
-            "F9 giro de ativos crescendo": f9
-        }
-        
-        return f_score_total, detalhamento
-    except Exception:
-        return 0, {}
+            if st.form_submit_button("alterar senha"):
+                from database.db import autenticar_usuario, alterar_senha
+                if autenticar_usuario(user['username'], senha_atual):
+                    if senha_nova == senha_conf and len(senha_nova) >= 4:
+                        alterar_senha(user['user_id'], senha_nova)
+                        st.success("✅ senha alterada com sucesso!")
+                    elif senha_nova != senha_conf:
+                        st.error("as senhas não coincidem.")
+                    else:
+                        st.error("senha deve ter pelo menos 4 caracteres.")
+                else:
+                    st.error("senha atual incorreta.")
 
-def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
-    """
-    Motor quantitativo institucional (Dynamic Scoring).
-    Cruza pilares fundamentalistas com o cenário macro e momentum técnico.
-    Contém motores distintos para FIIs, Ações B3 e Ações EUA.
-    """
-    if macro_context is None:
-        macro_context = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
-    
-    juros_altos_br = macro_context.get('selic', 10.5) > 10.0
-    vix_alto = macro_context.get('vix', 15.0) > 20.0
-    
-    # Detecção de Mercado
-    is_fii = _is_fii(ticker)
-    is_br = ticker.endswith('.SA') and not is_fii
-    is_us = not ticker.endswith('.SA') and not is_fii
-    
-    try:
-        acao = yf.Ticker(ticker)
-        info = acao.info
-        hist = acao.history(period="1y")
-        
-        cache = get_todos_fundamentos_cache()
-        dados_base = cache.get(ticker, {})
-        
-        pvp = dados_base.get('p/vp') or info.get('priceToBook', None)
-        dy = dados_base.get('dy%') or (info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0)
-        
-        score = 0
-        alertas = []
-        breakdown = {}
-        
-        if hist.empty or len(hist) < 50:
-            payload = {"alertas": ["histórico insuficiente para análise técnica"], "breakdown": {}}
-            salvar_health_score(ticker, 50, payload)
-            return {'score': 50, 'alertas': ["histórico insuficiente"]}
+st.markdown("---")
 
-        close = hist['Close']
-        mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean()
-        preco_atual = close.iloc[-1]
-        
-        delta = close.diff()
-        ganho = delta.clip(lower=0).rolling(14).mean()
-        perda = (-delta.clip(upper=0)).rolling(14).mean()
-        rsi = (100 - (100 / (1 + (ganho / perda)))).iloc[-1] if len(close) >= 15 else 50
-        
-        penalidade_tec = 0
-        if preco_atual < mm200:
-            alertas.append("📉 tendência de baixa (preço abaixo da MM200).")
-            penalidade_tec = -15
-            
-        penalidade_vix = 0
-        if vix_alto and (info.get('beta', 1) > 1.2):
-            alertas.append("⚠️ ativo volátil em cenário de stress (VIX alto).")
-            penalidade_vix = -10
+# ==========================================
+# NAVEGAÇÃO RÁPIDA E STATUS GLOBAL
+# ==========================================
+section_title("🧭 navegação rápida")
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1: st.page_link("pages/1_Research.py", label="micro (research)", icon="🔬")
+with c2: st.page_link("pages/2_Discovery.py", label="oportunidades", icon="🎯")
+with c3: st.page_link("pages/3_Macro.py", label="macro global", icon="🌍")
+with c4: st.page_link("pages/4_Portfolio.py", label="meu portfólio", icon="💼")
+with c5: st.page_link("pages/5_Solana.py", label="on-chain (rwa)", icon="⛓️")
 
-        # ==========================================
-        # MOTOR 1: FUNDOS IMOBILIÁRIOS (FIIs)
-        # ==========================================
-        if is_fii:
-            score_pvp = 0
-            if pvp is not None and pvp > 0:
-                if 0.90 <= pvp <= 1.05: score_pvp += 40 
-                elif 0.80 <= pvp < 0.90: 
-                    score_pvp += 30 
-                    alertas.append("⚠️ desconto alto no p/vp. verificar risco de vacância.")
-                elif pvp < 0.80:
-                    score_pvp += 10
-                    alertas.append("🚨 p/vp crítico (< 0.80). o mercado precifica problemas graves.")
-                elif pvp > 1.05:
-                    score_pvp += 20
-                    alertas.append("⚠️ fundo negociado com ágio.")
-            else: score_pvp += 20
+st.markdown("---")
+section_title("📊 status global")
+auto_refresh_indicator(5)
+
+with st.container():
+    @st.cache_data(ttl=300, show_spinner=False)
+    def buscar_indices():
+        tickers = {"ibovespa": "^BVSP", "s&p 500": "^GSPC", "nasdaq": "^IXIC", "bitcoin": "BTC-USD", "dólar": "BRL=X"}
+        resultados = {}
+        try:
+            hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
+            for nome, tk in tickers.items():
+                try:
+                    s = hist[tk].dropna()
+                    if len(s) >= 2:
+                        preco = float(s.iloc[-1])
+                        var = ((preco / float(s.iloc[-2])) - 1) * 100
+                        resultados[nome] = {"preco": preco, "var": var}
+                except: pass
+        except: pass
+        return resultados
+
+    indices = buscar_indices()
+    if indices:
+        cols = st.columns(len(indices))
+        for i, (nome, dados) in enumerate(indices.items()):
+            cor_d = "bull" if dados['var'] >= 0 else "bear"
+            sinal = "▲" if dados['var'] >= 0 else "▼"
+            moeda = "r$ " if nome == "dólar" else ""
+            with cols[i]:
+                metric_card(
+                    label=nome,
+                    valor=fmt_preco(dados['preco'], moeda),
+                    delta=f"{sinal} {abs(dados['var']):.2f}%",
+                    cor_delta=cor_d
+                )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# RESUMO DO PORTFÓLIO
+# ==========================================
+pesos_atuais = get_pesos()
+ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
+
+if ativos_alocados:
+    with st.expander("💼 resumo do seu portfólio (mark-to-market)", expanded=False):
+        tickers_com_peso = list(ativos_alocados.keys())
+        with st.spinner("sincronizando marcação a mercado..."):
+            live_data_port = {}
+            try:
+                tickers_base_port = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
+                hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
                 
-            score_y = 0
-            if dy is not None:
-                if 8.0 <= dy <= 12.0: score_y += 40 
-                elif dy > 12.0:
-                    score_y += 20
-                    alertas.append("🚨 yield trap? dividendos excessivamente altos.")
-                elif 5.0 <= dy < 8.0: score_y += 20
-                elif dy < 5.0: alertas.append("⚠️ dividend yield muito baixo para um FII.")
-            else: score_y += 20
+                if isinstance(hist_port, pd.Series): 
+                    hist_port = hist_port.to_frame(name=tickers_base_port[0])
+                hist_port = hist_port.ffill()
+                
+                for t in tickers_com_peso:
+                    t_base = mapear_ticker_base(t)
+                    try: live_data_port[t] = float(hist_port[t_base].dropna().iloc[-1])
+                    except: live_data_port[t] = 0.0
+            except: pass
 
-            score_tec = 20 + penalidade_tec
-            score = score_pvp + score_y + score_tec
-            
-            breakdown = {
-                "Valuation Justo (P/VP)": score_pvp,
-                "Geração de Renda (Yield)": score_y,
-                "Momento Técnico": score_tec
-            }
+            custo_total = 0.0
+            valor_atual = 0.0
+            for t, dados in ativos_alocados.items():
+                qtd = float(dados.get('quantidade', 0))
+                pm = float(dados.get('preco_medio', 0))
+                preco_live = live_data_port.get(t, 0.0)
+                custo_total += (qtd * pm)
+                valor_atual += (qtd * preco_live)
 
-        # ==========================================
-        # MOTOR 2 e 3: AÇÕES (B3 vs EUA)
-        # ==========================================
+            pnl_valor = valor_atual - custo_total
+            pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0.0
+
+            c1, c2, c3 = st.columns(3)
+            with c1: metric_card("custo alocado total", fmt_preco(custo_total, "$"))
+            with c2: metric_card("património atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear")
+            with c3: metric_card("lucro/prejuízo global", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
+            st.caption("🔍 para aprofundar na alocação e risco, aceda à aba 'meu portfólio'.")
+
+# ==========================================
+# WATCHLIST INTELIGENTE E SELETOR
+# ==========================================
+section_title("👁️ watchlist & radar de alertas")
+
+watchlists_disponiveis = listar_watchlists()
+if not watchlists_disponiveis:
+    get_watchlist_padrao()
+    watchlists_disponiveis = listar_watchlists()
+
+if 'watchlist_ativa_id' not in st.session_state:
+    st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+
+opcoes_wl = {f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id'] for wl in watchlists_disponiveis}
+
+idx_ativo = 0
+for i, wl in enumerate(watchlists_disponiveis):
+    if wl['id'] == st.session_state['watchlist_ativa_id']:
+        idx_ativo = i
+        break
+
+col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
+
+with col_sel_wl:
+    sel_wl_label = st.selectbox("watchlist ativa:", list(opcoes_wl.keys()), index=idx_ativo, key="sel_watchlist_ativa_ui", label_visibility="collapsed")
+    st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
+    watchlist_id_ativo = st.session_state['watchlist_ativa_id']
+
+with col_btn_nova:
+    if st.button("➕ nova watchlist", use_container_width=True):
+        st.session_state['criar_wl_modal'] = True
+
+with col_btn_cfg:
+    if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
+        st.session_state['cfg_wl_modal'] = True
+
+# ── MODAIS DA WATCHLIST ───────────────────────
+@st.dialog("➕ criar nova watchlist")
+def modal_criar_watchlist():
+    icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
+    cores_opcoes = {"âmbar (padrão)": "#FF9900", "verde": "#00C853", "azul": "#00B0FF", "vermelho": "#FF1744", "roxo": "#E040FB"}
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        nome_nova = st.text_input("nome:", placeholder="ex: dividendos br")
+    with c2:
+        icone_nova = st.selectbox("ícone:", icones_opcoes)
+
+    descricao_nova = st.text_input("descrição (opcional):", placeholder="ex: ações de alta renda")
+    cor_label = st.selectbox("cor:", list(cores_opcoes.keys()))
+    cor_nova = cores_opcoes[cor_label]
+
+    c_ok, c_cancel = st.columns(2)
+    if c_ok.button("criar", type="primary", use_container_width=True):
+        if nome_nova.strip():
+            novo_id = criar_watchlist(nome_nova.strip(), descricao_nova, cor_nova, icone_nova)
+            st.session_state['watchlist_ativa_id'] = novo_id
+            st.success(f"{icone_nova} watchlist '{nome_nova.lower()}' criada!")
+            time.sleep(1)
+            st.rerun()
         else:
-            f_score, f_detalhamento = calcular_piotroski(acao)
-            
-            pl = dados_base.get('p/l') or info.get('trailingPE', info.get('forwardPE', None))
-            roe = dados_base.get('roe%') or (info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else None)
-            margem = dados_base.get('margem%') or (info.get('profitMargins', 0) * 100 if info.get('profitMargins') else None)
-            ev_ebitda = dados_base.get('ev/ebitda') or info.get('enterpriseToEbitda', None)
-            debt_equity = info.get('debtToEquity', None)
+            st.warning("digite um nome.")
+    if c_cancel.button("cancelar", use_container_width=True):
+        st.rerun()
 
-            # --- Qualidade e Rentabilidade ---
-            score_q = 0
-            if roe is not None:
-                if roe > 20: score_q += 15
-                elif roe > 10: score_q += 10
-                elif roe > 0: score_q += 5
-                else: alertas.append("⚠️ empresa destruindo valor (roe negativo).")
+if st.session_state.get('criar_wl_modal'):
+    st.session_state.pop('criar_wl_modal')
+    modal_criar_watchlist()
+
+@st.dialog("⚙️ configurar watchlist")
+def modal_cfg_watchlist():
+    wl_atual = next((wl for wl in watchlists_disponiveis if wl['id'] == watchlist_id_ativo), None)
+    if not wl_atual:
+        st.rerun()
+        return
+
+    st.markdown(f"**editando:** {wl_atual['icone']} {wl_atual['nome']}")
+
+    icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
+    novo_nome = st.text_input("nome:", value=wl_atual['nome'])
+    nova_desc = st.text_input("descrição:", value=wl_atual.get('descricao',''))
+    novo_icone = st.selectbox("ícone:", icones_opcoes, index=icones_opcoes.index(wl_atual.get('icone','⭐')) if wl_atual.get('icone','⭐') in icones_opcoes else 0)
+
+    col_a, col_b, col_c = st.columns(3)
+    if col_a.button("💾 salvar", type="primary", use_container_width=True):
+        renomear_watchlist(watchlist_id_ativo, novo_nome, nova_desc, novo_icone)
+        st.success("watchlist atualizada!")
+        time.sleep(1)
+        st.rerun()
+
+    if col_b.button("⭐ definir padrão", use_container_width=True):
+        definir_watchlist_padrao(watchlist_id_ativo)
+        st.success("definida como padrão!")
+        time.sleep(1)
+        st.rerun()
+
+    pode_deletar = len(watchlists_disponiveis) > 1
+    if col_c.button("🗑️ deletar", use_container_width=True, disabled=not pode_deletar, help="deleta a watchlist e todos os ativos nela"):
+        deletar_watchlist(watchlist_id_ativo)
+        st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+        st.success("watchlist deletada.")
+        time.sleep(1)
+        st.rerun()
+
+if st.session_state.get('cfg_wl_modal'):
+    st.session_state.pop('cfg_wl_modal')
+    modal_cfg_watchlist()
+
+# ── BUSCAR E ADICIONAR ATIVO ──
+expandir_busca = bool(st.session_state.get('resultados_busca'))
+
+with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
+    with st.form("form_busca_ativo", clear_on_submit=False):
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            termo = st.text_input("digite o nome da empresa ou ativo:", key="input_busca", label_visibility="collapsed", placeholder="buscar ativo (ex: aapl, wege3)...")
+        with c2:
+            btn_buscar = st.form_submit_button("buscar", use_container_width=True, type="primary")
+            
+    if btn_buscar and termo:
+        with st.spinner("procurando na api global..."):
+            resultados = buscar_ativo_yahoo(termo)
+            st.session_state['resultados_busca'] = resultados
+            if not resultados:
+                st.warning("nenhum ativo encontrado.")
                 
-            if margem is not None:
-                if margem > 15: score_q += 15
-                elif margem > 5: score_q += 10
-                elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
-            else: score_q += 7
-            
-            # --- Valuation Adaptativo (B3 vs EUA) ---
-            score_v = 0
-            if pl is not None and pl > 0:
-                limite_pl_bom = 18 if is_us else 10
-                limite_pl_medio = 30 if is_us else 20
-                
-                if pl <= limite_pl_bom: score_v += 15
-                elif pl <= limite_pl_medio: score_v += 10
-                elif pl > limite_pl_medio: alertas.append(f"⚠️ valuation esticado (p/l de {pl:.1f}).")
-                
-            if pvp is not None and pvp > 0:
-                limite_pvp_bom = 3.5 if is_us else 1.5
-                limite_pvp_medio = 6.0 if is_us else 3.0
-                
-                if pvp <= limite_pvp_bom: score_v += 15
-                elif pvp <= limite_pvp_medio: score_v += 10
-                elif pvp > limite_pvp_medio: alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
-
-            # --- Solvência e Risco ---
-            score_r = 0
-            penalizacao_divida = 2 if (is_br and juros_altos_br) else 1 
-            
-            if debt_equity is not None:
-                if debt_equity < 50: score_r += 20
-                elif debt_equity < 120: score_r += 10
-                elif debt_equity > 150: 
-                    alertas.append(f"🚨 risco de solvência (dívida alta).")
-                    score_r -= (10 * penalizacao_divida)
-            elif ev_ebitda is not None and ev_ebitda > 0:
-                limite_ev_bom = 12 if is_us else 8
-                limite_ev_medio = 18 if is_us else 12
-                
-                if ev_ebitda <= limite_ev_bom: score_r += 20
-                elif ev_ebitda <= limite_ev_medio: score_r += 10
-                elif ev_ebitda > limite_ev_medio:
-                    alertas.append(f"🚨 alavancagem alta (ev/ebitda: {ev_ebitda:.1f}).")
-                    score_r -= (5 * penalizacao_divida)
-            else: score_r += 10 
-            
-            score_r_final = max(0, score_r)
-
-            # --- Geração de Caixa / Yield Adaptativo ---
-            score_y = 0
-            exigencia_yield = 2.5 if is_us else (6.0 if juros_altos_br else 4.0)
-            
-            if dy is not None:
-                if dy >= exigencia_yield: score_y += 20
-                elif dy >= (exigencia_yield / 2): score_y += 10
-                elif dy == 0 and is_br: alertas.append("ℹ️ empresa não distribui proventos.")
-
-            score_piotroski = 0
-            if f_score >= 7:
-                score_piotroski = 15
-                alertas.append(f"✅ balanço de alta qualidade (piotroski f-score: {f_score}/9).")
-            elif f_score >= 5:
-                score_piotroski = 8
-            elif f_score <= 2 and f_detalhamento:
-                score_piotroski = -10
-                alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
-
-            score = score_q + score_v + score_r_final + score_y + score_piotroski + penalidade_tec + penalidade_vix
-
-            breakdown = {
-                "Qualidade e Rentabilidade": score_q,
-                f"Valuation (Padrão {'EUA' if is_us else 'B3'})": score_v,
-                "Solvência e Risco Macro": score_r_final,
-                f"Geração de Caixa / Yield": score_y,
-                "Qualidade de Balanço (Piotroski F-Score)": score_piotroski,
-                "Penalidade Técnica (MM200)": penalidade_tec,
-                "Risco Volatilidade (VIX)": penalidade_vix
-            }
-            
-            if f_detalhamento:
-                for k, v in f_detalhamento.items():
-                    breakdown[f"  ↳ {k}"] = v
-
-        # ==========================================
-        # DIAGNÓSTICO FINAL COMPARTILHADO
-        # ==========================================
-        status_acao = ""
-        score = min(max(int(score), 0), 100) 
-
-        if score >= 75 and rsi < 40:
-            status_acao = "🟢 ACUMULAÇÃO FORTE: Ativo sólido com desconto e sobrevendido."
-        elif score >= 65 and rsi >= 40:
-            status_acao = "🟡 MANUTENÇÃO: Saudável, sem desconto gritante. Aporte neutro."
-        elif score < 65 and score >= 40 and preco_atual < mm200:
-            status_acao = "🟠 REDUZIR EXPOSIÇÃO: Fundamentos fracos e tendência de baixa."
-        elif score < 40:
-            status_acao = "🔴 VENDA DEFINITIVA: Quebra de tese (Score Crítico)."
-        else:
-            status_acao = "⚪ AGUARDAR: Zona indefinida."
-            
-        alertas.insert(0, status_acao)
-
-        payload = {
-            "alertas": alertas,
-            "breakdown": breakdown
-        }
-
-        salvar_health_score(ticker, score, payload)
-        return {'score': score, 'alertas': alertas, 'status': status_acao}
+    if st.session_state.get('resultados_busca'):
+        opcoes_formatadas = []
+        ativos_validos = []
+        for q in st.session_state['resultados_busca']:
+            tk = q.get('symbol'); nm = q.get('shortname') or q.get('longname')
+            if tk and nm:
+                bolsa = q.get('exchDisp', 'desconhecida')
+                opcoes_formatadas.append(f"{tk} | {nm.lower()} ({bolsa.lower()})")
+                ativos_validos.append(q)
         
-    except Exception as e:
-        payload = {"alertas": [f"erro no cálculo: {e}"], "breakdown": {}}
-        salvar_health_score(ticker, 50, payload)
-        return {'score': 50, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}
+        if opcoes_formatadas:
+            st.markdown("---")
+            cs1, cs2, cs3 = st.columns([4, 3, 2])
+            with cs1:
+                escolha = st.selectbox("selecione o ativo correto:", opcoes_formatadas, label_visibility="collapsed", key="busca_ativo_correto")
+                idx = opcoes_formatadas.index(escolha)
+                ativo_escolhido = ativos_validos[idx]
+            with cs2:
+                opcoes_destino = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disponiveis}
+                idx_dest = list(opcoes_destino.values()).index(watchlist_id_ativo) if watchlist_id_ativo in opcoes_destino.values() else 0
+                destino_wl_nome = st.selectbox("adicionar à:", list(opcoes_destino.keys()), index=idx_dest, label_visibility="collapsed", key="busca_destino_wl")
+                destino_wl_id = opcoes_destino[destino_wl_nome]
+            with cs3:
+                if st.button("salvar na watchlist", type="primary", use_container_width=True, key="btn_salvar_novo_ativo"):
+                    tk = ativo_escolhido['symbol']
+                    nm = ativo_escolhido.get('shortname') or ativo_escolhido.get('longname', tk)
+                    bolsa_str = ativo_escolhido.get('exchDisp', '').lower()
+                    tipo_str = ativo_escolhido.get('quoteType', '').lower()
+                    
+                    if "são paulo" in bolsa_str or tk.endswith(".SA"): mercado = "brasil"
+                    elif "nyse" in bolsa_str or "nasdaq" in bolsa_str: mercado = "eua"
+                    elif "cryptocurrency" in tipo_str: mercado = "criptomoedas"
+                    else: mercado = "outros"
+                    
+                    adicionar_ativo(tk, nm, mercado, watchlist_id=destino_wl_id)
+                    st.success(f"{tk.lower()} adicionado!")
+                    st.session_state['resultados_busca'] = []
+                    time.sleep(1)
+                    st.rerun()
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── ATUALIZAR SCORES ───────────────────────
+col_btn, _ = st.columns([2, 8])
+if col_btn.button("🚨 atualizar scores", use_container_width=True, type="primary"):
+    ativos_atuais = listar_watchlist(watchlist_id=watchlist_id_ativo)
+    if ativos_atuais:
+        progress_steps(["inicializando", "coletando dados", "calculando scores"], current=1)
+        barra = st.progress(0)
+        txt = st.empty()
+        total = len(ativos_atuais)
+        
+        for idx, item in enumerate(ativos_atuais):
+            t = item['ticker']
+            txt.caption(f"a analisar {t.lower()}...")
+            
+            calcular_health_score(mapear_ticker_base(t))
+            
+            barra.progress((idx + 1) / total)
+            
+            # --- PROTEÇÃO OBRIGATÓRIA CONTRA BANIMENTO DO YAHOO (RATE LIMIT) ---
+            time.sleep(2.5) 
+            
+        txt.empty()
+        barra.empty()
+        progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
+        time.sleep(1)
+        st.rerun()
+
+# ── FUNÇÃO MODAL DO MEMORIAL ───────────────────────
+@st.dialog("🧮 memorial de cálculo")
+def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
+    st.markdown(f"#### ativo: {ticker_nome.lower()}")
+    
+    cor_score = "#00C853" if score_final >= 70 else ("#FF9900" if score_final >= 40 else "#FF1744")
+    st.markdown(f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; color:{cor_score}; text-align:center; padding:10px; background:#111; border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>", unsafe_allow_html=True)
+    
+    if breakdown_dict:
+        st.markdown("**🧱 pilares de pontuação:**")
+        for pilar, pts in breakdown_dict.items():
+            if pts == 0 and "Penalidade" in pilar:
+                continue 
+            
+            cor_pts = "#00C853" if pts > 0 else ("#FF1744" if pts < 0 else "#666")
+            st.markdown(f"<div style='display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:4px 0;'><span style='color:#ccc;'>{pilar.lower()}</span> <span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>{pts:+.0f} pts</span></div>", unsafe_allow_html=True)
+    else:
+        st.info("💡 memorial não disponível. clique em '🚨 atualizar health scores' no topo da página para recalcular este ativo na nova versão.")
+        
+    if alertas_lista:
+        st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
+        for a in alertas_lista:
+            st.markdown(f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; padding-left:10px; border-left:2px solid #444;'>{a}</div>", unsafe_allow_html=True)
+
+# ── GRID DA WATCHLIST ATIVA ─────────────────────────────
+watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
+
+if not watchlist:
+    empty_state(icone="⭐", titulo="watchlist vazia", descricao="a sua lista de monitorização está vazia. utilize a barra de pesquisa acima para adicionar ativos.")
+else:
+    tickers_ativos = [item['ticker'] for item in watchlist]
+    live_data = {}
+    health_data = {h['ticker']: h for h in get_health_scores()}
+
+    with st.spinner("sincronizando cotações em tempo real..."):
+        try:
+            tickers_base = list(set([mapear_ticker_base(t) for t in tickers_ativos]))
+            data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
+            
+            if not data.empty and 'Close' in data.columns:
+                hist = data['Close']
+                if isinstance(hist, pd.Series): 
+                    hist = hist.to_frame(name=tickers_base[0])
+                hist = hist.ffill()
+                
+                for t in tickers_ativos:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        if t_base in hist.columns:
+                            s = hist[t_base].dropna()
+                            if len(s) >= 2:
+                                p_atual = float(s.iloc[-1])
+                                p_ontem = float(s.iloc[-2])
+                                p_1m = float(s.iloc[0])
+                                live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
+                    except:
+                        pass
+        except:
+            pass
+
+    mercados = {}
+    for item in watchlist:
+        m = item['mercado']
+        if m not in mercados:
+            mercados[m] = []
+        mercados[m].append(item)
+        
+    for mercado, ativos in mercados.items():
+        st.markdown(f"##### 📍 {mercado.lower()}")
+        cols = st.columns(4)
+        for idx, item in enumerate(ativos):
+            t = item['ticker']
+            d = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
+            
+            t_base = mapear_ticker_base(t)
+            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas": [], "breakdown": {}}'})
+            
+            # DECODIFICAÇÃO ROBUSTA PROTEGIDA
+            try: 
+                raw_data = h_info['alertas_venda']
+                parsed_data = json.loads(raw_data)
+                
+                # Se ainda for string (devido ao histórico corrompido de JSON duplo), decodifica novamente
+                if isinstance(parsed_data, str):
+                    parsed_data = json.loads(parsed_data)
+                
+                if isinstance(parsed_data, dict):
+                    lista_alertas = parsed_data.get('alertas', [])
+                    breakdown = parsed_data.get('breakdown', {})
+                else:
+                    lista_alertas = parsed_data if isinstance(parsed_data, list) else []
+                    breakdown = {}
+            except: 
+                lista_alertas = []
+                breakdown = {}
+
+            with cols[idx % 4]:
+                watchlist_card(
+                    ticker=t, nome=item['nome'], preco=d['preco'], var_1d=d['var_1d'],
+                    moeda="r$" if t_base.endswith(".SA") else "$",
+                    health_score=h_info['score'], alertas=lista_alertas
+                )
+                
+                # Botões de Ação do Card
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if st.button("🗑️", key=f"del_{t}", use_container_width=True, help="remover ativo"):
+                        remover_ativo(t, watchlist_id=watchlist_id_ativo)
+                        st.rerun()
+                with c2:
+                    nova_nota = st.popover("📝", use_container_width=True)
+                    with nova_nota:
+                        txt = st.text_area("anotações da tese:", value=item['notas'] or "", key=f"nota_{t}")
+                        if st.button("salvar", key=f"btn_nota_{t}"):
+                            atualizar_notas(t, txt, watchlist_id=watchlist_id_ativo)
+                            st.rerun()
+                with c3:
+                    if st.button("🧮", key=f"calc_{t}", use_container_width=True, help="memorial de cálculo"):
+                        exibir_memorial(t, h_info['score'], breakdown, lista_alertas)
+                        
+                st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
