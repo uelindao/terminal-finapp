@@ -687,9 +687,10 @@ with tab_momentum:
             with st.spinner(f"calculando momentum de {len(mom_lista)} ativos..."):
                 resultados_mom = calcular_momentum(tuple(mom_lista))
                 df_mom = pd.DataFrame(resultados_mom)
-                df_mom = df_mom[df_mom['score momentum'] >= score_minimo]
-                df_mom = df_mom.head(mom_top_n)
-                st.session_state['momentum_resultado'] = df_mom
+                if not df_mom.empty:
+                    df_mom = df_mom[df_mom['score momentum'] >= score_minimo]
+                    df_mom = df_mom.head(mom_top_n)
+                    st.session_state['momentum_resultado'] = df_mom
 
     if 'momentum_resultado' in st.session_state and not st.session_state['momentum_resultado'].empty:
         df_m = st.session_state['momentum_resultado']
@@ -715,7 +716,7 @@ with tab_momentum:
 
         st.dataframe(
             df_m[cols_mostrar].style
-                .applymap(colorir_momentum, subset=['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)'])
+                .map(colorir_momentum, subset=['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)'])
                 .format({'ret 1m (%)': '{:+.2f}%', 'ret 3m (%)': '{:+.2f}%', 'ret 6m (%)': '{:+.2f}%', 'ret 1y (%)': '{:+.2f}%', 'dist. topo 52w (%)': '{:+.2f}%', 'score momentum': '{:.0f}'}),
             use_container_width=True,
             hide_index=True
@@ -750,7 +751,7 @@ with tab_momentum:
                 c1.markdown(f"**{row['ticker']}**")
                 score = row['score momentum']
                 cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
-                barra = "█" * (score // 10) + "░" * (10 - score // 10)
+                barra = "█" * int(score // 10) + "░" * int(10 - score // 10)
                 c2.markdown(f'<span style="font-family:Courier New; font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
                 if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True):
                     mercado = "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua"
