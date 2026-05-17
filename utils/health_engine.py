@@ -123,7 +123,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
         
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})
-        
+
+        qualidade = dados_base.get('qualidade_dados', 50)
+        dados_confiaveis = qualidade >= 40
+
         pvp = dados_base.get('p/vp') or info.get('priceToBook', None)
         dy = dados_base.get('dy%') or (info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0)
         
@@ -278,7 +281,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 score_piotroski = -10
                 alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
 
-            score = score_q + score_v + score_r_final + score_y + score_piotroski + penalidade_tec + penalidade_vix
+            # penalidade por dados de baixa qualidade
+            penalidade_dados = 0
+            if not dados_confiaveis and not is_us:
+                penalidade_dados = -10
+                alertas.append(f"⚠️ dados fundamentalistas com qualidade baixa ({qualidade}%). score pode estar subestimado.")
+
+            score = score_q + score_v + score_r_final + score_y + score_piotroski + penalidade_tec + penalidade_vix + penalidade_dados
 
             breakdown = {
                 "Qualidade e Rentabilidade": score_q,
@@ -287,7 +296,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 f"Geração de Caixa / Yield": score_y,
                 "Qualidade de Balanço (Piotroski F-Score)": score_piotroski,
                 "Penalidade Técnica (MM200)": penalidade_tec,
-                "Risco Volatilidade (VIX)": penalidade_vix
+                "Risco Volatilidade (VIX)": penalidade_vix,
+                "Penalidade Dados (Qualidade)": penalidade_dados
             }
             
             if f_detalhamento:

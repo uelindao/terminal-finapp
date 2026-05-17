@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+import yfinance as yf
 
 def buscar_dados_b3(ticker: str) -> dict:
     """extrai fundamentos reais do fundamentus mapeando a tabela de forma agressiva."""
@@ -51,6 +52,89 @@ def buscar_dados_b3(ticker: str) -> dict:
         res['margem%'] = get_num('Marg. Líquida')
         res['market_cap'] = get_num('Valor de mercado')
         
+        res = validar_fundamentos(res)
+
+        # fallback: se qualidade < 40% e é B3, complementar com yfinance
+        if res.get('qualidade_dados', 0) < 40:
+            yf_dados = buscar_dados_us(ticker)
+            for campo in ['p/l', 'p/vp', 'roe%', 'dy%', 'ev/ebitda', 'margem%']:
+                if res.get(campo) is None and yf_dados.get(campo) is not None:
+                    res[campo] = yf_dados[campo]
+            if res['nome'] == '—' and yf_dados['nome'] != '—':
+                res['nome'] = yf_dados['nome']
+
         return res
+    except:
+        # fallback completo para yfinance quando Fundamentus falha totalmente
+        return buscar_dados_us(ticker)
+
+
+# ranges realistas para validação de dados fundamentalistas
+RANGES_VALIDOS = {
+    'p/l':      (-50.0,  500.0),
+    'p/vp':     (0.0,    50.0),
+    'roe%':     (-100.0, 300.0),
+    'dy%':      (0.0,    50.0),
+    'ev/ebitda':(-10.0,  100.0),
+    'margem%':  (-200.0, 100.0),
+}
+
+def validar_fundamentos(dados: dict) -> dict:
+    """
+    Valida cada campo contra ranges realistas.
+    Campos fora do range são zerados (None) para evitar distorção no score.
+    Retorna o dict limpo e adiciona campo 'qualidade_dados' de 0 a 100.
+    """
+    campos_validos = 0
+    campos_totais = len(RANGES_VALIDOS)
+
+    for campo, (minimo, maximo) in RANGES_VALIDOS.items():
+        val = dados.get(campo)
+        if val is None:
+            continue
+        try:
+            val = float(val)
+            if minimo <= val <= maximo:
+                campos_validos += 1
+                dados[campo] = val
+            else:
+                dados[campo] = None  # dado fora do range — descartado
+        except:
+            dados[campo] = None
+
+    dados['qualidade_dados'] = int((campos_validos / campos_totais) * 100)
+    return dados
+
+
+def buscar_dados_us(ticker: str) -> dict:
+    """
+    Busca fundamentos de ações US via yfinance.
+    Usado como fonte primária para EUA e fallback para B3 quando Fundamentus falha.
+    """
+    res = {
+        'nome': '—', 'setor': '—', 'p/l': None, 'p/vp': None,
+        'roe%': None, 'dy%': None, 'ev/ebitda': None, 'margem%': None,
+        'market_cap': 0, 'qualidade_dados': 0
+    }
+    try:
+        acao = yf.Ticker(ticker)
+        info = acao.info
+
+        if not info or info.get('regularMarketPrice') is None:
+            return res
+
+        res['nome']       = info.get('longName', info.get('shortName', '—')).lower()
+        res['setor']      = info.get('sector', info.get('industryDisp', '—')).lower()
+        res['p/l']        = info.get('trailingPE') or info.get('forwardPE')
+        res['p/vp']       = info.get('priceToBook')
+        res['ev/ebitda']  = info.get('enterpriseToEbitda')
+        res['dy%']        = (info.get('dividendYield', 0) or 0) * 100
+        res['margem%']    = (info.get('profitMargins', 0) or 0) * 100
+        res['market_cap'] = info.get('marketCap', 0) or 0
+
+        roe_raw = info.get('returnOnEquity')
+        res['roe%'] = (roe_raw * 100) if roe_raw is not None else None
+
+        return validar_fundamentos(res)
     except:
         return res
