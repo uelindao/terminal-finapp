@@ -37,9 +37,51 @@ inject_keyboard_shortcuts()
 
 page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_betas(tickers_tuple: tuple) -> dict:
+    """Calcula beta de cada ativo contra IBOV e S&P500 usando 1 ano de dados."""
+    tickers = list(tickers_tuple)
+    betas = {}
+    try:
+        benchmarks = ["^BVSP", "^GSPC"]
+        todos = list(set([mapear_ticker_base(t) for t in tickers] + benchmarks))
+        hist = yf.download(todos, period="1y", auto_adjust=True, progress=False)['Close']
+        if isinstance(hist, pd.Series):
+            hist = hist.to_frame()
+        rets = hist.pct_change().dropna()
+
+        for t in tickers:
+            t_base = mapear_ticker_base(t)
+            if t_base not in rets.columns:
+                betas[t] = {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')}
+                continue
+
+            is_br = t.endswith('.SA')
+            benchmark = "^BVSP" if is_br else "^GSPC"
+
+            if benchmark in rets.columns:
+                cov = rets[[t_base, benchmark]].dropna().cov()
+                var_bench = rets[benchmark].var()
+                beta = cov.loc[t_base, benchmark] / var_bench if var_bench > 0 else 1.0
+                beta = max(min(beta, 3.0), -1.0)
+            else:
+                beta = 1.0
+
+            betas[t] = {
+                'beta_ibov': round(beta, 2) if is_br else round(beta * 0.3, 2),
+                'beta_sp': round(beta * 0.3, 2) if is_br else round(beta, 2),
+                'is_br': is_br
+            }
+    except:
+        for t in tickers:
+            betas[t] = {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')}
+
+    return betas
+
 # 4. criação das tabs
-tab_posicoes, tab_backtest, tab_diario = st.tabs([
+tab_posicoes, tab_stress, tab_backtest, tab_diario = st.tabs([
     "💼 posições & p&l",
+    "⚡ stress test",
     "📊 backtesting",
     "📝 diário de decisões"
 ])
@@ -297,7 +339,183 @@ with tab_posicoes:
             st.plotly_chart(fig_bar, use_container_width=True)
 
 # ==========================================
-# tab 2: backtesting
+# tab 2: stress test
+# ==========================================
+with tab_stress:
+    section_title("⚡ stress test de portfólio")
+
+    status_card(
+        "metodologia",
+        "simula o impacto de choques macro no portfólio usando betas históricos de cada ativo contra ibov e s&p500. o impacto é estimado como: variação_ativo = beta × choque_benchmark. os resultados são aproximações baseadas em comportamento histórico.",
+        tipo="info"
+    )
+
+    ativos_stress = {t: d for t, d in {p['ticker']: p for p in get_pesos(portfolio_id=st.session_state.get('portfolio_id_stress', get_portfolio_padrao()))}.items() if d.get('quantidade', 0) > 0}
+
+    if not ativos_stress:
+        empty_state("⚡", "portfólio vazio", "adicione posições na aba posições & p&l para rodar o stress test.")
+    else:
+        st.markdown("---")
+        section_title("⚙️ configurar cenários")
+
+        cenarios_padrao = {
+            "🔴 crise financeira severa": {"ibov": -35.0, "sp500": -40.0, "dolar": +35.0, "selic": +3.0},
+            "🟠 recessão brasil": {"ibov": -20.0, "sp500": -5.0, "dolar": +20.0, "selic": +2.0},
+            "🟡 aperto monetário fed": {"ibov": -10.0, "sp500": -15.0, "dolar": +10.0, "selic": +1.0},
+            "🟢 pouso suave (bull case)": {"ibov": +15.0, "sp500": +12.0, "dolar": -8.0, "selic": -1.5},
+            "✏️ cenário personalizado": None,
+        }
+
+        sc1, sc2 = st.columns([2, 3])
+        with sc1:
+            cenario_sel = st.selectbox("cenário macro:", list(cenarios_padrao.keys()), key="stress_cenario")
+
+        with sc2:
+            if cenarios_padrao[cenario_sel] is not None:
+                c = cenarios_padrao[cenario_sel]
+                st.markdown(f"""
+                <div style="font-family:Courier New; font-size:0.82rem; color:#888; padding:8px; background:#0d0d0d; border-radius:4px; border-left:3px solid #FF9900;">
+                IBOV: <span style="color:{'#FF1744' if c['ibov']<0 else '#00C853'}">{c['ibov']:+.1f}%</span> &nbsp;|&nbsp;
+                S&P500: <span style="color:{'#FF1744' if c['sp500']<0 else '#00C853'}">{c['sp500']:+.1f}%</span> &nbsp;|&nbsp;
+                Dólar: <span style="color:{'#FF1744' if c['dolar']<0 else '#00C853'}">{c['dolar']:+.1f}%</span> &nbsp;|&nbsp;
+                Selic: <span style="color:{'#FF1744' if c['selic']<0 else '#00C853'}">{c['selic']:+.2f}pp</span>
+                </div>
+                """, unsafe_allow_html=True)
+                choque_ibov = c['ibov']
+                choque_sp = c['sp500']
+            else:
+                p1, p2 = st.columns(2)
+                with p1:
+                    choque_ibov = st.slider("ibov (%):", -60.0, 30.0, -20.0, 5.0, key="stress_ibov")
+                    choque_dolar = st.slider("dólar (%):", -20.0, 50.0, 10.0, 5.0, key="stress_dolar")
+                with p2:
+                    choque_sp = st.slider("s&p500 (%):", -60.0, 30.0, -15.0, 5.0, key="stress_sp")
+                    choque_selic = st.slider("selic (pp):", -3.0, 5.0, 1.0, 0.5, key="stress_selic")
+
+        btn_stress = st.button("⚡ rodar stress test", type="primary", use_container_width=True)
+
+        if btn_stress:
+            with st.spinner("calculando betas e simulando cenários..."):
+                tickers_stress = list(ativos_stress.keys())
+                betas_calc = calcular_betas(tuple(tickers_stress))
+
+                linhas_stress = []
+                for t, dados in ativos_stress.items():
+                    qtd = float(dados.get('quantidade', 0))
+                    pm = float(dados.get('preco_medio', 0))
+                    valor_pos = qtd * pm
+
+                    beta_info = betas_calc.get(t, {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')})
+
+                    if beta_info['is_br']:
+                        impacto_pct = beta_info['beta_ibov'] * choque_ibov
+                    else:
+                        impacto_pct = beta_info['beta_sp'] * choque_sp
+
+                    impacto_valor = valor_pos * (impacto_pct / 100)
+                    valor_estressado = valor_pos + impacto_valor
+
+                    linhas_stress.append({
+                        'ticker': t,
+                        'valor atual (R$)': round(valor_pos, 2),
+                        'beta': beta_info['beta_ibov'] if beta_info['is_br'] else beta_info['beta_sp'],
+                        'benchmark': 'ibov' if beta_info['is_br'] else 's&p500',
+                        'impacto (%)': round(impacto_pct, 2),
+                        'impacto (R$)': round(impacto_valor, 2),
+                        'valor estressado (R$)': round(valor_estressado, 2),
+                    })
+
+                df_stress = pd.DataFrame(linhas_stress).sort_values('impacto (R$)')
+                patrimonio_atual = df_stress['valor atual (R$)'].sum()
+                patrimonio_stress = df_stress['valor estressado (R$)'].sum()
+                impacto_total = patrimonio_stress - patrimonio_atual
+                impacto_total_pct = (impacto_total / patrimonio_atual * 100) if patrimonio_atual > 0 else 0
+
+                st.session_state['stress_resultado'] = df_stress
+                st.session_state['stress_resumo'] = {
+                    'patrimonio_atual': patrimonio_atual,
+                    'patrimonio_stress': patrimonio_stress,
+                    'impacto_total': impacto_total,
+                    'impacto_total_pct': impacto_total_pct,
+                    'cenario': cenario_sel
+                }
+
+        if 'stress_resultado' in st.session_state and 'stress_resumo' in st.session_state:
+            df_s = st.session_state['stress_resultado']
+            resumo = st.session_state['stress_resumo']
+
+            st.markdown("---")
+            section_title(f"📊 resultado — {resumo['cenario']}")
+
+            cor_impacto = "bull" if resumo['impacto_total'] >= 0 else "bear"
+            rc1, rc2, rc3 = st.columns(3)
+            with rc1:
+                metric_card("patrimônio atual", fmt_numero(resumo['patrimonio_atual'], "R$ "))
+            with rc2:
+                metric_card("patrimônio estressado", fmt_numero(resumo['patrimonio_stress'], "R$ "),
+                           fmt_pct(resumo['impacto_total_pct']), cor_impacto)
+            with rc3:
+                metric_card("impacto total", fmt_numero(resumo['impacto_total'], "R$ "),
+                           "perda estimada" if resumo['impacto_total'] < 0 else "ganho estimado", cor_impacto)
+
+            def colorir_stress(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return 'color: #00C853'
+                    if val < 0: return 'color: #FF1744'
+                return ''
+
+            st.dataframe(
+                df_s.style
+                    .applymap(colorir_stress, subset=['impacto (%)', 'impacto (R$)'])
+                    .format({
+                        'valor atual (R$)': 'R$ {:,.2f}',
+                        'beta': '{:.2f}',
+                        'impacto (%)': '{:+.2f}%',
+                        'impacto (R$)': 'R$ {:+,.2f}',
+                        'valor estressado (R$)': 'R$ {:,.2f}'
+                    }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            fig_stress = go.Figure(go.Bar(
+                x=df_s['impacto (R$)'],
+                y=df_s['ticker'],
+                orientation='h',
+                marker_color=['#FF1744' if v < 0 else '#00C853' for v in df_s['impacto (R$)']],
+                hovertemplate='%{y}<br>impacto: R$ %{x:+,.2f}<extra></extra>'
+            ))
+            fig_stress.add_vline(x=0, line_color="#333", line_width=1)
+            fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
+            st.plotly_chart(fig_stress, use_container_width=True)
+
+            if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
+                with st.spinner("analisando exposições e gerando recomendações..."):
+                    try:
+                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                        dados_texto = df_s.to_csv(index=False)
+                        prompt = f"""você é um gestor de risco de um fundo multimercado brasileiro. analise o stress test abaixo e recomende ações defensivas.
+
+cenário: {resumo['cenario']}
+impacto total estimado: {resumo['impacto_total_pct']:+.1f}% (R$ {resumo['impacto_total']:+,.2f})
+
+posições e impactos:
+{dados_texto}
+
+responda com 4 bullet points em português, letra minúscula:
+1. qual posição representa o maior risco no cenário e por quê.
+2. sugestão de hedge ou redução de exposição.
+3. quais posições podem se beneficiar neste cenário (naturalmente defensivas).
+4. recomendação de realocação para reduzir o impacto total em pelo menos 30%.
+
+seja direto e objetivo."""
+                        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                        status_card("recomendações de proteção — ia", response.text, tipo="info")
+                    except Exception as e:
+                        st.error(f"erro no agente de ia: {e}")
+
+# ==========================================
+# tab 3: backtesting
 # ==========================================
 with tab_backtest:
     
