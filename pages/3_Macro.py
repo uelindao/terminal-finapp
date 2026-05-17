@@ -178,10 +178,87 @@ def diagnosticar_ciclo(t10y2y, vix, hy_spread):
         return "🟡 pico de ciclo (late cycle)", "#FF9900", "energia (xle), materiais (xlb), saúde (xlv)"
     return "⚪ transição", "#888888", "posicionamento neutro — aguardar confirmação"
 
+def get_eventos_macro_fixos() -> list[dict]:
+    """
+    Retorna calendário de eventos macro fixos para os próximos 90 dias.
+    Datas atualizadas manualmente — COPOM, Fed, ECB.
+    """
+    hoje = datetime.date.today()
+
+    eventos = [
+        # COPOM 2026
+        {"data": datetime.date(2026, 5, 6),  "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 6, 17), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 7, 29), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 9, 16), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 11, 4), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 12, 9), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        # Fed 2026
+        {"data": datetime.date(2026, 6, 17), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 7, 29), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 9, 16), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 11, 4), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 12, 9), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        # IPCA 2026
+        {"data": datetime.date(2026, 5, 12), "evento": "IPCA — inflação mensal (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": datetime.date(2026, 6, 9),  "evento": "IPCA — inflação mensal (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": datetime.date(2026, 7, 9),  "evento": "IPCA — inflação mensal (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        # CPI EUA 2026
+        {"data": datetime.date(2026, 5, 13), "evento": "CPI EUA — inflação ao consumidor", "categoria": "eua", "impacto": "medio"},
+        {"data": datetime.date(2026, 6, 10), "evento": "CPI EUA — inflação ao consumidor", "categoria": "eua", "impacto": "medio"},
+        {"data": datetime.date(2026, 7, 14), "evento": "CPI EUA — inflação ao consumidor", "categoria": "eua", "impacto": "medio"},
+        # Payroll EUA 2026
+        {"data": datetime.date(2026, 5, 1),  "evento": "Payroll EUA — empregos não-agrícolas", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 6, 5),  "evento": "Payroll EUA — empregos não-agrícolas", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 7, 2),  "evento": "Payroll EUA — empregos não-agrícolas", "categoria": "eua", "impacto": "alto"},
+    ]
+
+    proximos = [e for e in eventos if e['data'] >= hoje]
+    proximos.sort(key=lambda x: x['data'])
+    return proximos[:20]
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def buscar_earnings_calendario(tickers_tuple: tuple) -> list[dict]:
+    """Busca earnings dates via yfinance para uma lista de tickers."""
+    eventos = []
+    hoje = datetime.date.today()
+    limite = hoje + datetime.timedelta(days=90)
+
+    for t in tickers_tuple:
+        try:
+            acao = yf.Ticker(t)
+            cal = acao.calendar
+            if cal is None or cal.empty:
+                continue
+
+            if 'Earnings Date' in cal.index:
+                earning_date = cal.loc['Earnings Date'].iloc[0]
+                if hasattr(earning_date, 'date'):
+                    earning_date = earning_date.date()
+                if isinstance(earning_date, datetime.date) and hoje <= earning_date <= limite:
+                    eps_est = None
+                    try:
+                        eps_est = float(cal.loc['EPS Estimate'].iloc[0]) if 'EPS Estimate' in cal.index else None
+                    except:
+                        pass
+                    eventos.append({
+                        'data': earning_date,
+                        'evento': f"{t} — divulgação de resultados",
+                        'categoria': 'earnings',
+                        'impacto': 'alto',
+                        'detalhe': f"eps estimado: {eps_est:.2f}" if eps_est else "eps: n/d"
+                    })
+        except:
+            continue
+
+    eventos.sort(key=lambda x: x['data'])
+    return eventos
+
 # ==========================================
 # abas principais da página
 # ==========================================
-tab_global, tab_ciclo, tab_overlay = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "🔭 overlay macro × preços"])
+tab_global, tab_ciclo, tab_calendar, tab_overlay = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços"])
 
 with tab_global:
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
@@ -367,6 +444,147 @@ with tab_ciclo:
                 status_card("rotação setorial recomendada", response.text, "info")
             except Exception as e:
                 st.error(f"erro no agente de ia: {e}")
+
+with tab_calendar:
+    section_title("📅 calendário de eventos de mercado")
+
+    status_card(
+        "cobertura",
+        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates do seu portfólio via yfinance. datas macro são atualizadas manualmente a cada ciclo.",
+        tipo="info"
+    )
+
+    # filtros
+    fc1, fc2 = st.columns([3, 1])
+    with fc1:
+        filtro_cat = st.multiselect(
+            "filtrar por categoria:",
+            ["brasil", "eua", "earnings"],
+            default=["brasil", "eua", "earnings"],
+            key="cal_filtro_cat"
+        )
+    with fc2:
+        janela_dias = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela")
+
+    hoje = datetime.date.today()
+    limite_cal = hoje + datetime.timedelta(days=janela_dias)
+
+    # eventos macro fixos
+    eventos_macro = get_eventos_macro_fixos()
+    eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
+
+    # earnings do portfólio
+    from database.db import get_pesos
+    pesos = get_pesos()
+    tickers_port = tuple(set([p['ticker'] for p in pesos if p.get('quantidade', 0) > 0]))
+
+    eventos_earnings = []
+    if "earnings" in filtro_cat and tickers_port:
+        with st.spinner("buscando earnings dates do portfólio..."):
+            eventos_earnings = buscar_earnings_calendario(tickers_port)
+            eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_cal]
+
+    todos_eventos = sorted(eventos_macro + eventos_earnings, key=lambda x: x['data'])
+
+    if not todos_eventos:
+        empty_state("📅", "sem eventos", f"nenhum evento encontrado nos próximos {janela_dias} dias para as categorias selecionadas.")
+    else:
+        # métricas rápidas
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            proximos_7 = len([e for e in todos_eventos if e['data'] <= hoje + datetime.timedelta(days=7)])
+            metric_card("próximos 7 dias", str(proximos_7), "eventos críticos" if proximos_7 > 0 else "", "bear" if proximos_7 > 0 else "muted")
+        with mc2:
+            total_alto = len([e for e in todos_eventos if e['impacto'] == 'alto'])
+            metric_card("alto impacto", str(total_alto), f"de {len(todos_eventos)} eventos", "amber")
+        with mc3:
+            total_earnings = len([e for e in todos_eventos if e['categoria'] == 'earnings'])
+            metric_card("earnings portfólio", str(total_earnings), f"nos próximos {janela_dias}d", "info")
+
+        st.markdown("---")
+
+        # timeline de eventos agrupados por semana
+        section_title("🗓️ timeline de eventos")
+
+        semana_atual = None
+        for evento in todos_eventos:
+            semana = evento['data'].isocalendar()[1]
+            ano = evento['data'].year
+            chave_semana = f"{ano}-{semana}"
+
+            if chave_semana != semana_atual:
+                semana_atual = chave_semana
+                inicio_semana = evento['data'] - datetime.timedelta(days=evento['data'].weekday())
+                dias_ate = (inicio_semana - hoje).days
+                if dias_ate <= 0:
+                    label_semana = "🔴 esta semana"
+                elif dias_ate <= 7:
+                    label_semana = "🟡 próxima semana"
+                else:
+                    label_semana = f"📆 semana de {inicio_semana.strftime('%d/%m')}"
+                st.markdown(f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; text-transform:uppercase; letter-spacing:0.1em; margin:16px 0 4px 0; border-bottom:1px solid #1e1e1e; padding-bottom:4px;">{label_semana}</div>', unsafe_allow_html=True)
+
+            cat = evento['categoria']
+            cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E", "earnings": "#FF9900"}.get(cat, "#555")
+            icone_imp = {"alto": "🔴", "medio": "🟡", "baixo": "🟢"}.get(evento['impacto'], "⚪")
+            label_cat = {"brasil": "BR", "eua": "EUA", "earnings": "EARN"}.get(cat, cat.upper())
+            detalhe = evento.get('detalhe', '')
+
+            dias_evento = (evento['data'] - hoje).days
+            if dias_evento == 0:
+                data_label = "hoje"
+                cor_data = "#FF1744"
+            elif dias_evento == 1:
+                data_label = "amanhã"
+                cor_data = "#FF9900"
+            else:
+                data_label = evento['data'].strftime('%d/%m/%Y')
+                cor_data = "#888"
+
+            ev1, ev2 = st.columns([5, 1])
+            with ev1:
+                texto_evento = f"{evento['evento']}"
+                if detalhe:
+                    texto_evento += f" | {detalhe}"
+                st.markdown(
+                    f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; border-left:3px solid {cor_cat}; border-radius:4px; padding:10px 14px; margin-bottom:6px;">'
+                    f'<span style="font-family:Courier New; font-size:0.7rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{label_cat}</span>'
+                    f'<span style="font-family:Courier New; font-size:0.7rem; color:#333; margin:0 6px;">|</span>'
+                    f'<span style="font-family:Courier New; font-size:0.85rem; color:#E0E0E0;">{texto_evento}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            with ev2:
+                st.markdown(
+                    f'<div style="text-align:right; padding-top:12px;">'
+                    f'<span style="font-family:Courier New; font-size:0.75rem; color:{cor_data};">{data_label}</span>'
+                    f' {icone_imp}</div>',
+                    unsafe_allow_html=True
+                )
+
+        st.markdown("---")
+
+        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
+            with st.spinner("analisando eventos e gerando briefing..."):
+                try:
+                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                    eventos_texto = "\n".join([f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | {e['evento']} | impacto: {e['impacto']}" for e in todos_eventos[:15]])
+                    prompt = f"""você é um estrategista macro de um fundo multimercado. analise o calendário de eventos abaixo e gere um briefing executivo.
+
+calendário dos próximos {janela_dias} dias:
+{eventos_texto}
+
+responda em 4 bullet points em português, letra minúscula:
+1. evento de maior impacto potencial e o que monitorar.
+2. como o calendário pode afetar o mercado brasileiro especificamente.
+3. qual posicionamento defensivo faz sentido antes dos eventos críticos.
+4. após os eventos, quais serão os principais gatilhos para reposicionamento.
+
+seja direto e objetivo."""
+                    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+                    status_card("briefing macro — ia", response.text, tipo="info")
+                except Exception as e:
+                    st.error(f"erro no agente de ia: {e}")
 
 with tab_overlay:
     st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")
