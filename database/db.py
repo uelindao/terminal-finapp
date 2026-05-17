@@ -70,7 +70,7 @@ def alterar_senha(user_id: int, nova_senha: str) -> None:
 
 def deletar_usuario(user_id: int) -> None:
     conn = get_connection()
-    tabelas = ['watchlist', 'alertas', 'portfolio_pesos', 'decisoes', 'comparacoes_salvas', 'config_solana', 'custom_mints', 'watchlists']
+    tabelas = ['watchlist', 'alertas', 'portfolio_pesos', 'decisoes', 'comparacoes_salvas', 'config_solana', 'custom_mints', 'watchlists', 'portfolios']
     for tabela in tabelas:
         try:
             conn.execute(f'DELETE FROM {tabela} WHERE user_id = ?', (user_id,))
@@ -152,7 +152,26 @@ def init_db():
         )
     ''')
     
-    c.execute('CREATE TABLE IF NOT EXISTS portfolio_pesos (ticker TEXT, peso REAL, preco_medio REAL, quantidade REAL, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1, PRIMARY KEY (ticker, user_id))')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            nome TEXT NOT NULL,
+            descricao TEXT DEFAULT '',
+            cor TEXT DEFAULT '#FF9900',
+            icone TEXT DEFAULT '\U0001f4bc',
+            padrao INTEGER DEFAULT 0,
+            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    c.execute('CREATE TABLE IF NOT EXISTS portfolio_pesos (ticker TEXT, peso REAL, preco_medio REAL, quantidade REAL, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1, portfolio_id INTEGER DEFAULT 1, PRIMARY KEY (ticker, user_id, portfolio_id))')
+
+    # migracao: adicionar portfolio_id se nao existir
+    c.execute("PRAGMA table_info(portfolio_pesos)")
+    cols_pp = [col[1] for col in c.fetchall()]
+    if 'portfolio_id' not in cols_pp:
+        c.execute('ALTER TABLE portfolio_pesos ADD COLUMN portfolio_id INTEGER DEFAULT 1')
     c.execute('CREATE TABLE IF NOT EXISTS health_scores (ticker TEXT PRIMARY KEY, score REAL, alertas_venda TEXT, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, threshold REAL, criado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
     c.execute('CREATE TABLE IF NOT EXISTS decisoes (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, data_decisao TEXT, preco_decisao REAL, quantidade REAL, tese TEXT, resultado TEXT, data_resultado TEXT, user_id INTEGER DEFAULT 1)')
@@ -175,6 +194,7 @@ def init_db():
     
     _criar_admin_padrao()
     _migrar_watchlist_para_default()
+    _migrar_portfolio_para_default()
 
 def _migrar_watchlist_para_default():
     conn = get_connection()
@@ -195,6 +215,26 @@ def _migrar_watchlist_para_default():
 
     conn.commit()
     conn.close()
+
+def _migrar_portfolio_para_default():
+    conn = get_connection()
+    try:
+        users = conn.execute('SELECT DISTINCT user_id FROM portfolio_pesos WHERE portfolio_id IS NULL').fetchall()
+        for row in users:
+            uid = row['user_id']
+            pf = conn.execute('SELECT id FROM portfolios WHERE user_id=? LIMIT 1', (uid,)).fetchone()
+            if not pf:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO portfolios (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '💼', '#FF9900', 1)", (uid,))
+                pf_id = cursor.lastrowid
+            else:
+                pf_id = pf['id']
+            conn.execute('UPDATE portfolio_pesos SET portfolio_id=? WHERE user_id=? AND portfolio_id IS NULL', (pf_id, uid))
+        conn.commit()
+    except:
+        pass
+    finally:
+        conn.close()
 
 # ==========================================
 # CACHE DE FUNDAMENTOS
@@ -345,23 +385,97 @@ def popular_watchlist_inicial():
     conn.close()
 
 # ==========================================
-# PORTFÓLIO E DECISÕES
+# GESTÃO DE PORTFÓLIOS (MÚLTIPLOS)
 # ==========================================
 
-def salvar_peso(ticker, peso, preco_medio=None, quantidade=None):
+def criar_portfolio(nome: str, descricao: str = "", cor: str = "#FF9900", icone: str = "💼") -> int:
     user_id = get_user_id()
     conn = get_connection()
-    conn.execute('''
-        INSERT OR REPLACE INTO portfolio_pesos (ticker, peso, preco_medio, quantidade, user_id)
-        VALUES (?,?,?,?,?)
-    ''', (ticker, peso, preco_medio, quantidade, user_id))
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO portfolios (user_id, nome, descricao, cor, icone)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, nome, descricao, cor, icone))
+    novo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return novo_id
+
+def listar_portfolios() -> list[dict]:
+    user_id = get_user_id()
+    conn = get_connection()
+    rows = conn.execute('''
+        SELECT p.*, COUNT(pp.ticker) as total_ativos
+        FROM portfolios p
+        LEFT JOIN portfolio_pesos pp ON pp.portfolio_id = p.id AND pp.user_id = p.user_id AND pp.quantidade > 0
+        WHERE p.user_id = ?
+        GROUP BY p.id
+        ORDER BY p.padrao DESC, p.criado_em ASC
+    ''', (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_portfolio_padrao() -> int:
+    user_id = get_user_id()
+    conn = get_connection()
+    row = conn.execute('SELECT id FROM portfolios WHERE user_id=? ORDER BY padrao DESC, criado_em ASC LIMIT 1', (user_id,)).fetchone()
+    if row:
+        conn.close()
+        return row['id']
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO portfolios (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '💼', '#FF9900', 1)", (user_id,))
+    novo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return novo_id
+
+def definir_portfolio_padrao(portfolio_id: int) -> None:
+    user_id = get_user_id()
+    conn = get_connection()
+    conn.execute('UPDATE portfolios SET padrao=0 WHERE user_id=?', (user_id,))
+    conn.execute('UPDATE portfolios SET padrao=1 WHERE id=? AND user_id=?', (portfolio_id, user_id))
     conn.commit()
     conn.close()
 
-def get_pesos():
+def renomear_portfolio(portfolio_id: int, novo_nome: str, nova_descricao: str = "", novo_icone: str = "💼", nova_cor: str = "#FF9900") -> None:
+    conn = get_connection()
+    conn.execute('''
+        UPDATE portfolios SET nome=?, descricao=?, icone=?, cor=?
+        WHERE id=? AND user_id=?
+    ''', (novo_nome, nova_descricao, novo_icone, nova_cor, portfolio_id, get_user_id()))
+    conn.commit()
+    conn.close()
+
+def deletar_portfolio(portfolio_id: int) -> None:
     user_id = get_user_id()
     conn = get_connection()
-    rows = conn.execute('SELECT * FROM portfolio_pesos WHERE user_id=?', (user_id,)).fetchall()
+    conn.execute('DELETE FROM portfolio_pesos WHERE portfolio_id=? AND user_id=?', (portfolio_id, user_id))
+    conn.execute('DELETE FROM portfolios WHERE id=? AND user_id=?', (portfolio_id, user_id))
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# PORTFÓLIO E DECISÕES
+# ==========================================
+
+def salvar_peso(ticker, peso, preco_medio=None, quantidade=None, portfolio_id=None):
+    user_id = get_user_id()
+    if portfolio_id is None:
+        portfolio_id = get_portfolio_padrao()
+    conn = get_connection()
+    conn.execute('''
+        INSERT OR REPLACE INTO portfolio_pesos (ticker, peso, preco_medio, quantidade, user_id, portfolio_id)
+        VALUES (?,?,?,?,?,?)
+    ''', (ticker, peso, preco_medio, quantidade, user_id, portfolio_id))
+    conn.commit()
+    conn.close()
+
+def get_pesos(portfolio_id=None):
+    user_id = get_user_id()
+    if portfolio_id is None:
+        portfolio_id = get_portfolio_padrao()
+    conn = get_connection()
+    rows = conn.execute('SELECT * FROM portfolio_pesos WHERE user_id=? AND portfolio_id=?', (user_id, portfolio_id)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

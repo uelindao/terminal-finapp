@@ -16,7 +16,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
-from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists
+from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -48,9 +48,63 @@ tab_posicoes, tab_backtest, tab_diario = st.tabs([
 # tab 1: posições e p&l
 # ==========================================
 with tab_posicoes:
-    
+
+    portfolios_lista = listar_portfolios()
+    if not portfolios_lista:
+        criar_portfolio("principal", icone="💼", cor="#FF9900")
+        portfolios_lista = listar_portfolios()
+
+    col_sel, col_btn = st.columns([4, 1])
+    with col_sel:
+        portfolio_idx = st.selectbox(
+            "portfólio ativo:",
+            range(len(portfolios_lista)),
+            format_func=lambda i: f"{portfolios_lista[i]['icone']} {portfolios_lista[i]['nome']} ({portfolios_lista[i]['total_ativos']} ativos)",
+            key="sel_portfolio_ativo"
+        )
+    portfolio_ativo = portfolios_lista[portfolio_idx]
+    portfolio_id_ativo = portfolio_ativo['id']
+
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("⚙️ gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
+            st.session_state['show_portfolio_manager'] = not st.session_state.get('show_portfolio_manager', False)
+
+    if st.session_state.get('show_portfolio_manager', False):
+        with st.expander("⚙️ gerenciar portfólios", expanded=True):
+            st.markdown("##### criar novo portfólio")
+            with st.form("form_novo_portfolio", clear_on_submit=True):
+                fc1, fc2, fc3 = st.columns(3)
+                with fc1:
+                    novo_pf_nome = st.text_input("nome:", placeholder="ex: ações EUA")
+                with fc2:
+                    novo_pf_icone = st.selectbox("ícone:", ["💼", "🇧🇷", "🇺🇸", "🏢", "📈", "₿", "🌍"])
+                with fc3:
+                    novo_pf_cor = st.selectbox("cor:", ["#FF9900", "#00C853", "#00B0FF", "#E040FB", "#FF1744"])
+                if st.form_submit_button("criar portfólio", type="primary"):
+                    if novo_pf_nome.strip():
+                        criar_portfolio(novo_pf_nome.strip(), icone=novo_pf_icone, cor=novo_pf_cor)
+                        st.success(f"✅ portfólio '{novo_pf_nome}' criado!")
+                        st.rerun()
+                    else:
+                        st.warning("digite um nome para o portfólio.")
+            st.markdown("---")
+            st.markdown("##### portfólios existentes")
+            for pf in portfolios_lista:
+                pc1, pc2, pc3 = st.columns([4, 1, 1])
+                pc1.markdown(f"{pf['icone']} **{pf['nome']}** — {pf['total_ativos']} ativos")
+                if pf['padrao']:
+                    pc2.markdown('<span class="badge badge-amber">padrão</span>', unsafe_allow_html=True)
+                else:
+                    if pc2.button("⭐ padrão", key=f"pf_pad_{pf['id']}", use_container_width=True):
+                        definir_portfolio_padrao(pf['id'])
+                        st.rerun()
+                if pc3.button("🗑️ excluir", key=f"pf_del_{pf['id']}", use_container_width=True, disabled=(len(portfolios_lista) <= 1)):
+                    deletar_portfolio(pf['id'])
+                    st.rerun()
+
     watchlist = listar_watchlist()
-    pesos_atuais = {p['ticker']: p for p in get_pesos()}
+    pesos_atuais = {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}
 
     tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
     posicoes_ativas = []
@@ -103,7 +157,7 @@ with tab_posicoes:
                 pm = row['preço médio']
                 v_total = row['valor total']
                 peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                salvar_peso(t, peso_real, pm, qtd)
+                salvar_peso(t, peso_real, pm, qtd, portfolio_id=portfolio_id_ativo)
                 
             st.success("✅ posições atualizadas.")
             st.rerun()
@@ -131,7 +185,7 @@ with tab_posicoes:
         if btn_add:
             ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
             if ticker_final and qtd_form > 0 and pm_form > 0:
-                salvar_peso(ticker_final, 0.0, pm_form, qtd_form)
+                salvar_peso(ticker_final, 0.0, pm_form, qtd_form, portfolio_id=portfolio_id_ativo)
                 st.success(f"✅ {ticker_final} adicionado. salve as alterações para recalcular os pesos.")
                 st.rerun()
             else:
@@ -225,8 +279,10 @@ with tab_posicoes:
             section_title("⚖️ alocação por ativo")
             fig_pie = go.Figure(go.Pie(labels=df_portfolio['ativo'], values=df_portfolio['valor atual'], hole=0.4, textinfo='label+percent', marker=dict(line=dict(color='#010101', width=2))))
             layout_pie = base_layout(height=350)
-            layout_pie['xaxis']['visible'] = False
-            layout_pie['yaxis']['visible'] = False
+            if 'xaxis' in layout_pie:
+                layout_pie['xaxis']['visible'] = False
+            if 'yaxis' in layout_pie:
+                layout_pie['yaxis']['visible'] = False
             fig_pie.update_layout(**layout_pie)
             st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -235,7 +291,8 @@ with tab_posicoes:
             df_pnl = df_portfolio.sort_values(by='p&l ($)', ascending=True)
             fig_bar = go.Figure(go.Bar(x=df_pnl['p&l ($)'], y=df_pnl['ativo'], orientation='h', marker_color=['#FF1744' if val < 0 else '#00C853' for val in df_pnl['p&l ($)']]))
             layout_bar = base_layout(height=350)
-            layout_bar['yaxis']['showgrid'] = False
+            if 'yaxis' in layout_bar:
+                layout_bar['yaxis']['showgrid'] = False
             fig_bar.update_layout(**layout_bar)
             st.plotly_chart(fig_bar, use_container_width=True)
 
