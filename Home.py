@@ -360,15 +360,20 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
         barra = st.progress(0)
         txt = st.empty()
         total = len(ativos_atuais)
+        
+        # LOOP LIMPO DE VELOCIDADE MÁXIMA
         for idx, item in enumerate(ativos_atuais):
             t = item['ticker']
             txt.caption(f"a analisar {t.lower()}...")
+            
             calcular_health_score(mapear_ticker_base(t))
+            
             barra.progress((idx + 1) / total)
+            
         txt.empty()
         barra.empty()
         progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
-        time.sleep(1)
+        time.sleep(1) # pausa de UI (interface) rápida só pra mostrar "concluído" antes de sumir
         st.rerun()
 
 # ── FUNÇÃO MODAL DO MEMORIAL ───────────────────────
