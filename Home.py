@@ -92,7 +92,7 @@ with st.expander("👤 meu perfil", expanded=False):
 st.markdown("---")
 
 # ==========================================
-# NAVEGAÇÃO RÁPIDA E STATUS GLOBAL
+# NAVEGAÇÃO RÁPIDA
 # ==========================================
 section_title("🧭 navegação rápida")
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -103,85 +103,265 @@ with c4: st.page_link("pages/4_Portfolio.py", label="meu portfólio", icon="💼
 with c5: st.page_link("pages/5_Solana.py", label="on-chain (rwa)", icon="⛓️")
 
 st.markdown("---")
-section_title("📊 status global")
-auto_refresh_indicator(5)
-
-with st.container():
-    @st.cache_data(ttl=300, show_spinner=False)
-    def buscar_indices():
-        tickers = {"ibovespa": "^BVSP", "s&p 500": "^GSPC", "nasdaq": "^IXIC", "bitcoin": "BTC-USD", "dólar": "BRL=X"}
-        resultados = {}
-        try:
-            hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
-            for nome, tk in tickers.items():
-                try:
-                    s = hist[tk].dropna()
-                    if len(s) >= 2:
-                        preco = float(s.iloc[-1])
-                        var = ((preco / float(s.iloc[-2])) - 1) * 100
-                        resultados[nome] = {"preco": preco, "var": var}
-                except: pass
-        except: pass
-        return resultados
-
-    indices = buscar_indices()
-    if indices:
-        cols = st.columns(len(indices))
-        for i, (nome, dados) in enumerate(indices.items()):
-            cor_d = "bull" if dados['var'] >= 0 else "bear"
-            sinal = "▲" if dados['var'] >= 0 else "▼"
-            moeda = "r$ " if nome == "dólar" else ""
-            with cols[i]:
-                metric_card(
-                    label=nome,
-                    valor=fmt_preco(dados['preco'], moeda),
-                    delta=f"{sinal} {abs(dados['var']):.2f}%",
-                    cor_delta=cor_d
-                )
-        st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# RESUMO DO PORTFÓLIO
+# FAIXA 1 — PULSO DO MERCADO
+# ==========================================
+section_title("⚡ pulso do mercado")
+auto_refresh_indicator(5)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_indices_completo():
+    tickers = {
+        "ibovespa": "^BVSP",
+        "s&p 500": "^GSPC",
+        "nasdaq": "^IXIC",
+        "dólar (brl)": "BRL=X",
+        "bitcoin": "BTC-USD",
+        "ouro": "GC=F",
+        "vix": "^VIX",
+        "treasury 10y": "^TNX",
+    }
+    resultados = {}
+    try:
+        hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
+        for nome, tk in tickers.items():
+            try:
+                s = hist[tk].dropna() if isinstance(hist, pd.DataFrame) and tk in hist.columns else pd.Series()
+                if len(s) >= 2:
+                    preco = float(s.iloc[-1])
+                    var = ((preco / float(s.iloc[-2])) - 1) * 100
+                    resultados[nome] = {"preco": preco, "var": var, "ticker": tk}
+            except:
+                pass
+    except:
+        pass
+    return resultados
+
+indices = buscar_indices_completo()
+if indices:
+    cols = st.columns(len(indices))
+    for i, (nome, dados) in enumerate(indices.items()):
+        cor_d = "bull" if dados['var'] >= 0 else "bear"
+        sinal = "▲" if dados['var'] >= 0 else "▼"
+        tk = dados['ticker']
+        if tk == "BRL=X":
+            valor_fmt = f"R$ {dados['preco']:.4f}"
+        elif tk in ["^VIX", "^TNX"]:
+            valor_fmt = f"{dados['preco']:.2f}"
+        elif tk == "GC=F":
+            valor_fmt = f"$ {dados['preco']:,.2f}"
+        elif tk == "BTC-USD":
+            valor_fmt = f"$ {dados['preco']:,.0f}"
+        else:
+            valor_fmt = f"{dados['preco']:,.2f}"
+        with cols[i]:
+            metric_card(
+                label=nome,
+                valor=valor_fmt,
+                delta=f"{sinal} {abs(dados['var']):.2f}%",
+                cor_delta=cor_d
+            )
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# FAIXA 2 — SEMÁFORO MACRO
+# ==========================================
+section_title("🚦 semáforo macro")
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_dados_semaforo():
+    dados = {"selic": None, "ipca": None, "t10y2y": None, "vix": None, "hy_spread": None}
+    try:
+        from fredapi import Fred
+        fred = Fred(api_key=st.secrets["FRED_API_KEY"])
+        t10y2y = fred.get_series('T10Y2Y', limit=1)
+        if not t10y2y.empty:
+            dados["t10y2y"] = float(t10y2y.iloc[-1])
+        vix = fred.get_series('VIXCLS', limit=1)
+        if not vix.empty:
+            dados["vix"] = float(vix.iloc[-1])
+        hy = fred.get_series('BAMLH0A0HYM2', limit=1)
+        if not hy.empty:
+            dados["hy_spread"] = float(hy.iloc[-1])
+    except:
+        pass
+    try:
+        from bcb import sgs
+        selic_serie = sgs.get({'selic': 432}, last=1)
+        if not selic_serie.empty:
+            dados["selic"] = float(selic_serie['selic'].iloc[-1])
+        ipca_serie = sgs.get({'ipca': 433}, last=1)
+        if not ipca_serie.empty:
+            dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
+    except:
+        pass
+    return dados
+
+dados_sem = buscar_dados_semaforo()
+
+def avaliar_semaforo_brasil(selic, ipca):
+    if selic is None: return "amber", "⚠️", "dados indisponíveis"
+    if selic > 13: return "bear", "🔴", f"juro restritivo ({selic:.1f}%)"
+    if selic > 10: return "amber", "🟡", f"juro elevado ({selic:.1f}%)"
+    return "bull", "🟢", f"ambiente favorável ({selic:.1f}%)"
+
+def avaliar_semaforo_eua(t10y2y, vix):
+    if t10y2y is None or vix is None: return "amber", "⚠️", "dados indisponíveis"
+    if t10y2y < -0.2 and vix > 25: return "bear", "🔴", "curva invertida + stress"
+    if t10y2y < 0: return "amber", "🟡", f"curva invertida ({t10y2y:.2f}%)"
+    if vix > 25: return "amber", "🟡", f"vix elevado ({vix:.1f})"
+    return "bull", "🟢", f"spread positivo ({t10y2y:.2f}%)"
+
+def avaliar_semaforo_risco(vix, hy_spread):
+    if vix is None: return "amber", "⚠️", "dados indisponíveis"
+    if vix > 30 or (hy_spread and hy_spread > 6): return "bear", "🔴", "stress elevado"
+    if vix > 20 or (hy_spread and hy_spread > 4): return "amber", "🟡", f"atenção (vix {vix:.1f})"
+    return "bull", "🟢", f"risco controlado (vix {vix:.1f})"
+
+cor_br, icone_br, texto_br = avaliar_semaforo_brasil(dados_sem.get("selic"), dados_sem.get("ipca"))
+cor_us, icone_us, texto_us = avaliar_semaforo_eua(dados_sem.get("t10y2y"), dados_sem.get("vix"))
+cor_risco, icone_risco, texto_risco = avaliar_semaforo_risco(dados_sem.get("vix"), dados_sem.get("hy_spread"))
+
+cores_bg = {"bull": "#001a0d", "bear": "#1a0005", "amber": "#1a0f00"}
+cores_border = {"bull": "#00C853", "bear": "#FF1744", "amber": "#FF9900"}
+
+sm1, sm2, sm3 = st.columns(3)
+with sm1:
+    selic_txt = f"selic: {dados_sem['selic']:.1f}%" if dados_sem.get('selic') else "selic: n/d"
+    ipca_txt = f"ipca: {dados_sem['ipca']:.2f}%" if dados_sem.get('ipca') else "ipca: n/d"
+    st.markdown(f'''<div style="background:{cores_bg[cor_br]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_br]}; border-radius:6px; padding:14px 16px;">
+    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🇧🇷 brasil</div>
+    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_br} {texto_br}</div>
+    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{selic_txt} | {ipca_txt}</div>
+    </div>''', unsafe_allow_html=True)
+with sm2:
+    t10_txt = f"yield curve: {dados_sem['t10y2y']:.2f}%" if dados_sem.get('t10y2y') is not None else "yield curve: n/d"
+    vix_txt = f"vix: {dados_sem['vix']:.1f}" if dados_sem.get('vix') else "vix: n/d"
+    st.markdown(f'''<div style="background:{cores_bg[cor_us]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_us]}; border-radius:6px; padding:14px 16px;">
+    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🇺🇸 eua</div>
+    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_us} {texto_us}</div>
+    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{t10_txt} | {vix_txt}</div>
+    </div>''', unsafe_allow_html=True)
+with sm3:
+    hy_txt = f"spread hy: {dados_sem['hy_spread']:.2f}%" if dados_sem.get('hy_spread') else "spread hy: n/d"
+    st.markdown(f'''<div style="background:{cores_bg[cor_risco]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_risco]}; border-radius:6px; padding:14px 16px;">
+    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🌐 risco global</div>
+    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_risco} {texto_risco}</div>
+    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{hy_txt} | {vix_txt}</div>
+    </div>''', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# FAIXA 3 — PRÓXIMOS EVENTOS CRÍTICOS
+# ==========================================
+section_title("📅 próximos eventos")
+
+import datetime as dt_module
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_proximos_eventos_home():
+    hoje = dt_module.date.today()
+    eventos = [
+        {"data": dt_module.date(2026, 5, 13), "evento": "CPI EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 6, 5),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 6, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 6, 10), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 6, 17), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 6, 17), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 2),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 7, 14), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 7, 29), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 29), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+    ]
+    proximos = sorted([e for e in eventos if e['data'] >= hoje], key=lambda x: x['data'])
+    return proximos[:4]
+
+proximos_eventos = get_proximos_eventos_home()
+if proximos_eventos:
+    ev_cols = st.columns(len(proximos_eventos))
+    hoje_home = dt_module.date.today()
+    for i, ev in enumerate(proximos_eventos):
+        dias = (ev['data'] - hoje_home).days
+        cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E"}.get(ev['categoria'], "#555")
+        cor_dias = "#FF1744" if dias <= 3 else ("#FF9900" if dias <= 7 else "#555")
+        icone_imp = "🔴" if ev['impacto'] == 'alto' else "🟡"
+        with ev_cols[i]:
+            st.markdown(f'''<div style="background:#0d0d0d; border:1px solid #1e1e1e; border-top:2px solid {cor_cat}; border-radius:6px; padding:12px; text-align:center;">
+            <div style="font-family:Courier New; font-size:0.68rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{ev['categoria']}</div>
+            <div style="font-family:Courier New; font-size:0.85rem; color:#E0E0E0; margin:6px 0;">{icone_imp} {ev['evento']}</div>
+            <div style="font-family:Courier New; font-size:0.75rem; color:{cor_dias};">{ev['data'].strftime('%d/%m/%Y')}</div>
+            <div style="font-family:Courier New; font-size:0.68rem; color:#555; margin-top:2px;">em {dias} dias</div>
+            </div>''', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ==========================================
+# FAIXA 4 — RESUMO DO PORTFÓLIO + WATCHLIST HIGHLIGHTS
 # ==========================================
 pesos_atuais = get_pesos()
 ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
 
 if ativos_alocados:
-    with st.expander("💼 resumo do seu portfólio (mark-to-market)", expanded=False):
-        tickers_com_peso = list(ativos_alocados.keys())
-        with st.spinner("sincronizando marcação a mercado..."):
-            live_data_port = {}
-            try:
-                tickers_base_port = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
-                hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
-                
-                if isinstance(hist_port, pd.Series): 
-                    hist_port = hist_port.to_frame(name=tickers_base_port[0])
-                hist_port = hist_port.ffill()
-                
-                for t in tickers_com_peso:
-                    t_base = mapear_ticker_base(t)
-                    try: live_data_port[t] = float(hist_port[t_base].dropna().iloc[-1])
-                    except: live_data_port[t] = 0.0
-            except: pass
+    section_title("💼 portfólio & watchlist highlights")
 
-            custo_total = 0.0
-            valor_atual = 0.0
-            for t, dados in ativos_alocados.items():
-                qtd = float(dados.get('quantidade', 0))
-                pm = float(dados.get('preco_medio', 0))
-                preco_live = live_data_port.get(t, 0.0)
-                custo_total += (qtd * pm)
-                valor_atual += (qtd * preco_live)
+    tickers_com_peso = list(ativos_alocados.keys())
+    with st.spinner("sincronizando..."):
+        live_data_port = {}
+        var_dia_port = {}
+        try:
+            tickers_base_port = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
+            hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
+            if isinstance(hist_port, pd.Series):
+                hist_port = hist_port.to_frame(name=tickers_base_port[0])
+            hist_port = hist_port.ffill()
+            for t in tickers_com_peso:
+                t_base = mapear_ticker_base(t)
+                try:
+                    s = hist_port[t_base].dropna()
+                    if len(s) >= 2:
+                        live_data_port[t] = float(s.iloc[-1])
+                        var_dia_port[t] = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
+                except:
+                    live_data_port[t] = 0.0
+        except:
+            pass
 
-            pnl_valor = valor_atual - custo_total
-            pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0.0
+    custo_total = sum(float(d.get('quantidade',0)) * float(d.get('preco_medio',0)) for d in ativos_alocados.values())
+    valor_atual = sum(float(d.get('quantidade',0)) * live_data_port.get(t,0) for t, d in ativos_alocados.items())
+    pnl_valor = valor_atual - custo_total
+    pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0
 
-            c1, c2, c3 = st.columns(3)
-            with c1: metric_card("custo alocado total", fmt_preco(custo_total, "$"))
-            with c2: metric_card("património atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear")
-            with c3: metric_card("lucro/prejuízo global", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
-            st.caption("🔍 para aprofundar na alocação e risco, aceda à aba 'meu portfólio'.")
+    pf1, pf2, pf3, pf4 = st.columns(4)
+    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear")
+    with pf2: metric_card("p&l total", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
+
+    if var_dia_port:
+        melhor_t = max(var_dia_port, key=var_dia_port.get)
+        pior_t = min(var_dia_port, key=var_dia_port.get)
+        with pf3: metric_card("melhor hoje", melhor_t, fmt_pct(var_dia_port[melhor_t]), "bull")
+        with pf4: metric_card("pior hoje", pior_t, fmt_pct(var_dia_port[pior_t]), "bear")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    health_data_home = {h['ticker']: h for h in get_health_scores()}
+    ativos_alerta = []
+    for t in tickers_com_peso:
+        t_base = mapear_ticker_base(t)
+        h = health_data_home.get(t_base, {})
+        score = h.get('score', 50)
+        if score < 40:
+            ativos_alerta.append((t, score))
+
+    if ativos_alerta:
+        alertas_txt = " | ".join([f"{t} ({s:.0f})" for t, s in sorted(ativos_alerta, key=lambda x: x[1])[:3]])
+        st.warning(f"🚨 atenção no portfólio — health score crítico: {alertas_txt}")
+
+    st.caption("🔍 para análise completa acesse meu portfólio.")
+    st.markdown("---")
 
 # ==========================================
 # WATCHLIST INTELIGENTE E SELETOR
