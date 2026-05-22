@@ -1,0 +1,639 @@
+import streamlit as st
+from database.db import (
+    get_user_id, listar_usuarios, criar_usuario, deletar_usuario, alterar_senha,
+    listar_watchlists, criar_watchlist, renomear_watchlist, deletar_watchlist,
+    definir_watchlist_padrao, get_watchlist_padrao,
+    listar_portfolios, criar_portfolio, renomear_portfolio, deletar_portfolio,
+    definir_portfolio_padrao, get_portfolio_padrao,
+    listar_relatorios_enviados
+)
+
+st.set_page_config(page_title="configurações", page_icon="⚙️", layout="wide")
+
+# ── estilos ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+  .config-header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2d2d4e;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .config-card {
+    background: #1a1a2e;
+    border: 1px solid #2d2d4e;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .danger-zone {
+    border: 1px solid #ff4b4b44;
+    background: #ff4b4b0a;
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 16px;
+  }
+  .tag-pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+# ── cabeçalho ──────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="config-header">
+  <h2 style="margin:0; color:#e2e8f0;">⚙️ configurações</h2>
+  <p style="margin:4px 0 0; color:#94a3b8; font-size:0.9em;">
+    gerencie sua conta, listas, portfólios e preferências do sistema
+  </p>
+</div>
+""", unsafe_allow_html=True)
+
+user_id_atual = get_user_id()
+
+# verifica se é admin
+try:
+    is_admin = st.session_state.get('is_admin', False)
+except Exception:
+    is_admin = False
+
+# ── tabs ───────────────────────────────────────────────────────────────────────
+tabs_labels = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "📧 email & alertas", "🛡️ administração"]
+tab_conta, tab_wl, tab_pf, tab_email, tab_admin = st.tabs(tabs_labels)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — MINHA CONTA
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_conta:
+    st.subheader("👤 informações da conta")
+
+    col_info, col_senha = st.columns([1, 1], gap="large")
+
+    with col_info:
+        st.markdown("#### perfil")
+
+        username = st.session_state.get('username', 'usuário')
+        nome = st.session_state.get('nome', '')
+        email = st.session_state.get('email', '')
+
+        st.markdown(f"""
+        <div class="config-card">
+          <p style="margin:0; color:#94a3b8; font-size:0.8em;">usuário</p>
+          <p style="margin:2px 0 12px; font-size:1.1em; font-weight:600; color:#e2e8f0;">
+            {username}
+            {'<span class="tag-pill" style="background:#7c3aed22; color:#a78bfa; border:1px solid #7c3aed44;">admin</span>' if is_admin else ''}
+          </p>
+          <p style="margin:0; color:#94a3b8; font-size:0.8em;">nome</p>
+          <p style="margin:2px 0 12px; color:#e2e8f0;">{nome if nome else '—'}</p>
+          <p style="margin:0; color:#94a3b8; font-size:0.8em;">e-mail</p>
+          <p style="margin:2px 0 0; color:#e2e8f0;">{email if email else '—'}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.info("para alterar nome e e-mail, contate o administrador do sistema.", icon="ℹ️")
+
+    with col_senha:
+        st.markdown("#### alterar senha")
+
+        with st.form("form_alterar_senha"):
+            senha_atual = st.text_input("senha atual", type="password", placeholder="••••••••")
+            nova_senha = st.text_input("nova senha", type="password", placeholder="mínimo 6 caracteres")
+            conf_senha = st.text_input("confirmar nova senha", type="password", placeholder="repita a senha")
+
+            if st.form_submit_button("🔒 alterar senha", use_container_width=True, type="primary"):
+                if not senha_atual or not nova_senha:
+                    st.error("preencha todos os campos.")
+                elif nova_senha != conf_senha:
+                    st.error("as senhas não coincidem.")
+                elif len(nova_senha) < 6:
+                    st.error("a nova senha deve ter pelo menos 6 caracteres.")
+                else:
+                    from database.db import autenticar_usuario
+                    check = autenticar_usuario(username, senha_atual)
+                    if not check:
+                        st.error("senha atual incorreta.")
+                    else:
+                        alterar_senha(user_id_atual, nova_senha)
+                        st.success("✅ senha alterada com sucesso!")
+
+    st.divider()
+
+    # sessão
+    st.markdown("#### sessão")
+    col_s1, col_s2, col_s3 = st.columns(3)
+    with col_s1:
+        st.metric("user id", f"#{user_id_atual}")
+    with col_s2:
+        wl_padrao_id = get_watchlist_padrao()
+        wls = listar_watchlists()
+        nome_wl_padrao = next((w['nome'] for w in wls if w['id'] == wl_padrao_id), "—")
+        st.metric("watchlist padrão", nome_wl_padrao)
+    with col_s3:
+        pf_padrao_id = get_portfolio_padrao()
+        pfs = listar_portfolios()
+        nome_pf_padrao = next((p['nome'] for p in pfs if p['id'] == pf_padrao_id), "—")
+        st.metric("portfólio padrão", nome_pf_padrao)
+
+    if st.button("🚪 encerrar sessão", type="secondary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.success("sessão encerrada. recarregue a página para fazer login.")
+        st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — WATCHLISTS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_wl:
+    st.subheader("⭐ gerenciar watchlists")
+
+    wls = listar_watchlists()
+    wl_padrao_id = get_watchlist_padrao()
+
+    # criar nova
+    with st.expander("➕ criar nova watchlist", expanded=False):
+        with st.form("form_criar_wl"):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            with c1:
+                novo_nome_wl_criar = st.text_input("nome da watchlist", placeholder="ex: crescimento, dividendos…")
+            with c2:
+                novo_icone_wl_criar = st.text_input("ícone", value="⭐", max_chars=2)
+            with c3:
+                nova_cor_wl_criar = st.color_picker("cor", value="#FF9900")
+            nova_desc_wl_criar = st.text_area("descrição (opcional)", height=60)
+
+            if st.form_submit_button("✅ criar watchlist", use_container_width=True, type="primary"):
+                if not novo_nome_wl_criar.strip():
+                    st.error("informe um nome para a watchlist.")
+                else:
+                    criar_watchlist(novo_nome_wl_criar.strip(), nova_desc_wl_criar, nova_cor_wl_criar, novo_icone_wl_criar)
+                    st.success(f"watchlist '{novo_nome_wl_criar}' criada!")
+                    st.rerun()
+
+    st.divider()
+
+    if not wls:
+        st.info("nenhuma watchlist encontrada. crie uma acima.", icon="⭐")
+    else:
+        st.caption(f"{len(wls)} watchlist(s) encontrada(s)")
+
+        for wl in wls:
+            is_padrao = wl['id'] == wl_padrao_id
+            badge = " ⭐ padrão" if is_padrao else ""
+
+            with st.expander(f"{wl.get('icone','⭐')} **{wl['nome']}**{badge}  —  {wl.get('total_ativos', 0)} ativo(s)", expanded=False):
+                col_edit, col_acoes = st.columns([3, 1])
+
+                with col_edit:
+                    with st.form(f"form_editar_wl_{wl['id']}"):
+                        st.markdown(f"<small style='color:#64748b;'>id: {wl['id']}</small>", unsafe_allow_html=True)
+                        ec1, ec2, ec3 = st.columns([3, 1, 1])
+                        with ec1:
+                            novo_nome_wl = st.text_input("nome", value=wl['nome'], key=f"nome_wl_{wl['id']}")
+                        with ec2:
+                            novo_icone_wl = st.text_input("ícone", value=wl.get('icone', '⭐'), max_chars=2, key=f"icone_wl_{wl['id']}")
+                        with ec3:
+                            nova_cor_wl = st.color_picker("cor", value=wl.get('cor', '#FF9900'), key=f"cor_wl_{wl['id']}")
+                        nova_desc_wl = st.text_area("descrição", value=wl.get('descricao', ''), height=60, key=f"desc_wl_{wl['id']}")
+
+                        if st.form_submit_button("💾 salvar alterações", use_container_width=True):
+                            if not novo_nome_wl.strip():
+                                st.error("o nome não pode ser vazio.")
+                            else:
+                                renomear_watchlist(
+                                    wl['id'],
+                                    novo_nome_wl.strip(),
+                                    nova_desc_wl,
+                                    novo_icone=novo_icone_wl,
+                                    nova_cor=nova_cor_wl
+                                )
+                                st.success("watchlist atualizada!")
+                                st.rerun()
+
+                with col_acoes:
+                    st.markdown("**ações**")
+
+                    if not is_padrao:
+                        if st.button("⭐ definir padrão", key=f"padrao_wl_{wl['id']}", use_container_width=True):
+                            definir_watchlist_padrao(wl['id'])
+                            st.success(f"'{wl['nome']}' definida como padrão.")
+                            st.rerun()
+                    else:
+                        st.markdown(
+                            "<span style='color:#f59e0b; font-size:0.85em;'>✔ watchlist padrão</span>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.markdown("")
+                    if wl.get('total_ativos', 0) == 0:
+                        if st.button("🗑️ deletar", key=f"del_wl_{wl['id']}", use_container_width=True, type="secondary"):
+                            deletar_watchlist(wl['id'])
+                            st.warning(f"watchlist '{wl['nome']}' removida.")
+                            st.rerun()
+                    else:
+                        st.caption(f"remova os {wl.get('total_ativos')} ativos antes de deletar.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — PORTFÓLIOS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_pf:
+    st.subheader("💼 gerenciar portfólios")
+
+    pfs = listar_portfolios()
+    pf_padrao_id = get_portfolio_padrao()
+
+    # criar novo
+    with st.expander("➕ criar novo portfólio", expanded=False):
+        with st.form("form_criar_pf"):
+            pc1, pc2, pc3 = st.columns([3, 1, 1])
+            with pc1:
+                novo_nome_pf_criar = st.text_input("nome do portfólio", placeholder="ex: longo prazo, especulativo…")
+            with pc2:
+                novo_icone_pf_criar = st.text_input("ícone", value="💼", max_chars=2)
+            with pc3:
+                nova_cor_pf_criar = st.color_picker("cor", value="#3b82f6")
+            nova_desc_pf_criar = st.text_area("descrição (opcional)", height=60)
+
+            if st.form_submit_button("✅ criar portfólio", use_container_width=True, type="primary"):
+                if not novo_nome_pf_criar.strip():
+                    st.error("informe um nome para o portfólio.")
+                else:
+                    criar_portfolio(novo_nome_pf_criar.strip(), nova_desc_pf_criar, nova_cor_pf_criar, novo_icone_pf_criar)
+                    st.success(f"portfólio '{novo_nome_pf_criar}' criado!")
+                    st.rerun()
+
+    st.divider()
+
+    if not pfs:
+        st.info("nenhum portfólio encontrado. crie um acima.", icon="💼")
+    else:
+        st.caption(f"{len(pfs)} portfólio(s) encontrado(s)")
+
+        for pf in pfs:
+            is_padrao = pf['id'] == pf_padrao_id
+            badge = " ⭐ padrão" if is_padrao else ""
+
+            with st.expander(f"{pf.get('icone','💼')} **{pf['nome']}**{badge}  —  {pf.get('total_ativos', 0)} ativo(s)", expanded=False):
+                col_edit_pf, col_acoes_pf = st.columns([3, 1])
+
+                with col_edit_pf:
+                    with st.form(f"form_editar_pf_{pf['id']}"):
+                        st.markdown(f"<small style='color:#64748b;'>id: {pf['id']}</small>", unsafe_allow_html=True)
+                        pe1, pe2, pe3 = st.columns([3, 1, 1])
+                        with pe1:
+                            novo_nome_pf = st.text_input("nome", value=pf['nome'], key=f"nome_pf_{pf['id']}")
+                        with pe2:
+                            novo_icone_pf = st.text_input("ícone", value=pf.get('icone', '💼'), max_chars=2, key=f"icone_pf_{pf['id']}")
+                        with pe3:
+                            nova_cor_pf = st.color_picker("cor", value=pf.get('cor', '#FF9900'), key=f"cor_pf_{pf['id']}")
+                        nova_desc_pf = st.text_area("descrição", value=pf.get('descricao', ''), height=60, key=f"desc_pf_{pf['id']}")
+
+                        if st.form_submit_button("💾 salvar alterações", use_container_width=True):
+                            if not novo_nome_pf.strip():
+                                st.error("o nome não pode ser vazio.")
+                            else:
+                                renomear_portfolio(
+                                    pf['id'],
+                                    novo_nome_pf.strip(),
+                                    nova_desc_pf,
+                                    novo_icone=novo_icone_pf,
+                                    nova_cor=nova_cor_pf
+                                )
+                                st.success("portfólio atualizado!")
+                                st.rerun()
+
+                with col_acoes_pf:
+                    st.markdown("**ações**")
+
+                    if not is_padrao:
+                        if st.button("⭐ definir padrão", key=f"padrao_pf_{pf['id']}", use_container_width=True):
+                            definir_portfolio_padrao(pf['id'])
+                            st.success(f"'{pf['nome']}' definido como padrão.")
+                            st.rerun()
+                    else:
+                        st.markdown(
+                            "<span style='color:#f59e0b; font-size:0.85em;'>✔ portfólio padrão</span>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.markdown("")
+                    if pf.get('total_ativos', 0) == 0:
+                        if st.button("🗑️ deletar", key=f"del_pf_{pf['id']}", use_container_width=True, type="secondary"):
+                            deletar_portfolio(pf['id'])
+                            st.warning(f"portfólio '{pf['nome']}' removido.")
+                            st.rerun()
+                    else:
+                        st.caption(f"remova os {pf.get('total_ativos')} ativos antes de deletar.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — EMAIL & ALERTAS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_email:
+    st.subheader("📧 configurações de e-mail e alertas")
+
+    # leitura das credenciais SMTP configuradas nos secrets
+    try:
+        remetente = st.secrets["email"]["remetente"]
+        destinatario = st.secrets["email"]["destinatario"]
+        tem_config = bool(remetente and destinatario)
+    except Exception:
+        tem_config = False
+        remetente = ""
+        destinatario = ""
+
+    if tem_config:
+        st.success(
+            f"✅ SMTP configurado — remetente: `{remetente}` · destinatário padrão: `{destinatario}`",
+            icon="📬"
+        )
+    else:
+        st.warning(
+            "⚠️ credenciais de e-mail não configuradas em `secrets.toml`. "
+            "adicione a seção `[email]` com `remetente` e `destinatario` para habilitar o envio.",
+            icon="📭"
+        )
+
+    col_email_cfg, col_email_hist = st.columns([1, 1], gap="large")
+
+    with col_email_cfg:
+        st.markdown("#### endereço de e-mail")
+
+        email_salvo = st.session_state.get('email', '')
+
+        with st.form("form_email_config"):
+            email_input = st.text_input(
+                "e-mail para receber relatórios",
+                value=email_salvo,
+                placeholder="seu@email.com"
+            )
+            freq_opcoes = ["semanal (toda segunda)", "quinzenal", "mensal", "nunca"]
+            freq_idx = st.session_state.get('freq_relatorio_idx', 0)
+            frequencia = st.selectbox("frequência dos relatórios", freq_opcoes, index=freq_idx)
+
+            st.markdown("**conteúdo do relatório**")
+            inc_health = st.checkbox("health scores do portfólio", value=True)
+            inc_macro = st.checkbox("resumo macro (ibovespa, câmbio, juros)", value=True)
+            inc_alertas = st.checkbox("alertas de venda ativos", value=True)
+            inc_benchmark = st.checkbox("comparação com benchmark", value=False)
+
+            if st.form_submit_button("💾 salvar preferências", use_container_width=True, type="primary"):
+                st.session_state['email_relatorio'] = email_input
+                st.session_state['freq_relatorio_idx'] = freq_opcoes.index(frequencia)
+                st.success("✅ preferências de e-mail salvas!")
+
+        st.divider()
+
+        st.markdown("#### teste de envio")
+        if st.button("📤 enviar relatório agora", use_container_width=True):
+            email_destino = st.session_state.get('email_relatorio', email_salvo)
+            if not email_destino:
+                st.error("configure um e-mail acima antes de enviar.")
+            else:
+                try:
+                    from utils.email_sender import enviar_relatorio_semanal
+                    pesos = []
+                    try:
+                        from database.db import get_pesos
+                        pesos = get_pesos()
+                    except Exception:
+                        pass
+                    ok = enviar_relatorio_semanal({'tickers': [p['ticker'] for p in pesos], 'email': email_destino})
+                    if ok:
+                        from database.db import registrar_envio_relatorio
+                        registrar_envio_relatorio([p['ticker'] for p in pesos])
+                        st.success(f"✅ relatório enviado para {email_destino}!")
+                    else:
+                        st.error("falha ao enviar o relatório. verifique as configurações SMTP.")
+                except ImportError:
+                    st.warning("módulo `utils/email_sender.py` não encontrado. implemente a função `enviar_relatorio_semanal` para ativar essa funcionalidade.", icon="⚠️")
+                except Exception as e:
+                    st.error(f"erro ao enviar: {e}")
+
+    with col_email_hist:
+        st.markdown("#### histórico de envios")
+
+        relatorios = listar_relatorios_enviados(limite=15)
+
+        if not relatorios:
+            st.info("nenhum relatório enviado ainda.", icon="📭")
+        else:
+            st.caption(f"{len(relatorios)} envio(s) registrado(s)")
+            for r in relatorios:
+                enviado_em = r.get('enviado_em', '')[:16] if r.get('enviado_em') else '—'
+                tickers_str = r.get('tickers_incluidos', '') or ''
+                tickers_list = tickers_str.split(',') if tickers_str else []
+                n_tickers = len(tickers_list)
+                status = r.get('status', 'enviado')
+                status_cor = '#22c55e' if status == 'enviado' else '#ef4444'
+
+                st.markdown(f"""
+                <div class="config-card" style="padding:10px 14px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="color:#e2e8f0; font-size:0.9em;">📅 {enviado_em}</span>
+                    <span style="color:{status_cor}; font-size:0.75em; font-weight:600;">● {status}</span>
+                  </div>
+                  <div style="color:#94a3b8; font-size:0.8em; margin-top:4px;">
+                    {n_tickers} ticker(s) · tipo: {r.get('tipo','semanal')}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.divider()
+
+    st.markdown("#### 🔔 alertas de preço")
+    st.info("os alertas de preço são configurados diretamente na página de cada ativo (watchlist). aqui você pode ver um resumo.", icon="🔔")
+
+    try:
+        from database.db import get_connection
+        conn = get_connection()
+        alertas = conn.execute(
+            'SELECT * FROM alertas WHERE user_id=? ORDER BY criado_em DESC LIMIT 20',
+            (user_id_atual,)
+        ).fetchall()
+        conn.close()
+
+        if alertas:
+            import pandas as pd
+            df_alertas = pd.DataFrame([dict(a) for a in alertas])
+            df_alertas = df_alertas[['ticker', 'tipo', 'threshold', 'criado_em']].rename(columns={
+                'ticker': 'ticker',
+                'tipo': 'tipo',
+                'threshold': 'gatilho',
+                'criado_em': 'criado em'
+            })
+            st.dataframe(df_alertas, use_container_width=True, hide_index=True)
+        else:
+            st.caption("nenhum alerta de preço configurado.")
+    except Exception as e:
+        st.caption(f"não foi possível carregar alertas: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — ADMINISTRAÇÃO (apenas admin)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_admin:
+    st.subheader("🛡️ administração do sistema")
+
+    if not is_admin:
+        st.warning("🔒 área restrita a administradores.", icon="🛡️")
+        st.stop()
+
+    # ── listagem de usuários ───────────────────────────────────────────────
+    st.markdown("#### usuários cadastrados")
+
+    usuarios = listar_usuarios()
+    st.caption(f"{len(usuarios)} usuário(s) no sistema")
+
+    for u in usuarios:
+        tag_admin = "🛡️ admin" if u.get('is_admin') else "👤 usuário"
+        ultimo_login = u.get('ultimo_login', '')
+        ultimo_login_str = ultimo_login[:16] if ultimo_login else 'nunca'
+        criado_em = u.get('criado_em', '')[:10] if u.get('criado_em') else '—'
+
+        with st.expander(f"**{u['username']}** · {tag_admin}  —  {u.get('nome','')}", expanded=False):
+            info1, info2, info3 = st.columns(3)
+            with info1:
+                st.metric("id", f"#{u['id']}")
+            with info2:
+                st.metric("criado em", criado_em)
+            with info3:
+                st.metric("último login", ultimo_login_str)
+
+            st.caption(f"e-mail: {u.get('email') or '—'}")
+
+            acoes1, acoes2 = st.columns([1, 1])
+
+            with acoes1:
+                with st.form(f"form_reset_senha_{u['id']}"):
+                    nova_senha_admin = st.text_input(
+                        "nova senha",
+                        type="password",
+                        placeholder="mínimo 6 caracteres",
+                        key=f"nova_senha_admin_{u['id']}"
+                    )
+                    if st.form_submit_button("🔑 redefinir senha", use_container_width=True):
+                        if len(nova_senha_admin) < 6:
+                            st.error("mínimo 6 caracteres.")
+                        else:
+                            alterar_senha(u['id'], nova_senha_admin)
+                            st.success(f"senha de '{u['username']}' redefinida.")
+
+            with acoes2:
+                if u['id'] != user_id_atual:
+                    st.markdown("")
+                    st.markdown("""
+                    <div class="danger-zone">
+                      <p style="color:#f87171; font-size:0.85em; margin:0 0 8px;">⚠️ zona de risco</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button(
+                        f"🗑️ deletar '{u['username']}'",
+                        key=f"del_user_{u['id']}",
+                        use_container_width=True,
+                        type="secondary"
+                    ):
+                        deletar_usuario(u['id'])
+                        st.warning(f"usuário '{u['username']}' removido.")
+                        st.rerun()
+                else:
+                    st.info("você não pode deletar sua própria conta.", icon="ℹ️")
+
+    st.divider()
+
+    # ── criar usuário ──────────────────────────────────────────────────────
+    st.markdown("#### ➕ criar novo usuário")
+
+    with st.form("form_criar_usuario"):
+        cu1, cu2 = st.columns(2)
+        with cu1:
+            novo_username = st.text_input("username", placeholder="login único (sem espaços)")
+            novo_nome = st.text_input("nome completo", placeholder="opcional")
+        with cu2:
+            novo_email = st.text_input("e-mail", placeholder="opcional")
+            nova_senha_novo = st.text_input("senha inicial", type="password", placeholder="mínimo 6 caracteres")
+
+        novo_admin = st.checkbox("conceder permissão de administrador")
+
+        if st.form_submit_button("✅ criar usuário", use_container_width=True, type="primary"):
+            if not novo_username.strip():
+                st.error("informe um username.")
+            elif len(nova_senha_novo) < 6:
+                st.error("a senha deve ter pelo menos 6 caracteres.")
+            else:
+                ok = criar_usuario(
+                    novo_username.strip(),
+                    nova_senha_novo,
+                    nome=novo_nome,
+                    email=novo_email,
+                    is_admin=novo_admin
+                )
+                if ok:
+                    st.success(f"✅ usuário '{novo_username}' criado com sucesso!")
+                    st.rerun()
+                else:
+                    st.error(f"username '{novo_username}' já existe. escolha outro.")
+
+    st.divider()
+
+    # ── informações do sistema ─────────────────────────────────────────────
+    st.markdown("#### 🖥️ informações do sistema")
+
+    try:
+        import sqlite3
+        from database.db import db_name
+        conn_info = sqlite3.connect(db_name)
+        tabelas = conn_info.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+        tamanhos = []
+        for (tabela,) in tabelas:
+            try:
+                count = conn_info.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
+                tamanhos.append({'tabela': tabela, 'registros': count})
+            except Exception:
+                tamanhos.append({'tabela': tabela, 'registros': '—'})
+        conn_info.close()
+
+        import pandas as pd
+        df_tabelas = pd.DataFrame(tamanhos)
+        st.dataframe(df_tabelas, use_container_width=True, hide_index=True)
+
+        import os
+        if os.path.exists(db_name):
+            tamanho_kb = os.path.getsize(db_name) / 1024
+            st.caption(f"banco de dados: `{db_name}` — {tamanho_kb:.1f} KB")
+    except Exception as e:
+        st.warning(f"não foi possível carregar informações do banco: {e}")
+
+    st.divider()
+
+    # ── limpeza de cache ───────────────────────────────────────────────────
+    st.markdown("#### 🧹 manutenção")
+
+    manut1, manut2 = st.columns(2)
+
+    with manut1:
+        if st.button("🧹 limpar cache do Streamlit", use_container_width=True):
+            st.cache_data.clear()
+            st.success("cache limpo com sucesso!")
+
+    with manut2:
+        if st.button("🗑️ limpar cache de IA (análises antigas)", use_container_width=True):
+            try:
+                from database.db import get_connection as _gc
+                c = _gc()
+                removidos = c.execute(
+                    "DELETE FROM cache_analise_ia WHERE gerado_em < datetime('now', '-30 days')"
+                ).rowcount
+                c.commit()
+                c.close()
+                st.success(f"{removidos} análise(s) antiga(s) removida(s).")
+            except Exception as e:
+                st.error(f"erro: {e}")

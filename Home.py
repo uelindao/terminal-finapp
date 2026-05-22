@@ -14,12 +14,14 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge, render_painel_admin, get_current_user
 from utils.style import aplicar_tema
 from database.db import (
-    init_db, popular_watchlist_inicial, listar_watchlist, 
-    remover_ativo, adicionar_ativo, atualizar_notas, 
+    init_db, popular_watchlist_inicial, listar_watchlist,
+    remover_ativo, adicionar_ativo, atualizar_notas,
     get_health_scores, get_pesos, get_connection,
     listar_watchlists, criar_watchlist, renomear_watchlist,
-    deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao
+    deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao,
+    registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados
 )
+from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score
 from utils.tickers import mapear_ticker_base
 
@@ -677,3 +679,98 @@ else:
                         exibir_memorial(t, h_info['score'], breakdown, lista_alertas)
                         
                 st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+
+# ==========================================
+# RELATÓRIO SEMANAL
+# ==========================================
+section_title("📧 relatório semanal")
+
+ultimo_envio = get_ultimo_envio_relatorio()
+
+col_rel1, col_rel2 = st.columns([3, 1])
+with col_rel1:
+    if ultimo_envio:
+        from datetime import datetime
+        dt_ultimo = datetime.fromisoformat(ultimo_envio['enviado_em'])
+        dias_desde = (datetime.now() - dt_ultimo).days
+        if dias_desde >= 7:
+            st.info(f"📬 último relatório enviado há {dias_desde} dias ({dt_ultimo.strftime('%d/%m/%Y')}). hora de enviar o novo!")
+        else:
+            st.success(f"✅ relatório enviado em {dt_ultimo.strftime('%d/%m/%Y %H:%M')} — {dias_desde} dia(s) atrás.")
+    else:
+        st.info("📭 nenhum relatório enviado ainda. clique para gerar o primeiro.")
+
+with col_rel2:
+    btn_relatorio = st.button(
+        "📧 enviar relatório",
+        type="primary",
+        use_container_width=True,
+        key="btn_enviar_relatorio"
+    )
+
+if btn_relatorio:
+    with st.spinner("montando relatório do portfólio..."):
+        try:
+            pesos_rel = get_pesos()
+            ativos_rel = {p['ticker']: p for p in pesos_rel if p.get('quantidade', 0) > 0}
+
+            if not ativos_rel:
+                st.warning("nenhum ativo no portfólio para incluir no relatório.")
+            else:
+                health_rel = {h['ticker']: h for h in get_health_scores()}
+
+                tickers_base_rel = list(set([mapear_ticker_base(t) for t in ativos_rel.keys()]))
+                hist_rel = yf.download(tickers_base_rel, period="35d", auto_adjust=True, progress=False)['Close']
+                if isinstance(hist_rel, pd.Series):
+                    hist_rel = hist_rel.to_frame(name=tickers_base_rel[0])
+                hist_rel = hist_rel.ffill()
+
+                dados_carteira = []
+                for t, dados in ativos_rel.items():
+                    t_base = mapear_ticker_base(t)
+                    score = health_rel.get(t_base, {}).get('score', 50)
+
+                    var_1d = 0.0
+                    var_1m = 0.0
+                    try:
+                        if t_base in hist_rel.columns:
+                            s = hist_rel[t_base].dropna()
+                            if len(s) >= 2:
+                                var_1d = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
+                            if len(s) >= 22:
+                                var_1m = ((float(s.iloc[-1]) / float(s.iloc[-22])) - 1) * 100
+                    except:
+                        pass
+
+                    dados_carteira.append({
+                        'ticker': t,
+                        'score': score,
+                        'var_1d': var_1d,
+                        'var_1m': var_1m,
+                    })
+
+                ok = enviar_relatorio_semanal(dados_carteira)
+
+                if ok:
+                    registrar_envio_relatorio(list(ativos_rel.keys()))
+                    st.success(f"✅ relatório enviado para {st.secrets['email']['destinatario']}! verifique sua caixa de entrada.")
+                    st.rerun()
+                else:
+                    st.error("erro ao enviar. verifique as configurações de email em secrets.toml.")
+        except Exception as e:
+            st.error(f"erro ao montar relatório: {e}")
+
+with st.expander("📋 histórico de envios", expanded=False):
+    historico = listar_relatorios_enviados(limite=5)
+    if historico:
+        from datetime import datetime
+        for h in historico:
+            dt_h = datetime.fromisoformat(h['enviado_em'])
+            tickers_h = h['tickers_incluidos'].split(',') if h['tickers_incluidos'] else []
+            st.markdown(
+                f'<div style="font-family:Courier New; font-size:0.8rem; color:#888; padding:6px 0; border-bottom:1px solid #1e1e1e;">'
+                f'📧 {dt_h.strftime("%d/%m/%Y %H:%M")} — {len(tickers_h)} ativos incluídos</div>',
+                unsafe_allow_html=True
+            )
+    else:
+        st.caption("nenhum envio registrado.")

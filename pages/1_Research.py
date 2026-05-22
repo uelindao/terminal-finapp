@@ -9,6 +9,7 @@ from google import genai
 from fredapi import Fred
 from bcb import sgs
 import logging
+import requests
 
 # silenciar alertas vermelhos do yahoo finance no terminal
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -40,6 +41,18 @@ init_db()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
 # ==========================================
+# MOTOR DE BUSCA GLOBAL (YAHOO FINANCE)
+# ==========================================
+def buscar_ativo_yahoo(query):
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+    headers = {'user-agent': 'Mozilla/5.0'}
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        return r.json().get('quotes', [])
+    except:
+        return []
+
+# ==========================================
 # GESTÃO DE ESTADO E SIDEBAR
 # ==========================================
 if 'research_ticker' not in st.session_state:
@@ -56,18 +69,51 @@ with st.sidebar:
     
     if modo_pesquisa == "Deep Dive (Individual)":
         section_title("pesquisar ativo")
+        
+        # --- NOVA BUSCA GLOBAL (YAHOO FINANCE API) ---
+        termo = st.text_input("buscar qualquer ativo global:", placeholder="nome ou ticker (ex: nubank, aapl)...")
+        if st.button("🔍 buscar ativo", use_container_width=True):
+            if termo:
+                with st.spinner("procurando na rede global..."):
+                    resultados = buscar_ativo_yahoo(termo)
+                    if resultados:
+                        melhor_match = resultados[0].get('symbol')
+                        if melhor_match:
+                            st.session_state['research_ticker'] = melhor_match
+                            st.rerun()
+                    else:
+                        st.warning("ativo não encontrado.")
+        
+        st.markdown("<div style='text-align: center; color: #555; padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
+        
+        # --- LISTA PADRÃO COM PROTEÇÃO PARA ATIVOS EXTERNOS ---
         opcoes = get_opcoes_selectbox()
+        ticker_atual = st.session_state['research_ticker']
+        
+        # Verifica se o ticker pesquisado está na lista padrão, se não, adiciona ele no topo
+        ticker_presente = any(ticker_atual in opt for opt in opcoes)
+        if not ticker_presente:
+            opcoes.insert(0, f"{ticker_atual} — Ativo Externo")
         
         idx_default = 0
         for i, opt in enumerate(opcoes):
-            if st.session_state['research_ticker'] in opt:
+            if ticker_atual in opt:
                 idx_default = i
                 break
 
-        escolha = st.selectbox("selecionar ticker:", opcoes, index=idx_default)
-        ticker_limpo = ticker_from_label(escolha)
-        if ticker_limpo:
+        escolha = st.selectbox("lista de ativos:", opcoes, index=idx_default, label_visibility="collapsed")
+        
+        # Extrair ticker com segurança
+        if " — " in escolha:
+            ticker_limpo = escolha.split(" — ")[0].strip()
+        else:
+            ticker_limpo = ticker_from_label(escolha)
+            
+        # Atualiza a página caso o usuário escolha outro item da lista dropdown
+        if ticker_limpo and ticker_limpo != st.session_state['research_ticker']:
             st.session_state['research_ticker'] = ticker_limpo
+            st.rerun()
+            
     else:
         section_title("comparar ativos")
         ativos_comp = st.multiselect("selecione os ativos:", 
@@ -75,7 +121,7 @@ with st.sidebar:
                                      default=["PETR4.SA", "VALE3.SA", "ITUB4.SA"])
     
     st.markdown("---")
-    st.caption("v2.3 — ia context-aware ativa")
+    st.caption("v2.4 — busca universal implementada")
 
 # Trava de segurança para números
 def safe_float(val):
@@ -199,7 +245,7 @@ if is_fii:
     dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
     mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
     assets = safe_float(info_dict.get('totalAssets'))
-    with c1: metric_card("preço / vp", f"{pvp:.2f}" if pvp else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear")
+    with c1: metric_card("preço / vp", f"{pvp:.2f}" if pvp is not None else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear")
     with c2: metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted")
     with c3: metric_card("mkt cap", fmt_numero(mcap, moeda))
     with c4: metric_card("patrimônio líq.", fmt_numero(assets, moeda))
@@ -208,7 +254,7 @@ else:
     roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
     mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
     dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
-    with c1: metric_card("preço / lucro", f"{pl:.1f}" if pl else "n/d", "valuation")
+    with c1: metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation")
     with c2: metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted")
     with c3: metric_card("margem líq.", fmt_pct(mrg), "eficiência", "bull" if mrg and mrg > 10 else "bear")
     with c4: metric_card("div yield", fmt_pct(dy), "12m")
@@ -263,11 +309,23 @@ with tab_fund:
             assets_t = safe_float(info_dict.get('totalAssets', 1))
             ltv = (debt / assets_t * 100) if assets_t > 0 else 0
             f_d = {"métrica": ["P/VP", "Yield (12m)", "Volatilidade Anual", "Alavancagem (Dívida/Ativos)", "Setor/Segmento"], 
-                   "valor": [f"{pvp:.2f}" if pvp else "N/D", fmt_pct(dy), vol, f"{ltv:.1f}%" if ltv > 0 else "baixa/nula", setor]}
+                   "valor": [f"{pvp:.2f}" if pvp is not None else "N/D", fmt_pct(dy), vol, f"{ltv:.1f}%" if ltv > 0 else "baixa/nula", setor]}
         else:
             ev_e = safe_float(cache_d.get('ev/ebitda')) or safe_float(info_dict.get('enterpriseToEbitda'))
-            f_d = {"métrica": ["EV/EBITDA", "P/VP", "Volatilidade Anual", "Beta", "Dívida/Patrimônio"], 
-                   "valor": [f"{ev_e:.2f}" if ev_e else "N/D", f"{safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook')):.2f}", vol, f"{safe_float(info_dict.get('beta')):,.2f}" if safe_float(info_dict.get('beta')) else "N/D", f"{safe_float(info_dict.get('debtToEquity')):,.1f}%" if safe_float(info_dict.get('debtToEquity')) else "N/D"]}
+            pvp_val = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+            beta_val = safe_float(info_dict.get('beta'))
+            debt_val = safe_float(info_dict.get('debtToEquity'))
+            
+            f_d = {
+                "métrica": ["EV/EBITDA", "P/VP", "Volatilidade Anual", "Beta", "Dívida/Patrimônio"], 
+                "valor": [
+                    f"{ev_e:.2f}" if ev_e is not None else "N/D", 
+                    f"{pvp_val:.2f}" if pvp_val is not None else "N/D", 
+                    vol, 
+                    f"{beta_val:,.2f}" if beta_val is not None else "N/D", 
+                    f"{debt_val:,.1f}%" if debt_val is not None else "N/D"
+                ]
+            }
         st.table(pd.DataFrame(f_d))
     with c_f2:
         st.markdown("**descrição**")
@@ -442,6 +500,11 @@ if st.button("🧠 gerar diagnóstico de tese via gemini", use_container_width=T
             val_roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
             val_dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
             
+            val_pl_str = f"{val_pl:.2f}" if val_pl is not None else "N/D"
+            val_pvp_str = f"{val_pvp:.2f}" if val_pvp is not None else "N/D"
+            val_roe_str = f"{val_roe:.1f}%" if val_roe is not None else "N/D"
+            val_dy_str = f"{val_dy:.1f}%" if val_dy is not None else "N/D"
+            
             # Cálculo de Alavancagem para FIIs
             debt_val = safe_float(info_dict.get('totalDebt', 0))
             assets_val = safe_float(info_dict.get('totalAssets', 1))
@@ -449,9 +512,9 @@ if st.button("🧠 gerar diagnóstico de tese via gemini", use_container_width=T
 
             # Construção do Contexto Rico para a IA
             if is_fii:
-                ctx = f"ativo: {ticker} (Fundo Imobiliário). Segmento: {setor}. P/VP: {val_pvp:.2f}. Dividend Yield: {val_dy:.1f}%. Alavancagem (Dívida/Ativos): {ltv_val:.1f}%."
+                ctx = f"ativo: {ticker} (Fundo Imobiliário). Segmento: {setor}. P/VP: {val_pvp_str}. Dividend Yield: {val_dy_str}. Alavancagem (Dívida/Ativos): {ltv_val:.1f}%."
             else:
-                ctx = f"ativo: {ticker}. P/L: {val_pl:.2f}. ROE: {val_roe:.1f}%. Dividend Yield: {val_dy:.1f}%. Setor: {setor}."
+                ctx = f"ativo: {ticker}. P/L: {val_pl_str}. ROE: {val_roe_str}. Dividend Yield: {val_dy_str}. Setor: {setor}."
 
             client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
             res = client.models.generate_content(model='gemini-2.5-flash', 

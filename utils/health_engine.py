@@ -99,7 +99,7 @@ def calcular_piotroski(acao):
     except Exception:
         return 0, {}
 
-def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
+def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
     Cruza pilares fundamentalistas com o cenário macro e momentum técnico.
@@ -117,12 +117,27 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
-        acao = yf.Ticker(ticker)
-        info = acao.info
-        hist = acao.history(period="1y")
-        
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})
+        cache_disponivel = bool(dados_base and dados_base.get('qualidade_dados', 0) >= 40)
+
+        # usar hist_externo se disponível, senão buscar individualmente
+        if hist_externo is not None and not (isinstance(hist_externo, pd.DataFrame) and hist_externo.empty):
+            hist = hist_externo if isinstance(hist_externo, pd.DataFrame) else pd.DataFrame({'Close': hist_externo})
+        else:
+            acao_temp = yf.Ticker(ticker)
+            hist = acao_temp.history(period="1y")
+
+        # pular acao.info para qualquer mercado com cache populado
+        if cache_disponivel and (is_br or is_fii or is_us):
+            info = {}
+            acao = None
+        else:
+            if 'acao_temp' in locals():
+                acao = acao_temp
+            else:
+                acao = yf.Ticker(ticker)
+            info = acao.info
 
         qualidade = dados_base.get('qualidade_dados', 50)
         dados_confiaveis = qualidade >= 40
@@ -178,13 +193,28 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
                 
             score_y = 0
             if dy is not None:
-                if 8.0 <= dy <= 12.0: score_y += 40 
-                elif dy > 12.0:
-                    score_y += 20
-                    alertas.append("🚨 yield trap? dividendos excessivamente altos.")
-                elif 5.0 <= dy < 8.0: score_y += 20
-                elif dy < 5.0: alertas.append("⚠️ dividend yield muito baixo para um FII.")
-            else: score_y += 20
+                selic_atual = macro_context.get('selic', 10.5)
+                # yield mínimo aceitável = Selic + 2% (prêmio de risco imobiliário)
+                yield_minimo   = selic_atual + 2.0
+                yield_otimo    = selic_atual + 4.0
+                yield_excessivo = selic_atual + 8.0
+
+                if dy >= yield_otimo and dy <= yield_excessivo:
+                    score_y += 40
+                elif dy >= yield_minimo and dy < yield_otimo:
+                    score_y += 25
+                    alertas.append(f"ℹ️ yield ({dy:.1f}%) adequado mas abaixo do ótimo para selic {selic_atual:.1f}%.")
+                elif dy > yield_excessivo:
+                    score_y += 15
+                    alertas.append(f"🚨 yield trap? dividendo ({dy:.1f}%) excessivamente alto vs selic {selic_atual:.1f}%.")
+                elif dy < yield_minimo and dy >= selic_atual:
+                    score_y += 10
+                    alertas.append(f"⚠️ yield ({dy:.1f}%) abaixo do prêmio mínimo exigido vs selic {selic_atual:.1f}%.")
+                else:
+                    score_y += 0
+                    alertas.append(f"🚨 yield ({dy:.1f}%) muito baixo para FII com selic a {selic_atual:.1f}%.")
+            else:
+                score_y += 20
 
             score_tec = 20 + penalidade_tec
             score = score_pvp + score_y + score_tec
@@ -199,7 +229,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
         # MOTOR 2 e 3: AÇÕES (B3 vs EUA)
         # ==========================================
         else:
-            f_score, f_detalhamento = calcular_piotroski(acao)
+            if acao is not None:
+                f_score, f_detalhamento = calcular_piotroski(acao)
+            else:
+                f_score, f_detalhamento = 0, {}
             
             pl = dados_base.get('p/l') or info.get('trailingPE', info.get('forwardPE', None))
             roe = dados_base.get('roe%') or (info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else None)
@@ -207,52 +240,55 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
             ev_ebitda = dados_base.get('ev/ebitda') or info.get('enterpriseToEbitda', None)
             debt_equity = info.get('debtToEquity', None)
 
-            # --- Qualidade e Rentabilidade ---
+            # --- Qualidade e Rentabilidade (máx 24pts) ---
             score_q = 0
             if roe is not None:
-                if roe > 20: score_q += 15
-                elif roe > 10: score_q += 10
-                elif roe > 0: score_q += 5
+                if roe > 20: score_q += 12
+                elif roe > 10: score_q += 8
+                elif roe > 0: score_q += 4
                 else: alertas.append("⚠️ empresa destruindo valor (roe negativo).")
-                
+
             if margem is not None:
-                if margem > 15: score_q += 15
-                elif margem > 5: score_q += 10
+                if margem > 15: score_q += 12
+                elif margem > 5: score_q += 8
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
-            else: score_q += 7
+            else: score_q += 6
             
-            # --- Valuation Adaptativo (B3 vs EUA) ---
+            # --- Valuation Adaptativo (máx 26pts, B3 vs EUA) ---
             score_v = 0
             if pl is not None and pl > 0:
-                limite_pl_bom = 18 if is_us else 10
-                limite_pl_medio = 30 if is_us else 20
-                
-                if pl <= limite_pl_bom: score_v += 15
-                elif pl <= limite_pl_medio: score_v += 10
+                limite_pl_bom   = 18 if is_us else 13
+                limite_pl_medio = 32 if is_us else 25
+
+                if pl <= limite_pl_bom: score_v += 13
+                elif pl <= limite_pl_medio: score_v += 8
                 elif pl > limite_pl_medio: alertas.append(f"⚠️ valuation esticado (p/l de {pl:.1f}).")
-                
+
             if pvp is not None and pvp > 0:
-                limite_pvp_bom = 3.5 if is_us else 1.5
-                limite_pvp_medio = 6.0 if is_us else 3.0
-                
-                if pvp <= limite_pvp_bom: score_v += 15
-                elif pvp <= limite_pvp_medio: score_v += 10
+                limite_pvp_bom   = 4.0 if is_us else 2.0
+                limite_pvp_medio = 8.0 if is_us else 4.0
+
+                if pvp <= limite_pvp_bom: score_v += 13
+                elif pvp <= limite_pvp_medio: score_v += 8
                 elif pvp > limite_pvp_medio: alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
-            # --- Solvência e Risco ---
+            # --- Solvência e Risco (máx 20pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
-            penalizacao_divida = 2 if (is_br and juros_altos_br) else 1 
-            
+            penalizacao_divida = 2 if (is_br and juros_altos_br) else 1
+
             if debt_equity is not None:
-                if debt_equity < 50: score_r += 20
-                elif debt_equity < 120: score_r += 10
-                elif debt_equity > 150: 
-                    alertas.append(f"🚨 risco de solvência (dívida alta).")
+                limite_de_bom   = 30 if (is_br and juros_altos_br) else 50
+                limite_de_medio = 100 if (is_br and juros_altos_br) else 120
+
+                if debt_equity < limite_de_bom: score_r += 20
+                elif debt_equity < limite_de_medio: score_r += 10
+                elif debt_equity > 150:
+                    alertas.append(f"🚨 risco de solvência (dívida alta, d/e: {debt_equity:.0f}).")
                     score_r -= (10 * penalizacao_divida)
             elif ev_ebitda is not None and ev_ebitda > 0:
-                limite_ev_bom = 12 if is_us else 8
-                limite_ev_medio = 18 if is_us else 12
-                
+                limite_ev_bom   = 12 if is_us else 8
+                limite_ev_medio = 20 if is_us else 14
+
                 if ev_ebitda <= limite_ev_bom: score_r += 20
                 elif ev_ebitda <= limite_ev_medio: score_r += 10
                 elif ev_ebitda > limite_ev_medio:
@@ -278,7 +314,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
             elif f_score >= 5:
                 score_piotroski = 8
             elif f_score <= 2 and f_detalhamento:
-                score_piotroski = -10
+                score_piotroski = -8
                 alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
 
             # penalidade por dados de baixa qualidade
@@ -307,15 +343,26 @@ def calcular_health_score(ticker: str, macro_context: dict = None) -> dict:
         # ==========================================
         # DIAGNÓSTICO FINAL COMPARTILHADO
         # ==========================================
-        status_acao = ""
-        score = min(max(int(score), 0), 100) 
+        score = min(max(int(score), 0), 100)
 
-        if score >= 75 and rsi < 40:
-            status_acao = "🟢 ACUMULAÇÃO FORTE: Ativo sólido com desconto e sobrevendido."
-        elif score >= 65 and rsi >= 40:
+        # RSI como qualificador adicional, não como gate exclusivo
+        rsi_sobrevendido  = rsi < 35
+        rsi_sobrecomprado = rsi > 70
+
+        if score >= 72:
+            if rsi_sobrevendido:
+                status_acao = "🟢 ACUMULAÇÃO FORTE: Ativo sólido com desconto e sobrevendido."
+            elif rsi_sobrecomprado:
+                status_acao = "🟡 ATENÇÃO: Fundamentos sólidos mas sobrecomprado no curto prazo."
+            else:
+                status_acao = "🟢 ACUMULAÇÃO: Ativo sólido. Bom ponto de entrada."
+        elif score >= 58:
             status_acao = "🟡 MANUTENÇÃO: Saudável, sem desconto gritante. Aporte neutro."
-        elif score < 65 and score >= 40 and preco_atual < mm200:
-            status_acao = "🟠 REDUZIR EXPOSIÇÃO: Fundamentos fracos e tendência de baixa."
+        elif score >= 40:
+            if preco_atual < mm200:
+                status_acao = "🟠 REDUZIR EXPOSIÇÃO: Fundamentos fracos e tendência de baixa."
+            else:
+                status_acao = "🟠 AGUARDAR: Fundamentos medianos. Sem catalisador claro."
         elif score < 40:
             status_acao = "🔴 VENDA DEFINITIVA: Quebra de tese (Score Crítico)."
         else:

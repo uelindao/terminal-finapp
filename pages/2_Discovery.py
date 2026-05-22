@@ -273,46 +273,118 @@ with tab_setup:
             else: 
                 universo = tickers_watchlist
 
-        resultados = []
-        barra = st.progress(0); status = st.empty()
+        barra = st.progress(0)
+        status = st.empty()
+        resultados_engine = []
 
+        # batch download único para todos os ativos
+        status.text(f"baixando histórico de {len(universo)} ativos de uma vez...")
+        tickers_base_universo = list(set([mapear_ticker_base(t) for t in universo]))
+        hist_batch = {}
+
+        try:
+            df_batch = yf.download(
+                tickers_base_universo,
+                period="1y",
+                auto_adjust=True,
+                progress=False,
+                threads=True
+            )
+            if isinstance(df_batch.columns, pd.MultiIndex):
+                df_close = df_batch['Close']
+            else:
+                df_close = df_batch
+
+            if isinstance(df_close, pd.DataFrame):
+                for col in df_close.columns:
+                    serie = df_close[col].dropna()
+                    if len(serie) > 10:
+                        hist_batch[str(col)] = serie.to_frame('Close')
+            elif isinstance(df_close, pd.Series):
+                if tickers_base_universo:
+                    hist_batch[tickers_base_universo[0]] = df_close.dropna().to_frame('Close')
+        except Exception as e:
+            status.text(f"batch falhou ({e}), usando chamadas individuais...")
+
+        # loop sequencial — sem threads para não causar rerun
+        macro_ctx = None
         for i, t in enumerate(universo):
-            status.text(f"engine a processar {t.lower()} ({i+1}/{len(universo)})...")
-            barra.progress((i+1)/len(universo))
             t_base = mapear_ticker_base(t)
+            status.text(f"engine a processar {t.lower()} ({i+1}/{len(universo)})...")
+            barra.progress((i + 1) / len(universo))
 
             try:
-                resultado_engine = calcular_health_score(t_base)
-                score = resultado_engine['score']
-                status_acao = resultado_engine.get('status', '⚪ AGUARDAR')
-                
-                acao = yf.Ticker(t_base)
-                preco = acao.fast_info.last_price
-                var_1d = ((preco / acao.fast_info.previous_close) - 1) * 100 if acao.fast_info.previous_close else 0
-                
-                f_dados = CACHE_FUNDAMENTOS.get(t_base, {})
-                setor = f_dados.get('setor', 'imobiliário' if t_base in FII_TODOS else '—')
-                nome = f_dados.get('nome', t)
-
-                if score >= score_min:
-                    resultados.append({
-                        'ticker': t, 'nome': nome, 'setor': setor, 
-                        'status engine': status_acao,
-                        'score saúde': round(score, 1),
-                        'preço': preco, 'var 1d%': round(var_1d, 2),
-                        'na watchlist': t in tickers_watchlist
+                hist_ext = hist_batch.get(t_base, None)
+                resultado_engine = calcular_health_score(
+                    t_base,
+                    macro_context=macro_ctx,
+                    hist_externo=hist_ext
+                )
+                score_val = resultado_engine.get('score', 0)
+                if score_val >= score_min:
+                    f_dados = CACHE_FUNDAMENTOS.get(t_base, {})
+                    resultados_engine.append({
+                        'ticker': t,
+                        'score': score_val,
+                        'status': resultado_engine.get('status', ''),
+                        'alertas': resultado_engine.get('alertas', []),
+                        'nome': f_dados.get('nome', t_base),
+                        'setor': traduzir_setor(f_dados.get('setor', '—')),
+                        'p/l': f_dados.get('p/l'),
+                        'p/vp': f_dados.get('p/vp'),
+                        'roe%': f_dados.get('roe%'),
+                        'dy%': f_dados.get('dy%'),
                     })
-            except Exception: pass 
+            except Exception:
+                continue
+
+        status.text(f"✅ concluído — {len(resultados_engine)} ativos acima do score {score_min}.")
+        resultados_engine.sort(key=lambda x: x['score'], reverse=True)
 
         barra.empty(); status.empty()
-        st.session_state['setup_resultados'] = resultados
+        st.session_state['setup_resultados'] = resultados_engine
         st.session_state['setup_ia_result'] = None
 
     if 'setup_resultados' in st.session_state and st.session_state['setup_resultados']:
-        df_setup = pd.DataFrame(st.session_state['setup_resultados']).sort_values('score saúde', ascending=False)
-        
+        df_setup = pd.DataFrame(st.session_state['setup_resultados']).sort_values('score', ascending=False)
+
+        # filtro por status
+        status_disponiveis = df_setup['status'].dropna().unique().tolist()
+        status_opcoes = ["todos"] + sorted(set([
+            s.split(":")[0].strip() if ":" in s else s
+            for s in status_disponiveis
+        ]))
+
+        fcol1, fcol2, fcol3 = st.columns([2, 2, 2])
+        with fcol1:
+            filtro_status = st.selectbox(
+                "filtrar por status:",
+                status_opcoes,
+                key="filtro_status_setup"
+            )
+        with fcol2:
+            filtro_setor = st.selectbox(
+                "filtrar por setor:",
+                ["todos"] + sorted(df_setup['setor'].dropna().unique().tolist()),
+                key="filtro_setor_setup"
+            )
+        with fcol3:
+            st.metric("ativos encontrados", len(df_setup))
+
+        # aplicar filtros
+        df_filtrado = df_setup.copy()
+        if filtro_status != "todos":
+            df_filtrado = df_filtrado[df_filtrado['status'].str.contains(filtro_status, na=False)]
+        if filtro_setor != "todos":
+            df_filtrado = df_filtrado[df_filtrado['setor'] == filtro_setor]
+
+        if df_filtrado.empty:
+            st.info("nenhum ativo encontrado com os filtros selecionados.")
+        else:
+            st.caption(f"exibindo {len(df_filtrado)} de {len(df_setup)} ativos")
+
         st.markdown("<br>", unsafe_allow_html=True)
-        for idx, row in df_setup.reset_index(drop=True).iterrows():
+        for idx, row in df_filtrado.reset_index(drop=True).iterrows():
             cols = st.columns([1, 2, 3, 3, 2, 1.5, 1.5, 2])
             with cols[0]:
                 st.markdown(f"<div style='font-family: Courier New; font-weight: bold; color: #FF9900; padding-top: 8px;'>{idx+1}</div>", unsafe_allow_html=True)
@@ -323,31 +395,31 @@ with tab_setup:
                 st.markdown(f"<div style='font-size: 0.85rem; color: #555; padding-top: 8px;'>{nome_trunc}</div>", unsafe_allow_html=True)
             with cols[3]:
                 status_color = "#888888"
-                if "🟢" in row['status engine']: status_color = "#00C853"
-                elif "🟡" in row['status engine']: status_color = "#FF9900"
-                elif "🟠" in row['status engine']: status_color = "#FF7043"
-                elif "🔴" in row['status engine']: status_color = "#FF1744"
-                st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem; font-weight: bold; color: {status_color};'>{row['status engine']}</div>", unsafe_allow_html=True)
+                if "🟢" in row['status']: status_color = "#00C853"
+                elif "🟡" in row['status']: status_color = "#FF9900"
+                elif "🟠" in row['status']: status_color = "#FF7043"
+                elif "🔴" in row['status']: status_color = "#FF1744"
+                st.markdown(f"<div style='padding-top: 8px; font-size: 0.8rem; font-weight: bold; color: {status_color};'>{row['status']}</div>", unsafe_allow_html=True)
             with cols[4]:
                 st.markdown(f"<div style='padding-top: 8px; font-size: 0.85rem;'>{row['setor']}</div>", unsafe_allow_html=True)
             with cols[5]:
-                st.markdown(f"<div style='padding-top: 8px; font-weight: bold;'>HS: {row['score saúde']:.1f}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='padding-top: 8px; font-weight: bold;'>HS: {row['score']:.1f}</div>", unsafe_allow_html=True)
             with cols[6]:
-                var_color = "#00C853" if row['var 1d%'] >= 0 else "#FF1744"
-                st.markdown(f"<div style='padding-top: 8px; color: {var_color};'>{row['var 1d%']:+.2f}%</div>", unsafe_allow_html=True)
+                var_color = "#00C853" if row.get('var 1d%', 0) >= 0 else "#FF1744"
+                st.markdown(f"<div style='padding-top: 8px; color: {var_color};'>{row.get('var 1d%', 0):+.2f}%</div>", unsafe_allow_html=True)
             with cols[7]:
                 if st.button("＋ watchlist", key=f"btn_wl_setup_{row['ticker']}_{idx}", use_container_width=True):
                     modal_salvar_screener(row['ticker'], row['nome'], "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua")
             st.markdown("<hr style='border-top: 1px solid #1e1e1e; margin: 0.5rem 0;'>", unsafe_allow_html=True)
 
         st.markdown("---")
-        if not df_setup[df_setup['status engine'].str.contains("🟢")].empty:
+        if not df_setup[df_setup['status'].str.contains("🟢")].empty:
             if st.button("🤖 ia: analisar top picks (acumulação forte)", use_container_width=True, type="primary"):
                 with st.spinner("gemini a elaborar o racional..."):
                     try:
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        alvos = df_setup[df_setup['status engine'].str.contains("🟢")]
-                        tabela = alvos[['ticker','score saúde','setor']].to_csv(index=False)
+                        alvos = df_setup[df_setup['status'].str.contains("🟢")]
+                        tabela = alvos[['ticker','score','setor']].to_csv(index=False)
                         
                         prompt = f"""
                         você é um gestor de portfólio sênior. 

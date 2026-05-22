@@ -153,9 +153,9 @@ with tab_posicoes:
     
     for t in tickers_unicos:
         p_atual = pesos_atuais.get(t, {})
-        qtd = float(p_atual.get('quantidade', 0))
+        qtd = float(p_atual.get('quantidade') or 0)
         if qtd > 0:
-            pm = float(p_atual.get('preco_medio', 0))
+            pm = float(p_atual.get('preco_medio') or 0)
             posicoes_ativas.append({
                 "ticker": t,
                 "quantidade": qtd,
@@ -187,7 +187,7 @@ with tab_posicoes:
         with c_txt:
             st.markdown(f"<div style='font-family: Courier New; font-size: 0.85rem; color: #888; padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
         with c_btn:
-            btn_salvar = st.button("💾 salvar alterações", type="primary", use_container_width=True)
+            btn_salvar = st.button("💾 salvar correções da tabela", type="primary", use_container_width=True)
             
         if btn_salvar:
             df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
@@ -207,31 +207,62 @@ with tab_posicoes:
         empty_state("📋", "nenhuma posição ativa", "adicione sua primeira posição abaixo.")
 
     st.markdown("<hr style='margin: 1.5rem 0; opacity: 0.2;'>", unsafe_allow_html=True)
-    section_title("➕ adicionar ou editar posição")
+    section_title("➕ lançar operação (compra / venda)")
     
     with st.form("form_add_posicao", clear_on_submit=True):
-        col_f1, col_f2, col_f3 = st.columns(3)
+        col_op, col_f1, col_f2, col_f3 = st.columns([2, 3, 2, 2])
+        
+        with col_op:
+            tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
+            
         with col_f1:
             opcoes_wl = [w['ticker'] for w in watchlist]
             ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
+            
         with col_f2:
-            qtd_form = st.number_input("quantidade", min_value=0.0, step=0.001, format="%.4f")
+            qtd_form = st.number_input("quantidade operada", min_value=0.0, step=0.001, format="%.4f")
+            
         with col_f3:
-            pm_form = st.number_input("preço médio pago (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
+            pm_form = st.number_input("preço (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
             
         ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
         
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_add = st.form_submit_button("adicionar ao portfólio", type="primary", use_container_width=True)
+        btn_add = st.form_submit_button("registrar operação no portfólio", type="primary", use_container_width=True)
         
         if btn_add:
             ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
+            
             if ticker_final and qtd_form > 0 and pm_form > 0:
-                salvar_peso(ticker_final, 0.0, pm_form, qtd_form, portfolio_id=portfolio_id_ativo)
-                st.success(f"✅ {ticker_final} adicionado. salve as alterações para recalcular os pesos.")
-                st.rerun()
+                # Obter dados atuais da posição antes da operação
+                p_atual = pesos_atuais.get(ticker_final, {})
+                qtd_atual = float(p_atual.get('quantidade') or 0)
+                pm_atual = float(p_atual.get('preco_medio') or 0)
+                
+                if "Comprar" in tipo_op:
+                    nova_qtd = qtd_atual + qtd_form
+                    # Cálculo inteligente de Preço Médio
+                    novo_pm = ((qtd_atual * pm_atual) + (qtd_form * pm_form)) / nova_qtd if nova_qtd > 0 else pm_form
+                    
+                    salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
+                    st.success(f"✅ compra de {qtd_form} cotas de {ticker_final} registrada! novo PM: {novo_pm:.2f}")
+                    time.sleep(1.5)
+                    st.rerun()
+                    
+                elif "Vender" in tipo_op:
+                    if qtd_form > qtd_atual:
+                        st.warning(f"⚠️ você está tentando vender {qtd_form} cotas, mas só possui {qtd_atual} de {ticker_final}.")
+                    else:
+                        nova_qtd = qtd_atual - qtd_form
+                        # Em vendas, o Preço Médio das cotas restantes NÃO muda. Se zerar a posição, zera o PM.
+                        novo_pm = pm_atual if nova_qtd > 0 else 0.0
+                        
+                        salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
+                        st.success(f"✅ venda de {qtd_form} cotas de {ticker_final} registrada com sucesso!")
+                        time.sleep(1.5)
+                        st.rerun()
             else:
-                st.warning("preencha ticker, quantidade maior que zero e preço médio maior que zero.")
+                st.warning("preencha ticker, uma quantidade maior que zero e um preço válido.")
 
     ativos_alocados = {t: d for t, d in pesos_atuais.items() if d['peso'] > 0}
     
@@ -262,8 +293,8 @@ with tab_posicoes:
         health_data = {h['ticker']: h.get('score', 50) for h in health_raw}
 
         for t, dados in ativos_alocados.items():
-            qtd = float(dados.get('quantidade', 0))
-            pm = float(dados.get('preco_medio', 0))
+            qtd = float(dados.get('quantidade') or 0)
+            pm = float(dados.get('preco_medio') or 0)
             preco_atual = live_data.get(t, 0.0)
             custo_posicao = qtd * pm
             valor_posicao = qtd * preco_atual
@@ -401,8 +432,8 @@ with tab_stress:
 
                 linhas_stress = []
                 for t, dados in ativos_stress.items():
-                    qtd = float(dados.get('quantidade', 0))
-                    pm = float(dados.get('preco_medio', 0))
+                    qtd = float(dados.get('quantidade') or 0)
+                    pm = float(dados.get('preco_medio') or 0)
                     valor_pos = qtd * pm
 
                     beta_info = betas_calc.get(t, {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')})
@@ -466,7 +497,7 @@ with tab_stress:
 
             st.dataframe(
                 df_s.style
-                    .applymap(colorir_stress, subset=['impacto (%)', 'impacto (R$)'])
+                    .map(colorir_stress, subset=['impacto (%)', 'impacto (R$)'])
                     .format({
                         'valor atual (R$)': 'R$ {:,.2f}',
                         'beta': '{:.2f}',
@@ -524,7 +555,7 @@ with tab_backtest:
         
     def carregar_portfolio():
         pesos = get_pesos()
-        tkrs = [p['ticker'] for p in pesos if float(p.get('peso', 0)) > 0]
+        tkrs = [p['ticker'] for p in pesos if float(p.get('peso') or 0) > 0]
         if tkrs:
             st.session_state.bt_selecionados = list(dict.fromkeys(st.session_state.bt_selecionados + tkrs))
             

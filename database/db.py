@@ -177,6 +177,16 @@ def init_db():
     c.execute('CREATE TABLE IF NOT EXISTS decisoes (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, data_decisao TEXT, preco_decisao REAL, quantidade REAL, tese TEXT, resultado TEXT, data_resultado TEXT, user_id INTEGER DEFAULT 1)')
     c.execute('CREATE TABLE IF NOT EXISTS cache_analise_ia (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, conteudo TEXT, gerado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
     c.execute('CREATE TABLE IF NOT EXISTS comparacoes_salvas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, tickers TEXT NOT NULL, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS relatorios_enviados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 1,
+            tipo TEXT DEFAULT 'semanal',
+            enviado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            tickers_incluidos TEXT,
+            status TEXT DEFAULT 'enviado'
+        )
+    ''')
 
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(watchlist)")
@@ -547,3 +557,39 @@ def get_cache_ia(ticker, tipo):
     row = conn.execute('SELECT conteudo, gerado_em FROM cache_analise_ia WHERE ticker=? AND tipo=? ORDER BY gerado_em DESC LIMIT 1', (ticker, tipo)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+# ==========================================
+# RELATÓRIOS SEMANAIS
+# ==========================================
+
+def registrar_envio_relatorio(tickers: list[str], tipo: str = 'semanal') -> None:
+    user_id = get_user_id()
+    conn = get_connection()
+    conn.execute('''
+        INSERT INTO relatorios_enviados (user_id, tipo, tickers_incluidos)
+        VALUES (?, ?, ?)
+    ''', (user_id, tipo, ','.join(tickers)))
+    conn.commit()
+    conn.close()
+
+def get_ultimo_envio_relatorio(tipo: str = 'semanal') -> dict | None:
+    user_id = get_user_id()
+    conn = get_connection()
+    row = conn.execute('''
+        SELECT * FROM relatorios_enviados
+        WHERE user_id = ? AND tipo = ?
+        ORDER BY enviado_em DESC LIMIT 1
+    ''', (user_id, tipo)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def listar_relatorios_enviados(limite: int = 10) -> list[dict]:
+    user_id = get_user_id()
+    conn = get_connection()
+    rows = conn.execute('''
+        SELECT * FROM relatorios_enviados
+        WHERE user_id = ?
+        ORDER BY enviado_em DESC LIMIT ?
+    ''', (user_id, limite)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
