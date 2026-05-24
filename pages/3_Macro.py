@@ -181,6 +181,155 @@ def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
     return resultado
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_fear_greed() -> dict:
+    """
+    Calcula Fear & Greed Index proprietário com 7 componentes.
+    Retorna dict com score 0-100, label, cor, tipo e breakdown.
+    """
+    componentes: dict = {}
+    scores: list[int] = []
+
+    try:
+        fim    = datetime.datetime.today()
+        inicio = fim - datetime.timedelta(days=365)
+
+        dados = yf.download(
+            ['^GSPC', '^VIX', '^IXIC', 'GC=F', 'BTC-USD'],
+            start=inicio, end=fim,
+            auto_adjust=True, progress=False,
+        )['Close']
+
+        sp500 = dados['^GSPC'].dropna()
+        vix   = dados['^VIX'].dropna()
+
+        # ── 1. MOMENTUM DO S&P500 (125 dias vs MM125) ──────────────────────
+        if len(sp500) >= 125:
+            mm125      = sp500.rolling(125).mean()
+            desvio_pct = ((sp500.iloc[-1] - mm125.iloc[-1]) / mm125.iloc[-1] * 100)
+            score_mom  = min(max(int(50 + desvio_pct * 2), 0), 100)
+            componentes['momentum_sp500'] = {
+                'score': score_mom,
+                'label': 'Momentum S&P500',
+                'valor': f"{desvio_pct:+.1f}% vs MM125",
+            }
+            scores.append(score_mom)
+
+        # ── 2. FORÇA DO VIX (invertido — VIX alto = medo) ──────────────────
+        if len(vix) >= 252:
+            vix_atual   = float(vix.iloc[-1])
+            vix_52w_max = float(vix.rolling(252).max().iloc[-1])
+            vix_52w_min = float(vix.rolling(252).min().iloc[-1])
+            amplitude   = vix_52w_max - vix_52w_min
+            if amplitude > 0:
+                pos_vix   = (vix_atual - vix_52w_min) / amplitude
+                score_vix = min(max(int((1 - pos_vix) * 100), 0), 100)
+            else:
+                score_vix = 50
+            componentes['vix'] = {
+                'score': score_vix,
+                'label': 'Força VIX (invertido)',
+                'valor': f"VIX: {vix_atual:.1f}",
+            }
+            scores.append(score_vix)
+
+        # ── 3. AMPLITUDE DE MERCADO (High-Low 52 semanas) ──────────────────
+        if len(sp500) >= 252:
+            max_52w   = sp500.rolling(252).max()
+            min_52w   = sp500.rolling(252).min()
+            range_52w = max_52w.iloc[-1] - min_52w.iloc[-1]
+            if range_52w > 0:
+                pos_atual = (sp500.iloc[-1] - min_52w.iloc[-1]) / range_52w * 100
+                score_amp = int(pos_atual)
+            else:
+                score_amp = 50
+            componentes['amplitude'] = {
+                'score': score_amp,
+                'label': 'Posição no Range 52 semanas',
+                'valor': f"{score_amp:.0f}% do range",
+            }
+            scores.append(score_amp)
+
+        # ── 4. MOMENTUM NASDAQ vs S&P500 ────────────────────────────────────
+        nasdaq = dados['^IXIC'].dropna()
+        if len(nasdaq) >= 20 and len(sp500) >= 20:
+            ret_nq_20d  = ((nasdaq.iloc[-1] / nasdaq.iloc[-20]) - 1) * 100
+            ret_sp_20d  = ((sp500.iloc[-1]  / sp500.iloc[-20])  - 1) * 100
+            diferencial = ret_nq_20d - ret_sp_20d
+            score_nq    = min(max(int(50 + diferencial * 3), 0), 100)
+            componentes['nasdaq_vs_sp'] = {
+                'score': score_nq,
+                'label': 'Nasdaq vs S&P500 (20d)',
+                'valor': f"diferencial: {diferencial:+.1f}pp",
+            }
+            scores.append(score_nq)
+
+        # ── 5. OURO como SAFE HAVEN ─────────────────────────────────────────
+        ouro = dados['GC=F'].dropna()
+        if len(ouro) >= 20 and len(sp500) >= 20:
+            ret_ouro_20d = ((ouro.iloc[-1]  / ouro.iloc[-20])  - 1) * 100
+            ret_sp_20d   = ((sp500.iloc[-1] / sp500.iloc[-20]) - 1) * 100
+            fuga_ouro    = ret_ouro_20d - ret_sp_20d
+            score_ouro   = min(max(int(50 - fuga_ouro * 2), 0), 100)
+            componentes['safe_haven'] = {
+                'score': score_ouro,
+                'label': 'Ouro vs Ações (safe haven)',
+                'valor': f"ouro {ret_ouro_20d:+.1f}% vs ações {ret_sp_20d:+.1f}%",
+            }
+            scores.append(score_ouro)
+
+        # ── 6. VOLATILIDADE REALIZADA vs IMPLÍCITA ──────────────────────────
+        if len(sp500) >= 30 and len(vix) >= 5:
+            rets_sp  = sp500.pct_change().dropna()
+            vol_real = float(rets_sp.iloc[-20:].std() * (252 ** 0.5) * 100)
+            vix_agora = float(vix.iloc[-1])
+            ratio     = vix_agora / vol_real if vol_real > 0 else 1.0
+            score_vol = min(max(int(100 - (ratio - 1) * 50), 0), 100)
+            componentes['vol_ratio'] = {
+                'score': score_vol,
+                'label': 'VIX vs Volatilidade Realizada',
+                'valor': f"ratio: {ratio:.2f}x",
+            }
+            scores.append(score_vol)
+
+        # ── 7. BITCOIN como APETITE A RISCO ────────────────────────────────
+        btc = dados['BTC-USD'].dropna()
+        if len(btc) >= 30:
+            ret_btc_30d = ((btc.iloc[-1] / btc.iloc[-30]) - 1) * 100
+            score_btc   = min(max(int(50 + ret_btc_30d * 0.8), 0), 100)
+            componentes['bitcoin'] = {
+                'score': score_btc,
+                'label': 'Bitcoin (apetite a risco)',
+                'valor': f"{ret_btc_30d:+.1f}% em 30d",
+            }
+            scores.append(score_btc)
+
+    except Exception as e:
+        logger.warning(f"[macro] erro fear&greed: {e}")
+
+    fg_score = int(sum(scores) / len(scores)) if scores else 50
+    fg_score = min(max(fg_score, 0), 100)
+
+    if fg_score <= 25:
+        label, cor, tipo = "MEDO EXTREMO",     "#FF1744", "bear"
+    elif fg_score <= 45:
+        label, cor, tipo = "MEDO",             "#FF9900", "amber"
+    elif fg_score <= 55:
+        label, cor, tipo = "NEUTRO",           "#888888", "muted"
+    elif fg_score <= 75:
+        label, cor, tipo = "GANÂNCIA",         "#00C853", "bull"
+    else:
+        label, cor, tipo = "GANÂNCIA EXTREMA", "#00FF88", "bull"
+
+    return {
+        'score':       fg_score,
+        'label':       label,
+        'cor':         cor,
+        'tipo':        tipo,
+        'componentes': componentes,
+    }
+
+
 def renderizar_noticias(ticker, titulo_secao):
     section_title(titulo_secao)
     try:
@@ -335,7 +484,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple) -> list[dict]:
 # ==========================================
 # abas principais da página
 # ==========================================
-tab_global, tab_ciclo, tab_calendar, tab_overlay = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços"])
+tab_global, tab_ciclo, tab_calendar, tab_overlay, tab_sentimento = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços", "🧠 sentimento"])
 
 with tab_global:
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
@@ -794,3 +943,185 @@ with tab_overlay:
                         st.plotly_chart(fig, use_container_width=True)
                     else: st.warning("não foi possível obter a série de dados macroeconómicos.")
                 except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
+
+with tab_sentimento:
+    section_title("🧠 fear & greed index proprietário")
+
+    status_card(
+        "metodologia",
+        "índice construído com 7 componentes quantitativos: momentum s&p500, força do vix (invertido), "
+        "posição no range 52 semanas, diferencial nasdaq vs s&p500, ouro como safe haven, "
+        "ratio vix/volatilidade realizada e bitcoin como proxy de apetite a risco. "
+        "pontuação normalizada de 0 (medo extremo) a 100 (ganância extrema).",
+        tipo="info",
+    )
+
+    with st.spinner("calculando fear & greed index..."):
+        fg = calcular_fear_greed()
+
+    col_gauge, col_comp = st.columns([1, 1])
+
+    with col_gauge:
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=fg['score'],
+            number={
+                'font': {'family': 'Courier New', 'size': 56, 'color': fg['cor']},
+                'suffix': '',
+            },
+            gauge={
+                'axis': {
+                    'range': [0, 100],
+                    'tickfont': {'family': 'Courier New', 'size': 10, 'color': '#555'},
+                    'tickvals': [0, 25, 45, 55, 75, 100],
+                    'ticktext': ['0', '25', '45', '55', '75', '100'],
+                },
+                'bar': {'color': fg['cor'], 'thickness': 0.25},
+                'bgcolor': '#0d0d0d',
+                'borderwidth': 0,
+                'steps': [
+                    {'range': [0,  25], 'color': '#330000'},
+                    {'range': [25, 45], 'color': '#331a00'},
+                    {'range': [45, 55], 'color': '#1a1a1a'},
+                    {'range': [55, 75], 'color': '#001a00'},
+                    {'range': [75, 100], 'color': '#00330d'},
+                ],
+                'threshold': {
+                    'line': {'color': fg['cor'], 'width': 3},
+                    'thickness': 0.8,
+                    'value': fg['score'],
+                },
+            },
+        ))
+
+        layout_gauge = base_layout(height=300)
+        layout_gauge.update({
+            'paper_bgcolor': '#0d0d0d',
+            'plot_bgcolor': '#0d0d0d',
+            'margin': {'t': 20, 'b': 10, 'l': 20, 'r': 20},
+        })
+        fig_gauge.update_layout(**layout_gauge)
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        st.markdown(
+            f'<div style="text-align:center; font-family:Courier New; font-size:1.4rem; '
+            f'font-weight:bold; color:{fg["cor"]}; letter-spacing:0.12em; margin-top:-16px;">'
+            f'{fg["label"]}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_comp:
+        section_title("📊 breakdown dos componentes")
+        componentes = fg.get('componentes', {})
+        if componentes:
+            for chave, comp in componentes.items():
+                sc    = comp['score']
+                lbl   = comp['label']
+                val   = comp['valor']
+                # cor por faixa
+                if sc <= 25:
+                    cor_c = "#FF1744"
+                elif sc <= 45:
+                    cor_c = "#FF9900"
+                elif sc <= 55:
+                    cor_c = "#888888"
+                elif sc <= 75:
+                    cor_c = "#00C853"
+                else:
+                    cor_c = "#00FF88"
+
+                barra_pct = sc  # 0-100 já está na escala correta
+                st.markdown(
+                    f'<div style="margin-bottom:10px;">'
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'font-family:Courier New; font-size:0.72rem; color:#888; margin-bottom:3px;">'
+                    f'<span>{lbl.lower()}</span>'
+                    f'<span style="color:{cor_c};">{sc} — {val}</span>'
+                    f'</div>'
+                    f'<div style="background:#1a1a1a; border-radius:2px; height:6px; width:100%;">'
+                    f'<div style="background:{cor_c}; width:{barra_pct}%; height:6px; border-radius:2px;"></div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            empty_state("📊", "sem componentes", "não foi possível calcular os componentes do índice.")
+
+    st.markdown("---")
+
+    # ── interpretação estratégica ────────────────────────────────────────────
+    section_title("💡 interpretação estratégica")
+
+    interpretacoes = {
+        "bear": (
+            "medo extremo / medo",
+            "o mercado está vendendo de forma indiscriminada. "
+            "historicamente, níveis abaixo de 25 coincidem com fundos de mercado de curto prazo. "
+            "pode ser uma janela para acumulação em ativos de qualidade com desconto, "
+            "mas atenção: mercados podem ficar irracionais mais tempo do que o esperado.",
+            [
+                "monitorar suportes técnicos importantes no s&p500 e ibovespa.",
+                "considerar aumentar caixa ou hedge (puts/ouro) se o score continuar caindo.",
+                "atenção a fundamentos: quedas com medo extremo podem ser oportunidade se macro suportar.",
+                "evitar alavancagem em ativos de risco até estabilização do índice acima de 35.",
+            ],
+        ),
+        "amber": (
+            "medo / cautela",
+            "sentimento negativo, mas sem pânico. mercado em modo defensivo. "
+            "rotação para setores de valor e defensivos (utilities, saúde, consumo básico) "
+            "tende a funcionar melhor nesse cenário.",
+            [
+                "preferir posições em setores defensivos e ativos de qualidade.",
+                "reduzir exposição a small caps e growth de alto múltiplo.",
+                "acompanhar fluxo de capital para renda fixa e ouro.",
+                "não aumentar posições de risco até índice superar a zona neutra (45-55).",
+            ],
+        ),
+        "muted": (
+            "neutro — equilíbrio de forças",
+            "mercado sem direção definida. bulls e bears equilibrados. "
+            "tendências de curto prazo pouco confiáveis. "
+            "melhor momento para revisar alocação e esperar catalisador claro.",
+            [
+                "manter alocação atual sem grandes mudanças direcionais.",
+                "usar o momento para revisar o portfólio e cortar posições sem tese clara.",
+                "acompanhar próximos eventos macro (fed, copom, cpi) como catalisadores.",
+                "posição em caixa moderada (~15-20%) pode gerar opcionalidade.",
+            ],
+        ),
+        "bull": (
+            "ganância / ganância extrema",
+            "mercado eufórico. valuations pressionados e momentum forte. "
+            "historicamente, scores acima de 75 precedem correções de curto prazo. "
+            "não significa vender tudo, mas é hora de gerenciar risco ativamente.",
+            [
+                "realizar lucros parciais em posições com ganhos expressivos.",
+                "apertar stops e reduzir tamanho de posições mais especulativas.",
+                "atenção a sinais de reversão: queda de volume, divergência de momentum.",
+                "evitar entrar em novas posições de risco em ativos com alta recente expressiva.",
+            ],
+        ),
+    }
+
+    tipo_fg   = fg.get('tipo', 'muted')
+    interp    = interpretacoes.get(tipo_fg, interpretacoes['muted'])
+    titulo_i  = interp[0]
+    resumo_i  = interp[1]
+    bullets_i = interp[2]
+
+    status_card(titulo_i, resumo_i, tipo=tipo_fg)
+
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.75rem; color:#555; '
+        'text-transform:uppercase; letter-spacing:0.08em; margin:16px 0 8px 0;">'
+        'ações táticas recomendadas:</div>',
+        unsafe_allow_html=True,
+    )
+    for bullet in bullets_i:
+        st.markdown(
+            f'<div style="font-family:Courier New; font-size:0.82rem; color:#B0B0B0; '
+            f'padding:6px 0 6px 12px; border-left:2px solid {fg["cor"]}; margin-bottom:6px;">'
+            f'→ {bullet}</div>',
+            unsafe_allow_html=True,
+        )
