@@ -7,6 +7,25 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Referência de múltiplos por setor (yfinance sector strings, lowercase)
+# Tupla: (pe_bom, pe_medio, pb_bom, pb_medio)
+MULTIPLOS_SETOR: dict[str, tuple] = {
+    "technology":             (30, 50, 6.0, 12.0),
+    "financial services":     (12, 20, 1.5,  3.0),
+    "utilities":              (18, 28, 1.5,  2.5),
+    "consumer staples":       (22, 35, 3.0,  6.0),
+    "consumer cyclical":      (20, 35, 3.0,  7.0),
+    "healthcare":             (22, 38, 4.0,  8.0),
+    "energy":                 (12, 20, 1.5,  3.0),
+    "basic materials":        (12, 22, 1.5,  3.0),
+    "industrials":            (20, 32, 3.0,  6.0),
+    "real estate":            (20, 35, 1.5,  3.0),
+    "communication services": (22, 38, 4.0,  8.0),
+    # fallback para setores não mapeados (aplicado via lógica BR vs EUA)
+    "_default":               (18, 32, 2.0,  4.0),
+}
+
+
 def _is_fii(ticker: str) -> bool:
     """Determina se o ativo é um Fundo Imobiliário (FII)."""
     nao_fiis = [
@@ -102,6 +121,143 @@ def calcular_piotroski(acao):
     except Exception as e:
         logger.warning(f"[health_engine] falha ao calcular Piotroski F-Score: {e}")
         return 0, {}
+
+
+def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
+    """
+    Pilar de Crescimento de Receita e Lucro (máx 15pts).
+    Usa info.get('revenueGrowth') / 'earningsGrowth' como fonte primária;
+    cai para acao.financials quando não disponível.
+    Retorna (score, {'alertas': [...], 'rev_growth': float|None, 'earnings_growth': float|None}).
+    """
+    score_cresc = 0
+    alertas_cresc: list[str] = []
+    rev_growth: float | None = None
+    earnings_growth: float | None = None
+
+    try:
+        # --- Fonte primária: info (decimal — 0.15 = 15%) ---
+        rev_growth = info.get('revenueGrowth')
+        earnings_growth = info.get('earningsGrowth')
+
+        # --- Fallback: calcula manualmente via financials ---
+        if acao is not None:
+            fin = acao.financials
+            if fin is not None and not fin.empty and len(fin.columns) >= 2:
+
+                if rev_growth is None:
+                    for nome in ['Total Revenue', 'Revenue']:
+                        if nome in fin.index:
+                            v_atual = fin.loc[nome, fin.columns[0]]
+                            v_ant   = fin.loc[nome, fin.columns[1]]
+                            if isinstance(v_atual, pd.Series): v_atual = v_atual.iloc[0]
+                            if isinstance(v_ant,   pd.Series): v_ant   = v_ant.iloc[0]
+                            if pd.notna(v_atual) and pd.notna(v_ant) and float(v_ant) != 0:
+                                rev_growth = (float(v_atual) - float(v_ant)) / abs(float(v_ant))
+                            break
+
+                if earnings_growth is None:
+                    for nome in ['Net Income', 'Net Income Common Stockholders']:
+                        if nome in fin.index:
+                            v_atual = fin.loc[nome, fin.columns[0]]
+                            v_ant   = fin.loc[nome, fin.columns[1]]
+                            if isinstance(v_atual, pd.Series): v_atual = v_atual.iloc[0]
+                            if isinstance(v_ant,   pd.Series): v_ant   = v_ant.iloc[0]
+                            if pd.notna(v_atual) and pd.notna(v_ant) and float(v_ant) != 0:
+                                earnings_growth = (float(v_atual) - float(v_ant)) / abs(float(v_ant))
+                            break
+
+        # --- Pontuação de receita (máx 8pts) ---
+        if rev_growth is not None:
+            if rev_growth > 0.15:
+                score_cresc += 8
+            elif rev_growth > 0.05:
+                score_cresc += 5
+            elif rev_growth < 0:
+                score_cresc -= 5
+                alertas_cresc.append("⚠️ receita em queda (sinal de deterioração).")
+
+        # --- Pontuação de lucro (máx 7pts) ---
+        if earnings_growth is not None:
+            if earnings_growth > 0.20:
+                score_cresc += 7
+            elif earnings_growth > 0.05:
+                score_cresc += 4
+            elif earnings_growth < 0 and rev_growth is not None and rev_growth < 0:
+                alertas_cresc.append("🚨 compressão de margem e queda de receita simultâneas.")
+
+    except Exception as e:
+        logger.warning(f"[health_engine] falha ao calcular crescimento: {e}")
+
+    return score_cresc, {
+        'alertas': alertas_cresc,
+        'rev_growth': rev_growth,
+        'earnings_growth': earnings_growth,
+    }
+
+
+def calcular_roic(
+    acao, info: dict,
+    is_br: bool, is_us: bool,
+    macro_context: dict,
+) -> tuple[int, float | None]:
+    """
+    Pilar ROIC vs WACC simplificado (máx 12pts).
+    WACC_ref: Selic + 3% para B3, 7.5% fixo para EUA.
+    Retorna (score, roic_valor_percentual | None).
+    A adição do alerta de ROIC negativo fica a cargo da função chamadora.
+    """
+    if acao is None:
+        return 0, None
+
+    score_roic = 0
+    roic_valor: float | None = None
+
+    try:
+        fin = acao.financials
+        bs  = acao.balance_sheet
+
+        def _get(df, nomes, col=0):
+            if df is None or df.empty:
+                return None
+            for nome in nomes:
+                if nome in df.index and len(df.columns) > col:
+                    val = df.loc[nome, df.columns[col]]
+                    if isinstance(val, pd.Series):
+                        val = val.iloc[0]
+                    if pd.notna(val):
+                        return float(val)
+            return None
+
+        ebit         = _get(fin, ['EBIT'])
+        total_assets = _get(bs,  ['Total Assets'])
+        current_liab = _get(bs,  ['Current Liabilities'])
+
+        if ebit is not None and total_assets is not None and current_liab is not None:
+            tax_rate       = 0.25
+            nopat          = ebit * (1 - tax_rate)
+            invested_cap   = total_assets - current_liab
+
+            if invested_cap > 0:
+                roic_valor = (nopat / invested_cap) * 100
+
+                selic    = macro_context.get('selic', 10.5)
+                wacc_ref = (selic + 3.0) if is_br else 7.5
+
+                if roic_valor > wacc_ref * 1.5:
+                    score_roic = 12
+                elif roic_valor > wacc_ref:
+                    score_roic = 8
+                elif roic_valor >= 0:
+                    score_roic = 3
+                else:
+                    score_roic = -5   # alerta adicionado pelo chamador
+
+    except Exception as e:
+        logger.warning(f"[health_engine] falha ao calcular ROIC: {e}")
+
+    return score_roic, roic_valor
+
 
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
     """
@@ -258,23 +414,29 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
             else: score_q += 6
             
-            # --- Valuation Adaptativo (máx 26pts, B3 vs EUA) ---
-            score_v = 0
-            if pl is not None and pl > 0:
-                limite_pl_bom   = 18 if is_us else 13
-                limite_pl_medio = 32 if is_us else 25
-
-                if pl <= limite_pl_bom: score_v += 13
-                elif pl <= limite_pl_medio: score_v += 8
-                elif pl > limite_pl_medio: alertas.append(f"⚠️ valuation esticado (p/l de {pl:.1f}).")
-
-            if pvp is not None and pvp > 0:
+            # --- Valuation Adaptativo com múltiplos setoriais (máx 26pts) ---
+            # Fonte: info.get('sector') em inglês (yfinance) ou fallback para dado do cache
+            setor_yf = (info.get('sector', '') or dados_base.get('setor', '')).lower()
+            if setor_yf in MULTIPLOS_SETOR:
+                # setor identificado — usa thresholds específicos do setor
+                limite_pl_bom, limite_pl_medio, limite_pvp_bom, limite_pvp_medio = MULTIPLOS_SETOR[setor_yf]
+            else:
+                # setor não mapeado — mantém diferenciação BR vs EUA (comportamento original)
+                limite_pl_bom    = 18 if is_us else 13
+                limite_pl_medio  = 32 if is_us else 25
                 limite_pvp_bom   = 4.0 if is_us else 2.0
                 limite_pvp_medio = 8.0 if is_us else 4.0
 
-                if pvp <= limite_pvp_bom: score_v += 13
+            score_v = 0
+            if pl is not None and pl > 0:
+                if pl <= limite_pl_bom:    score_v += 13
+                elif pl <= limite_pl_medio: score_v += 8
+                elif pl > limite_pl_medio:  alertas.append(f"⚠️ valuation esticado (p/l de {pl:.1f}).")
+
+            if pvp is not None and pvp > 0:
+                if pvp <= limite_pvp_bom:    score_v += 13
                 elif pvp <= limite_pvp_medio: score_v += 8
-                elif pvp > limite_pvp_medio: alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
+                elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
             # --- Solvência e Risco (máx 20pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
@@ -321,25 +483,49 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 score_piotroski = -8
                 alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
 
+            # --- Crescimento de Receita e Lucro (máx 15pts) ---
+            score_crescimento = 0
+            if acao is not None:
+                score_crescimento, detalhes_cresc = calcular_crescimento(acao, info)
+                alertas.extend(detalhes_cresc.get('alertas', []))
+
+            # --- ROIC vs WACC (máx 12pts) ---
+            score_roic = 0
+            roic_valor: float | None = None
+            if acao is not None:
+                score_roic, roic_valor = calcular_roic(acao, info, is_br, is_us, macro_context)
+                if roic_valor is not None and roic_valor < 0:
+                    alertas.append("🚨 ROIC negativo — empresa destruindo capital dos acionistas.")
+
             # penalidade por dados de baixa qualidade
             penalidade_dados = 0
             if not dados_confiaveis and not is_us:
                 penalidade_dados = -10
                 alertas.append(f"⚠️ dados fundamentalistas com qualidade baixa ({qualidade}%). score pode estar subestimado.")
 
-            score = score_q + score_v + score_r_final + score_y + score_piotroski + penalidade_tec + penalidade_vix + penalidade_dados
+            score = (
+                score_q + score_v + score_r_final + score_y
+                + score_piotroski + score_crescimento + score_roic
+                + penalidade_tec + penalidade_vix + penalidade_dados
+            )
 
+            setor_label = setor_yf.title() if setor_yf and setor_yf in MULTIPLOS_SETOR else ('EUA' if is_us else 'B3')
             breakdown = {
                 "Qualidade e Rentabilidade": score_q,
-                f"Valuation (Padrão {'EUA' if is_us else 'B3'})": score_v,
+                f"Valuation ({setor_label})": score_v,
                 "Solvência e Risco Macro": score_r_final,
-                f"Geração de Caixa / Yield": score_y,
+                "Geração de Caixa / Yield": score_y,
                 "Qualidade de Balanço (Piotroski F-Score)": score_piotroski,
+                "Crescimento (Receita/Lucro)": score_crescimento,
+                "ROIC vs WACC": score_roic,
                 "Penalidade Técnica (MM200)": penalidade_tec,
                 "Risco Volatilidade (VIX)": penalidade_vix,
-                "Penalidade Dados (Qualidade)": penalidade_dados
+                "Penalidade Dados (Qualidade)": penalidade_dados,
             }
-            
+
+            if roic_valor is not None:
+                breakdown["  ↳ ROIC"] = f"{roic_valor:.1f}%"
+
             if f_detalhamento:
                 for k, v in f_detalhamento.items():
                     breakdown[f"  ↳ {k}"] = v
