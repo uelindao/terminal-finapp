@@ -79,11 +79,12 @@ def calcular_betas(tickers_tuple: tuple) -> dict:
     return betas
 
 # 4. criação das tabs
-tab_posicoes, tab_stress, tab_backtest, tab_diario = st.tabs([
+tab_posicoes, tab_stress, tab_backtest, tab_diario, tab_ir = st.tabs([
     "💼 posições & p&l",
     "⚡ stress test",
     "📊 backtesting",
-    "📝 diário de decisões"
+    "📝 diário de decisões",
+    "🧾 imposto de renda",
 ])
 
 # ==========================================
@@ -987,3 +988,222 @@ with tab_diario:
                     status_card("mentoria comportamental ia", resposta.text, "info")
                 except Exception as e:
                     st.error(f"falha ao conectar com o mentor de ia: {e}")
+
+# ==========================================
+# tab 5: imposto de renda
+# ==========================================
+with tab_ir:
+    from utils.ir_calculator import calcular_ir_venda, gerar_resumo_mensal
+
+    section_title("🧾 calculadora de imposto de renda")
+
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.78rem; color:#555; '
+        'margin-bottom:20px; line-height:1.6;">'
+        '📋 <b>regras aplicadas:</b> ações BR (isenção R$ 20k/mês, 15% acima), '
+        'FIIs (20% ganho de capital), ações EUA (15%), day trade (20%). '
+        'compensação de prejuízos automática dentro da mesma categoria.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── calculadora rápida ────────────────────────────────────────────────────
+    section_title("🧮 calculadora rápida de operação")
+
+    with st.form("form_calc_ir"):
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            ticker_ir = st.text_input(
+                "ticker:", placeholder="WEGE3", key="ir_ticker"
+            ).upper()
+            tipo_ir = st.selectbox(
+                "tipo de ativo:",
+                options=['acao_br', 'fii', 'acao_us'],
+                format_func=lambda x: {
+                    'acao_br': '🇧🇷 Ação BR',
+                    'fii':     '🏢 FII',
+                    'acao_us': '🇺🇸 Ação EUA',
+                }[x],
+                key="ir_tipo",
+            )
+            day_trade_ir = st.checkbox("day trade?", key="ir_dt")
+
+        with col_b:
+            preco_compra_ir = st.number_input(
+                "preço médio de compra (R$):",
+                min_value=0.01, value=10.0,
+                step=0.01, format="%.2f", key="ir_pc",
+            )
+            qtd_ir = st.number_input(
+                "quantidade vendida:",
+                min_value=1, value=100,
+                step=1, key="ir_qtd",
+            )
+            custo_ir = st.number_input(
+                "custos operacionais (R$):",
+                min_value=0.0, value=0.0,
+                step=0.01, format="%.2f",
+                key="ir_custo",
+                help="corretagem + emolumentos B3",
+            )
+
+        with col_c:
+            preco_venda_ir = st.number_input(
+                "preço de venda (R$):",
+                min_value=0.01, value=12.0,
+                step=0.01, format="%.2f", key="ir_pv",
+            )
+            outras_vendas_ir = st.number_input(
+                "outras vendas no mês (R$):",
+                min_value=0.0, value=0.0,
+                step=100.0, format="%.2f",
+                key="ir_outras",
+                help="soma de outras vendas de ações no mês corrente",
+            )
+            prejuizo_ir = st.number_input(
+                "prejuízo acumulado (R$):",
+                min_value=0.0, value=0.0,
+                step=100.0, format="%.2f",
+                key="ir_prej",
+                help="saldo negativo de meses anteriores (insira valor positivo)",
+            )
+
+        calcular_btn = st.form_submit_button(
+            "🧮 calcular IR", type="primary", use_container_width=True,
+        )
+
+    if calcular_btn:
+        resultado_ir = calcular_ir_venda(
+            ticker           = ticker_ir or "TICKER",
+            tipo_ativo       = tipo_ir,
+            preco_compra     = preco_compra_ir,
+            preco_venda      = preco_venda_ir,
+            quantidade       = float(qtd_ir),
+            custo_operacao   = custo_ir,
+            day_trade        = day_trade_ir,
+            total_vendas_mes = outras_vendas_ir,
+            prejuizo_acum    = -abs(prejuizo_ir),
+        )
+
+        st.markdown("---")
+        section_title("📊 resultado do cálculo")
+
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        lucro  = resultado_ir['lucro_bruto']
+        cor_l  = "bull" if lucro >= 0 else "bear"
+        ir_dev = resultado_ir['ir_devido']
+
+        with rc1:
+            metric_card(
+                "lucro/prejuízo bruto",
+                f"R$ {lucro:,.2f}",
+                f"receita: R$ {resultado_ir['receita_venda']:,.2f}",
+                cor_delta=cor_l,
+            )
+        with rc2:
+            if resultado_ir['prejuizo_comp'] > 0:
+                metric_card(
+                    "prejuízo compensado",
+                    f"R$ {resultado_ir['prejuizo_comp']:,.2f}",
+                    "deduzido do lucro tributável",
+                    cor_delta="info",
+                )
+            else:
+                metric_card(
+                    "lucro tributável",
+                    f"R$ {resultado_ir['lucro_tributavel']:,.2f}",
+                    f"alíquota: {resultado_ir['aliquota'] * 100:.0f}%",
+                    cor_delta=cor_l,
+                )
+        with rc3:
+            metric_card(
+                "ir a recolher (DARF)",
+                f"R$ {ir_dev:,.2f}",
+                "até último dia útil do mês seguinte",
+                cor_delta="bear" if ir_dev > 0 else "bull",
+            )
+        with rc4:
+            lucro_liq = lucro - ir_dev
+            custo_base = preco_compra_ir * float(qtd_ir)
+            retorno_pct = (lucro_liq / custo_base * 100) if custo_base > 0 else 0.0
+            metric_card(
+                "lucro líquido após IR",
+                f"R$ {lucro_liq:,.2f}",
+                f"retorno: {retorno_pct:+.1f}%",
+                cor_delta="bull" if lucro_liq >= 0 else "bear",
+            )
+
+        # Regra aplicada + observações
+        st.markdown(
+            f'<div class="card" style="margin-top:12px; padding:14px; border-left:3px solid #00B0FF;">'
+            f'<div style="font-family:Courier New; font-size:0.7rem; color:#555; '
+            f'text-transform:uppercase; margin-bottom:6px;">regra aplicada</div>'
+            f'<div style="font-family:Courier New; font-size:0.82rem; color:#E0E0E0;">'
+            f'{resultado_ir["regra_aplicada"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        for obs in resultado_ir['observacoes']:
+            st.markdown(
+                f'<div style="font-family:Courier New; font-size:0.78rem; color:#888; '
+                f'padding:5px 0; border-bottom:1px solid #1e1e1e;">{obs}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Alerta DARF
+        if resultado_ir['ir_devido'] >= 10.0:
+            codigo_darf = "6015" if tipo_ir in ('acao_br', 'acao_us') else "3317"
+            status_card(
+                "⚡ lembrete: DARF",
+                f"você tem R$ {resultado_ir['ir_devido']:,.2f} de IR a recolher. "
+                f"emita o DARF pelo site da Receita Federal "
+                f"(código {codigo_darf} para {'ações' if tipo_ir != 'fii' else 'FIIs'}) "
+                f"até o último dia útil do próximo mês.",
+                tipo="amber",
+            )
+        elif resultado_ir['isento']:
+            status_card(
+                "✅ operação isenta",
+                "suas vendas neste mês estão abaixo do limite de R$ 20.000 — "
+                "nenhum DARF precisa ser emitido para esta operação.",
+                tipo="bull",
+            )
+
+    # ── guia de referência ────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("📚 guia rápido de alíquotas e regras (2024/2025)", expanded=False):
+        regras = [
+            ("🇧🇷 Ações BR — swing trade",
+             "isenção total se vendas no mês ≤ R$ 20.000. "
+             "acima desse limite: 15% sobre o lucro líquido. "
+             "prejuízo pode ser compensado em meses futuros (mesma categoria)."),
+            ("⚡ Ações BR — day trade",
+             "20% sobre o lucro, sem isenção de R$ 20k. "
+             "obrigatório retenção na fonte de 1% (IRRF) pela corretora."),
+            ("🏢 FIIs",
+             "20% sobre ganho de capital na venda. sem limite de isenção. "
+             "proventos mensais distribuídos pelo fundo são isentos para pessoa física."),
+            ("🇺🇸 Ações EUA / BDRs",
+             "15% sobre lucro em reais. variação cambial entre a data de compra "
+             "e venda também é tributável. sem isenção de R$ 20k."),
+            ("📋 Compensação de prejuízos",
+             "prejuízos em ações só compensam lucros de ações (não de FIIs). "
+             "prejuízos em FIIs só compensam lucros de FIIs. "
+             "sem prazo de validade — acumula até ser zerado."),
+            ("📅 Prazo de pagamento",
+             "DARF deve ser pago até o último dia útil do mês seguinte à operação. "
+             "código DARF: 6015 (ações e day trade), 3317 (FIIs e fundos). "
+             "valor mínimo de DARF: R$ 10,00 (abaixo disso, acumula para o próximo mês)."),
+        ]
+        for titulo, descricao in regras:
+            st.markdown(
+                f'<div style="margin-bottom:12px; padding:10px 14px; '
+                f'background:#0d0d0d; border:1px solid #1e1e1e; border-radius:4px;">'
+                f'<div style="font-family:Courier New; font-size:0.78rem; '
+                f'color:#FF9900; font-weight:bold; margin-bottom:4px;">{titulo}</div>'
+                f'<div style="font-family:Courier New; font-size:0.76rem; '
+                f'color:#888; line-height:1.5;">{descricao}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
