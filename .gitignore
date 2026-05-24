@@ -10,6 +10,7 @@ __pycache__/
 # Banco de Dados Local (Não queremos subir o histórico do seu PC)
 data/
 *.db
+*.sqlite
 *.sqlite3
 
 # Ambientes Virtuais (Se você usar)

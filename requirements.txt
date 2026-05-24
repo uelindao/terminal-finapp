@@ -6,3 +6,4 @@ plotly
 google-genai
 fredapi
 python-bcb
+supabase>=2.0.0

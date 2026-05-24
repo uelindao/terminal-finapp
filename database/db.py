@@ -1,17 +1,19 @@
-import sqlite3
+"""
+FinTerminal — camada de acesso a dados via Supabase (PostgreSQL).
+Mantém EXATAMENTE as mesmas assinaturas de função que o db_sqlite_legacy.py,
+incluindo aliases de compatibilidade nas colunas renomeadas.
+
+Schema: execute database/migrations/001_initial_schema.sql no Supabase Dashboard
+antes do primeiro uso.
+"""
 import json
 from datetime import datetime
 import hashlib
+from database.supabase_client import get_supabase
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-db_name = "finterminal.db"
-
-def get_connection():
-    conn = sqlite3.connect(db_name)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def get_user_id() -> int:
     """Retorna o user_id da sessão atual ou 1 (admin) como fallback."""
@@ -22,6 +24,7 @@ def get_user_id() -> int:
         logger.warning(f"[db] falha ao obter user_id da sessão, usando fallback 1: {e}")
         return 1
 
+
 # ==========================================
 # AUTENTICAÇÃO E GESTÃO DE UTILIZADORES
 # ==========================================
@@ -29,247 +32,186 @@ def get_user_id() -> int:
 def _hash_senha(senha: str, salt: str = "finterminal_2025") -> str:
     return hashlib.sha256(f"{salt}{senha}".encode()).hexdigest()
 
+
 def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is_admin: bool = False) -> bool:
-    conn = get_connection()
+    sb = get_supabase()
     try:
-        conn.execute('''
-            INSERT INTO usuarios (username, senha_hash, nome, email, is_admin)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (username.lower().strip(), _hash_senha(senha), nome, email, 1 if is_admin else 0))
-        conn.commit()
+        sb.table('users').insert({
+            'username': username.lower().strip(),
+            'senha_hash': _hash_senha(senha),
+            'nome': nome,
+            'email': email,
+            'is_admin': is_admin,
+        }).execute()
         return True
     except Exception as e:
         logger.error(f"[db] falha ao criar usuário '{username}': {e}")
         return False
-    finally:
-        conn.close()
+
 
 def autenticar_usuario(username: str, senha: str) -> dict | None:
-    conn = get_connection()
+    sb = get_supabase()
     try:
-        row = conn.execute('''
-            SELECT id, username, nome, email, is_admin
-            FROM usuarios
-            WHERE username = ? AND senha_hash = ?
-        ''', (username.lower().strip(), _hash_senha(senha))).fetchone()
-
-        if row:
-            conn.execute('UPDATE usuarios SET ultimo_login = CURRENT_TIMESTAMP WHERE id = ?', (row['id'],))
-            conn.commit()
-            return dict(row)
+        rows = (
+            sb.table('users')
+            .select('id, username, nome, email, is_admin')
+            .eq('username', username.lower().strip())
+            .eq('senha_hash', _hash_senha(senha))
+            .execute()
+            .data
+        )
+        if rows:
+            user = rows[0]
+            try:
+                sb.table('users').update(
+                    {'ultimo_login': datetime.utcnow().isoformat()}
+                ).eq('id', user['id']).execute()
+            except Exception as e:
+                logger.warning(f"[db] falha ao atualizar ultimo_login do user {user['id']}: {e}")
+            return user
         return None
-    finally:
-        conn.close()
+    except Exception as e:
+        logger.error(f"[db] falha na autenticação do usuário '{username}': {e}")
+        return None
+
 
 def listar_usuarios() -> list[dict]:
-    conn = get_connection()
-    rows = conn.execute('SELECT id, username, nome, email, is_admin, criado_em, ultimo_login FROM usuarios ORDER BY criado_em').fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+    try:
+        rows = (
+            sb.table('users')
+            .select('id, username, nome, email, is_admin, created_at, ultimo_login')
+            .order('created_at')
+            .execute()
+            .data
+        )
+        # Alias de compatibilidade: created_at → criado_em
+        for r in rows:
+            r.setdefault('criado_em', r.get('created_at'))
+        return rows
+    except Exception as e:
+        logger.error(f"[db] falha ao listar usuários: {e}")
+        return []
+
 
 def alterar_senha(user_id: int, nova_senha: str) -> None:
-    conn = get_connection()
-    conn.execute('UPDATE usuarios SET senha_hash = ? WHERE id = ?', (_hash_senha(nova_senha), user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    try:
+        sb.table('users').update(
+            {'senha_hash': _hash_senha(nova_senha)}
+        ).eq('id', user_id).execute()
+    except Exception as e:
+        logger.error(f"[db] falha ao alterar senha do user_id={user_id}: {e}")
+
 
 def deletar_usuario(user_id: int) -> None:
-    conn = get_connection()
-    tabelas = ['watchlist', 'alertas', 'portfolio_pesos', 'decisoes', 'comparacoes_salvas', 'config_solana', 'custom_mints', 'watchlists', 'portfolios']
+    sb = get_supabase()
+    tabelas = [
+        'watchlist_items', 'alerts', 'portfolio_positions', 'decision_log',
+        'saved_comparisons', 'watchlists', 'portfolios', 'report_history',
+    ]
     for tabela in tabelas:
         try:
-            conn.execute(f'DELETE FROM {tabela} WHERE user_id = ?', (user_id,))
+            sb.table(tabela).delete().eq('user_id', user_id).execute()
         except Exception as e:
             logger.warning(f"[db] falha ao limpar tabela '{tabela}' para user_id={user_id}: {e}")
-    conn.execute('DELETE FROM usuarios WHERE id = ?', (user_id,))
-    conn.commit()
-    conn.close()
+    try:
+        sb.table('users').delete().eq('id', user_id).execute()
+    except Exception as e:
+        logger.error(f"[db] falha ao deletar usuário user_id={user_id}: {e}")
+
 
 def _criar_admin_padrao():
-    conn = get_connection()
-    count = conn.execute('SELECT COUNT(*) FROM usuarios WHERE is_admin=1').fetchone()[0]
-    if count == 0:
-        try:
-            import streamlit as st
-            senha_padrao = st.secrets.get('admin', {}).get('password', 'admin123')
-        except Exception as e:
-            logger.warning(f"[db] falha ao ler senha admin dos secrets, usando padrão: {e}")
-            senha_padrao = 'admin123'
-            
-        conn.execute('''
-            INSERT INTO usuarios (username, senha_hash, nome, is_admin)
-            VALUES ('admin', ?, 'administrador', 1)
-        ''', (_hash_senha(senha_padrao),))
-        conn.commit()
-    conn.close()
+    sb = get_supabase()
+    try:
+        rows = sb.table('users').select('id').eq('is_admin', True).execute().data
+        if len(rows) == 0:
+            try:
+                import streamlit as st
+                try:
+                    senha_padrao = st.secrets["admin"]["password"]
+                except (KeyError, AttributeError):
+                    senha_padrao = 'admin123'
+            except Exception as e:
+                logger.warning(f"[db] falha ao ler senha admin dos secrets, usando padrão: {e}")
+                senha_padrao = 'admin123'
+
+            sb.table('users').insert({
+                'username': 'admin',
+                'senha_hash': _hash_senha(senha_padrao),
+                'nome': 'administrador',
+                'is_admin': True,
+            }).execute()
+            logger.info("[db] usuário admin padrão criado.")
+    except Exception as e:
+        logger.error(f"[db] falha ao criar admin padrão: {e}")
+
 
 # ==========================================
-# INICIALIZAÇÃO DA BASE DE DADOS E MIGRAÇÕES
+# INICIALIZAÇÃO DA BASE DE DADOS
 # ==========================================
 
 def init_db():
-    conn = get_connection()
-    c = conn.cursor()
+    """
+    Verifica a conexão com Supabase e garante o admin padrão.
 
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
-            senha_hash TEXT NOT NULL,
-            nome TEXT,
-            email TEXT,
-            is_admin INTEGER DEFAULT 0,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            ultimo_login DATETIME
+    O schema NÃO é criado automaticamente aqui — execute antes:
+        database/migrations/001_initial_schema.sql
+    no Supabase Dashboard → SQL Editor.
+    """
+    try:
+        sb = get_supabase()
+        sb.table('users').select('id').limit(1).execute()
+        logger.info("[db] Supabase conectado e schema validado.")
+        _criar_admin_padrao()
+        _migrar_watchlist_para_default()
+        _migrar_portfolio_para_default()
+    except Exception as e:
+        logger.error(
+            f"[db] falha na inicialização do Supabase: {e}. "
+            "Execute database/migrations/001_initial_schema.sql no Supabase Dashboard."
         )
-    ''')
+        raise
 
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS watchlists (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL DEFAULT 1,
-            nome        TEXT NOT NULL,
-            descricao   TEXT DEFAULT '',
-            cor         TEXT DEFAULT '#FF9900',
-            icone       TEXT DEFAULT '⭐',
-            padrao      INTEGER DEFAULT 0,
-            criado_em   DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS watchlist (
-            ticker TEXT, 
-            nome TEXT, 
-            mercado TEXT, 
-            adicionado_em DATETIME DEFAULT CURRENT_TIMESTAMP, 
-            notas TEXT, 
-            user_id INTEGER DEFAULT 1, 
-            watchlist_id INTEGER,
-            PRIMARY KEY (ticker, user_id, watchlist_id)
-        )
-    ''')
-
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS fundamentos_cache (
-            ticker TEXT PRIMARY KEY,
-            dados_json TEXT,
-            atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS portfolios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL DEFAULT 1,
-            nome TEXT NOT NULL,
-            descricao TEXT DEFAULT '',
-            cor TEXT DEFAULT '#FF9900',
-            icone TEXT DEFAULT '\U0001f4bc',
-            padrao INTEGER DEFAULT 0,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    c.execute('CREATE TABLE IF NOT EXISTS portfolio_pesos (ticker TEXT, peso REAL, preco_medio REAL, quantidade REAL, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1, portfolio_id INTEGER DEFAULT 1, PRIMARY KEY (ticker, user_id, portfolio_id))')
-
-    # migracao: adicionar portfolio_id se nao existir
-    c.execute("PRAGMA table_info(portfolio_pesos)")
-    cols_pp = [col[1] for col in c.fetchall()]
-    if 'portfolio_id' not in cols_pp:
-        c.execute('ALTER TABLE portfolio_pesos ADD COLUMN portfolio_id INTEGER DEFAULT 1')
-    c.execute('CREATE TABLE IF NOT EXISTS health_scores (ticker TEXT PRIMARY KEY, score REAL, alertas_venda TEXT, atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    c.execute('CREATE TABLE IF NOT EXISTS alertas (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, threshold REAL, criado_em DATETIME DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
-    c.execute('CREATE TABLE IF NOT EXISTS decisoes (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, data_decisao TEXT, preco_decisao REAL, quantidade REAL, tese TEXT, resultado TEXT, data_resultado TEXT, user_id INTEGER DEFAULT 1)')
-    c.execute('CREATE TABLE IF NOT EXISTS cache_analise_ia (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, tipo TEXT, conteudo TEXT, gerado_em DATETIME DEFAULT CURRENT_TIMESTAMP)')
-    c.execute('CREATE TABLE IF NOT EXISTS comparacoes_salvas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, tickers TEXT NOT NULL, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP, user_id INTEGER DEFAULT 1)')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS relatorios_enviados (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER DEFAULT 1,
-            tipo TEXT DEFAULT 'semanal',
-            enviado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            tickers_incluidos TEXT,
-            status TEXT DEFAULT 'enviado'
-        )
-    ''')
-
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(watchlist)")
-    cols = cursor.fetchall()
-    pk_count = sum(1 for col in cols if col[5] > 0)
-    
-    if pk_count < 3:
-        c.execute('CREATE TABLE IF NOT EXISTS watchlist_new (ticker TEXT, nome TEXT, mercado TEXT, adicionado_em DATETIME DEFAULT CURRENT_TIMESTAMP, notas TEXT, user_id INTEGER DEFAULT 1, watchlist_id INTEGER, PRIMARY KEY (ticker, user_id, watchlist_id))')
-        c.execute('INSERT OR IGNORE INTO watchlist_new SELECT * FROM watchlist')
-        c.execute('DROP TABLE watchlist')
-        c.execute('ALTER TABLE watchlist_new RENAME TO watchlist')
-
-    conn.commit()
-    conn.close()
-    
-    _criar_admin_padrao()
-    _migrar_watchlist_para_default()
-    _migrar_portfolio_para_default()
 
 def _migrar_watchlist_para_default():
-    conn = get_connection()
-    users = conn.execute('SELECT DISTINCT user_id FROM watchlist WHERE watchlist_id IS NULL').fetchall()
+    """No-op: o schema Supabase já nasce com estrutura correta."""
+    pass
 
-    for row in users:
-        uid = row['user_id']
-        wl = conn.execute('SELECT id FROM watchlists WHERE user_id=? LIMIT 1', (uid,)).fetchone()
-
-        if not wl:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO watchlists (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '⭐', '#FF9900', 1)", (uid,))
-            wl_id = cursor.lastrowid
-        else:
-            wl_id = wl['id']
-
-        conn.execute('UPDATE watchlist SET watchlist_id=? WHERE user_id=? AND watchlist_id IS NULL', (wl_id, uid))
-
-    conn.commit()
-    conn.close()
 
 def _migrar_portfolio_para_default():
-    conn = get_connection()
-    try:
-        users = conn.execute('SELECT DISTINCT user_id FROM portfolio_pesos WHERE portfolio_id IS NULL').fetchall()
-        for row in users:
-            uid = row['user_id']
-            pf = conn.execute('SELECT id FROM portfolios WHERE user_id=? LIMIT 1', (uid,)).fetchone()
-            if not pf:
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO portfolios (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '💼', '#FF9900', 1)", (uid,))
-                pf_id = cursor.lastrowid
-            else:
-                pf_id = pf['id']
-            conn.execute('UPDATE portfolio_pesos SET portfolio_id=? WHERE user_id=? AND portfolio_id IS NULL', (pf_id, uid))
-        conn.commit()
-    except Exception as e:
-        logger.warning(f"[db] falha na migração de portfolio para default: {e}")
-    finally:
-        conn.close()
+    """No-op: o schema Supabase já nasce com estrutura correta."""
+    pass
+
 
 # ==========================================
 # CACHE DE FUNDAMENTOS
 # ==========================================
 
 def salvar_fundamento_cache(ticker: str, dados: dict):
-    conn = get_connection()
-    conn.execute('''
-        INSERT OR REPLACE INTO fundamentos_cache (ticker, dados_json, atualizado_em)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-    ''', (ticker, json.dumps(dados)))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    try:
+        sb.table('fundamentals_cache').upsert(
+            {'ticker': ticker, 'dados_json': json.dumps(dados)},
+            on_conflict='ticker',
+        ).execute()
+    except Exception as e:
+        logger.warning(f"[db] falha ao salvar cache de fundamentos para {ticker}: {e}")
+
 
 def get_todos_fundamentos_cache() -> dict:
-    conn = get_connection()
-    rows = conn.execute('SELECT ticker, dados_json FROM fundamentos_cache').fetchall()
-    conn.close()
-    return {r['ticker']: json.loads(r['dados_json']) for r in rows}
+    sb = get_supabase()
+    try:
+        rows = sb.table('fundamentals_cache').select('ticker, dados_json').execute().data
+        return {
+            r['ticker']: json.loads(r['dados_json'])
+            for r in rows
+            if r.get('dados_json')
+        }
+    except Exception as e:
+        logger.warning(f"[db] falha ao carregar cache de fundamentos: {e}")
+        return {}
+
 
 # ==========================================
 # GESTÃO DE WATCHLISTS (COLEÇÕES)
@@ -277,72 +219,88 @@ def get_todos_fundamentos_cache() -> dict:
 
 def criar_watchlist(nome: str, descricao: str = "", cor: str = "#FF9900", icone: str = "⭐") -> int:
     user_id = get_user_id()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO watchlists (user_id, nome, descricao, cor, icone)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, nome, descricao, cor, icone))
-    novo_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return novo_id
+    sb = get_supabase()
+    response = sb.table('watchlists').insert({
+        'user_id': user_id, 'nome': nome,
+        'descricao': descricao, 'cor': cor, 'icone': icone,
+    }).execute()
+    return response.data[0]['id']
+
 
 def listar_watchlists() -> list[dict]:
     user_id = get_user_id()
-    conn = get_connection()
-    rows = conn.execute('''
-        SELECT w.*, COUNT(i.ticker) as total_ativos
-        FROM watchlists w
-        LEFT JOIN watchlist i ON i.watchlist_id = w.id AND i.user_id = w.user_id
-        WHERE w.user_id = ?
-        GROUP BY w.id
-        ORDER BY w.padrao DESC, w.criado_em ASC
-    ''', (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+
+    watchlists = (
+        sb.table('watchlists').select('*').eq('user_id', user_id).execute().data
+    )
+    # Ordenação: padrao True primeiro, depois por created_at asc
+    watchlists.sort(key=lambda x: (not bool(x.get('padrao')), x.get('created_at') or ''))
+
+    # Contagem de itens por watchlist (evita JOIN)
+    items = (
+        sb.table('watchlist_items')
+        .select('watchlist_id')
+        .eq('user_id', user_id)
+        .execute()
+        .data
+    )
+    counts: dict[int, int] = {}
+    for item in items:
+        wid = item['watchlist_id']
+        counts[wid] = counts.get(wid, 0) + 1
+
+    for wl in watchlists:
+        wl['total_ativos'] = counts.get(wl['id'], 0)
+        wl.setdefault('criado_em', wl.get('created_at'))   # alias de compat.
+
+    return watchlists
+
 
 def renomear_watchlist(watchlist_id: int, novo_nome: str, nova_descricao: str = "", novo_icone: str = "⭐", nova_cor: str = "#FF9900") -> None:
-    conn = get_connection()
-    conn.execute('''
-        UPDATE watchlists
-        SET nome=?, descricao=?, icone=?, cor=?
-        WHERE id=? AND user_id=?
-    ''', (novo_nome, nova_descricao, novo_icone, nova_cor, watchlist_id, get_user_id()))
-    conn.commit()
-    conn.close()
+    user_id = get_user_id()
+    sb = get_supabase()
+    sb.table('watchlists').update({
+        'nome': novo_nome, 'descricao': nova_descricao,
+        'icone': novo_icone, 'cor': nova_cor,
+    }).eq('id', watchlist_id).eq('user_id', user_id).execute()
+
 
 def deletar_watchlist(watchlist_id: int) -> None:
-    conn = get_connection()
     user_id = get_user_id()
-    conn.execute('DELETE FROM watchlist WHERE watchlist_id=? AND user_id=?', (watchlist_id, user_id))
-    conn.execute('DELETE FROM watchlists WHERE id=? AND user_id=?', (watchlist_id, user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('watchlist_items').delete().eq('watchlist_id', watchlist_id).eq('user_id', user_id).execute()
+    sb.table('watchlists').delete().eq('id', watchlist_id).eq('user_id', user_id).execute()
+
 
 def get_watchlist_padrao() -> int:
     user_id = get_user_id()
-    conn = get_connection()
-    row = conn.execute('SELECT id FROM watchlists WHERE user_id=? ORDER BY padrao DESC, criado_em ASC LIMIT 1', (user_id,)).fetchone()
+    sb = get_supabase()
 
-    if row:
-        conn.close()
-        return row['id']
+    rows = (
+        sb.table('watchlists').select('id, padrao, created_at')
+        .eq('user_id', user_id)
+        .execute()
+        .data
+    )
+    if rows:
+        rows.sort(key=lambda x: (not bool(x.get('padrao')), x.get('created_at') or ''))
+        return rows[0]['id']
 
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO watchlists (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '⭐', '#FF9900', 1)", (user_id,))
-    novo_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return novo_id
+    # Cria watchlist padrão se não existir
+    response = sb.table('watchlists').insert({
+        'user_id': user_id, 'nome': 'principal',
+        'icone': '⭐', 'cor': '#FF9900', 'padrao': True,
+    }).execute()
+    return response.data[0]['id']
+
 
 def definir_watchlist_padrao(watchlist_id: int) -> None:
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('UPDATE watchlists SET padrao=0 WHERE user_id=?', (user_id,))
-    conn.execute('UPDATE watchlists SET padrao=1 WHERE id=? AND user_id=?', (watchlist_id, user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('watchlists').update({'padrao': False}).eq('user_id', user_id).execute()
+    sb.table('watchlists').update({'padrao': True}).eq('id', watchlist_id).eq('user_id', user_id).execute()
+
 
 # ==========================================
 # ATIVOS (CRUD NA WATCHLIST)
@@ -352,53 +310,71 @@ def adicionar_ativo(ticker: str, nome: str = "", mercado: str = "", watchlist_id
     user_id = get_user_id()
     if watchlist_id is None:
         watchlist_id = get_watchlist_padrao()
-        
-    conn = get_connection()
-    conn.execute('''
-        INSERT OR IGNORE INTO watchlist (ticker, nome, mercado, user_id, watchlist_id)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (ticker, nome, mercado, user_id, watchlist_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    try:
+        sb.table('watchlist_items').insert({
+            'ticker': ticker, 'nome': nome, 'mercado': mercado,
+            'user_id': user_id, 'watchlist_id': watchlist_id,
+        }).execute()
+    except Exception as e:
+        # UNIQUE(ticker, user_id, watchlist_id) — duplicata ignorada silenciosamente
+        logger.warning(f"[db] ativo {ticker} já existe na watchlist {watchlist_id} (user={user_id}): {e}")
+
 
 def remover_ativo(ticker: str, watchlist_id: int = None) -> None:
     user_id = get_user_id()
-    conn = get_connection()
+    sb = get_supabase()
+    query = sb.table('watchlist_items').delete().eq('ticker', ticker).eq('user_id', user_id)
     if watchlist_id:
-        conn.execute('DELETE FROM watchlist WHERE ticker=? AND user_id=? AND watchlist_id=?', (ticker, user_id, watchlist_id))
-    else:
-        conn.execute('DELETE FROM watchlist WHERE ticker=? AND user_id=?', (ticker, user_id))
-    conn.commit()
-    conn.close()
+        query = query.eq('watchlist_id', watchlist_id)
+    query.execute()
+
 
 def listar_watchlist(watchlist_id: int = None) -> list[dict]:
     user_id = get_user_id()
-    conn = get_connection()
+    sb = get_supabase()
+    query = (
+        sb.table('watchlist_items').select('*')
+        .eq('user_id', user_id)
+        .order('created_at', desc=True)
+    )
     if watchlist_id is not None:
-        rows = conn.execute('SELECT * FROM watchlist WHERE user_id=? AND watchlist_id=? ORDER BY adicionado_em DESC', (user_id, watchlist_id)).fetchall()
-    else:
-        rows = conn.execute('SELECT * FROM watchlist WHERE user_id=? ORDER BY adicionado_em DESC', (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+        query = query.eq('watchlist_id', watchlist_id)
+    rows = query.execute().data
+    # Alias de compatibilidade: created_at → adicionado_em
+    for r in rows:
+        r.setdefault('adicionado_em', r.get('created_at'))
+    return rows
+
 
 def atualizar_notas(ticker, notas, watchlist_id):
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('UPDATE watchlist SET notas=? WHERE ticker=? AND user_id=? AND watchlist_id=?', (notas, ticker, user_id, watchlist_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('watchlist_items').update({'notas': notas}).eq(
+        'ticker', ticker,
+    ).eq('user_id', user_id).eq('watchlist_id', watchlist_id).execute()
+
 
 def popular_watchlist_inicial():
     user_id = get_user_id()
-    conn = get_connection()
-    count = conn.execute('SELECT COUNT(*) FROM watchlist WHERE user_id=?', (user_id,)).fetchone()[0]
+    sb = get_supabase()
+    count = len(sb.table('watchlist_items').select('ticker').eq('user_id', user_id).execute().data)
     if count == 0:
         wl_id = get_watchlist_padrao()
-        ativos = [('PETR4.SA', 'petrobras', 'brasil'), ('ITUB4.SA', 'itaú unibanco', 'brasil'), ('AAPL', 'apple inc.', 'eua')]
+        ativos = [
+            ('PETR4.SA', 'petrobras', 'brasil'),
+            ('ITUB4.SA', 'itaú unibanco', 'brasil'),
+            ('AAPL', 'apple inc.', 'eua'),
+        ]
         for t, n, m in ativos:
-            conn.execute('INSERT INTO watchlist (ticker, nome, mercado, user_id, watchlist_id) VALUES (?,?,?,?,?)', (t, n, m, user_id, wl_id))
-        conn.commit()
-    conn.close()
+            try:
+                sb.table('watchlist_items').insert({
+                    'ticker': t, 'nome': n, 'mercado': m,
+                    'user_id': user_id, 'watchlist_id': wl_id,
+                }).execute()
+            except Exception as e:
+                logger.warning(f"[db] falha ao inserir ativo inicial {t}: {e}")
+
 
 # ==========================================
 # GESTÃO DE PORTFÓLIOS (MÚLTIPLOS)
@@ -406,69 +382,85 @@ def popular_watchlist_inicial():
 
 def criar_portfolio(nome: str, descricao: str = "", cor: str = "#FF9900", icone: str = "💼") -> int:
     user_id = get_user_id()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO portfolios (user_id, nome, descricao, cor, icone)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, nome, descricao, cor, icone))
-    novo_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return novo_id
+    sb = get_supabase()
+    response = sb.table('portfolios').insert({
+        'user_id': user_id, 'nome': nome,
+        'descricao': descricao, 'cor': cor, 'icone': icone,
+    }).execute()
+    return response.data[0]['id']
+
 
 def listar_portfolios() -> list[dict]:
     user_id = get_user_id()
-    conn = get_connection()
-    rows = conn.execute('''
-        SELECT p.*, COUNT(pp.ticker) as total_ativos
-        FROM portfolios p
-        LEFT JOIN portfolio_pesos pp ON pp.portfolio_id = p.id AND pp.user_id = p.user_id AND pp.quantidade > 0
-        WHERE p.user_id = ?
-        GROUP BY p.id
-        ORDER BY p.padrao DESC, p.criado_em ASC
-    ''', (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+
+    portfolios = sb.table('portfolios').select('*').eq('user_id', user_id).execute().data
+    portfolios.sort(key=lambda x: (not bool(x.get('padrao')), x.get('created_at') or ''))
+
+    # Contagem de posições com quantidade > 0
+    positions = (
+        sb.table('portfolio_positions')
+        .select('portfolio_id, quantidade')
+        .eq('user_id', user_id)
+        .execute()
+        .data
+    )
+    counts: dict[int, int] = {}
+    for pos in positions:
+        if (pos.get('quantidade') or 0) > 0:
+            pid = pos['portfolio_id']
+            counts[pid] = counts.get(pid, 0) + 1
+
+    for pf in portfolios:
+        pf['total_ativos'] = counts.get(pf['id'], 0)
+        pf.setdefault('criado_em', pf.get('created_at'))   # alias de compat.
+
+    return portfolios
+
 
 def get_portfolio_padrao() -> int:
     user_id = get_user_id()
-    conn = get_connection()
-    row = conn.execute('SELECT id FROM portfolios WHERE user_id=? ORDER BY padrao DESC, criado_em ASC LIMIT 1', (user_id,)).fetchone()
-    if row:
-        conn.close()
-        return row['id']
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO portfolios (user_id, nome, icone, cor, padrao) VALUES (?, 'principal', '💼', '#FF9900', 1)", (user_id,))
-    novo_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return novo_id
+    sb = get_supabase()
+
+    rows = (
+        sb.table('portfolios').select('id, padrao, created_at')
+        .eq('user_id', user_id)
+        .execute()
+        .data
+    )
+    if rows:
+        rows.sort(key=lambda x: (not bool(x.get('padrao')), x.get('created_at') or ''))
+        return rows[0]['id']
+
+    response = sb.table('portfolios').insert({
+        'user_id': user_id, 'nome': 'principal',
+        'icone': '💼', 'cor': '#FF9900', 'padrao': True,
+    }).execute()
+    return response.data[0]['id']
+
 
 def definir_portfolio_padrao(portfolio_id: int) -> None:
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('UPDATE portfolios SET padrao=0 WHERE user_id=?', (user_id,))
-    conn.execute('UPDATE portfolios SET padrao=1 WHERE id=? AND user_id=?', (portfolio_id, user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('portfolios').update({'padrao': False}).eq('user_id', user_id).execute()
+    sb.table('portfolios').update({'padrao': True}).eq('id', portfolio_id).eq('user_id', user_id).execute()
+
 
 def renomear_portfolio(portfolio_id: int, novo_nome: str, nova_descricao: str = "", novo_icone: str = "💼", nova_cor: str = "#FF9900") -> None:
-    conn = get_connection()
-    conn.execute('''
-        UPDATE portfolios SET nome=?, descricao=?, icone=?, cor=?
-        WHERE id=? AND user_id=?
-    ''', (novo_nome, nova_descricao, novo_icone, nova_cor, portfolio_id, get_user_id()))
-    conn.commit()
-    conn.close()
+    user_id = get_user_id()
+    sb = get_supabase()
+    sb.table('portfolios').update({
+        'nome': novo_nome, 'descricao': nova_descricao,
+        'icone': novo_icone, 'cor': nova_cor,
+    }).eq('id', portfolio_id).eq('user_id', user_id).execute()
+
 
 def deletar_portfolio(portfolio_id: int) -> None:
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('DELETE FROM portfolio_pesos WHERE portfolio_id=? AND user_id=?', (portfolio_id, user_id))
-    conn.execute('DELETE FROM portfolios WHERE id=? AND user_id=?', (portfolio_id, user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('portfolio_positions').delete().eq('portfolio_id', portfolio_id).eq('user_id', user_id).execute()
+    sb.table('portfolios').delete().eq('id', portfolio_id).eq('user_id', user_id).execute()
+
 
 # ==========================================
 # PORTFÓLIO E DECISÕES
@@ -478,91 +470,121 @@ def salvar_peso(ticker, peso, preco_medio=None, quantidade=None, portfolio_id=No
     user_id = get_user_id()
     if portfolio_id is None:
         portfolio_id = get_portfolio_padrao()
-    conn = get_connection()
-    conn.execute('''
-        INSERT OR REPLACE INTO portfolio_pesos (ticker, peso, preco_medio, quantidade, user_id, portfolio_id)
-        VALUES (?,?,?,?,?,?)
-    ''', (ticker, peso, preco_medio, quantidade, user_id, portfolio_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('portfolio_positions').upsert(
+        {
+            'ticker': ticker, 'peso': peso,
+            'preco_medio': preco_medio, 'quantidade': quantidade,
+            'user_id': user_id, 'portfolio_id': portfolio_id,
+        },
+        on_conflict='ticker,user_id,portfolio_id',
+    ).execute()
+
 
 def get_pesos(portfolio_id=None):
     user_id = get_user_id()
     if portfolio_id is None:
         portfolio_id = get_portfolio_padrao()
-    conn = get_connection()
-    rows = conn.execute('SELECT * FROM portfolio_pesos WHERE user_id=? AND portfolio_id=?', (user_id, portfolio_id)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+    rows = (
+        sb.table('portfolio_positions').select('*')
+        .eq('user_id', user_id)
+        .eq('portfolio_id', portfolio_id)
+        .execute()
+        .data
+    )
+    # Alias de compatibilidade: updated_at → atualizado_em
+    for r in rows:
+        r.setdefault('atualizado_em', r.get('updated_at'))
+    return rows
+
 
 def registrar_decisao(ticker, tipo, data, preco, quantidade, tese):
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('''
-        INSERT INTO decisoes (ticker, tipo, data_decisao, preco_decisao, quantidade, tese, user_id)
-        VALUES (?,?,?,?,?,?,?)
-    ''', (ticker, tipo, data, preco, quantidade, tese, user_id))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('decision_log').insert({
+        'ticker': ticker, 'tipo': tipo, 'data_decisao': data,
+        'preco_decisao': preco, 'quantidade': quantidade,
+        'tese': tese, 'user_id': user_id,
+    }).execute()
+
 
 def listar_decisoes(ticker=None):
     user_id = get_user_id()
-    conn = get_connection()
+    sb = get_supabase()
+    query = (
+        sb.table('decision_log').select('*')
+        .eq('user_id', user_id)
+        .order('data_decisao', desc=True)
+    )
     if ticker:
-        rows = conn.execute('SELECT * FROM decisoes WHERE ticker=? AND user_id=? ORDER BY data_decisao DESC', (ticker, user_id)).fetchall()
-    else:
-        rows = conn.execute('SELECT * FROM decisoes WHERE user_id=? ORDER BY data_decisao DESC', (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+        query = query.eq('ticker', ticker)
+    return query.execute().data
+
 
 def atualizar_resultado(id_decisao, resultado):
-    conn = get_connection()
+    sb = get_supabase()
     data_res = datetime.today().strftime('%Y-%m-%d') if resultado else None
-    conn.execute('UPDATE decisoes SET resultado=?, data_resultado=? WHERE id=?', (resultado, data_res, id_decisao))
-    conn.commit()
-    conn.close()
+    sb.table('decision_log').update({
+        'resultado': resultado,
+        'data_resultado': data_res,
+    }).eq('id', id_decisao).execute()
+
 
 # ==========================================
-# HEALTH SCORES (CORREÇÃO DE JSON DUPLO)
+# HEALTH SCORES
 # ==========================================
 
 def get_health_scores():
-    conn = get_connection()
-    rows = conn.execute('SELECT * FROM health_scores').fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+    rows = sb.table('health_scores').select('*').execute().data
+    # Alias de compatibilidade: updated_at → atualizado_em
+    for r in rows:
+        r.setdefault('atualizado_em', r.get('updated_at'))
+    return rows
+
 
 def salvar_health_score(ticker, score, alertas_payload):
     """
-    Guarda o score no banco de dados. 
+    Guarda o score no banco de dados.
     A trava 'not isinstance(..., str)' garante que não ocorra dupla codificação (Double JSON).
     """
     if not isinstance(alertas_payload, str):
         alertas_payload = json.dumps(alertas_payload)
-        
-    conn = get_connection()
-    conn.execute('''
-        INSERT OR REPLACE INTO health_scores (ticker, score, alertas_venda, atualizado_em) 
-        VALUES (?,?,?,CURRENT_TIMESTAMP)
-    ''', (ticker, score, alertas_payload))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('health_scores').upsert(
+        {'ticker': ticker, 'score': score, 'alertas_venda': alertas_payload},
+        on_conflict='ticker',
+    ).execute()
+
 
 # ==========================================
 # CACHE DE IA
 # ==========================================
 
 def salvar_cache_ia(ticker, tipo, conteudo):
-    conn = get_connection()
-    conn.execute('INSERT INTO cache_analise_ia (ticker, tipo, conteudo) VALUES (?,?,?)', (ticker, tipo, conteudo))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('ai_analysis_cache').insert({
+        'ticker': ticker, 'tipo': tipo, 'conteudo': conteudo,
+    }).execute()
+
 
 def get_cache_ia(ticker, tipo):
-    conn = get_connection()
-    row = conn.execute('SELECT conteudo, gerado_em FROM cache_analise_ia WHERE ticker=? AND tipo=? ORDER BY gerado_em DESC LIMIT 1', (ticker, tipo)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    sb = get_supabase()
+    rows = (
+        sb.table('ai_analysis_cache').select('conteudo, created_at')
+        .eq('ticker', ticker)
+        .eq('tipo', tipo)
+        .order('created_at', desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if rows:
+        # Alias de compatibilidade: created_at → gerado_em (igual ao SQLite)
+        return {'conteudo': rows[0]['conteudo'], 'gerado_em': rows[0]['created_at']}
+    return None
+
 
 # ==========================================
 # RELATÓRIOS SEMANAIS
@@ -570,32 +592,43 @@ def get_cache_ia(ticker, tipo):
 
 def registrar_envio_relatorio(tickers: list[str], tipo: str = 'semanal') -> None:
     user_id = get_user_id()
-    conn = get_connection()
-    conn.execute('''
-        INSERT INTO relatorios_enviados (user_id, tipo, tickers_incluidos)
-        VALUES (?, ?, ?)
-    ''', (user_id, tipo, ','.join(tickers)))
-    conn.commit()
-    conn.close()
+    sb = get_supabase()
+    sb.table('report_history').insert({
+        'user_id': user_id, 'tipo': tipo,
+        'tickers_incluidos': ','.join(tickers),
+    }).execute()
+
 
 def get_ultimo_envio_relatorio(tipo: str = 'semanal') -> dict | None:
     user_id = get_user_id()
-    conn = get_connection()
-    row = conn.execute('''
-        SELECT * FROM relatorios_enviados
-        WHERE user_id = ? AND tipo = ?
-        ORDER BY enviado_em DESC LIMIT 1
-    ''', (user_id, tipo)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    sb = get_supabase()
+    rows = (
+        sb.table('report_history').select('*')
+        .eq('user_id', user_id)
+        .eq('tipo', tipo)
+        .order('created_at', desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if rows:
+        rows[0].setdefault('enviado_em', rows[0].get('created_at'))  # alias de compat.
+        return rows[0]
+    return None
+
 
 def listar_relatorios_enviados(limite: int = 10) -> list[dict]:
     user_id = get_user_id()
-    conn = get_connection()
-    rows = conn.execute('''
-        SELECT * FROM relatorios_enviados
-        WHERE user_id = ?
-        ORDER BY enviado_em DESC LIMIT ?
-    ''', (user_id, limite)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    sb = get_supabase()
+    rows = (
+        sb.table('report_history').select('*')
+        .eq('user_id', user_id)
+        .order('created_at', desc=True)
+        .limit(limite)
+        .execute()
+        .data
+    )
+    # Alias de compatibilidade: created_at → enviado_em
+    for r in rows:
+        r.setdefault('enviado_em', r.get('created_at'))
+    return rows
