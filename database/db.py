@@ -725,3 +725,52 @@ def get_historico_score(ticker: str, dias: int = 180) -> list[dict]:
     except Exception as e:
         logger.warning(f"[db] falha ao buscar histórico de score para {ticker}: {e}")
         return []
+
+
+# ── rebalanceamento inteligente ──────────────────────────────────────────────
+
+def salvar_peso_alvo(portfolio_id: int, ticker: str, peso_alvo: float):
+    """Salva ou atualiza o peso-alvo (%) de um ativo no portfólio."""
+    try:
+        get_supabase().table("portfolio_targets").upsert(
+            {
+                "portfolio_id": portfolio_id,
+                "ticker":       ticker,
+                "peso_alvo":    round(peso_alvo, 2),
+                "updated_at":   "now()",
+            },
+            on_conflict="portfolio_id,ticker",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"[db] salvar_peso_alvo {ticker}: {e}")
+
+
+def get_pesos_alvo(portfolio_id: int) -> list[dict]:
+    """Retorna todos os pesos-alvo de um portfólio."""
+    try:
+        res = (
+            get_supabase()
+            .table("portfolio_targets")
+            .select("ticker, peso_alvo")
+            .eq("portfolio_id", portfolio_id)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        logger.warning(f"[db] get_pesos_alvo portfolio_id={portfolio_id}: {e}")
+        return []
+
+
+def deletar_peso_alvo(portfolio_id: int, ticker: str):
+    """Remove o peso-alvo de um ativo."""
+    try:
+        (
+            get_supabase()
+            .table("portfolio_targets")
+            .delete()
+            .eq("portfolio_id", portfolio_id)
+            .eq("ticker", ticker)
+            .execute()
+        )
+    except Exception as e:
+        logger.warning(f"[db] deletar_peso_alvo {ticker}: {e}")

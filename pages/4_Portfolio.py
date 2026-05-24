@@ -16,7 +16,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
-from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio
+from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -368,6 +368,182 @@ with tab_posicoes:
                 layout_bar['yaxis']['showgrid'] = False
             fig_bar.update_layout(**layout_bar)
             st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ── rebalanceamento inteligente ───────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("⚖️ rebalanceamento inteligente", expanded=False):
+
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.78rem; color:#555; margin-bottom:16px;">'
+                'defina a alocação-alvo (%) para cada ativo e veja exatamente quanto '
+                'comprar ou vender para rebalancear a carteira.</div>',
+                unsafe_allow_html=True,
+            )
+
+            pesos_alvo_list = get_pesos_alvo(portfolio_id_ativo)
+            pesos_alvo_dict = {p['ticker']: float(p['peso_alvo']) for p in pesos_alvo_list}
+
+            if valor_atual_carteira <= 0:
+                st.warning("adicione posições com quantidade e preço para usar o rebalanceamento.")
+            else:
+                # ── 1. definição dos alvos ────────────────────────────────────
+                section_title("1. defina os pesos-alvo (%)")
+
+                tickers_port = [
+                    t for t, d in ativos_alocados.items()
+                    if float(d.get('quantidade') or 0) > 0
+                ]
+
+                total_alvo  = 0.0
+                novos_alvos = {}
+
+                n_cols     = min(4, len(tickers_port))
+                cols_alvo  = st.columns(n_cols) if n_cols > 0 else [st]
+                for i, t in enumerate(tickers_port):
+                    with cols_alvo[i % len(cols_alvo)]:
+                        alvo_atual = pesos_alvo_dict.get(t, 0.0)
+                        novo_alvo  = st.number_input(
+                            f"{t.replace('.SA', '')}",
+                            min_value=0.0, max_value=100.0,
+                            value=float(alvo_atual),
+                            step=1.0, format="%.1f",
+                            key=f"alvo_{t}",
+                        )
+                        novos_alvos[t] = novo_alvo
+                        total_alvo    += novo_alvo
+
+                # Indicador de soma dos alvos
+                cor_total = "#00C853" if abs(total_alvo - 100) < 0.1 else "#FF1744"
+                aviso_soma = "✅" if abs(total_alvo - 100) < 0.1 else "⚠️ deve somar 100%"
+                st.markdown(
+                    f'<div style="font-family:Courier New; font-size:0.85rem; '
+                    f'color:{cor_total}; margin:8px 0;">'
+                    f'total alocado: {total_alvo:.1f}% {aviso_soma}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                col_s1, col_s2 = st.columns([1, 3])
+                with col_s1:
+                    if st.button("💾 salvar alvos", type="primary", use_container_width=True,
+                                 key="btn_salvar_alvos"):
+                        for t, alvo in novos_alvos.items():
+                            salvar_peso_alvo(portfolio_id_ativo, t, alvo)
+                        st.success("✅ alvos salvos!")
+                        st.rerun()
+
+                # ── 2. plano de rebalanceamento ───────────────────────────────
+                if pesos_alvo_dict and abs(total_alvo - 100) < 5:
+
+                    section_title("2. plano de rebalanceamento")
+
+                    aporte_adicional = st.number_input(
+                        "aporte adicional disponível (R$):",
+                        min_value=0.0, value=0.0,
+                        step=100.0, format="%.2f",
+                        key="aporte_rebal",
+                        help="valor extra que você quer aportar agora",
+                    )
+
+                    valor_total_novo = valor_atual_carteira + aporte_adicional
+
+                    dados_rebal = []
+                    for t, dados in ativos_alocados.items():
+                        qtd_atual = float(dados.get('quantidade') or 0)
+                        if qtd_atual <= 0:
+                            continue
+
+                        preco_at  = live_data.get(t, 0.0)
+                        val_atual = qtd_atual * preco_at
+                        pct_atual = (val_atual / valor_atual_carteira * 100
+                                     if valor_atual_carteira > 0 else 0.0)
+
+                        alvo_pct  = pesos_alvo_dict.get(t, 0.0)
+                        val_alvo  = valor_total_novo * alvo_pct / 100
+                        diferenca = val_alvo - val_atual
+                        qtd_op    = diferenca / preco_at if preco_at > 0 else 0.0
+                        desvio_pp = pct_atual - alvo_pct
+
+                        dados_rebal.append({
+                            'ticker':       t.replace('.SA', ''),
+                            '_ticker_orig': t,
+                            'peso atual':   f"{pct_atual:.1f}%",
+                            'peso alvo':    f"{alvo_pct:.1f}%",
+                            'desvio':       desvio_pp,
+                            'valor atual':  val_atual,
+                            'valor alvo':   val_alvo,
+                            'diferença R$': diferenca,
+                            'ação':         qtd_op,
+                            'preço':        preco_at,
+                        })
+
+                    if dados_rebal:
+                        dados_rebal.sort(key=lambda x: abs(x['desvio']), reverse=True)
+
+                        for d in dados_rebal:
+                            cor_op = "#00C853" if d['diferença R$'] > 0 else "#FF1744"
+                            op_txt = "COMPRAR" if d['diferença R$'] > 0 else "VENDER"
+                            seta   = "▲" if d['diferença R$'] > 0 else "▼"
+
+                            r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3])
+                            with r1:
+                                st.markdown(
+                                    f'<div style="font-family:Courier New; color:#FF9900; font-weight:bold;">{d["ticker"]}</div>'
+                                    f'<div style="font-family:Courier New; font-size:0.7rem; color:#555;">{d["peso atual"]} → {d["peso alvo"]}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with r2:
+                                cor_dev = ("#FF1744" if abs(d['desvio']) > 5
+                                           else "#FF9900" if abs(d['desvio']) > 2
+                                           else "#00C853")
+                                st.markdown(
+                                    f'<div style="font-family:Courier New; color:{cor_dev}; font-size:0.85rem;">'
+                                    f'desvio: {d["desvio"]:+.1f}pp</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with r3:
+                                st.markdown(
+                                    f'<div style="font-family:Courier New; color:#888; font-size:0.8rem;">'
+                                    f'R$ {d["valor atual"]:,.0f} → R$ {d["valor alvo"]:,.0f}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with r4:
+                                st.markdown(
+                                    f'<div style="font-family:Courier New; color:{cor_op}; font-size:0.85rem; font-weight:bold;">'
+                                    f'{seta} {op_txt} R$ {abs(d["diferença R$"]):,.2f}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            with r5:
+                                if d['preço'] > 0 and abs(d['ação']) >= 0.01:
+                                    qtd_fmt = (
+                                        f"{d['ação']:+.0f} cotas"
+                                        if abs(d['ação']) >= 1
+                                        else f"{d['ação']:+.4f} lotes"
+                                    )
+                                    st.markdown(
+                                        f'<div style="font-family:Courier New; color:{cor_op}; font-size:0.8rem;">'
+                                        f'{qtd_fmt} @ R$ {d["preço"]:,.2f}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+
+                            st.markdown(
+                                '<div style="height:1px; background:#1e1e1e; margin:4px 0;"></div>',
+                                unsafe_allow_html=True,
+                            )
+
+                        # Resumo
+                        total_compras = sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] > 0)
+                        total_vendas  = abs(sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] < 0))
+                        aporte_liq    = max(0.0, total_compras - total_vendas)
+
+                        st.markdown("---")
+                        rc1, rc2, rc3 = st.columns(3)
+                        with rc1:
+                            metric_card("total a comprar",   f"R$ {total_compras:,.2f}", "", "bull")
+                        with rc2:
+                            metric_card("total a vender",    f"R$ {total_vendas:,.2f}",  "", "bear")
+                        with rc3:
+                            metric_card("aporte necessário", f"R$ {aporte_liq:,.2f}",
+                                        "além do que já tem em carteira", "amber")
 
 # ==========================================
 # tab 2: stress test
