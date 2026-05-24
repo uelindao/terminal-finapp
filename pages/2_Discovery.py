@@ -19,8 +19,8 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from database.db import (
-    listar_watchlist, get_health_scores, adicionar_ativo, 
-    get_connection, listar_watchlists, criar_watchlist, get_watchlist_padrao,
+    listar_watchlist, get_health_scores, adicionar_ativo,
+    listar_watchlists, criar_watchlist, get_watchlist_padrao,
     get_todos_fundamentos_cache, salvar_fundamento_cache, init_db
 )
 from utils.tickers import (

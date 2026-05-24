@@ -638,6 +638,55 @@ def listar_relatorios_enviados(limite: int = 10) -> list[dict]:
 # HISTÓRICO TEMPORAL DE HEALTH SCORES
 # ==========================================
 
+# ==========================================
+# ALERTAS DE PREÇO
+# ==========================================
+
+def listar_alertas(user_id: int = None, limite: int = 20) -> list[dict]:
+    """Retorna os alertas de preço do usuário, ordenados por created_at desc."""
+    if user_id is None:
+        user_id = get_user_id()
+    sb = get_supabase()
+    try:
+        rows = (
+            sb.table('alerts')
+            .select('*')
+            .eq('user_id', user_id)
+            .order('created_at', desc=True)
+            .limit(limite)
+            .execute()
+            .data
+        )
+        # Alias de compatibilidade: created_at → criado_em
+        for r in rows:
+            r.setdefault('criado_em', r.get('created_at'))
+        return rows
+    except Exception as e:
+        logger.warning(f"[db] falha ao listar alertas do user_id={user_id}: {e}")
+        return []
+
+
+def limpar_cache_ia_antigo(dias: int = 30) -> int:
+    """
+    Deleta registros de cache de IA mais antigos que `dias` dias.
+    Retorna o número de linhas removidas.
+    """
+    sb = get_supabase()
+    try:
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=dias)).isoformat()
+        res = (
+            sb.table('ai_analysis_cache')
+            .delete()
+            .lt('created_at', cutoff)
+            .execute()
+        )
+        return len(res.data) if res.data else 0
+    except Exception as e:
+        logger.warning(f"[db] falha ao limpar cache de IA antigo: {e}")
+        return 0
+
+
 def registrar_historico_score(ticker: str, score: int) -> None:
     """
     Insere um ponto de histórico do health score para o ticker.

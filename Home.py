@@ -16,7 +16,7 @@ from utils.style import aplicar_tema
 from database.db import (
     init_db, popular_watchlist_inicial, listar_watchlist,
     remover_ativo, adicionar_ativo, atualizar_notas,
-    get_health_scores, get_pesos, get_connection,
+    get_health_scores, get_pesos,
     listar_watchlists, criar_watchlist, renomear_watchlist,
     deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao,
     registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados

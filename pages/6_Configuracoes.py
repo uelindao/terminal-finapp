@@ -453,23 +453,16 @@ with tab_email:
     st.info("os alertas de preço são configurados diretamente na página de cada ativo (watchlist). aqui você pode ver um resumo.", icon="🔔")
 
     try:
-        from database.db import get_connection
-        conn = get_connection()
-        alertas = conn.execute(
-            'SELECT * FROM alertas WHERE user_id=? ORDER BY criado_em DESC LIMIT 20',
-            (user_id_atual,)
-        ).fetchall()
-        conn.close()
-
-        if alertas:
+        from database.db import listar_alertas
+        alertas_raw = listar_alertas(user_id_atual)
+        if alertas_raw:
             import pandas as pd
-            df_alertas = pd.DataFrame([dict(a) for a in alertas])
-            df_alertas = df_alertas[['ticker', 'tipo', 'threshold', 'criado_em']].rename(columns={
-                'ticker': 'ticker',
-                'tipo': 'tipo',
-                'threshold': 'gatilho',
-                'criado_em': 'criado em'
-            })
+            df_alertas = pd.DataFrame(alertas_raw)
+            # garantir coluna de data compatível
+            if 'criado_em' not in df_alertas.columns and 'created_at' in df_alertas.columns:
+                df_alertas['criado_em'] = df_alertas['created_at']
+            show_cols = [c for c in ['ticker', 'tipo', 'threshold', 'criado_em'] if c in df_alertas.columns]
+            df_alertas = df_alertas[show_cols].rename(columns={'threshold': 'gatilho', 'criado_em': 'criado em'})
             st.dataframe(df_alertas, use_container_width=True, hide_index=True)
         else:
             st.caption("nenhum alerta de preço configurado.")
@@ -588,27 +581,26 @@ with tab_admin:
     st.markdown("#### 🖥️ informações do sistema")
 
     try:
-        import sqlite3
-        from database.db import db_name
-        conn_info = sqlite3.connect(db_name)
-        tabelas = conn_info.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+        from database.supabase_client import get_supabase
+        import pandas as pd
+        sb = get_supabase()
+        tabelas_conhecidas = [
+            'users', 'watchlists', 'watchlist_items', 'portfolios',
+            'portfolio_positions', 'health_scores', 'fundamentals_cache',
+            'decision_log', 'report_history', 'alerts', 'ai_analysis_cache',
+            'saved_comparisons', 'health_score_history',
+        ]
         tamanhos = []
-        for (tabela,) in tabelas:
+        for tabela in tabelas_conhecidas:
             try:
-                count = conn_info.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
+                res = sb.table(tabela).select('id', count='exact').execute()
+                count = res.count if res.count is not None else len(res.data)
                 tamanhos.append({'tabela': tabela, 'registros': count})
             except Exception:
                 tamanhos.append({'tabela': tabela, 'registros': '—'})
-        conn_info.close()
-
-        import pandas as pd
         df_tabelas = pd.DataFrame(tamanhos)
         st.dataframe(df_tabelas, use_container_width=True, hide_index=True)
-
-        import os
-        if os.path.exists(db_name):
-            tamanho_kb = os.path.getsize(db_name) / 1024
-            st.caption(f"banco de dados: `{db_name}` — {tamanho_kb:.1f} KB")
+        st.caption("banco de dados: **Supabase (PostgreSQL)** — nuvem")
     except Exception as e:
         st.warning(f"não foi possível carregar informações do banco: {e}")
 
@@ -627,13 +619,8 @@ with tab_admin:
     with manut2:
         if st.button("🗑️ limpar cache de IA (análises antigas)", use_container_width=True):
             try:
-                from database.db import get_connection as _gc
-                c = _gc()
-                removidos = c.execute(
-                    "DELETE FROM cache_analise_ia WHERE gerado_em < datetime('now', '-30 days')"
-                ).rowcount
-                c.commit()
-                c.close()
+                from database.db import limpar_cache_ia_antigo
+                removidos = limpar_cache_ia_antigo(dias=30)
                 st.success(f"{removidos} análise(s) antiga(s) removida(s).")
             except Exception as e:
                 st.error(f"erro: {e}")
