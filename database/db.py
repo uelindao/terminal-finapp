@@ -774,3 +774,33 @@ def deletar_peso_alvo(portfolio_id: int, ticker: str):
         )
     except Exception as e:
         logger.warning(f"[db] deletar_peso_alvo {ticker}: {e}")
+
+
+# ── onboarding ───────────────────────────────────────────────────────────────
+
+def is_primeiro_acesso(user_id: int) -> bool:
+    """
+    Retorna True se o usuário nunca adicionou nenhum ativo à watchlist.
+    """
+    try:
+        wl = (
+            get_supabase()
+            .table("watchlist_items")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return (wl.count or 0) == 0
+    except Exception as e:
+        logger.warning(f"[db] is_primeiro_acesso: {e}")
+        return False
+
+
+def marcar_onboarding_completo(user_id: int):
+    """Marca que o usuário completou o onboarding."""
+    try:
+        get_supabase().table("users").update(
+            {"onboarding_completo": True}
+        ).eq("id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"[db] marcar_onboarding: {e}")

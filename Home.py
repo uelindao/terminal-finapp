@@ -19,7 +19,8 @@ from database.db import (
     get_health_scores, get_pesos,
     listar_watchlists, criar_watchlist, renomear_watchlist,
     deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao,
-    registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados
+    registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados,
+    is_primeiro_acesso, marcar_onboarding_completo,
 )
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score
@@ -811,6 +812,20 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
 
 # ── GRID DA WATCHLIST ATIVA ─────────────────────────────
 watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
+
+# Onboarding: intercepta quando watchlist está vazia E é primeiro acesso
+_user_home = get_current_user()
+if (not watchlist
+        and _user_home
+        and is_primeiro_acesso(_user_home['user_id'])
+        and not st.session_state.get('skip_onboarding')):
+    from utils.onboarding import render_onboarding
+    render_onboarding(_user_home['user_id'], watchlist_id_ativo)
+    st.markdown("---")
+    if st.button("pular onboarding e ir direto →", key="btn_skip_ob"):
+        st.session_state['skip_onboarding'] = True
+        st.rerun()
+    st.stop()
 
 if not watchlist:
     empty_state(icone="⭐", titulo="watchlist vazia", descricao="a sua lista de monitorização está vazia. utilize a barra de pesquisa acima para adicionar ativos.")
