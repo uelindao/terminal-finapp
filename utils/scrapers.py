@@ -1,6 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import yfinance as yf
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 def buscar_dados_b3(ticker: str) -> dict:
     """extrai fundamentos reais do fundamentus mapeando a tabela de forma agressiva."""
@@ -39,7 +42,8 @@ def buscar_dados_b3(ticker: str) -> dict:
             if val in ['—', '-', '']: return None
             try:
                 return float(val.replace('.', '').replace(',', '.').replace('%', ''))
-            except:
+            except Exception as e:
+                logger.warning(f"[scrapers] falha ao converter '{chave}'='{val}' para float: {e}")
                 return None
 
         res['nome'] = dados_tabela.get('Empresa', '—').lower()
@@ -56,6 +60,8 @@ def buscar_dados_b3(ticker: str) -> dict:
 
         # fallback: se qualidade < 40% e é B3, complementar com yfinance
         if res.get('qualidade_dados', 0) < 40:
+            qualidade = res.get('qualidade_dados', 0)
+            logger.info(f"[scrapers] fallback yfinance para {ticker} (qualidade fundamentus: {qualidade}%)")
             yf_dados = buscar_dados_us(ticker)
             for campo in ['p/l', 'p/vp', 'roe%', 'dy%', 'ev/ebitda', 'margem%']:
                 if res.get(campo) is None and yf_dados.get(campo) is not None:
@@ -64,8 +70,8 @@ def buscar_dados_b3(ticker: str) -> dict:
                 res['nome'] = yf_dados['nome']
 
         return res
-    except:
-        # fallback completo para yfinance quando Fundamentus falha totalmente
+    except Exception as e:
+        logger.warning(f"[scrapers] falha total no scraping do Fundamentus para {ticker}, usando fallback yfinance: {e}")
         return buscar_dados_us(ticker)
 
 
@@ -99,7 +105,8 @@ def validar_fundamentos(dados: dict) -> dict:
                 dados[campo] = val
             else:
                 dados[campo] = None  # dado fora do range — descartado
-        except:
+        except Exception as e:
+            logger.warning(f"[scrapers] falha ao validar campo '{campo}' (valor={val}): {e}")
             dados[campo] = None
 
     dados['qualidade_dados'] = int((campos_validos / campos_totais) * 100)
@@ -136,5 +143,6 @@ def buscar_dados_us(ticker: str) -> dict:
         res['roe%'] = (roe_raw * 100) if roe_raw is not None else None
 
         return validar_fundamentos(res)
-    except:
+    except Exception as e:
+        logger.warning(f"[scrapers] falha ao buscar dados yfinance para {ticker}: {e}")
         return res

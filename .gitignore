@@ -15,3 +15,6 @@ data/
 # Ambientes Virtuais (Se você usar)
 venv/
 env/
+
+# Logs gerados em runtime (manter pasta, ignorar arquivos)
+logs/*.log

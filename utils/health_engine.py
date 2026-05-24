@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 from database.db import salvar_health_score, get_todos_fundamentos_cache
 from utils.tickers import FII_TODOS
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 def _is_fii(ticker: str) -> bool:
     """Determina se o ativo é um Fundo Imobiliário (FII)."""
@@ -96,7 +99,8 @@ def calcular_piotroski(acao):
         }
         
         return f_score_total, detalhamento
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[health_engine] falha ao calcular Piotroski F-Score: {e}")
         return 0, {}
 
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
@@ -379,6 +383,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         return {'score': score, 'alertas': alertas, 'status': status_acao}
         
     except Exception as e:
+        logger.error(f"[health_engine] erro crítico ao calcular health score para {ticker}: {e}")
         payload = {"alertas": [f"erro no cálculo: {e}"], "breakdown": {}}
         salvar_health_score(ticker, 50, payload)
         return {'score': 50, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}

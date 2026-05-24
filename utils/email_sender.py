@@ -4,6 +4,9 @@ from email.mime.text import MIMEText
 import streamlit as st
 from datetime import datetime
 import threading
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 def _enviar_assincrono(msg, remetente, app_password, destinatario):
     """Função interna que roda em uma thread separada para não bloquear a UI."""
@@ -12,7 +15,7 @@ def _enviar_assincrono(msg, remetente, app_password, destinatario):
             smtp.login(remetente, app_password)
             smtp.sendmail(remetente, destinatario, msg.as_string())
     except Exception as e:
-        print(f"Erro ao enviar email em background: {e}")
+        logger.error(f"[email_sender] falha ao enviar email via SMTP: {e}")
 
 def enviar_alerta_email(ticker: str, score: float, alertas: list[str]) -> bool:
     """

@@ -2,6 +2,9 @@ import sqlite3
 import json
 from datetime import datetime
 import hashlib
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 db_name = "finterminal.db"
 
@@ -15,7 +18,8 @@ def get_user_id() -> int:
     try:
         import streamlit as st
         return st.session_state.get('user_id', 1)
-    except:
+    except Exception as e:
+        logger.warning(f"[db] falha ao obter user_id da sessão, usando fallback 1: {e}")
         return 1
 
 # ==========================================
@@ -34,7 +38,8 @@ def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is
         ''', (username.lower().strip(), _hash_senha(senha), nome, email, 1 if is_admin else 0))
         conn.commit()
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"[db] falha ao criar usuário '{username}': {e}")
         return False
     finally:
         conn.close()
@@ -74,8 +79,8 @@ def deletar_usuario(user_id: int) -> None:
     for tabela in tabelas:
         try:
             conn.execute(f'DELETE FROM {tabela} WHERE user_id = ?', (user_id,))
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"[db] falha ao limpar tabela '{tabela}' para user_id={user_id}: {e}")
     conn.execute('DELETE FROM usuarios WHERE id = ?', (user_id,))
     conn.commit()
     conn.close()
@@ -87,7 +92,8 @@ def _criar_admin_padrao():
         try:
             import streamlit as st
             senha_padrao = st.secrets.get('admin', {}).get('password', 'admin123')
-        except:
+        except Exception as e:
+            logger.warning(f"[db] falha ao ler senha admin dos secrets, usando padrão: {e}")
             senha_padrao = 'admin123'
             
         conn.execute('''
@@ -241,8 +247,8 @@ def _migrar_portfolio_para_default():
                 pf_id = pf['id']
             conn.execute('UPDATE portfolio_pesos SET portfolio_id=? WHERE user_id=? AND portfolio_id IS NULL', (pf_id, uid))
         conn.commit()
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"[db] falha na migração de portfolio para default: {e}")
     finally:
         conn.close()
 
