@@ -26,11 +26,13 @@ from utils.health_engine import calcular_health_score
 from utils.tickers import mapear_ticker_base
 
 from utils.components import (
-    page_header, section_title, metric_card, 
-    watchlist_card, empty_state, progress_steps, 
+    page_header, section_title, metric_card,
+    watchlist_card, empty_state, progress_steps,
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator
 )
 from utils.formatters import fmt_preco, fmt_pct
+import plotly.graph_objects as go
+from utils.charts import base_layout
 
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
@@ -259,55 +261,225 @@ def avaliar_semaforo_fiscal(divida_pib, tendencia, primario):
         return "amber", "🟡", f"atenção fiscal (dívida {divida_pib:.0f}% pib)" if divida_pib else "atenção fiscal"
     return "bull", "🟢", f"fiscal estável (dívida {divida_pib:.0f}% pib)" if divida_pib else "fiscal estável"
 
-cor_br, icone_br, texto_br = avaliar_semaforo_brasil(dados_sem.get("selic"), dados_sem.get("ipca"))
-cor_us, icone_us, texto_us = avaliar_semaforo_eua(dados_sem.get("t10y2y"), dados_sem.get("vix"))
-cor_risco, icone_risco, texto_risco = avaliar_semaforo_risco(dados_sem.get("vix"), dados_sem.get("hy_spread"))
-cor_fiscal, icone_fiscal, texto_fiscal = avaliar_semaforo_fiscal(
-    dados_sem.get("divida_pib"), dados_sem.get("tendencia_divida"), dados_sem.get("result_primario"))
+def calcular_ambiente_macro(selic, vix, t10y2y, hy_spread,
+                             fiscal_status=None) -> dict:
+    """
+    Consolida os indicadores macro em um score único 0-100.
+    100 = ambiente ideal para risco / 0 = ambiente hostil, defensivo.
+    """
+    score  = 50  # neutro como base
+    sinais = []
 
-# Penalidade: fiscal crítico degrada o semáforo geral do Brasil
-if cor_fiscal == "bear":
-    if cor_br == "bull":
-        cor_br, icone_br = "amber", "🟡"
-        texto_br += " (pressão fiscal)"
-    elif cor_br == "amber":
-        texto_br += " + fiscal crítico"
+    # ── VIX (peso: 25pts) ───────────────────────────────────────────────────
+    if vix is not None:
+        if vix < 15:
+            score += 12
+            sinais.append(("VIX", "baixo", "bull", f"{vix:.1f}"))
+        elif vix < 20:
+            score += 5
+            sinais.append(("VIX", "normal", "amber", f"{vix:.1f}"))
+        elif vix < 30:
+            score -= 8
+            sinais.append(("VIX", "elevado", "amber", f"{vix:.1f}"))
+        else:
+            score -= 20
+            sinais.append(("VIX", "crítico", "bear", f"{vix:.1f}"))
 
-cores_bg = {"bull": "#001a0d", "bear": "#1a0005", "amber": "#1a0f00"}
-cores_border = {"bull": "#00C853", "bear": "#FF1744", "amber": "#FF9900"}
+    # ── CURVA DE JUROS EUA T10Y2Y (peso: 20pts) ─────────────────────────────
+    if t10y2y is not None:
+        if t10y2y > 0.5:
+            score += 10
+            sinais.append(("Curva EUA", "normal", "bull", f"+{t10y2y:.2f}%"))
+        elif t10y2y > 0:
+            score += 3
+            sinais.append(("Curva EUA", "achatada", "amber", f"+{t10y2y:.2f}%"))
+        elif t10y2y > -0.5:
+            score -= 8
+            sinais.append(("Curva EUA", "invertida", "amber", f"{t10y2y:.2f}%"))
+        else:
+            score -= 18
+            sinais.append(("Curva EUA", "inv. severa", "bear", f"{t10y2y:.2f}%"))
 
-sm1, sm2, sm3, sm4 = st.columns(4)
-with sm1:
-    selic_txt = f"selic: {dados_sem['selic']:.1f}%" if dados_sem.get('selic') else "selic: n/d"
-    ipca_txt = f"ipca: {dados_sem['ipca']:.2f}%" if dados_sem.get('ipca') else "ipca: n/d"
-    st.markdown(f'''<div style="background:{cores_bg[cor_br]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_br]}; border-radius:6px; padding:14px 16px;">
-    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🇧🇷 brasil</div>
-    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_br} {texto_br}</div>
-    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{selic_txt} | {ipca_txt}</div>
-    </div>''', unsafe_allow_html=True)
-with sm2:
-    t10_txt = f"yield curve: {dados_sem['t10y2y']:.2f}%" if dados_sem.get('t10y2y') is not None else "yield curve: n/d"
-    vix_txt = f"vix: {dados_sem['vix']:.1f}" if dados_sem.get('vix') else "vix: n/d"
-    st.markdown(f'''<div style="background:{cores_bg[cor_us]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_us]}; border-radius:6px; padding:14px 16px;">
-    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🇺🇸 eua</div>
-    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_us} {texto_us}</div>
-    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{t10_txt} | {vix_txt}</div>
-    </div>''', unsafe_allow_html=True)
-with sm3:
-    hy_txt = f"spread hy: {dados_sem['hy_spread']:.2f}%" if dados_sem.get('hy_spread') else "spread hy: n/d"
-    st.markdown(f'''<div style="background:{cores_bg[cor_risco]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_risco]}; border-radius:6px; padding:14px 16px;">
-    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🌐 risco global</div>
-    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_risco} {texto_risco}</div>
-    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{hy_txt} | {vix_txt}</div>
-    </div>''', unsafe_allow_html=True)
-with sm4:
-    divida_txt   = f"dívida/pib: {dados_sem['divida_pib']:.0f}%" if dados_sem.get('divida_pib') else "dívida/pib: n/d"
-    primario_txt = f"primário: {dados_sem['result_primario']:+.1f}% pib" if dados_sem.get('result_primario') is not None else "primário: n/d"
-    st.markdown(f'''<div style="background:{cores_bg[cor_fiscal]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_fiscal]}; border-radius:6px; padding:14px 16px;">
-    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🏛️ fiscal br</div>
-    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_fiscal} {texto_fiscal}</div>
-    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{divida_txt} | {primario_txt}</div>
-    </div>''', unsafe_allow_html=True)
+    # ── HY SPREAD (peso: 20pts) ──────────────────────────────────────────────
+    if hy_spread is not None:
+        if hy_spread < 3.5:
+            score += 10
+            sinais.append(("HY Spread", "comprimido", "bull", f"{hy_spread:.2f}%"))
+        elif hy_spread < 5.0:
+            score += 3
+            sinais.append(("HY Spread", "normal", "amber", f"{hy_spread:.2f}%"))
+        elif hy_spread < 7.0:
+            score -= 8
+            sinais.append(("HY Spread", "alargado", "amber", f"{hy_spread:.2f}%"))
+        else:
+            score -= 18
+            sinais.append(("HY Spread", "crise crédito", "bear", f"{hy_spread:.2f}%"))
+
+    # ── SELIC BR (peso: 15pts) ───────────────────────────────────────────────
+    if selic is not None:
+        if selic <= 9.0:
+            score += 8
+            sinais.append(("Selic", "favorável", "bull", f"{selic:.2f}%"))
+        elif selic <= 11.0:
+            score += 2
+            sinais.append(("Selic", "neutra", "amber", f"{selic:.2f}%"))
+        elif selic <= 13.0:
+            score -= 5
+            sinais.append(("Selic", "restritiva", "amber", f"{selic:.2f}%"))
+        else:
+            score -= 12
+            sinais.append(("Selic", "muito restritiva", "bear", f"{selic:.2f}%"))
+
+    # ── FISCAL BRASIL (peso: 10pts) ──────────────────────────────────────────
+    if fiscal_status == 'critico':
+        score -= 10
+        sinais.append(("Fiscal BR", "crítico", "bear", "⚠️"))
+    elif fiscal_status == 'alerta':
+        score -= 4
+        sinais.append(("Fiscal BR", "alerta", "amber", "⚠️"))
+    elif fiscal_status == 'saudavel':
+        score += 5
+        sinais.append(("Fiscal BR", "estável", "bull", "✅"))
+
+    score = min(max(int(score), 0), 100)
+
+    if score >= 70:
+        label = "RISK ON"
+        cor   = "#00C853"
+        tipo  = "bull"
+        descr = ("ambiente favorável ao risco. indicadores macro "
+                 "alinhados para ativos de crescimento.")
+    elif score >= 50:
+        label = "NEUTRO"
+        cor   = "#FF9900"
+        tipo  = "amber"
+        descr = ("ambiente misto. seletividade é essencial. "
+                 "prefira ativos de qualidade comprovada.")
+    elif score >= 35:
+        label = "CAUTELOSO"
+        cor   = "#FF9900"
+        tipo  = "amber"
+        descr = ("sinais de alerta presentes. reduza exposição "
+                 "especulativa e eleve qualidade da carteira.")
+    else:
+        label = "RISK OFF"
+        cor   = "#FF1744"
+        tipo  = "bear"
+        descr = ("ambiente hostil ao risco. priorize caixa, "
+                 "renda fixa curta e ativos defensivos.")
+
+    return {
+        'score':  score,
+        'label':  label,
+        'cor':    cor,
+        'tipo':   tipo,
+        'descr':  descr,
+        'sinais': sinais,
+    }
+
+
+# ── determina status fiscal para o scoring ──────────────────────────────────
+cor_fiscal, _, _ = avaliar_semaforo_fiscal(
+    dados_sem.get("divida_pib"),
+    dados_sem.get("tendencia_divida"),
+    dados_sem.get("result_primario"),
+)
+_fiscal_map = {"bear": "critico", "amber": "alerta", "bull": "saudavel"}
+fiscal_st_home = _fiscal_map.get(cor_fiscal)
+
+ambiente = calcular_ambiente_macro(
+    selic        = dados_sem.get('selic'),
+    vix          = dados_sem.get('vix'),
+    t10y2y       = dados_sem.get('t10y2y'),
+    hy_spread    = dados_sem.get('hy_spread'),
+    fiscal_status= fiscal_st_home,
+)
+
+# Persiste no session_state para outros módulos consumirem
+st.session_state['macro_score']   = ambiente['score']
+st.session_state['macro_label']   = ambiente['label']
+st.session_state['selic']         = dados_sem.get('selic') or 10.75
+st.session_state['macro_context'] = {
+    'selic': dados_sem.get('selic') or 10.75,
+    'vix':   dados_sem.get('vix')   or 15.0,
+    'ipca':  dados_sem.get('ipca')  or 4.5,
+}
+
+# ── renderização: gauge + sinais individuais ─────────────────────────────────
+col_gauge_mac, col_sinais_mac = st.columns([1, 2])
+
+with col_gauge_mac:
+    fig_mac = go.Figure(go.Indicator(
+        mode  = "gauge+number",
+        value = ambiente['score'],
+        title = {
+            'text': "ambiente macro",
+            'font': {'color': '#555', 'family': 'Courier New', 'size': 12},
+        },
+        gauge = {
+            'axis': {
+                'range': [0, 100],
+                'tickcolor': '#333',
+                'tickfont': {'color': '#444', 'size': 9},
+            },
+            'bar': {'color': ambiente['cor'], 'thickness': 0.25},
+            'bgcolor': '#050505',
+            'bordercolor': '#1e1e1e',
+            'steps': [
+                {'range': [0,  35],  'color': '#1a0005'},
+                {'range': [35, 50],  'color': '#1a0f00'},
+                {'range': [50, 70],  'color': '#111111'},
+                {'range': [70, 100], 'color': '#001a08'},
+            ],
+            'threshold': {
+                'line': {'color': ambiente['cor'], 'width': 3},
+                'thickness': 0.8,
+                'value': ambiente['score'],
+            },
+        },
+        number = {
+            'font': {'color': ambiente['cor'], 'family': 'Courier New', 'size': 42},
+        },
+    ))
+
+    layout_mac = base_layout(height=230)
+    layout_mac.update({
+        'margin':       {'l': 10, 'r': 10, 't': 50, 'b': 10},
+        'paper_bgcolor': '#050505',
+    })
+    fig_mac.update_layout(**layout_mac)
+    st.plotly_chart(fig_mac, use_container_width=True)
+
+    st.markdown(
+        f'<div style="text-align:center; font-family:Courier New; font-size:1.1rem; '
+        f'color:{ambiente["cor"]}; font-weight:bold; margin-top:-16px; '
+        f'letter-spacing:0.1em;">{ambiente["label"]}</div>',
+        unsafe_allow_html=True,
+    )
+
+with col_sinais_mac:
+    section_title("sinais individuais")
+
+    for nome, status, tipo_s, valor in ambiente['sinais']:
+        cor_s  = ("#00C853" if tipo_s == "bull" else
+                  "#FF1744" if tipo_s == "bear" else "#FF9900")
+        icone  = ("✅" if tipo_s == "bull" else
+                  "🚨" if tipo_s == "bear" else "⚠️")
+        st.markdown(
+            f'<div style="display:flex; justify-content:space-between; align-items:center; '
+            f'padding:6px 0; border-bottom:1px solid #111;">'
+            f'<span style="font-family:Courier New; font-size:0.75rem; color:#555; '
+            f'text-transform:uppercase; letter-spacing:0.06em;">{nome}</span>'
+            f'<span style="font-family:Courier New; font-size:0.78rem; '
+            f'color:{cor_s};">{icone} {status}</span>'
+            f'<span style="font-family:Courier New; font-size:0.75rem; '
+            f'color:#333;">{valor}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    status_card("leitura macro", ambiente['descr'], tipo=ambiente['tipo'])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
