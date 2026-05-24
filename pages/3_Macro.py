@@ -13,6 +13,9 @@ from google import genai
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator
@@ -45,7 +48,16 @@ def puxar_historico_mestre():
     inicio_10a = hoje - datetime.timedelta(days=365 * 10) 
     
     # 1. brasil (sgs)
-    series_bcb = {'Selic': 432, 'IPCA': 433, 'Dolar': 1, 'Desemprego': 24369}
+    series_bcb = {
+        'Selic':            432,
+        'IPCA':             433,
+        'Dolar':            1,
+        'Desemprego':       24369,
+        # séries fiscais
+        'Divida_Bruta_PIB': 13762,   # Dívida Bruta do Governo Geral % PIB
+        'Result_Primario':  5793,    # Resultado primário do setor público (% PIB)
+        'Result_Nominal':   4192,    # Resultado nominal do setor público
+    }
     dfs_br_dict = {}
     for nome, codigo in series_bcb.items():
         try:
@@ -103,6 +115,71 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
     fig.update_layout(**layout)
     fig.update_traces(line_color=cor_linha, line_width=1.5)
     return fig
+
+def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
+    """
+    Avalia o risco fiscal brasileiro com base em dívida/PIB, tendência
+    e resultado primário. Retorna dict com status, cor e label.
+    """
+    resultado = {
+        'divida_pib':       None,
+        'result_primario':  None,
+        'tendencia_divida': None,
+        'status':           'neutro',
+        'cor':              'amber',
+        'label':            'INDEFINIDO',
+    }
+
+    try:
+        # --- Dívida/PIB atual e tendência (últimos 6 meses) ---
+        if 'Divida_Bruta_PIB' in df_br.columns:
+            serie_divida = df_br['Divida_Bruta_PIB'].dropna()
+            if len(serie_divida) >= 6:
+                divida_atual    = float(serie_divida.iloc[-1])
+                divida_6m_atras = float(serie_divida.iloc[-6])
+                tendencia       = divida_atual - divida_6m_atras
+                resultado['divida_pib']       = divida_atual
+                resultado['tendencia_divida'] = tendencia
+
+        # --- Resultado primário atual ---
+        if 'Result_Primario' in df_br.columns:
+            serie_result = df_br['Result_Primario'].dropna()
+            if not serie_result.empty:
+                resultado['result_primario'] = float(serie_result.iloc[-1])
+
+        # --- Pontuação de risco ---
+        divida   = resultado['divida_pib']
+        tendencia = resultado['tendencia_divida']
+        primario = resultado['result_primario']
+
+        pontos_risco = 0
+
+        if divida is not None:
+            if divida > 90:   pontos_risco += 3
+            elif divida > 80: pontos_risco += 2
+            elif divida > 70: pontos_risco += 1
+
+        if tendencia is not None:
+            if tendencia > 3:   pontos_risco += 2   # subindo rápido
+            elif tendencia > 1: pontos_risco += 1
+
+        if primario is not None:
+            if primario < -3:   pontos_risco += 2   # déficit primário alto
+            elif primario < -1: pontos_risco += 1
+
+        # --- Classificação ---
+        if pontos_risco >= 5:
+            resultado.update({'status': 'critico', 'cor': 'bear',  'label': 'FISCAL CRÍTICO'})
+        elif pontos_risco >= 3:
+            resultado.update({'status': 'alerta',  'cor': 'amber', 'label': 'ATENÇÃO FISCAL'})
+        else:
+            resultado.update({'status': 'saudavel', 'cor': 'bull', 'label': 'FISCAL ESTÁVEL'})
+
+    except Exception as e:
+        logger.warning(f"[macro] erro semáforo fiscal: {e}")
+
+    return resultado
+
 
 def renderizar_noticias(ticker, titulo_secao):
     section_title(titulo_secao)
@@ -326,6 +403,81 @@ with tab_global:
             g3, g4 = st.columns(2)
             with g3: st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True)
             with g4: st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True)
+
+            # ── FISCAL BRASILEIRO ──────────────────────────────────────────────
+            st.markdown("---")
+            section_title("🏛️ fiscal brasileiro")
+
+            # usar df_br_master para o semáforo (precisa dos 6 meses mais recentes
+            # independente do filtro de horizonte selecionado pelo usuário)
+            fiscal = calcular_semaforo_fiscal(df_br_master)
+
+            f1, f2, f3 = st.columns(3)
+            with f1:
+                divida_val = fiscal['divida_pib']
+                tend_val   = fiscal['tendencia_divida']
+                if divida_val is not None:
+                    if tend_val is not None:
+                        sinal_tend  = "▲" if tend_val > 0 else "▼"
+                        delta_divida = f"{sinal_tend} {abs(tend_val):.1f}pp em 6m"
+                        cor_tend     = "bear" if tend_val > 1 else ("bull" if tend_val < -1 else "muted")
+                    else:
+                        delta_divida, cor_tend = "", "muted"
+                    metric_card("dívida bruta/pib", f"{divida_val:.1f}%", delta_divida, cor_tend)
+                else:
+                    metric_card("dívida bruta/pib", "n/d", "sem dados bcb")
+            with f2:
+                prim_val = fiscal['result_primario']
+                if prim_val is not None:
+                    metric_card(
+                        "resultado primário",
+                        f"{prim_val:+.2f}% pib",
+                        "superávit" if prim_val >= 0 else "déficit",
+                        "bull" if prim_val >= 0 else "bear",
+                    )
+                else:
+                    metric_card("resultado primário", "n/d", "sem dados bcb")
+            with f3:
+                cores_map = {"bear": "bear", "amber": "amber", "bull": "bull"}
+                metric_card("status fiscal", fiscal['label'], "", cores_map.get(fiscal['cor'], "muted"))
+
+            gf1, gf2 = st.columns(2)
+            with gf1:
+                fig_divida = criar_grafico_macro(df_br, 'Divida_Bruta_PIB',
+                                                 "dívida bruta do governo geral (% pib)", "#FF1744")
+                fig_divida.add_hline(
+                    y=60, line_color="#FF9900", line_dash="dash", line_width=1,
+                    annotation_text="limite prudencial 60% pib",
+                    annotation_font=dict(color="#FF9900", size=10, family="Courier New"),
+                )
+                st.plotly_chart(fig_divida, use_container_width=True)
+            with gf2:
+                st.plotly_chart(
+                    criar_grafico_macro(df_br, 'Result_Primario',
+                                        "resultado primário do setor público (% pib)", "#00B0FF"),
+                    use_container_width=True,
+                )
+
+            if fiscal['status'] == 'critico':
+                corpo_fiscal = (
+                    "trajetória fiscal insustentável detectada. "
+                    "dívida/pib acima de 90% com déficit primário elevado penaliza "
+                    "ativos de risco brasileiros. prefira ativos dolarizados ou renda fixa curta."
+                )
+                tipo_fiscal = "bear"
+            elif fiscal['status'] == 'alerta':
+                corpo_fiscal = (
+                    "fiscal em deterioração. monitore evolução da dívida/pib e aprovação "
+                    "de medidas de contenção de gastos. impacto moderado no câmbio e juros longos."
+                )
+                tipo_fiscal = "amber"
+            else:
+                corpo_fiscal = (
+                    "fiscal sob controle. trajetória de dívida estável reduz prêmio "
+                    "de risco brasil e favorece ativos locais."
+                )
+                tipo_fiscal = "bull"
+            status_card("interpretação fiscal", corpo_fiscal, tipo=tipo_fiscal)
 
         elif aba_sel == "🇺🇸 estados unidos":
             c1, c2, c3, c4 = st.columns(4)

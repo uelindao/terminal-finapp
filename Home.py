@@ -174,7 +174,12 @@ section_title("🚦 semáforo macro")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_dados_semaforo():
-    dados = {"selic": None, "ipca": None, "t10y2y": None, "vix": None, "hy_spread": None}
+    dados = {
+        "selic": None, "ipca": None,
+        "t10y2y": None, "vix": None, "hy_spread": None,
+        # fiscal BR
+        "divida_pib": None, "tendencia_divida": None, "result_primario": None,
+    }
     try:
         from fredapi import Fred
         fred = Fred(api_key=st.secrets["FRED_API_KEY"])
@@ -197,6 +202,17 @@ def buscar_dados_semaforo():
         ipca_serie = sgs.get({'ipca': 433}, last=1)
         if not ipca_serie.empty:
             dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
+        # fiscal: dívida/PIB (últimos 7 pontos para calcular tendência 6 meses)
+        divida_serie = sgs.get({'divida': 13762}, last=7)
+        if not divida_serie.empty:
+            dados["divida_pib"] = float(divida_serie['divida'].iloc[-1])
+            if len(divida_serie) >= 7:
+                dados["tendencia_divida"] = (
+                    float(divida_serie['divida'].iloc[-1]) - float(divida_serie['divida'].iloc[0])
+                )
+        primario_serie = sgs.get({'primario': 5793}, last=1)
+        if not primario_serie.empty:
+            dados["result_primario"] = float(primario_serie['primario'].iloc[-1])
     except:
         pass
     return dados
@@ -222,14 +238,45 @@ def avaliar_semaforo_risco(vix, hy_spread):
     if vix > 20 or (hy_spread and hy_spread > 4): return "amber", "🟡", f"atenção (vix {vix:.1f})"
     return "bull", "🟢", f"risco controlado (vix {vix:.1f})"
 
+def avaliar_semaforo_fiscal(divida_pib, tendencia, primario):
+    """Retorna (cor, icone, texto) para o card fiscal do semáforo da Home."""
+    if divida_pib is None and primario is None:
+        return "amber", "⚠️", "dados indisponíveis"
+    pontos = 0
+    if divida_pib is not None:
+        if divida_pib > 90:   pontos += 3
+        elif divida_pib > 80: pontos += 2
+        elif divida_pib > 70: pontos += 1
+    if tendencia is not None:
+        if tendencia > 3:   pontos += 2
+        elif tendencia > 1: pontos += 1
+    if primario is not None:
+        if primario < -3:   pontos += 2
+        elif primario < -1: pontos += 1
+    if pontos >= 5:
+        return "bear",  "🔴", f"fiscal crítico (dívida {divida_pib:.0f}% pib)" if divida_pib else "fiscal crítico"
+    if pontos >= 3:
+        return "amber", "🟡", f"atenção fiscal (dívida {divida_pib:.0f}% pib)" if divida_pib else "atenção fiscal"
+    return "bull", "🟢", f"fiscal estável (dívida {divida_pib:.0f}% pib)" if divida_pib else "fiscal estável"
+
 cor_br, icone_br, texto_br = avaliar_semaforo_brasil(dados_sem.get("selic"), dados_sem.get("ipca"))
 cor_us, icone_us, texto_us = avaliar_semaforo_eua(dados_sem.get("t10y2y"), dados_sem.get("vix"))
 cor_risco, icone_risco, texto_risco = avaliar_semaforo_risco(dados_sem.get("vix"), dados_sem.get("hy_spread"))
+cor_fiscal, icone_fiscal, texto_fiscal = avaliar_semaforo_fiscal(
+    dados_sem.get("divida_pib"), dados_sem.get("tendencia_divida"), dados_sem.get("result_primario"))
+
+# Penalidade: fiscal crítico degrada o semáforo geral do Brasil
+if cor_fiscal == "bear":
+    if cor_br == "bull":
+        cor_br, icone_br = "amber", "🟡"
+        texto_br += " (pressão fiscal)"
+    elif cor_br == "amber":
+        texto_br += " + fiscal crítico"
 
 cores_bg = {"bull": "#001a0d", "bear": "#1a0005", "amber": "#1a0f00"}
 cores_border = {"bull": "#00C853", "bear": "#FF1744", "amber": "#FF9900"}
 
-sm1, sm2, sm3 = st.columns(3)
+sm1, sm2, sm3, sm4 = st.columns(4)
 with sm1:
     selic_txt = f"selic: {dados_sem['selic']:.1f}%" if dados_sem.get('selic') else "selic: n/d"
     ipca_txt = f"ipca: {dados_sem['ipca']:.2f}%" if dados_sem.get('ipca') else "ipca: n/d"
@@ -252,6 +299,14 @@ with sm3:
     <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🌐 risco global</div>
     <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_risco} {texto_risco}</div>
     <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{hy_txt} | {vix_txt}</div>
+    </div>''', unsafe_allow_html=True)
+with sm4:
+    divida_txt   = f"dívida/pib: {dados_sem['divida_pib']:.0f}%" if dados_sem.get('divida_pib') else "dívida/pib: n/d"
+    primario_txt = f"primário: {dados_sem['result_primario']:+.1f}% pib" if dados_sem.get('result_primario') is not None else "primário: n/d"
+    st.markdown(f'''<div style="background:{cores_bg[cor_fiscal]}; border:1px solid #1e1e1e; border-left:4px solid {cores_border[cor_fiscal]}; border-radius:6px; padding:14px 16px;">
+    <div style="font-family:Courier New; font-size:0.7rem; color:#555; text-transform:uppercase; letter-spacing:0.1em;">🏛️ fiscal br</div>
+    <div style="font-family:Courier New; font-size:1.1rem; color:#E0E0E0; font-weight:bold; margin:6px 0;">{icone_fiscal} {texto_fiscal}</div>
+    <div style="font-family:Courier New; font-size:0.78rem; color:#888;">{divida_txt} | {primario_txt}</div>
     </div>''', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
