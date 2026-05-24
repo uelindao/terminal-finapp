@@ -10,9 +10,9 @@ import datetime
 from google import genai
 
 # importações do ecossistema finapp
-from utils.auth import require_auth, render_user_badge
+from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
-from utils.tickers import get_opcoes_selectbox, ticker_from_label
+from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -330,6 +330,75 @@ def calcular_fear_greed() -> dict:
     }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_correlacoes(tickers_tuple: tuple, janela: int = 60) -> dict:
+    """
+    Calcula matriz de correlação e séries de correlação rolante
+    entre pares relevantes (ativo da watchlist vs benchmark).
+    """
+    tickers = list(tickers_tuple)
+    resultado = {
+        'matriz_atual':  None,
+        'retornos':      None,
+        'rolling_pairs': {},
+    }
+
+    try:
+        hist = yf.download(
+            tickers, period="2y",
+            auto_adjust=True, progress=False,
+        )['Close']
+
+        if isinstance(hist, pd.Series):
+            hist = hist.to_frame(name=tickers[0])
+
+        # Remove colunas com dados insuficientes (< 70% de preenchimento)
+        hist = hist.dropna(axis=1, thresh=int(len(hist) * 0.7))
+        hist = hist.ffill().dropna()
+
+        retornos = hist.pct_change().dropna()
+
+        # Matriz de correlação na janela solicitada
+        if len(retornos) >= janela:
+            resultado['matriz_atual'] = (
+                retornos.iloc[-janela:]
+                .corr()
+                .round(2)
+            )
+
+        resultado['retornos'] = retornos
+
+        # Pares relevantes: ativo da watchlist vs benchmark natural
+        cols = list(retornos.columns)
+        benchmarks_set = {'^BVSP', '^GSPC', 'BRL=X', 'GC=F'}
+        pares_relevantes = []
+
+        for t in [c for c in cols if c not in benchmarks_set]:
+            bench = '^BVSP' if t.endswith('.SA') else '^GSPC'
+            if bench in cols:
+                pares_relevantes.append((t, bench))
+
+        # Par IBOV vs S&P500 sempre incluso
+        if '^BVSP' in cols and '^GSPC' in cols:
+            pares_relevantes.append(('^BVSP', '^GSPC'))
+
+        for par in pares_relevantes[:6]:  # máx 6 pares no gráfico
+            t1, t2 = par
+            if t1 in retornos.columns and t2 in retornos.columns:
+                rolling_corr = (
+                    retornos[t1]
+                    .rolling(janela)
+                    .corr(retornos[t2])
+                    .dropna()
+                )
+                resultado['rolling_pairs'][f"{t1} / {t2}"] = rolling_corr
+
+    except Exception as e:
+        logger.warning(f"[macro] erro correlação: {e}")
+
+    return resultado
+
+
 def renderizar_noticias(ticker, titulo_secao):
     section_title(titulo_secao)
     try:
@@ -484,7 +553,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple) -> list[dict]:
 # ==========================================
 # abas principais da página
 # ==========================================
-tab_global, tab_ciclo, tab_calendar, tab_overlay, tab_sentimento = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços", "🧠 sentimento"])
+tab_global, tab_ciclo, tab_calendar, tab_overlay, tab_sentimento, tab_correlacoes = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"])
 
 with tab_global:
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
@@ -1124,4 +1193,186 @@ with tab_sentimento:
             f'padding:6px 0 6px 12px; border-left:2px solid {fg["cor"]}; margin-bottom:6px;">'
             f'→ {bullet}</div>',
             unsafe_allow_html=True,
+        )
+
+with tab_correlacoes:
+    section_title("🔗 correlação dinâmica entre ativos")
+
+    status_card(
+        "como interpretar",
+        "correlação próxima de +1: ativos se movem juntos (sem diversificação real). "
+        "correlação próxima de 0: ativos independentes (boa diversificação). "
+        "correlação próxima de -1: ativos se movem em direções opostas (hedge natural). "
+        "a matriz usa a janela selecionada; o gráfico mostra como a correlação MUDA ao longo do tempo.",
+        tipo="info",
+    )
+
+    # ── monta lista de tickers: watchlist do usuário + benchmarks ────────────
+    from database.db import listar_watchlist, get_watchlist_padrao
+
+    try:
+        wl_id      = get_watchlist_padrao()
+        watchlist  = listar_watchlist(watchlist_id=wl_id) if wl_id else []
+        tickers_wl = [mapear_ticker_base(item['ticker']) for item in watchlist][:12]
+    except Exception as _e_wl:
+        logger.warning(f"[macro/correlações] erro ao buscar watchlist: {_e_wl}")
+        tickers_wl = []
+
+    benchmarks    = ['^BVSP', '^GSPC', 'BRL=X', 'GC=F']
+    tickers_todos = list(dict.fromkeys(tickers_wl + benchmarks))
+
+    # ── seletor de janela ────────────────────────────────────────────────────
+    janela_corr = st.select_slider(
+        "janela de correlação:",
+        options=[21, 42, 60, 90, 126],
+        value=60,
+        format_func=lambda x: f"{x} dias (~{x // 21}m)",
+        key="corr_janela",
+    )
+
+    with st.spinner("calculando correlações..."):
+        corr_data = calcular_correlacoes(tuple(tickers_todos), janela=janela_corr)
+
+    # ── heatmap da matriz ────────────────────────────────────────────────────
+    if corr_data['matriz_atual'] is not None:
+        matriz = corr_data['matriz_atual']
+
+        fig_heat = go.Figure(go.Heatmap(
+            z=matriz.values,
+            x=matriz.columns.tolist(),
+            y=matriz.index.tolist(),
+            colorscale=[
+                [0.0, '#FF1744'],   # -1: correlação inversa
+                [0.5, '#111111'],   # 0:  neutro
+                [1.0, '#00C853'],   # +1: correlação perfeita
+            ],
+            zmid=0,
+            zmin=-1, zmax=1,
+            text=matriz.values.round(2),
+            texttemplate="%{text}",
+            textfont={"size": 10, "color": "#E0E0E0", "family": "Courier New"},
+            hoverongaps=False,
+            showscale=True,
+            colorbar=dict(
+                tickfont=dict(color='#555', family='Courier New'),
+                bordercolor='#333',
+            ),
+        ))
+
+        layout_heat = base_layout(
+            height=max(300, len(matriz) * 45),
+            title=f"matriz de correlação — janela {janela_corr} dias",
+        )
+        fig_heat.update_layout(**layout_heat)
+        fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family='Courier New'))
+        fig_heat.update_yaxes(tickfont=dict(size=9, family='Courier New'))
+
+        st.plotly_chart(fig_heat, use_container_width=True)
+        st.caption(
+            f"correlação de pearson calculada sobre os últimos {janela_corr} pregões. "
+            "diagonal principal sempre = 1. benchmarks: ^bvsp (ibovespa), ^gspc (s&p500), "
+            "brl=x (dólar/brl), gc=f (ouro)."
+        )
+
+        # ── insights automáticos ─────────────────────────────────────────────
+        section_title("🔍 insights de correlação")
+
+        pares_alta  = []
+        pares_baixa = []
+        cols_m      = matriz.columns.tolist()
+
+        for i in range(len(cols_m)):
+            for j in range(i + 1, len(cols_m)):
+                t1      = cols_m[i]
+                t2      = cols_m[j]
+                cor_val = float(matriz.iloc[i, j])
+                if cor_val > 0.75:
+                    pares_alta.append((t1, t2, cor_val))
+                elif cor_val < 0.1:
+                    pares_baixa.append((t1, t2, cor_val))
+
+        if pares_alta:
+            pares_str = ", ".join(
+                [f"{t1}/{t2} ({v:.2f})" for t1, t2, v in
+                 sorted(pares_alta, key=lambda x: -x[2])[:3]]
+            )
+            status_card(
+                "⚠️ alta correlação detectada",
+                f"{pares_str} — estes ativos se movem juntos. "
+                "manter os dois pode não diversificar o risco da carteira.",
+                tipo="amber",
+            )
+
+        if pares_baixa:
+            pares_str = ", ".join(
+                [f"{t1}/{t2} ({v:.2f})" for t1, t2, v in
+                 sorted(pares_baixa, key=lambda x: abs(x[2]))[:3]]
+            )
+            status_card(
+                "✅ boa diversificação detectada",
+                f"{pares_str} — correlação baixa ou negativa. "
+                "estes ativos oferecem diversificação real na carteira.",
+                tipo="bull",
+            )
+
+        if not pares_alta and not pares_baixa:
+            status_card(
+                "correlações em zona moderada",
+                "nenhum par com correlação extrema detectado nesta janela. "
+                "carteira com nível de diversificação razoável.",
+                tipo="muted",
+            )
+
+    else:
+        empty_state(
+            "🔗", "sem dados de correlação",
+            "não foi possível calcular a matriz — verifique sua watchlist e conexão.",
+        )
+
+    # ── correlação rolante no tempo ──────────────────────────────────────────
+    if corr_data['rolling_pairs']:
+        section_title("📈 evolução da correlação ao longo do tempo")
+
+        fig_roll = go.Figure()
+        cores    = ["#FF9900", "#00B0FF", "#00C853", "#FF1744", "#E040FB", "#00BCD4"]
+
+        for i, (par, serie) in enumerate(corr_data['rolling_pairs'].items()):
+            fig_roll.add_trace(go.Scatter(
+                x=serie.index,
+                y=serie.values,
+                name=par.lower(),
+                line=dict(color=cores[i % len(cores)], width=1.5),
+                hovertemplate=(
+                    f"{par}<br>%{{x}}<br>correlação: %{{y:.2f}}<extra></extra>"
+                ),
+            ))
+
+        fig_roll.add_hline(
+            y=0.7,  line_color="#FF9900", line_dash="dash",  line_width=1,
+            annotation_text="alta correlação (0.7)",
+            annotation_font=dict(color="#FF9900", family="Courier New", size=10),
+        )
+        fig_roll.add_hline(
+            y=0,    line_color="#333333", line_dash="dot",   line_width=1,
+        )
+        fig_roll.add_hline(
+            y=-0.7, line_color="#00B0FF", line_dash="dash",  line_width=1,
+            annotation_text="correlação inversa (-0.7)",
+            annotation_font=dict(color="#00B0FF", family="Courier New", size=10),
+        )
+
+        layout_roll = base_layout(
+            height=350,
+            title=f"correlação rolante {janela_corr} dias — ativos vs benchmarks",
+        )
+        layout_roll.update({
+            'yaxis': {'range': [-1.1, 1.1], 'title': 'correlação',
+                      'gridcolor': '#1e1e1e', 'showgrid': True},
+        })
+        fig_roll.update_layout(**layout_roll)
+        st.plotly_chart(fig_roll, use_container_width=True)
+        st.caption(
+            "cada linha representa a correlação rolante entre um ativo da watchlist "
+            "e seu benchmark natural (ativos .SA vs ibovespa; ativos globais vs s&p500). "
+            f"janela móvel de {janela_corr} pregões."
         )
