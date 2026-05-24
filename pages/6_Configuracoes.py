@@ -5,8 +5,11 @@ from database.db import (
     definir_watchlist_padrao, get_watchlist_padrao,
     listar_portfolios, criar_portfolio, renomear_portfolio, deletar_portfolio,
     definir_portfolio_padrao, get_portfolio_padrao,
-    listar_relatorios_enviados
+    listar_relatorios_enviados,
+    listar_watchlist,
+    salvar_config_alerta, get_configs_alerta, deletar_config_alerta,
 )
+from utils.notificacoes import solicitar_permissao_notificacao
 
 st.set_page_config(page_title="configurações", page_icon="⚙️", layout="wide")
 
@@ -468,6 +471,85 @@ with tab_email:
             st.caption("nenhum alerta de preço configurado.")
     except Exception as e:
         st.caption(f"não foi possível carregar alertas: {e}")
+
+    st.divider()
+
+    # ── alertas de health score ───────────────────────────────────────────────
+    st.markdown("#### 🔔 alertas de health score")
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.78rem; '
+        'color:#94a3b8; margin-bottom:16px; line-height:1.6;">'
+        'configure alertas para ser notificado quando o health score '
+        'de um ativo cair abaixo do limite definido.<br>'
+        '⚠️ o browser precisa ter permissão para notificações do browser.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("🔔 ativar notificações no browser", type="secondary",
+                 key="btn_ativar_notif"):
+        solicitar_permissao_notificacao()
+        st.success("solicitação enviada! aceite a permissão no popup do browser.")
+
+    st.markdown("---")
+
+    # carrega watchlist padrão do usuário para listar ativos
+    try:
+        _wl_id_cfg   = get_watchlist_padrao()
+        _wl_items    = listar_watchlist(watchlist_id=_wl_id_cfg)
+    except Exception:
+        _wl_items = []
+
+    _configs_hs = {
+        c['ticker']: c['threshold']
+        for c in get_configs_alerta(user_id_atual)
+    }
+
+    if _wl_items:
+        st.markdown("##### configurar por ativo")
+
+        for item in _wl_items:
+            t = item['ticker']
+            col_t, col_sl, col_btn = st.columns([2, 3, 1])
+
+            with col_t:
+                st.markdown(
+                    f'<div style="font-family:Courier New; color:#FF9900; '
+                    f'padding-top:10px;">{t.replace(".SA", "")}</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_sl:
+                threshold_val = st.slider(
+                    f"limite {t}:",
+                    min_value=0, max_value=80,
+                    value=_configs_hs.get(t, 40),
+                    step=5,
+                    key=f"alert_th_{t}",
+                    label_visibility="collapsed",
+                )
+            with col_btn:
+                if t in _configs_hs:
+                    if st.button("🗑️", key=f"del_alert_{t}",
+                                 help="remover alerta"):
+                        deletar_config_alerta(user_id_atual, t)
+                        st.rerun()
+                else:
+                    if st.button("➕", key=f"add_alert_{t}",
+                                 help="ativar alerta"):
+                        salvar_config_alerta(user_id_atual, t, threshold_val)
+                        st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("💾 salvar todos os alertas", type="primary",
+                     use_container_width=True, key="btn_salvar_alertas_hs"):
+            for item in _wl_items:
+                t  = item['ticker']
+                th = st.session_state.get(f"alert_th_{t}", 40)
+                salvar_config_alerta(user_id_atual, t, th)
+            st.success("✅ alertas salvos com sucesso!")
+    else:
+        st.info("adicione ativos à watchlist para configurar alertas de health score.",
+                icon="🔔")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

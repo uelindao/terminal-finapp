@@ -804,3 +804,89 @@ def marcar_onboarding_completo(user_id: int):
         ).eq("id", user_id).execute()
     except Exception as e:
         logger.warning(f"[db] marcar_onboarding: {e}")
+
+
+# ── alertas de health score ───────────────────────────────────────────────────
+
+def salvar_config_alerta(user_id: int, ticker: str, threshold: int):
+    """Salva ou atualiza a configuração de alerta para um ativo."""
+    try:
+        get_supabase().table("alert_config").upsert(
+            {
+                "user_id":   user_id,
+                "ticker":    ticker,
+                "threshold": threshold,
+                "ativo":     True,
+            },
+            on_conflict="user_id,ticker",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"[db] salvar_config_alerta: {e}")
+
+
+def get_configs_alerta(user_id: int) -> list[dict]:
+    """Retorna todas as configurações de alerta ativas do usuário."""
+    try:
+        res = (
+            get_supabase()
+            .table("alert_config")
+            .select("ticker, threshold, ativo")
+            .eq("user_id", user_id)
+            .eq("ativo", True)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        logger.warning(f"[db] get_configs_alerta: {e}")
+        return []
+
+
+def registrar_disparo_alerta(user_id: int, ticker: str,
+                              score: int, threshold: int) -> bool:
+    """
+    Registra um disparo de alerta.
+    Retorna False se já disparou nas últimas 24h (anti-spam).
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+        desde = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+        ja_disparou = (
+            get_supabase()
+            .table("alert_log")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .eq("ticker", ticker)
+            .gte("disparado_em", desde)
+            .execute()
+        )
+        if (ja_disparou.count or 0) > 0:
+            return False  # já disparou hoje
+
+        get_supabase().table("alert_log").insert(
+            {
+                "user_id":   user_id,
+                "ticker":    ticker,
+                "score":     score,
+                "threshold": threshold,
+            }
+        ).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"[db] registrar_disparo_alerta: {e}")
+        return False
+
+
+def deletar_config_alerta(user_id: int, ticker: str):
+    """Remove a configuração de alerta para um ativo."""
+    try:
+        (
+            get_supabase()
+            .table("alert_config")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("ticker", ticker)
+            .execute()
+        )
+    except Exception as e:
+        logger.warning(f"[db] deletar_config_alerta: {e}")

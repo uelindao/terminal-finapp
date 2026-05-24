@@ -34,6 +34,8 @@ from utils.components import (
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
 from utils.charts import base_layout
+from utils.notificacoes import (solicitar_permissao_notificacao,
+                                 verificar_e_disparar_alertas)
 
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
@@ -50,6 +52,18 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+
+# Solicita permissão de notificação browser (uma vez por sessão)
+if not st.session_state.get('notif_permission_asked'):
+    solicitar_permissao_notificacao()
+    st.session_state['notif_permission_asked'] = True
+
+# Verifica alertas de health score ao carregar a página
+_user_notif = get_current_user()
+if _user_notif:
+    _health_all = get_health_scores()
+    if _health_all:
+        verificar_e_disparar_alertas(_user_notif['user_id'], _health_all)
 
 def buscar_ativo_yahoo(query):
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
