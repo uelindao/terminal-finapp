@@ -18,12 +18,12 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
-from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, init_db
+from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, init_db, get_historico_score
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout, CORES_SERIES, base100
+from utils.charts import base_layout, CORES_SERIES, base100, linha
 
 # 1. configuração da página
 st.set_page_config(page_title="terminal finapp | research", layout="wide", page_icon="🔬")
@@ -260,6 +260,23 @@ else:
     with c4: metric_card("div yield", fmt_pct(dy), "12m")
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+# --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
+historico = get_historico_score(t_base, dias=180)
+if len(historico) >= 3:
+    section_title("📈 evolução do health score")
+    df_hist_score = pd.DataFrame(historico)
+    df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'])
+    df_hist_score = df_hist_score.set_index('calculado_em')
+    fig_score = linha(df_hist_score, x_col=None, y_col='score',
+                      titulo=f"health score — {ticker} (180 dias)",
+                      cor="#FF9900", height=220)
+    fig_score.add_hline(y=65, line_color="#00C853", line_dash="dash",
+                        line_width=1, annotation_text="acumulação")
+    fig_score.add_hline(y=40, line_color="#FF1744", line_dash="dash",
+                        line_width=1, annotation_text="reduzir")
+    fig_score.update_yaxes(range=[0, 100])
+    st.plotly_chart(fig_score, use_container_width=True)
 
 # --- TABS ---
 tab_tec, tab_earn, tab_fund, tab_dcf, tab_sent, tab_macro = st.tabs([

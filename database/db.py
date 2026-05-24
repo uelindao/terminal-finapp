@@ -632,3 +632,47 @@ def listar_relatorios_enviados(limite: int = 10) -> list[dict]:
     for r in rows:
         r.setdefault('enviado_em', r.get('created_at'))
     return rows
+
+
+# ==========================================
+# HISTÓRICO TEMPORAL DE HEALTH SCORES
+# ==========================================
+
+def registrar_historico_score(ticker: str, score: int) -> None:
+    """
+    Insere um ponto de histórico do health score para o ticker.
+    Requer a tabela health_score_history (migration 002).
+    """
+    sb = get_supabase()
+    try:
+        sb.table('health_score_history').insert({
+            'ticker': ticker,
+            'score':  int(score),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"[db] falha ao registrar histórico de score para {ticker}: {e}")
+
+
+def get_historico_score(ticker: str, dias: int = 180) -> list[dict]:
+    """
+    Retorna os registros de health score dos últimos `dias` dias para o ticker,
+    ordenados por data crescente.
+    Cada item tem as chaves: 'score' (int) e 'calculado_em' (str ISO-8601).
+    """
+    sb = get_supabase()
+    try:
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=dias)).isoformat()
+        rows = (
+            sb.table('health_score_history')
+            .select('score, calculado_em')
+            .eq('ticker', ticker)
+            .gte('calculado_em', cutoff)
+            .order('calculado_em')
+            .execute()
+            .data
+        )
+        return rows
+    except Exception as e:
+        logger.warning(f"[db] falha ao buscar histórico de score para {ticker}: {e}")
+        return []

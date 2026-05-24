@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from database.db import salvar_health_score, get_todos_fundamentos_cache
+from database.db import salvar_health_score, get_todos_fundamentos_cache, registrar_historico_score
 from utils.tickers import FII_TODOS
 from utils.logger import get_logger
 
@@ -259,6 +259,51 @@ def calcular_roic(
     return score_roic, roic_valor
 
 
+def calcular_momentum(hist: pd.DataFrame) -> tuple[int, dict, list]:
+    """
+    Fator Momentum 12-1 meses (evita reversão de curto prazo).
+    Retorno = preço há 1 mês / preço há 12 meses − 1.
+    Máx +10pts / mín −8pts.
+    Retorna (score_mom, detalhes_dict, alertas_list).
+    """
+    if hist is None or len(hist) < 250:
+        return 0, {}, []
+    close = hist['Close'] if 'Close' in hist.columns else hist.iloc[:, 0]
+    close = close.dropna()
+    if len(close) < 230:
+        return 0, {}, []
+
+    preco_12m_atras = float(close.iloc[-252]) if len(close) >= 252 else float(close.iloc[0])
+    preco_1m_atras  = float(close.iloc[-21])
+    retorno_momentum = ((preco_1m_atras / preco_12m_atras) - 1) * 100
+
+    preco_atual = float(close.iloc[-1])
+    retorno_1m  = ((preco_atual / preco_1m_atras) - 1) * 100
+
+    score_mom  = 0
+    alertas_mom: list[str] = []
+
+    if retorno_momentum > 20:
+        score_mom = 10
+        alertas_mom.append(f"✅ Momentum forte (12-1m: +{retorno_momentum:.1f}%)")
+    elif retorno_momentum > 8:
+        score_mom = 6
+    elif retorno_momentum > 0:
+        score_mom = 3
+    elif retorno_momentum < -20:
+        score_mom = -8
+        alertas_mom.append(f"🚨 Momentum negativo severo (12-1m: {retorno_momentum:.1f}%)")
+    elif retorno_momentum < -8:
+        score_mom = -4
+        alertas_mom.append(f"⚠️ Momentum negativo (12-1m: {retorno_momentum:.1f}%)")
+
+    detalhes = {
+        "Momentum 12-1m":      f"{retorno_momentum:+.1f}%",
+        "Retorno último mês":  f"{retorno_1m:+.1f}%",
+    }
+    return score_mom, detalhes, alertas_mom
+
+
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
@@ -497,6 +542,14 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 if roic_valor is not None and roic_valor < 0:
                     alertas.append("🚨 ROIC negativo — empresa destruindo capital dos acionistas.")
 
+            # --- Momentum 12-1m (máx 10pts, mín −8pts) ---
+            score_momentum = 0
+            det_mom: dict = {}
+            alertas_mom_list: list[str] = []
+            if hist is not None and not hist.empty:
+                score_momentum, det_mom, alertas_mom_list = calcular_momentum(hist)
+                alertas.extend(alertas_mom_list)
+
             # penalidade por dados de baixa qualidade
             penalidade_dados = 0
             if not dados_confiaveis and not is_us:
@@ -506,6 +559,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             score = (
                 score_q + score_v + score_r_final + score_y
                 + score_piotroski + score_crescimento + score_roic
+                + score_momentum
                 + penalidade_tec + penalidade_vix + penalidade_dados
             )
 
@@ -518,6 +572,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 "Qualidade de Balanço (Piotroski F-Score)": score_piotroski,
                 "Crescimento (Receita/Lucro)": score_crescimento,
                 "ROIC vs WACC": score_roic,
+                "Momentum (12-1m)": score_momentum,
                 "Penalidade Técnica (MM200)": penalidade_tec,
                 "Risco Volatilidade (VIX)": penalidade_vix,
                 "Penalidade Dados (Qualidade)": penalidade_dados,
@@ -525,6 +580,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
             if roic_valor is not None:
                 breakdown["  ↳ ROIC"] = f"{roic_valor:.1f}%"
+
+            if det_mom:
+                for k, v in det_mom.items():
+                    breakdown[f"  ↳ {k}"] = v
 
             if f_detalhamento:
                 for k, v in f_detalhamento.items():
@@ -566,6 +625,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         }
 
         salvar_health_score(ticker, score, payload)
+        registrar_historico_score(ticker, score)
         return {'score': score, 'alertas': alertas, 'status': status_acao}
         
     except Exception as e:
