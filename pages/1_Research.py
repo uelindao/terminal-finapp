@@ -8,6 +8,7 @@ import datetime
 import json as _json
 from fredapi import Fred
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA, SYSTEM_TESE
+from utils.earnings_scraper import buscar_resultados
 from bcb import sgs
 import logging
 import requests
@@ -314,6 +315,208 @@ if _hs_row:
     }
 else:
     health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+
+# ── SEÇÃO: RESULTADOS FINANCEIROS TRIMESTRAIS ────────────────────────────
+section_title("📊 resultados financeiros")
+
+with st.spinner("buscando resultados..."):
+    _earnings = buscar_resultados(t_base)
+
+if _earnings.get('is_fii'):
+    st.caption(
+        "FIIs publicam relatórios mensais de proventos, não resultados trimestrais. "
+        "consulte o histórico de dividendos na seção acima."
+    )
+
+elif _earnings.get('erro') and not _earnings.get('historico'):
+    status_card(
+        "resultados indisponíveis",
+        f"não foi possível carregar os resultados para {t_base}. "
+        "tente novamente em alguns minutos.",
+        tipo="amber",
+    )
+
+else:
+    # ── PRÓXIMA DATA ─────────────────────────────────────────────────────
+    _prox_data = _earnings.get('proxima_data')
+    if _prox_data:
+        _hoje = datetime.date.today()
+        try:
+            _dt_prox  = datetime.datetime.strptime(_prox_data, '%d/%m/%Y').date()
+            _dias_ate = (_dt_prox - _hoje).days
+            if _dias_ate < 0:
+                _cor_prox, _label_prox = "muted", f"último: {_prox_data}"
+            elif _dias_ate == 0:
+                _cor_prox, _label_prox = "bear", "HOJE"
+            elif _dias_ate <= 7:
+                _cor_prox, _label_prox = "bear", f"em {_dias_ate} dias ({_prox_data})"
+            elif _dias_ate <= 30:
+                _cor_prox, _label_prox = "amber", f"em {_dias_ate} dias ({_prox_data})"
+            else:
+                _cor_prox, _label_prox = "muted", _prox_data
+        except Exception:
+            _cor_prox, _label_prox = "muted", _prox_data
+
+        _col_prox1, _col_prox2, _col_prox3 = st.columns(3)
+        with _col_prox1:
+            metric_card(
+                "próximo resultado", _label_prox,
+                f"fonte: {_earnings.get('fonte', '—')}",
+                _cor_prox,
+            )
+        if _earnings.get('eps_estimado'):
+            with _col_prox2:
+                metric_card(
+                    "eps estimado (próximo)",
+                    f"$ {_earnings['eps_estimado']:.2f}",
+                    "consenso de analistas",
+                )
+        if _earnings.get('receita_est'):
+            with _col_prox3:
+                metric_card(
+                    "receita estimada",
+                    f"$ {_earnings['receita_est']:.1f}B",
+                    "consenso de analistas",
+                )
+
+    # ── HISTÓRICO DE RESULTADOS ──────────────────────────────────────────
+    _earn_hist = _earnings.get('historico', [])
+    _is_us     = not t_base.endswith('.SA')
+
+    if _earn_hist:
+        section_title(f"📈 histórico trimestral (últimos {len(_earn_hist)} trimestres)")
+
+        _div_style = (
+            '<div style="height:1px; background:#111; margin:4px 0;"></div>'
+        )
+        _lbl = (
+            '<div style="font-family:Courier New; '
+            'font-size:0.78rem; color:#888;">{label}<br>'
+            '<span style="color:{cor};">{valor}</span></div>'
+        )
+
+        for _entry in _earn_hist:
+            _c1, _c2, _c3, _c4, _c5 = st.columns(5)
+
+            with _c1:
+                st.markdown(
+                    f'<div style="font-family:Courier New; color:#FF9900; '
+                    f'font-size:0.82rem; font-weight:bold;">'
+                    f'{_entry.get("periodo", "—")}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            with _c2:
+                _rec = _entry.get('receita')
+                if _rec is not None:
+                    _un = "B" if _is_us else "M"
+                    st.markdown(
+                        _lbl.format(
+                            label="receita",
+                            cor="#E0E0E0",
+                            valor=f"{_rec:.2f}{_un}",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+            with _c3:
+                _luc = _entry.get('lucro')
+                if _luc is not None:
+                    _un = "B" if _is_us else "M"
+                    _cor_l = "#00C853" if _luc > 0 else "#FF1744"
+                    st.markdown(
+                        _lbl.format(
+                            label="lucro líq.",
+                            cor=_cor_l,
+                            valor=f"{_luc:+.2f}{_un}",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+            with _c4:
+                if _is_us:
+                    _eps_r = _entry.get('eps_real')
+                    _eps_e = _entry.get('eps_est')
+                    if _eps_r is not None:
+                        _cor_e = "#00C853" if _eps_r >= (_eps_e or 0) else "#FF1744"
+                        _est   = f" (est: ${_eps_e:.2f})" if _eps_e else ""
+                        st.markdown(
+                            _lbl.format(
+                                label="eps",
+                                cor=_cor_e,
+                                valor=f"${_eps_r:.2f}{_est}",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    _lpa = _entry.get('lpa')
+                    if _lpa is not None:
+                        st.markdown(
+                            _lbl.format(
+                                label="lpa",
+                                cor="#E0E0E0",
+                                valor=f"R${_lpa:.2f}",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+            with _c5:
+                if _is_us:
+                    _surp = _entry.get('surpresa')
+                    if _surp is not None:
+                        _cor_s  = "#00C853" if _surp >= 0 else "#FF1744"
+                        _icon_s = "▲" if _surp >= 0 else "▼"
+                        st.markdown(
+                            _lbl.format(
+                                label="surpresa eps",
+                                cor=_cor_s,
+                                valor=f"{_icon_s} {abs(_surp):.1f}%",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    _mrg = _entry.get('margem')
+                    if _mrg is not None:
+                        _cor_m = (
+                            "#00C853" if _mrg > 10
+                            else "#FF9900" if _mrg > 0
+                            else "#FF1744"
+                        )
+                        st.markdown(
+                            _lbl.format(
+                                label="margem",
+                                cor=_cor_m,
+                                valor=f"{_mrg:.1f}%",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+            st.markdown(_div_style, unsafe_allow_html=True)
+
+        # ── Gráfico de evolução do lucro ─────────────────────────────────
+        _lucros_validos = [
+            (e['periodo'], e['lucro'])
+            for e in _earn_hist
+            if e.get('lucro') is not None
+        ]
+        if len(_lucros_validos) >= 3:
+            _peri_g  = [x[0] for x in reversed(_lucros_validos)]
+            _luc_g   = [x[1] for x in reversed(_lucros_validos)]
+            _cores_g = ["#00C853" if l > 0 else "#FF1744" for l in _luc_g]
+
+            _fig_earn = go.Figure(go.Bar(
+                x=_peri_g, y=_luc_g,
+                marker_color=_cores_g,
+                hovertemplate="%{x}<br>lucro: %{y:.2f}<extra></extra>",
+            ))
+            _un_g = "B (USD)" if _is_us else "M (BRL)"
+            _lay_earn = base_layout(
+                height=220,
+                titulo=f"lucro líquido trimestral ({_un_g})",
+            )
+            _fig_earn.update_layout(**_lay_earn)
+            _fig_earn.add_hline(y=0, line_color="#333", line_width=1)
+            st.plotly_chart(_fig_earn, use_container_width=True)
 
 # ── SEÇÃO: ANÁLISE IA — DEEPSEEK V4 PRO ──────────────────────────────────
 section_title("🧠 análise ia — deepseek v4 pro")
