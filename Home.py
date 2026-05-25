@@ -22,6 +22,7 @@ from database.db import (
     registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados,
     is_primeiro_acesso, marcar_onboarding_completo,
     get_earnings_dates, salvar_earnings_date,
+    listar_tags_watchlist, atualizar_tag_ativo,
 )
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score, _is_fii
@@ -975,12 +976,102 @@ else:
         except Exception:
             pass
 
+    # ── FILTRO POR TAG / TESE ────────────────────────────────────────────────
+    tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
+    opcoes_filtro    = ['todas'] + tags_disponiveis
+
+    col_tag1, col_tag2, col_tag3 = st.columns([3, 1, 1])
+    with col_tag1:
+        tag_filtro = st.radio(
+            "filtrar por tese:",
+            options=opcoes_filtro,
+            format_func=lambda x: "🌐 todas" if x == 'todas' else f"📁 {x}",
+            horizontal=True,
+            key="wl_tag_filtro",
+            label_visibility="collapsed",
+        )
+    with col_tag2:
+        if st.button("🏷️ editar tags", key="btn_editar_tags", use_container_width=True):
+            st.session_state['modo_editar_tags'] = not st.session_state.get('modo_editar_tags', False)
+    with col_tag3:
+        _n_grupos = len(tags_disponiveis) if tags_disponiveis else 1
+        st.markdown(
+            f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; '
+            f'padding-top:8px; text-align:right;">'
+            f'{len(watchlist)} ativos | {_n_grupos} grupo{"s" if _n_grupos != 1 else ""}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Filtra watchlist pela tag selecionada
+    if tag_filtro != 'todas':
+        watchlist_filtrada = [i for i in watchlist if (i.get('tag') or 'geral') == tag_filtro]
+    else:
+        watchlist_filtrada = watchlist
+
+    # Modo de edição de tags
+    if st.session_state.get('modo_editar_tags'):
+        with st.expander("🏷️ gerenciar tags dos ativos", expanded=True):
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.75rem; color:#555; margin-bottom:12px;">'
+                'organize seus ativos por tese de investimento. '
+                'ex: <code>dividendos br</code>, <code>tech eua</code>, <code>fiis logística</code></div>',
+                unsafe_allow_html=True,
+            )
+
+            _tags_sugeridas = [
+                'dividendos br', 'tech eua', 'fiis logística',
+                'fiis shoppings', 'fiis papel', 'blue chips',
+                'small caps', 'tokenizados', 'commodities',
+                'defensivo', 'especulativo',
+            ]
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.68rem; color:#444; margin-bottom:10px;">'
+                'sugeridas: ' +
+                ' | '.join(f'<code>{_t}</code>' for _t in _tags_sugeridas[:6]) +
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            _cols_tag = st.columns(3)
+            _changes: dict[str, str] = {}
+            for _i, _item in enumerate(watchlist):
+                _tk = _item['ticker']
+                with _cols_tag[_i % 3]:
+                    _nova_tag = st.text_input(
+                        _tk.replace('.SA', ''),
+                        value=_item.get('tag') or 'geral',
+                        key=f"tag_edit_{_tk}",
+                        placeholder="ex: dividendos br",
+                    )
+                    _changes[_tk] = _nova_tag
+
+            _cs, _cc = st.columns(2)
+            with _cs:
+                if st.button("💾 salvar tags", type="primary", use_container_width=True, key="btn_salvar_tags"):
+                    for _ticker_t, _tag_t in _changes.items():
+                        if _tag_t.strip():
+                            atualizar_tag_ativo(watchlist_id_ativo, _ticker_t, _tag_t)
+                    st.success("✅ tags salvas!")
+                    st.session_state['modo_editar_tags'] = False
+                    st.rerun()
+            with _cc:
+                if st.button("cancelar", type="secondary", use_container_width=True, key="btn_cancel_tags"):
+                    st.session_state['modo_editar_tags'] = False
+                    st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── GRID DE CARDS (usa watchlist_filtrada) ───────────────────────────────
     mercados = {}
-    for item in watchlist:
+    for item in watchlist_filtrada:
         m = item['mercado']
         if m not in mercados:
             mercados[m] = []
         mercados[m].append(item)
+
+    if not mercados:
+        empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
+                    "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
     for mercado, ativos in mercados.items():
         st.markdown(f"##### 📍 {mercado.lower()}")

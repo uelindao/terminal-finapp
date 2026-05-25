@@ -355,6 +355,36 @@ def atualizar_notas(ticker, notas, watchlist_id):
     ).eq('user_id', user_id).eq('watchlist_id', watchlist_id).execute()
 
 
+def atualizar_tag_ativo(watchlist_id: int, ticker: str, tag: str) -> None:
+    """Atualiza a tag/tese de um ativo na watchlist."""
+    try:
+        get_supabase().table("watchlist_items").update({
+            "tag": tag.strip().lower()
+        }).eq("watchlist_id", watchlist_id).eq("ticker", ticker).execute()
+    except Exception as e:
+        logger.warning(f"[db] atualizar_tag {ticker}: {e}")
+
+
+def listar_tags_watchlist(watchlist_id: int) -> list[str]:
+    """Retorna lista ordenada de tags únicas da watchlist."""
+    try:
+        res = (
+            get_supabase()
+            .table("watchlist_items")
+            .select("tag")
+            .eq("watchlist_id", watchlist_id)
+            .execute()
+        )
+        tags = list(set(
+            r['tag'] for r in (res.data or [])
+            if r.get('tag') and r['tag'] != 'geral'
+        ))
+        return sorted(tags)
+    except Exception as e:
+        logger.warning(f"[db] listar_tags: {e}")
+        return []
+
+
 def popular_watchlist_inicial():
     user_id = get_user_id()
     sb = get_supabase()
