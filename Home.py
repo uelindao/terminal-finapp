@@ -805,26 +805,74 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
 # ── FUNÇÃO MODAL DO MEMORIAL ───────────────────────
 @st.dialog("🧮 memorial de cálculo")
 def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
+    import re as _re
+
     st.markdown(f"#### ativo: {ticker_nome.lower()}")
-    
-    cor_score = "#00C853" if score_final >= 70 else ("#FF9900" if score_final >= 40 else "#FF1744")
-    st.markdown(f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; color:{cor_score}; text-align:center; padding:10px; background:#111; border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>", unsafe_allow_html=True)
-    
+
+    cor_score = "#00C853" if score_final >= 65 else ("#FF9900" if score_final >= 40 else "#FF1744")
+    st.markdown(
+        f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; "
+        f"color:{cor_score}; text-align:center; padding:10px; background:#111; "
+        f"border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>",
+        unsafe_allow_html=True,
+    )
+
     if breakdown_dict:
         st.markdown("**🧱 pilares de pontuação:**")
-        for pilar, pts in breakdown_dict.items():
-            if pts == 0 and "Penalidade" in pilar:
-                continue 
-            
-            cor_pts = "#00C853" if pts > 0 else ("#FF1744" if pts < 0 else "#666")
-            st.markdown(f"<div style='display:flex; justify-content:space-between; border-bottom:1px solid #222; padding:4px 0;'><span style='color:#ccc;'>{pilar.lower()}</span> <span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>{pts:+.0f} pts</span></div>", unsafe_allow_html=True)
+
+        for pilar, v in breakdown_dict.items():
+            # ── Extrai número da forma mais robusta possível ──────────────
+            # v pode ser int, float ou string como "+6 pts", "12.5%", "n/d"
+            pts_num = None
+            if isinstance(v, (int, float)):
+                pts_num = float(v)
+            elif isinstance(v, str):
+                m = _re.search(r'([+-]?\d+\.?\d*)', str(v))
+                if m:
+                    try:
+                        pts_num = float(m.group(1))
+                    except Exception:
+                        pts_num = None
+
+            # Decide se é pilar de pontuação (numérico inteiro/float direto)
+            # ou dado informativo (string percentual, ratio, etc.)
+            eh_pilar = isinstance(v, (int, float))
+
+            if eh_pilar and pts_num is not None:
+                # Pula penalidades zeradas para não poluir
+                if pts_num == 0 and "penalidade" in pilar.lower():
+                    continue
+                cor_pts = "#00C853" if pts_num > 0 else ("#FF1744" if pts_num < 0 else "#666")
+                sinal   = "+" if pts_num > 0 else ""
+                st.markdown(
+                    f"<div style='display:flex; justify-content:space-between; "
+                    f"border-bottom:1px solid #222; padding:4px 0;'>"
+                    f"<span style='color:#ccc;'>{pilar.lower()}</span> "
+                    f"<span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>"
+                    f"{sinal}{pts_num:.0f} pts</span></div>",
+                    unsafe_allow_html=True,
+                )
+            elif isinstance(v, str) and v not in ('n/d', '—', 'None', '', 'nan'):
+                # Dado informativo: mostra em cinza mais claro
+                cor_v = "#00C853" if v.startswith('+') else ("#FF1744" if v.startswith('-') else "#555")
+                st.markdown(
+                    f"<div style='display:flex; justify-content:space-between; "
+                    f"padding:3px 0; font-family:Courier New; font-size:0.72rem;'>"
+                    f"<span style='color:#444;'>{pilar.lower()}</span>"
+                    f"<span style='color:{cor_v};'>{v}</span></div>",
+                    unsafe_allow_html=True,
+                )
     else:
         st.info("💡 memorial não disponível. clique em '🚨 atualizar health scores' no topo da página para recalcular este ativo na nova versão.")
-        
+
     if alertas_lista:
         st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
         for a in alertas_lista:
-            st.markdown(f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; padding-left:10px; border-left:2px solid #444;'>{a}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; "
+                f"padding-left:10px; border-left:2px solid #444;'>{a}</div>",
+                unsafe_allow_html=True,
+            )
 
 # ── GRID DA WATCHLIST ATIVA ─────────────────────────────
 watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
@@ -878,18 +926,32 @@ else:
 
     # ── Busca datas de earnings para os cards da watchlist ───────────────────
     import datetime as _dt_mod
-    _hoje_home        = _dt_mod.date.today()
-    _tickers_base_wl  = list(set(mapear_ticker_base(i['ticker']) for i in watchlist))
-    _earnings_cache   = get_earnings_dates(_tickers_base_wl)
+    _hoje_home       = _dt_mod.date.today()
+    _tickers_base_wl = list(set(
+        mapear_ticker_base(i['ticker'])
+        for i in watchlist
+        if i.get('ticker')
+    ))
 
-    # Para tickers sem data em cache, busca e salva (apenas não-FIIs)
-    for _tb in _tickers_base_wl:
-        if _tb not in _earnings_cache:
-            try:
-                if not _is_fii(_tb):
+    # 1. Tenta pegar do cache Supabase primeiro (1 round-trip para N tickers)
+    _earnings_cache: dict = get_earnings_dates(_tickers_base_wl)
+
+    # 2. Para tickers sem cache, busca via scraper e persiste
+    #    (só roda para não-FIIs; falha silenciosa se tabela não existir)
+    _sem_cache = [_tb for _tb in _tickers_base_wl
+                  if _tb not in _earnings_cache and not _is_fii(_tb)]
+    if _sem_cache:
+        with st.spinner("buscando datas de resultados..."):
+            for _tb in _sem_cache:
+                try:
                     _earn_d = buscar_resultados(_tb)
                     _prox   = _earn_d.get('proxima_data')
-                    salvar_earnings_date(_tb, _prox, _earn_d.get('fonte', ''))
+                    # Persiste no Supabase (ignora erro se tabela não existir)
+                    try:
+                        salvar_earnings_date(_tb, _prox, _earn_d.get('fonte', ''))
+                    except Exception:
+                        pass
+                    # Sempre atualiza o cache em memória
                     if _prox:
                         try:
                             _earnings_cache[_tb] = _dt_mod.datetime.strptime(
@@ -897,18 +959,21 @@ else:
                             ).date()
                         except Exception:
                             pass
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-    # Monta mapa {ticker_base: earnings_info} para os cards (janela de 14 dias)
+    # 3. Monta mapa {ticker_base: earnings_info} para os cards (janela -1 a +14 dias)
     _earnings_info_map: dict = {}
     for _tb, _dt_earn in _earnings_cache.items():
-        _dias = (_dt_earn - _hoje_home).days
-        if -1 <= _dias <= 14:
-            _earnings_info_map[_tb] = {
-                'dias': _dias,
-                'data': _dt_earn.strftime('%d/%m/%Y'),
-            }
+        try:
+            _dias = (_dt_earn - _hoje_home).days
+            if -1 <= _dias <= 14:
+                _earnings_info_map[_tb] = {
+                    'dias': _dias,
+                    'data': _dt_earn.strftime('%d/%m/%Y'),
+                }
+        except Exception:
+            pass
 
     mercados = {}
     for item in watchlist:
