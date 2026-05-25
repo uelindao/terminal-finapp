@@ -79,12 +79,13 @@ def calcular_betas(tickers_tuple: tuple) -> dict:
     return betas
 
 # 4. criação das tabs
-tab_posicoes, tab_stress, tab_backtest, tab_diario, tab_ir = st.tabs([
+tab_posicoes, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
     "⚡ stress test",
     "📊 backtesting",
     "📝 diário de decisões",
     "🧾 imposto de renda",
+    "💬 chat ia",
 ])
 
 # ==========================================
@@ -313,6 +314,27 @@ with tab_posicoes:
 
         df_portfolio = pd.DataFrame(linhas_portfolio)
         df_portfolio['peso atual (%)'] = (df_portfolio['valor atual'] / valor_atual_carteira) * 100 if valor_atual_carteira > 0 else 0.0
+
+        # ── persiste dados para o chat IA (tab_chat usa estes) ──
+        st.session_state['pesos_ativos_cache'] = [
+            {
+                'ticker':      row['ativo'],
+                'quantidade':  row['qtd'],
+                'preco_medio': row['preço médio'],
+                'preco_atual': row['preço atual'],
+                'valor':       row['valor atual'],
+                'peso_pct':    row['peso atual (%)'],
+                'pnl_pct':     row['p&l (%)'],
+                'health_score': row['health score'],
+            }
+            for _, row in df_portfolio.iterrows()
+        ]
+        st.session_state['metricas_cache'] = {
+            'valor_total':   valor_atual_carteira,
+            'custo_total':   custo_total_carteira,
+            'pnl_total_pct': pnl_global_pct,
+            'num_posicoes':  len(df_portfolio),
+        }
 
         pnl_global_valor = valor_atual_carteira - custo_total_carteira
         pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
@@ -1202,3 +1224,184 @@ with tab_ir:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+
+# ==========================================
+# tab 6: chat ia
+# ==========================================
+with tab_chat:
+
+    section_title("💬 chat com sua carteira — deepseek v4 pro")
+
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.72rem; color:#333; '
+        'margin-bottom:16px; line-height:1.5;">'
+        'faça perguntas em linguagem natural sobre sua carteira. '
+        'o modelo tem acesso completo às suas posições, health scores e métricas. '
+        'não é recomendação de investimento.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── monta contexto da carteira (uma vez por sessão) ───────────────────
+
+    def montar_contexto_carteira(posicoes_cache: list, metricas_cache: dict) -> str:
+        """
+        Serializa o estado da carteira em texto estruturado.
+        Gerado UMA VEZ e armazenado no session_state para cache hit
+        em mensagens subsequentes da mesma sessão.
+        """
+        linhas = ["estado atual da carteira do usuário:\n"]
+
+        if posicoes_cache:
+            linhas.append("posições:")
+            for p in posicoes_cache:
+                hs = p.get('health_score', '—')
+                _hs_str = f"{hs}/100" if isinstance(hs, (int, float)) else str(hs)
+                try:
+                    _pnl_str = f"{float(p['pnl_pct']):+.1f}%"
+                except (TypeError, ValueError):
+                    _pnl_str = "n/d"
+                linhas.append(
+                    f"- {p['ticker']}: "
+                    f"{p['quantidade']:.0f} cotas | "
+                    f"preço r$ {p['preco_atual']:,.2f} | "
+                    f"pm r$ {p['preco_medio']:,.2f} | "
+                    f"valor r$ {p['valor']:,.0f} | "
+                    f"peso {p['peso_pct']:.1f}% | "
+                    f"health {_hs_str} | "
+                    f"p&l {_pnl_str}"
+                )
+        else:
+            linhas.append("nenhuma posição encontrada.")
+
+        if metricas_cache:
+            linhas.append(
+                f"\nresumo da carteira:\n"
+                f"- valor total (m2m): r$ {metricas_cache.get('valor_total', 0):,.2f}\n"
+                f"- custo total investido: r$ {metricas_cache.get('custo_total', 0):,.2f}\n"
+                f"- p&l total: {metricas_cache.get('pnl_total_pct', 0):+.1f}%\n"
+                f"- número de posições: {metricas_cache.get('num_posicoes', 0)}"
+            )
+
+        macro = st.session_state.get("macro_context", {})
+        if macro:
+            linhas.append(
+                f"\nambiente macro atual:\n"
+                f"- selic: {macro.get('selic', 10.75):.2f}%\n"
+                f"- vix: {macro.get('vix', 15.0):.1f}\n"
+                f"- ambiente: {macro.get('label', 'neutro')}"
+            )
+
+        return "\n".join(linhas)
+
+    _ctx_key = "chat_portfolio_contexto"
+
+    if _ctx_key not in st.session_state:
+        _pos_cache  = st.session_state.get('pesos_ativos_cache', [])
+        _met_cache  = st.session_state.get('metricas_cache', {})
+        st.session_state[_ctx_key] = montar_contexto_carteira(
+            _pos_cache, _met_cache
+        )
+
+    contexto_carteira = st.session_state[_ctx_key]
+
+    # ── sugestões rápidas ─────────────────────────────────────────────────
+
+    section_title("sugestões de perguntas")
+
+    _sugestoes = [
+        "qual meu ativo com pior health score?",
+        "estou bem diversificado ou concentrado?",
+        "meu p&l está bom para o ambiente macro?",
+        "quais posições devo revisar primeiro?",
+        "como o vix atual afeta minha carteira?",
+    ]
+
+    _cols_sug = st.columns(len(_sugestoes))
+    for _i, _sug in enumerate(_sugestoes):
+        with _cols_sug[_i]:
+            _label = (_sug[:30] + "...") if len(_sug) > 30 else _sug
+            if st.button(_label, key=f"chat_sug_{_i}",
+                         use_container_width=True, help=_sug):
+                st.session_state["chat_input_pendente"] = _sug
+
+    # ── inicializa histórico ──────────────────────────────────────────────
+
+    if "chat_portfolio_msgs" not in st.session_state:
+        st.session_state["chat_portfolio_msgs"] = []
+
+    # ── exibe histórico da conversa ───────────────────────────────────────
+
+    st.markdown("---")
+
+    for _msg in st.session_state["chat_portfolio_msgs"]:
+        _role   = _msg["role"]
+        _avatar = "👤" if _role == "user" else "⚡"
+        with st.chat_message(_role, avatar=_avatar):
+            st.markdown(
+                f'<div style="font-family:Courier New; font-size:0.83rem; '
+                f'color:#C0C0C0; line-height:1.6;">{_msg["content"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── input do usuário ──────────────────────────────────────────────────
+
+    _input_default = st.session_state.pop("chat_input_pendente", "")
+
+    _pergunta = st.chat_input(
+        "pergunte sobre sua carteira...",
+        key="chat_portfolio_input",
+    ) or _input_default
+
+    if _pergunta:
+        # Adiciona ao histórico e exibe imediatamente
+        st.session_state["chat_portfolio_msgs"].append(
+            {"role": "user", "content": _pergunta}
+        )
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(
+                f'<div style="font-family:Courier New; font-size:0.83rem; '
+                f'color:#E0E0E0;">{_pergunta}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Monta o prompt: contexto (semi-estático) → histórico → pergunta atual
+        # Ordem garante máximo cache hit no prefixo
+        _msgs_ant = st.session_state["chat_portfolio_msgs"][:-1]
+        _hist_txt = ""
+        if _msgs_ant:
+            _pares = []
+            for _m in _msgs_ant[-6:]:   # últimas 3 trocas (6 mensagens)
+                _pfx = "usuário" if _m["role"] == "user" else "analista"
+                _pares.append(f"{_pfx}: {_m['content']}")
+            _hist_txt = "\nhistórico recente:\n" + "\n".join(_pares) + "\n"
+
+        _prompt_chat = (
+            f"{contexto_carteira}"
+            f"{_hist_txt}"
+            f"\npergunta atual: {_pergunta}"
+            f"\n\nresponda de forma direta e objetiva usando os dados da carteira acima. "
+            f"letra minúscula."
+        )
+
+        _resposta = chamar_ia(
+            prompt_usuario = _prompt_chat,
+            system         = SYSTEM_PORTFOLIO,
+            max_tokens     = 600,
+            temperatura    = 0.3,
+            stream         = True,
+            thinking       = False,
+        )
+
+        # Salva resposta no histórico
+        st.session_state["chat_portfolio_msgs"].append(
+            {"role": "assistant", "content": _resposta}
+        )
+
+    # ── botão limpar ──────────────────────────────────────────────────────
+
+    if st.session_state.get("chat_portfolio_msgs"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑️ limpar conversa", key="btn_limpar_chat"):
+            st.session_state["chat_portfolio_msgs"] = []
+            st.session_state.pop(_ctx_key, None)
+            st.rerun()
