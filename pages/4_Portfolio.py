@@ -700,6 +700,7 @@ with tab_stress:
             if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
                 with st.spinner("analisando exposições e gerando recomendações..."):
                     try:
+                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_PORTFOLIO
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                         dados_texto = df_s.to_csv(index=False)
                         prompt = f"""você é um gestor de risco de um fundo multimercado brasileiro. analise o stress test abaixo e recomende ações defensivas.
@@ -971,9 +972,10 @@ with tab_diario:
                     df_revisao = df_decisoes.head(10).drop(columns=['id'])
                     csv_dados = df_revisao.to_csv(index=False, float_format='%.2f')
                     
+                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_PORTFOLIO
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                     prompt = f"""
-                    você é um mentor de investimentos e analista comportamental. 
+                    você é um mentor de investimentos e analista comportamental.
                     analise o histórico das últimas decisões do investidor abaixo:
                     
                     {csv_dados}

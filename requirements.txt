@@ -7,3 +7,4 @@ google-genai
 fredapi
 python-bcb
 supabase>=2.0.0
+openai>=1.30.0

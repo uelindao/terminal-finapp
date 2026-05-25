@@ -456,6 +456,7 @@ with tab_dcf:
                 with st.spinner("analisando..."):
                     prompt_ia = f"você é um analista de valuation sênior. analise o modelo de dcf reverso abaixo e dê sua opinião sobre o valuation do ativo. ativo: {ticker}. preço atual: {preco_input}. eps: {eps_input}. crescimento implícito no preço: {g_implicito_pct:.1f}%. wacc utilizado: {wacc_pct}%. crescimento terminal: {g_term_pct}%. horizonte: {n_anos} anos. responda com: 1. avaliação do crescimento implícito (é realista para o setor?). 2. comparação com pares do setor se souber. 3. cenário bull e bear para o preço em 3 anos baseado na sensibilidade. 4. recomendação de ação (comprar, aguardar, evitar) com justificativa. escreva em minúsculas e seja direto e objetivo."
                     try:
+                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_TESE
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                         res_ia = client.models.generate_content(model='gemini-2.5-flash', contents=prompt_ia).text
                         status_card("interpretação ia do valuation lab", res_ia, "info")
@@ -474,6 +475,7 @@ with tab_sent:
                     cn1.caption(f"{item.get('publisher')} | {datetime.datetime.fromtimestamp(item.get('providerPublishTime'))}")
                     if cn2.button("ia: analisar", key=item.get('uuid')):
                         with st.spinner("ia..."):
+                            # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
                             client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                             res = client.models.generate_content(model='gemini-2.5-flash', contents=f"analise se '{item.get('title')}' é positivo ou negativo para {ticker} em 1 frase curta com minúsculas.").text
                             st.info(res)
@@ -533,8 +535,9 @@ if st.button("🧠 gerar diagnóstico de tese via gemini", use_container_width=T
             else:
                 ctx = f"ativo: {ticker}. P/L: {val_pl_str}. ROE: {val_roe_str}. Dividend Yield: {val_dy_str}. Setor: {setor}."
 
+            # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_TESE
             client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-            res = client.models.generate_content(model='gemini-2.5-flash', 
+            res = client.models.generate_content(model='gemini-2.5-flash',
                 contents=f"você é um analista fundamentalista sênior. escreva uma tese de investimento de longo prazo para {ticker} baseada estritamente nestes dados: {ctx}. analise se o nível de dívida/alavancagem é adequado para o setor informado. escreva 4 parágrafos curtos em minúsculas.").text
             status_card(f"racional: {ticker.lower()}", res, "info")
         except Exception as e: st.error(f"Erro IA: {e}")

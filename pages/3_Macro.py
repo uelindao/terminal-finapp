@@ -580,9 +580,10 @@ with tab_global:
         if st.button("gerar relatório do cenário atual >>", type="primary"):
             with st.spinner("processando vetores de juros, inflação e risco global..."):
                 try:
+                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                     prompt = f"""
-                    aja como um estrategista macro de um hedge fund. 
+                    aja como um estrategista macro de um hedge fund.
                     brasil: selic {valor_atual_seguro(df_br, 'Selic') or 0:.2f}%, ipca {valor_atual_seguro(df_br, 'IPCA') or 0:.2f}%.
                     eua: fed funds {valor_atual_seguro(df_global, 'FEDFUNDS') or 0:.2f}%, cpi {valor_atual_seguro(df_global, 'CPI_MoM') or 0:.2f}%.
                     europa: bce {valor_atual_seguro(df_global, 'ECBDFR') or 0:.2f}%.
@@ -800,6 +801,7 @@ with tab_ciclo:
     if st.button("gerar análise de rotação setorial >>", type="primary"):
         with st.spinner("o agente está analisando o ciclo e os dados setoriais..."):
             try:
+                # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
                 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                 contexto_setores = ""
                 for index, row in df_setores.iterrows():
@@ -937,6 +939,7 @@ with tab_calendar:
         if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
             with st.spinner("analisando eventos e gerando briefing..."):
                 try:
+                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                     eventos_texto = "\n".join([f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | {e['evento']} | impacto: {e['impacto']}" for e in todos_eventos[:15]])
                     prompt = f"""você é um estrategista macro de um fundo multimercado. analise o calendário de eventos abaixo e gere um briefing executivo.

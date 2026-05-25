@@ -502,6 +502,7 @@ with tab_setup:
             if st.button("🤖 ia: analisar top picks (acumulação forte)", use_container_width=True, type="primary"):
                 with st.spinner("gemini a elaborar o racional..."):
                     try:
+                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                         alvos = df_setup[df_setup['status'].str.contains("🟢")]
                         tabela = alvos[['ticker','score','setor']].to_csv(index=False)
@@ -635,6 +636,7 @@ with tab_magic:
         if st.button("🧠 ia: analisar o ranking magic formula", type="primary", use_container_width=True):
             with st.spinner("analisando ranking e fundamentos..."):
                 try:
+                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                     dados_texto = df_res_magic.head(10).to_csv(index=False)
                     prompt = f"analise este ranking top 10 da magic formula de greenblatt:\n{dados_texto}\nidentifique padrões setoriais, riscos e qual dos ativos tem a melhor combination qualidade-preço. responda em minúsculas e direto."
@@ -796,6 +798,7 @@ with tab_radar:
         if st.button("🧠 ia: analisar as confluências detectadas", type="primary", use_container_width=True):
             with st.spinner("analisando confluências..."):
                 try:
+                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                     csv_confl = df_rad.head(10).to_csv(index=False)
                     prompt = f"analise este ranking de confluência (health score + magic formula):\n{csv_confl}\nqual ativo tem a tese mais sólida considerando os dois sistemas? quais setores estão concentrando as melhores confluências? qual o risco de cada um dos top 3? escreva em minúsculas e seja direto."
@@ -918,6 +921,7 @@ with tab_momentum:
             if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
                 with st.spinner("analisando momentum..."):
                     try:
+                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
                         client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
                         dados_texto = df_m[cols_mostrar].head(10).to_csv(index=False)
                         prompt = f"""você é um analista técnico e quantitativo sênior. analise os dados de momentum abaixo e responda em 4 bullet points curtos em português:
