@@ -973,6 +973,19 @@ with tab_screener:
     st.markdown("---")
     section_title("⚙️ filtros")
 
+    # ── inicializa variáveis intermediárias para os presets ──────────────────
+    # (evita StreamlitAPIException ao setar session_state de widget já renderizado)
+    for _k, _v in [
+        ("preset_pl_min",    0.0),
+        ("preset_pl_max",    0.0),
+        ("preset_pvp_max",   0.0),
+        ("preset_roe_min",   0.0),
+        ("preset_dy_min",    0.0),
+        ("preset_score_min", 50),
+    ]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
     # ── grid de filtros ──────────────────────────────────────────────────────
     f1, f2, f3, f4 = st.columns(4)
 
@@ -986,40 +999,41 @@ with tab_screener:
         with pl_col1:
             pl_min_scr = st.number_input(
                 "pl mín", min_value=0.0, max_value=200.0,
-                value=0.0, step=1.0, key="sc_pl_min",
-                label_visibility="collapsed",
+                value=st.session_state["preset_pl_min"], step=1.0,
+                key="sc_pl_min_input", label_visibility="collapsed",
             )
         with pl_col2:
             pl_max_scr = st.number_input(
                 "pl máx", min_value=0.0, max_value=500.0,
-                value=0.0, step=1.0, key="sc_pl_max",
-                label_visibility="collapsed",
+                value=st.session_state["preset_pl_max"], step=1.0,
+                key="sc_pl_max_input", label_visibility="collapsed",
             )
         st.caption("0 = sem limite")
 
     with f2:
         pvp_max_scr = st.number_input(
             "p/vp máximo:", min_value=0.0, max_value=20.0,
-            value=0.0, step=0.1, format="%.1f",
-            key="sc_pvp", help="0 = sem filtro",
+            value=st.session_state["preset_pvp_max"], step=0.1, format="%.1f",
+            key="sc_pvp_input", help="0 = sem filtro",
         )
         roe_min_scr = st.number_input(
             "roe mínimo (%):", min_value=0.0, max_value=100.0,
-            value=0.0, step=1.0, key="sc_roe",
+            value=st.session_state["preset_roe_min"], step=1.0,
+            key="sc_roe_input",
         )
 
     with f3:
         dy_min_scr = st.number_input(
             "dividend yield mínimo (%):",
             min_value=0.0, max_value=30.0,
-            value=0.0, step=0.5, format="%.1f",
-            key="sc_dy",
+            value=st.session_state["preset_dy_min"], step=0.5, format="%.1f",
+            key="sc_dy_input",
         )
         score_min_scr = st.slider(
             "health score mínimo:",
             min_value=0, max_value=100,
-            value=50, step=5,
-            key="sc_score",
+            value=st.session_state["preset_score_min"], step=5,
+            key="sc_score_input",
         )
 
     with f4:
@@ -1032,15 +1046,20 @@ with tab_screener:
         with pc1:
             if st.button("💎 valor", use_container_width=True,
                          help="P/L baixo + ROE alto", key="sc_preset_valor"):
-                st.session_state['sc_pl_max']  = 15.0
-                st.session_state['sc_roe']     = 12.0
-                st.session_state['sc_score']   = 55
+                st.session_state["preset_pl_min"]    = 0.0
+                st.session_state["preset_pl_max"]    = 15.0
+                st.session_state["preset_roe_min"]   = 12.0
+                st.session_state["preset_score_min"] = 55
+                st.session_state["preset_dy_min"]    = 0.0
                 st.rerun()
         with pc2:
             if st.button("💰 dividendo", use_container_width=True,
                          help="DY alto + score ok", key="sc_preset_div"):
-                st.session_state['sc_dy']    = 6.0
-                st.session_state['sc_score'] = 45
+                st.session_state["preset_pl_min"]    = 0.0
+                st.session_state["preset_pl_max"]    = 0.0
+                st.session_state["preset_dy_min"]    = 6.0
+                st.session_state["preset_score_min"] = 45
+                st.session_state["preset_roe_min"]   = 0.0
                 st.rerun()
 
     # ── botão rodar ──────────────────────────────────────────────────────────
