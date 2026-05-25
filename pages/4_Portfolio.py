@@ -20,6 +20,7 @@ from database.db import registrar_decisao, listar_decisoes, atualizar_resultado,
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
+from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 
@@ -165,6 +166,138 @@ with tab_posicoes:
                 "valor estimado": qtd * pm
             })
             
+    # ══ IMPORTAÇÃO VIA PLANILHA ══════════════════════════════════════════════
+    with st.expander("📥 importar portfólio via planilha", expanded=False):
+
+        col_imp1, col_imp2 = st.columns([3, 1])
+        with col_imp1:
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.78rem; '
+                'color:#555; line-height:1.6;">'
+                '📋 <b>formato aceito:</b> CSV ou Excel com colunas '
+                '<code>ticker</code>, <code>quantidade</code>, '
+                '<code>preco_medio</code>.<br>'
+                '💡 <b>dica:</b> envie prints da sua corretora para o Claude '
+                'ou ChatGPT pedindo para gerar um CSV neste formato.</div>',
+                unsafe_allow_html=True,
+            )
+        with col_imp2:
+            st.download_button(
+                label               = "📄 baixar template",
+                data                = TEMPLATE_CSV,
+                file_name           = "template_portfolio.csv",
+                mime                = "text/csv",
+                use_container_width = True,
+                key                 = "dl_template_portfolio",
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        arquivo_imp = st.file_uploader(
+            "selecione o arquivo:",
+            type = ['csv', 'xlsx', 'xls'],
+            key  = "uploader_portfolio",
+            help = "CSV ou Excel com ticker, quantidade e preço médio",
+        )
+
+        if arquivo_imp is not None:
+            resultado_imp = importar_planilha(
+                arquivo_imp.read(), arquivo_imp.name
+            )
+
+            if resultado_imp['posicoes']:
+                section_title(
+                    f"✅ {len(resultado_imp['posicoes'])} posições detectadas "
+                    f"— confirme antes de importar"
+                )
+
+                # ── Preview ──────────────────────────────────────────────
+                df_prev = pd.DataFrame(resultado_imp['posicoes'])[
+                    ['ticker', 'nome', 'quantidade', 'preco_medio', 'mercado']
+                ].copy()
+                df_prev['valor_estimado'] = (
+                    df_prev['quantidade'] * df_prev['preco_medio']
+                ).apply(lambda x: f"R$ {x:,.2f}")
+                df_prev['preco_medio'] = df_prev['preco_medio'].apply(
+                    lambda x: f"R$ {x:,.2f}"
+                )
+                st.dataframe(df_prev, use_container_width=True, hide_index=True)
+
+                # Erros não-críticos como warnings
+                for erro_imp in resultado_imp['erros']:
+                    st.warning(f"⚠️ {erro_imp}")
+
+                st.markdown("---")
+
+                col_conf1, col_conf2, col_conf3 = st.columns(3)
+                with col_conf1:
+                    modo_import = st.radio(
+                        "modo de importação:",
+                        options=['adicionar', 'substituir'],
+                        format_func=lambda x: {
+                            'adicionar':  '➕ adicionar às posições atuais',
+                            'substituir': '🔄 substituir portfólio inteiro',
+                        }[x],
+                        key="modo_importacao",
+                    )
+
+                with col_conf3:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(
+                        "✅ confirmar importação",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_confirmar_import",
+                    ):
+                        from database.db import (
+                            adicionar_ativo, get_watchlist_padrao,
+                        )
+
+                        wl_id_imp  = get_watchlist_padrao()
+                        importados = 0
+                        erros_imp  = []
+
+                        for pos in resultado_imp['posicoes']:
+                            try:
+                                # Garante que o ativo existe na watchlist
+                                adicionar_ativo(
+                                    ticker       = pos['ticker'],
+                                    nome         = pos['nome'],
+                                    mercado      = pos['mercado'],
+                                    watchlist_id = wl_id_imp,
+                                )
+                                # Salva posição no portfólio
+                                salvar_peso(
+                                    pos['ticker'],
+                                    0.0,
+                                    pos['preco_medio'],
+                                    pos['quantidade'],
+                                    portfolio_id=portfolio_id_ativo,
+                                )
+                                importados += 1
+                            except Exception as e_pos:
+                                erros_imp.append(
+                                    f"{pos['ticker']}: {e_pos}"
+                                )
+
+                        if importados > 0:
+                            st.success(
+                                f"✅ {importados} posições importadas com sucesso!"
+                            )
+                            st.rerun()
+                        for e_msg in erros_imp:
+                            st.error(f"❌ {e_msg}")
+
+            else:
+                st.error("não foi possível detectar posições no arquivo.")
+                for erro_imp in resultado_imp['erros']:
+                    st.error(f"❌ {erro_imp}")
+                st.info(
+                    "💡 verifique se o arquivo tem as colunas: "
+                    "ticker, quantidade, preco_medio"
+                )
+
+    # ══ TABELA DE POSIÇÕES ATIVAS ════════════════════════════════════════════
     if posicoes_ativas:
         section_title("📋 posições ativas")
         df_ativas = pd.DataFrame(posicoes_ativas)
