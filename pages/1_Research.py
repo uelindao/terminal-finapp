@@ -20,7 +20,8 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
-from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, init_db, get_historico_score, get_health_scores
+from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores
+from utils.scrapers import buscar_dados_b3, buscar_dados_us
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -252,6 +253,25 @@ if acao_obj is None or df_hist.empty:
     st.stop()
 
 cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
+
+# ── Fallback: busca fundamentos diretamente quando não está no cache ──────
+# Ativos externos (buscados manualmente) não passam pelo sync do screener.
+_qualidade_cache = cache_d.get('qualidade_dados', 0) if cache_d else 0
+if not cache_d or _qualidade_cache < 30:
+    with st.spinner(f"buscando fundamentos de {t_base}..."):
+        try:
+            _fund_fresh = (
+                buscar_dados_b3(t_base) if t_base.endswith('.SA')
+                else buscar_dados_us(t_base)
+            )
+            if _fund_fresh and _fund_fresh.get('qualidade_dados', 0) > 0:
+                cache_d = _fund_fresh
+                # Persiste no cache para próximas visitas
+                salvar_fundamento_cache(t_base, _fund_fresh)
+        except Exception as _e_fund:
+            logging.getLogger(__name__).warning(
+                f"[research] falha ao buscar fundamentos {t_base}: {_e_fund}"
+            )
 
 # --- HEADER & MÉTRICAS ---
 nome_exibicao = info_dict.get('longName') or info_dict.get('shortName') or cache_d.get('nome') or ticker
