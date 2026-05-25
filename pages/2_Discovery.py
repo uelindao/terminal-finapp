@@ -972,47 +972,51 @@ with tab_screener:
 
     st.markdown("---")
 
-    # ── PASSO 1: inicializa defaults no session_state ────────────────────────
-    # deve ser o PRIMEIRO código da seção, antes de qualquer widget
-    for _k, _v in [
-        ("sc_preset_pl_min",    0.0),
-        ("sc_preset_pl_max",    0.0),
-        ("sc_preset_pvp_max",   0.0),
-        ("sc_preset_roe_min",   0.0),
-        ("sc_preset_dy_min",    0.0),
-        ("sc_preset_score_min", 50),
-    ]:
+    # ══ INICIALIZAÇÃO DOS DEFAULTS (primeira execução) ═══════════════════════
+    # Usa as mesmas keys dos widgets — só seta se ainda não existir
+    for _k, _v in {
+        "sc_pl_min_w":  0.0,
+        "sc_pl_max_w":  0.0,
+        "sc_pvp_w":     0.0,
+        "sc_roe_w":     0.0,
+        "sc_dy_w":      0.0,
+        "sc_score_w":   50,
+        "sc_mm_w":      False,
+    }.items():
         if _k not in st.session_state:
             st.session_state[_k] = _v
 
-    # ── PASSO 2: botões de preset ANTES dos widgets ──────────────────────────
-    # st.rerun() dispara antes dos inputs renderizarem — garante que o valor
-    # novo já esteja no session_state quando os widgets forem criados
+    # ══ BOTÕES DE PRESET (ANTES de qualquer widget) ═══════════════════════════
+    # Setam diretamente as keys dos widgets no session_state,
+    # depois chamam st.rerun() — na próxima execução os widgets
+    # já encontram os valores corretos e os exibem sem conflito.
     section_title("⚙️ filtros")
 
-    col_pre1, col_pre2, col_pre3 = st.columns([1, 1, 4])
-    with col_pre1:
+    col_p1, col_p2, col_p3 = st.columns([1, 1, 4])
+    with col_p1:
         if st.button("💎 valor", key="btn_preset_valor",
                      use_container_width=True, help="P/L baixo + ROE alto"):
-            st.session_state["sc_preset_pl_max"]    = 15.0
-            st.session_state["sc_preset_roe_min"]   = 12.0
-            st.session_state["sc_preset_score_min"] = 55
-            st.session_state["sc_preset_dy_min"]    = 0.0
-            st.session_state["sc_preset_pvp_max"]   = 0.0
+            st.session_state["sc_pl_max_w"]  = 15.0
+            st.session_state["sc_pl_min_w"]  = 0.0
+            st.session_state["sc_roe_w"]     = 12.0
+            st.session_state["sc_score_w"]   = 55
+            st.session_state["sc_dy_w"]      = 0.0
+            st.session_state["sc_pvp_w"]     = 0.0
             st.rerun()
-    with col_pre2:
+    with col_p2:
         if st.button("💰 dividendo", key="btn_preset_div",
                      use_container_width=True, help="DY alto + score ok"):
-            st.session_state["sc_preset_dy_min"]    = 6.0
-            st.session_state["sc_preset_score_min"] = 45
-            st.session_state["sc_preset_pl_max"]    = 0.0
-            st.session_state["sc_preset_roe_min"]   = 0.0
-            st.session_state["sc_preset_pvp_max"]   = 0.0
+            st.session_state["sc_dy_w"]      = 6.0
+            st.session_state["sc_score_w"]   = 45
+            st.session_state["sc_pl_max_w"]  = 0.0
+            st.session_state["sc_pl_min_w"]  = 0.0
+            st.session_state["sc_roe_w"]     = 0.0
+            st.session_state["sc_pvp_w"]     = 0.0
             st.rerun()
 
-    # ── PASSO 3: widgets de filtro lendo do session_state ────────────────────
-    # keys dos widgets (sc_pl_max_w) diferentes das keys do session_state
-    # (sc_preset_pl_max) para evitar conflito de widget key
+    # ══ WIDGETS DE FILTRO (DEPOIS dos botões) ════════════════════════════════
+    # SEM value= — o session_state[key] já foi setado acima e controla
+    # o valor exibido após o primeiro render.
     f1, f2, f3, f4 = st.columns(4)
 
     with f1:
@@ -1023,55 +1027,59 @@ with tab_screener:
         )
         pl_col1, pl_col2 = st.columns(2)
         with pl_col1:
-            pl_min = st.number_input(
+            st.number_input(
                 "mín", min_value=0.0, max_value=200.0,
-                value=float(st.session_state["sc_preset_pl_min"]),
                 step=1.0, key="sc_pl_min_w",
                 label_visibility="collapsed",
             )
         with pl_col2:
-            pl_max = st.number_input(
+            st.number_input(
                 "máx", min_value=0.0, max_value=500.0,
-                value=float(st.session_state["sc_preset_pl_max"]),
                 step=1.0, key="sc_pl_max_w",
                 label_visibility="collapsed",
             )
         st.caption("0 = sem limite")
 
     with f2:
-        pvp_max = st.number_input(
+        st.number_input(
             "p/vp máximo:", min_value=0.0, max_value=20.0,
-            value=float(st.session_state["sc_preset_pvp_max"]),
             step=0.1, format="%.1f",
             key="sc_pvp_w", help="0 = sem filtro",
         )
-        roe_min = st.number_input(
+        st.number_input(
             "roe mínimo (%):", min_value=0.0, max_value=100.0,
-            value=float(st.session_state["sc_preset_roe_min"]),
             step=1.0, key="sc_roe_w",
         )
 
     with f3:
-        dy_min = st.number_input(
+        st.number_input(
             "dividend yield mínimo (%):",
             min_value=0.0, max_value=30.0,
-            value=float(st.session_state["sc_preset_dy_min"]),
             step=0.5, format="%.1f",
             key="sc_dy_w",
         )
-        score_min = st.slider(
+        st.slider(
             "health score mínimo:",
             min_value=0, max_value=100,
-            value=int(st.session_state["sc_preset_score_min"]),
             step=5, key="sc_score_w",
         )
 
     with f4:
-        apenas_mm = st.checkbox(
-            "apenas acima da MM200", value=False, key="sc_mm_w",
+        st.checkbox(
+            "apenas acima da MM200",
+            key="sc_mm_w",
         )
 
-    # ── PASSO 4: botão principal usa as variáveis locais ─────────────────────
+    # ══ LEITURA DOS VALORES (via session_state após render) ═══════════════════
+    pl_min    = st.session_state["sc_pl_min_w"]
+    pl_max    = st.session_state["sc_pl_max_w"]
+    pvp_max   = st.session_state["sc_pvp_w"]
+    roe_min   = st.session_state["sc_roe_w"]
+    dy_min    = st.session_state["sc_dy_w"]
+    score_min = st.session_state["sc_score_w"]
+    apenas_mm = st.session_state["sc_mm_w"]
+
+    # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
     if st.button("🔍 rodar screener", type="primary",
                  use_container_width=True, key="btn_rodar"):
         with st.spinner("filtrando universo de ativos..."):
