@@ -512,7 +512,7 @@ else:
             _un_g = "B (USD)" if _is_us else "M (BRL)"
             _lay_earn = base_layout(
                 height=220,
-                titulo=f"lucro líquido trimestral ({_un_g})",
+                title=f"lucro líquido trimestral ({_un_g})",
             )
             _fig_earn.update_layout(**_lay_earn)
             _fig_earn.add_hline(y=0, line_color="#333", line_width=1)
