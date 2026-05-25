@@ -15,7 +15,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
-from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo
+from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -95,14 +95,19 @@ def get_cambio_usd_brl() -> float:
     return 5.80  # fallback
 
 # 4. criação das tabs
-tab_posicoes, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
+tab_posicoes, tab_concentracao, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
+    "📊 concentração",
     "⚡ stress test",
     "📊 backtesting",
     "📝 diário de decisões",
     "🧾 imposto de renda",
     "💬 chat ia",
 ])
+
+# variáveis partilhadas entre tabs — preenchidas em tab_posicoes
+live_data: dict      = {}
+ativos_alocados: dict = {}
 
 # ==========================================
 # tab 1: posições e p&l
@@ -883,7 +888,209 @@ with tab_posicoes:
                                         "além do que já tem em carteira", "amber")
 
 # ==========================================
-# tab 2: stress test
+# tab 2: concentração de risco
+# ==========================================
+with tab_concentracao:
+    from utils.fmp_client import get_profile as _fmp_get_profile
+
+    section_title("🎯 análise de concentração de risco")
+
+    # ── MONTA DADOS DE CONCENTRAÇÃO ──────────────────────────────────────
+    _cache_fund = get_todos_fundamentos_cache()
+
+    _total_cart = 0.0
+    for _t, _d in ativos_alocados.items():
+        _qtd = float(_d.get('quantidade') or 0)
+        _pr  = live_data.get(_t, 0.0)
+        _total_cart += _pr * _qtd
+
+    if _total_cart <= 0:
+        empty_state(
+            "📊", "sem dados de posições",
+            "adicione posições com quantidade e preço para ver a análise de concentração."
+        )
+    else:
+        dados_conc = []
+
+        for _t, _d in ativos_alocados.items():
+            _qtd = float(_d.get('quantidade') or 0)
+            if _qtd <= 0:
+                continue
+
+            _t_base = mapear_ticker_base(_t)
+            _preco  = live_data.get(_t, 0.0)
+            _valor  = _preco * _qtd
+            _peso   = (_valor / _total_cart * 100) if _total_cart > 0 else 0.0
+
+            _eh_br = _t_base.endswith('.SA')
+            _moeda = 'BRL' if _eh_br else 'USD'
+            _pais  = 'Brasil' if _eh_br else 'EUA'
+
+            # setor — prioriza cache de fundamentos local
+            _fund_p = _cache_fund.get(_t_base, {})
+            _setor  = _fund_p.get('setor') or '—'
+            if _setor in ('—', '', None):
+                _setor = 'outros'
+
+            dados_conc.append({
+                'ticker': _t.replace('.SA', ''),
+                'valor':  _valor,
+                'peso':   _peso,
+                'setor':  _setor.lower(),
+                'pais':   _pais,
+                'moeda':  _moeda,
+                'eh_br':  _eh_br,
+            })
+
+        # ── ALERTAS DE CONCENTRAÇÃO ──────────────────────────────────────
+        alertas_conc = []
+
+        # por ativo (> 20 %)
+        for _dc in dados_conc:
+            if _dc['peso'] > 20:
+                alertas_conc.append({
+                    'tipo':  'ativo',
+                    'msg':   f"⚠️ {_dc['ticker']} representa {_dc['peso']:.1f}% da carteira (limite sugerido: 20%)",
+                    'nivel': 'bear' if _dc['peso'] > 30 else 'amber',
+                })
+
+        # por setor (> 40 %)
+        setores_peso: dict[str, float] = {}
+        for _dc in dados_conc:
+            setores_peso[_dc['setor']] = setores_peso.get(_dc['setor'], 0.0) + _dc['peso']
+
+        for _setor_k, _setor_v in setores_peso.items():
+            if _setor_v > 40:
+                alertas_conc.append({
+                    'tipo':  'setor',
+                    'msg':   f"⚠️ setor '{_setor_k}' representa {_setor_v:.1f}% da carteira (limite sugerido: 40%)",
+                    'nivel': 'bear' if _setor_v > 55 else 'amber',
+                })
+
+        # por país (> 80 %)
+        paises_peso: dict[str, float] = {}
+        for _dc in dados_conc:
+            paises_peso[_dc['pais']] = paises_peso.get(_dc['pais'], 0.0) + _dc['peso']
+
+        for _pais_k, _pais_v in paises_peso.items():
+            if _pais_v > 80:
+                alertas_conc.append({
+                    'tipo':  'pais',
+                    'msg':   f"⚠️ {_pais_v:.1f}% da carteira concentrada em {_pais_k} — considere diversificação geográfica",
+                    'nivel': 'amber',
+                })
+
+        # por moeda
+        moedas_peso: dict[str, float] = {}
+        for _dc in dados_conc:
+            moedas_peso[_dc['moeda']] = moedas_peso.get(_dc['moeda'], 0.0) + _dc['peso']
+
+        # exibe alertas
+        if alertas_conc:
+            for _alerta in alertas_conc:
+                status_card(
+                    f"concentração por {_alerta['tipo']}",
+                    _alerta['msg'],
+                    tipo=_alerta['nivel'],
+                )
+        else:
+            status_card(
+                "✅ concentração dentro dos limites",
+                "nenhum ativo acima de 20%, nenhum setor acima de 40%. carteira bem diversificada.",
+                tipo="bull",
+            )
+
+        # ── CARDS DE RESUMO ──────────────────────────────────────────────
+        st.markdown("---")
+        cc1, cc2, cc3, cc4 = st.columns(4)
+
+        _maior = max(dados_conc, key=lambda x: x['peso'])
+        _cor_ma = ("bear" if _maior['peso'] > 25 else
+                   "amber" if _maior['peso'] > 15 else "bull")
+        with cc1:
+            metric_card(
+                "maior posição",
+                _maior['ticker'],
+                f"{_maior['peso']:.1f}% da carteira",
+                cor_delta=_cor_ma,
+            )
+        with cc2:
+            metric_card(
+                "nº de ativos",
+                str(len(dados_conc)),
+                "diversificação por ativo",
+                cor_delta="info",
+            )
+        with cc3:
+            _pct_brl = paises_peso.get('Brasil', 0.0)
+            _pct_usd = paises_peso.get('EUA', 0.0)
+            metric_card(
+                "exposição brl / usd",
+                f"{_pct_brl:.0f}% / {_pct_usd:.0f}%",
+                "brasil vs eua",
+                cor_delta="info",
+            )
+        with cc4:
+            _hhi      = sum(_dc['peso'] ** 2 for _dc in dados_conc) / 10000
+            _diversif = max(0.0, 100.0 - _hhi * 100)
+            _cor_hhi  = ("bull" if _diversif > 70 else
+                         "amber" if _diversif > 50 else "bear")
+            metric_card(
+                "índice de diversificação",
+                f"{_diversif:.0f}/100",
+                "baseado no HHI (100 = máx diversif.)",
+                cor_delta=_cor_hhi,
+            )
+
+        # ── GRÁFICOS DE PIZZA ────────────────────────────────────────────
+        st.markdown("---")
+
+        def _pizza_chart(labels, values, title, height=290):
+            _fig = go.Figure(go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.45,
+                textinfo='label+percent',
+                textfont=dict(family='Courier New', size=10, color='#888'),
+                marker=dict(
+                    colors=CORES_SERIES[:len(labels)],
+                    line=dict(color='#050505', width=2),
+                ),
+                hovertemplate='%{label}<br>%{value:.1f}%<extra></extra>',
+            ))
+            _layout = base_layout(height=height, title=title)
+            _layout['showlegend'] = False
+            _fig.update_layout(**_layout)
+            return _fig
+
+        _cg1, _cg2, _cg3 = st.columns(3)
+
+        with _cg1:
+            _labels_a = [_dc['ticker'] for _dc in dados_conc]
+            _values_a = [_dc['peso']   for _dc in dados_conc]
+            st.plotly_chart(
+                _pizza_chart(_labels_a, _values_a, "por ativo"),
+                use_container_width=True,
+            )
+
+        with _cg2:
+            _labels_s = list(setores_peso.keys())
+            _values_s = list(setores_peso.values())
+            st.plotly_chart(
+                _pizza_chart(_labels_s, _values_s, "por setor"),
+                use_container_width=True,
+            )
+
+        with _cg3:
+            _labels_m = list(moedas_peso.keys())
+            _values_m = list(moedas_peso.values())
+            st.plotly_chart(
+                _pizza_chart(_labels_m, _values_m, "por moeda"),
+                use_container_width=True,
+            )
+
+# ==========================================
+# tab 3: stress test
 # ==========================================
 with tab_stress:
     section_title("⚡ stress test de portfólio")
