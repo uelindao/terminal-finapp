@@ -21,9 +21,11 @@ from database.db import (
     deletar_watchlist, definir_watchlist_padrao, get_watchlist_padrao,
     registrar_envio_relatorio, get_ultimo_envio_relatorio, listar_relatorios_enviados,
     is_primeiro_acesso, marcar_onboarding_completo,
+    get_earnings_dates, salvar_earnings_date,
 )
 from utils.email_sender import enviar_relatorio_semanal
-from utils.health_engine import calcular_health_score
+from utils.health_engine import calcular_health_score, _is_fii
+from utils.earnings_scraper import buscar_resultados
 from utils.tickers import mapear_ticker_base
 
 from utils.components import (
@@ -874,47 +876,86 @@ else:
         except:
             pass
 
+    # ── Busca datas de earnings para os cards da watchlist ───────────────────
+    import datetime as _dt_mod
+    _hoje_home        = _dt_mod.date.today()
+    _tickers_base_wl  = list(set(mapear_ticker_base(i['ticker']) for i in watchlist))
+    _earnings_cache   = get_earnings_dates(_tickers_base_wl)
+
+    # Para tickers sem data em cache, busca e salva (apenas não-FIIs)
+    for _tb in _tickers_base_wl:
+        if _tb not in _earnings_cache:
+            try:
+                if not _is_fii(_tb):
+                    _earn_d = buscar_resultados(_tb)
+                    _prox   = _earn_d.get('proxima_data')
+                    salvar_earnings_date(_tb, _prox, _earn_d.get('fonte', ''))
+                    if _prox:
+                        try:
+                            _earnings_cache[_tb] = _dt_mod.datetime.strptime(
+                                _prox, '%d/%m/%Y'
+                            ).date()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    # Monta mapa {ticker_base: earnings_info} para os cards (janela de 14 dias)
+    _earnings_info_map: dict = {}
+    for _tb, _dt_earn in _earnings_cache.items():
+        _dias = (_dt_earn - _hoje_home).days
+        if -1 <= _dias <= 14:
+            _earnings_info_map[_tb] = {
+                'dias': _dias,
+                'data': _dt_earn.strftime('%d/%m/%Y'),
+            }
+
     mercados = {}
     for item in watchlist:
         m = item['mercado']
         if m not in mercados:
             mercados[m] = []
         mercados[m].append(item)
-        
+
     for mercado, ativos in mercados.items():
         st.markdown(f"##### 📍 {mercado.lower()}")
         cols = st.columns(4)
         for idx, item in enumerate(ativos):
             t = item['ticker']
             d = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
-            
+
             t_base = mapear_ticker_base(t)
             h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas": [], "breakdown": {}}'})
-            
+
             # DECODIFICAÇÃO ROBUSTA PROTEGIDA
-            try: 
+            try:
                 raw_data = h_info['alertas_venda']
                 parsed_data = json.loads(raw_data)
-                
+
                 # Se ainda for string (devido ao histórico corrompido de JSON duplo), decodifica novamente
                 if isinstance(parsed_data, str):
                     parsed_data = json.loads(parsed_data)
-                
+
                 if isinstance(parsed_data, dict):
                     lista_alertas = parsed_data.get('alertas', [])
                     breakdown = parsed_data.get('breakdown', {})
                 else:
                     lista_alertas = parsed_data if isinstance(parsed_data, list) else []
                     breakdown = {}
-            except: 
+            except:
                 lista_alertas = []
                 breakdown = {}
 
             with cols[idx % 4]:
                 watchlist_card(
-                    ticker=t, nome=item['nome'], preco=d['preco'], var_1d=d['var_1d'],
-                    moeda="r$" if t_base.endswith(".SA") else "$",
-                    health_score=h_info['score'], alertas=lista_alertas
+                    ticker        = t,
+                    nome          = item['nome'],
+                    preco         = d['preco'],
+                    var_1d        = d['var_1d'],
+                    moeda         = "r$" if t_base.endswith(".SA") else "$",
+                    health_score  = h_info['score'],
+                    alertas       = lista_alertas,
+                    earnings_info = _earnings_info_map.get(t_base),
                 )
                 
                 # Botões de Ação do Card

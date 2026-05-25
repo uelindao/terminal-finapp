@@ -890,3 +890,63 @@ def deletar_config_alerta(user_id: int, ticker: str):
         )
     except Exception as e:
         logger.warning(f"[db] deletar_config_alerta: {e}")
+
+
+# ── cache de próximas datas de resultado (earnings_dates) ───────────────────
+
+def salvar_earnings_date(ticker: str, data_str: str | None, fonte: str = '') -> None:
+    """
+    Salva a próxima data de resultado no cache Supabase.
+    data_str: formato 'dd/mm/yyyy' ou None.
+    Tabela esperada: earnings_dates (ticker PK, proxima_data DATE, fonte TEXT, updated_at TIMESTAMPTZ)
+    """
+    try:
+        from datetime import datetime as _dt
+        data_iso = None
+        if data_str:
+            try:
+                data_iso = _dt.strptime(data_str, '%d/%m/%Y').date().isoformat()
+            except Exception:
+                pass
+
+        get_supabase().table("earnings_dates").upsert(
+            {
+                "ticker":       ticker,
+                "proxima_data": data_iso,
+                "fonte":        fonte,
+                "updated_at":   "now()",
+            },
+            on_conflict="ticker",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"[db] salvar_earnings_date {ticker}: {e}")
+
+
+def get_earnings_dates(tickers: list[str]) -> dict:
+    """
+    Retorna dict {ticker: date} com próximas datas de resultado
+    para a lista de tickers fornecida.
+    """
+    if not tickers:
+        return {}
+    try:
+        from datetime import date as _date
+        res = (
+            get_supabase()
+            .table("earnings_dates")
+            .select("ticker, proxima_data")
+            .in_("ticker", tickers)
+            .execute()
+        )
+        resultado: dict = {}
+        for row in (res.data or []):
+            raw = row.get('proxima_data')
+            if raw:
+                try:
+                    resultado[row['ticker']] = _date.fromisoformat(raw)
+                except Exception:
+                    pass
+        return resultado
+    except Exception as e:
+        logger.warning(f"[db] get_earnings_dates: {e}")
+        return {}
