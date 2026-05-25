@@ -216,14 +216,34 @@ is_fii = ticker in FII_TODOS or (ticker.endswith("11.SA") and ticker not in ['TA
 
 @st.cache_resource(ttl=3600)
 def carregar_dados_ativo(tk):
+    acao = yf.Ticker(tk)
+
+    # ── histórico: bloco isolado — falha aqui é fatal ──────────────────────
+    hist = pd.DataFrame()
     try:
-        acao = yf.Ticker(tk)
-        hist = acao.history(period="10y")
-        info = acao.info
-        if not isinstance(info, dict): info = {}
-        if not hist.empty and hist.index.tz is not None: hist.index = hist.index.tz_localize(None)
-        return acao, hist, info
-    except: return None, pd.DataFrame(), {}
+        hist = acao.history(period="10y", auto_adjust=True)
+        # yfinance >=0.2.x pode retornar MultiIndex; achata para índice simples
+        if isinstance(hist.columns, pd.MultiIndex):
+            hist.columns = hist.columns.get_level_values(0)
+        # remove timezone do índice para compatibilidade com plotly/pandas
+        if not hist.empty and getattr(hist.index, "tz", None) is not None:
+            hist.index = hist.index.tz_localize(None)
+    except Exception:
+        pass  # hist permanece vazio — tratado logo abaixo
+
+    # ── info: bloco isolado — falha aqui NÃO mata o histórico ──────────────
+    info = {}
+    try:
+        raw_info = acao.info
+        if isinstance(raw_info, dict):
+            info = raw_info
+    except Exception:
+        pass  # info fica {} — fallback para CACHE_FUNDAMENTOS
+
+    if hist.empty:
+        return None, pd.DataFrame(), {}
+
+    return acao, hist, info
 
 acao_obj, df_hist, info_dict = carregar_dados_ativo(t_base)
 if acao_obj is None or df_hist.empty:
