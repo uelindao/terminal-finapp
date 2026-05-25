@@ -22,6 +22,7 @@ from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
 from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores
 from utils.scrapers import buscar_dados_b3, buscar_dados_us
+from utils.fmp_client import get_multiplos_medios, get_peers
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -335,6 +336,111 @@ if _hs_row:
     }
 else:
     health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+
+# ── SEÇÃO: VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
+def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: str = "×"):
+    """Renderiza card de múltiplo com barra de posição histórica e cor de sinal."""
+    if stats is None or valor_atual is None:
+        st.markdown(
+            f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+            f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;">{label}</div>'
+            f'<div style="font-size:1.1rem;color:#555;">—</div>'
+            f'<div style="font-size:0.65rem;color:#555;margin-top:4px;">sem histórico FMP</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    media = stats["media"]
+    minv  = stats["min"]
+    maxv  = stats["max"]
+    atual = float(valor_atual)
+
+    # posição na banda histórica (0–1)
+    banda = maxv - minv if maxv != minv else 1.0
+    pos   = max(0.0, min(1.0, (atual - minv) / banda))
+
+    # sinal de cor
+    if media > 0:
+        desvio = (atual - media) / media
+        if desvio <= -0.15:
+            cor, sinal = "#00C853", "▼ desconto"
+        elif desvio >= 0.20:
+            cor, sinal = "#FF1744", "▲ prêmio"
+        else:
+            cor, sinal = "#FF9900", "≈ justo"
+    else:
+        cor, sinal = "#888888", "—"
+
+    bar_fill  = f"width:{round(pos * 100)}%;"
+    bar_color = cor
+
+    st.markdown(
+        f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+        f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
+        f'<div style="font-size:1.25rem;font-weight:600;color:{cor};">{atual:.1f}{sufixo}</div>'
+        f'<div style="font-size:0.65rem;color:#aaa;margin-top:2px;">'
+        f'média 5a: {media:.1f}{sufixo} &nbsp;|&nbsp; {sinal}'
+        f'</div>'
+        f'<div style="background:#333;border-radius:2px;height:4px;margin-top:6px;">'
+        f'<div style="background:{bar_color};border-radius:2px;height:4px;{bar_fill}"></div>'
+        f'</div>'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.58rem;color:#555;margin-top:2px;">'
+        f'<span>{minv:.1f}</span><span>{maxv:.1f}</span>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+_medios = get_multiplos_medios(t_base, anos=5)
+if _medios:
+    section_title("📊 valuation em contexto histórico (5 anos)")
+    _col_pe, _col_pb, _col_ev, _col_dy = st.columns(4)
+    with _col_pe:
+        _render_multiplo_card("P/L", cache_d.get('p/l'), _medios.get('pe'))
+    with _col_pb:
+        _render_multiplo_card("P/VP", cache_d.get('p/vp'), _medios.get('pb'))
+    with _col_ev:
+        _render_multiplo_card("EV/EBITDA", cache_d.get('ev/ebitda'), _medios.get('ev_ebitda'))
+    with _col_dy:
+        _render_multiplo_card("Div. Yield", cache_d.get('dy%'), _medios.get('dy'), sufixo="%")
+
+# ── SEÇÃO: COMPARAÇÃO COM PEERS (FMP) ───────────────────────────────────
+_peers_list = get_peers(t_base)
+if _peers_list:
+    section_title("👥 comparação com peers")
+
+    # linha de cabeçalho
+    _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+    for _hcol, _htxt in zip([_h1, _h2, _h3, _h4, _h5, _h6], ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"]):
+        _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
+
+    st.markdown('<div style="border-top:1px solid #333;margin-bottom:6px;"></div>', unsafe_allow_html=True)
+
+    _tickers_peers = [t_base] + [p for p in _peers_list[:5] if p != t_base]
+    for _pt in _tickers_peers:
+        _pd = CACHE_FUNDAMENTOS.get(_pt, {})
+        _is_atual = (_pt == t_base)
+        _cor_t    = "#FF9900" if _is_atual else "#ccc"
+
+        _nome_peer = _pd.get('nome') or _pt
+        _pe_peer   = _pd.get('p/l')
+        _roe_peer  = _pd.get('roe%')
+        _dy_peer   = _pd.get('dy%')
+        _mrg_peer  = _pd.get('margem_liq%') or _pd.get('mrg_liq%')
+
+        def _fmt_num(v, dec=1):
+            try:    return f"{float(v):.{dec}f}" if v is not None else "—"
+            except: return "—"
+
+        _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+        _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
+        _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
+        _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
+        _p4.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_roe_peer)}</span>', unsafe_allow_html=True)
+        _p5.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_dy_peer)}</span>', unsafe_allow_html=True)
+        _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
+        st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
 
 # ── SEÇÃO: RESULTADOS FINANCEIROS TRIMESTRAIS ────────────────────────────
 section_title("📊 resultados financeiros")

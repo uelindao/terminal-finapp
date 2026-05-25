@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 # componentes do design system (camada 2 e 4)
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
+from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 
@@ -513,41 +514,56 @@ def get_eventos_macro_fixos() -> list[dict]:
     return proximos[:20]
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def buscar_earnings_calendario(tickers_tuple: tuple) -> list[dict]:
-    """Busca earnings dates via yfinance para uma lista de tickers."""
-    eventos = []
+def buscar_earnings_calendario(tickers_tuple: tuple, data_fim_str: str | None = None) -> list[dict]:
+    """
+    Busca earnings dates via FMP para uma lista de tickers.
+    Substitui a versão yfinance que quebra no yfinance >=1.3.0
+    (.calendar retorna dict em vez de DataFrame).
+    """
     hoje = datetime.date.today()
-    limite = hoje + datetime.timedelta(days=90)
+    fim  = data_fim_str or (hoje + datetime.timedelta(days=90)).strftime("%Y-%m-%d")
 
-    for t in tickers_tuple:
+    fmp_eventos = _fmp_earnings_calendar(
+        tickers     = list(tickers_tuple),
+        data_inicio = hoje.strftime("%Y-%m-%d"),
+        data_fim    = fim,
+    )
+
+    eventos = []
+    for ev in fmp_eventos:
         try:
-            acao = yf.Ticker(t)
-            cal = acao.calendar
-            if cal is None or cal.empty:
-                continue
-
-            if 'Earnings Date' in cal.index:
-                earning_date = cal.loc['Earnings Date'].iloc[0]
-                if hasattr(earning_date, 'date'):
-                    earning_date = earning_date.date()
-                if isinstance(earning_date, datetime.date) and hoje <= earning_date <= limite:
-                    eps_est = None
-                    try:
-                        eps_est = float(cal.loc['EPS Estimate'].iloc[0]) if 'EPS Estimate' in cal.index else None
-                    except:
-                        pass
-                    eventos.append({
-                        'data': earning_date,
-                        'evento': f"{t} — divulgação de resultados",
-                        'categoria': 'earnings',
-                        'impacto': 'alto',
-                        'detalhe': f"eps estimado: {eps_est:.2f}" if eps_est else "eps: n/d"
-                    })
-        except:
+            data_ev = datetime.date.fromisoformat(ev["data"])
+        except Exception:
             continue
 
-    eventos.sort(key=lambda x: x['data'])
+        eps_e = ev.get("eps_est")
+        eps_r = ev.get("eps_real")
+        surp  = ev.get("surpresa")
+
+        if eps_r is not None:
+            detalhe = f"eps real: {eps_r:.2f}"
+            if surp is not None:
+                detalhe += f" ({'+' if surp >= 0 else ''}{surp:.1f}% vs est.)"
+        elif eps_e is not None:
+            detalhe = f"eps estimado: {eps_e:.2f}"
+        else:
+            detalhe = "eps: n/d"
+
+        hora_label = {"bmo": "antes da abertura", "amc": "após fechamento"}.get(
+            ev.get("hora", ""), ev.get("hora", "")
+        )
+        if hora_label:
+            detalhe += f" | {hora_label}"
+
+        eventos.append({
+            "data":      data_ev,
+            "evento":    f"{ev['ticker']} — divulgação de resultados",
+            "categoria": "earnings",
+            "impacto":   "alto",
+            "detalhe":   detalhe,
+        })
+
+    eventos.sort(key=lambda x: x["data"])
     return eventos
 
 # ==========================================
@@ -830,7 +846,7 @@ with tab_calendar:
 
     status_card(
         "cobertura",
-        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates do seu portfólio via yfinance. datas macro são atualizadas manualmente a cada ciclo.",
+        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates do portfólio e watchlists via FMP. cache de 1h — datas atualizam automaticamente.",
         tipo="info"
     )
 
@@ -853,15 +869,31 @@ with tab_calendar:
     eventos_macro = get_eventos_macro_fixos()
     eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
 
-    # earnings do portfólio
-    from database.db import get_pesos
+    # earnings do portfólio + watchlists (via FMP)
+    from database.db import get_pesos, listar_watchlists, listar_watchlist
     pesos = get_pesos()
-    tickers_port = tuple(set([p['ticker'] for p in pesos if p.get('quantidade', 0) > 0]))
+    tickers_port = set([p['ticker'] for p in pesos if p.get('quantidade', 0) > 0])
+
+    # agrega tickers de todas as watchlists do usuário
+    try:
+        _wls = listar_watchlists() or []
+        for _wl in _wls:
+            _itens = listar_watchlist(_wl['id']) or []
+            for _it in _itens:
+                if _it.get('ticker'):
+                    tickers_port.add(_it['ticker'])
+    except Exception:
+        pass
+
+    tickers_port = tuple(tickers_port)
 
     eventos_earnings = []
     if "earnings" in filtro_cat and tickers_port:
-        with st.spinner("buscando earnings dates do portfólio..."):
-            eventos_earnings = buscar_earnings_calendario(tickers_port)
+        with st.spinner("buscando earnings dates via FMP (portfólio + watchlists)..."):
+            eventos_earnings = buscar_earnings_calendario(
+                tickers_port,
+                data_fim_str=limite_cal.strftime("%Y-%m-%d"),
+            )
             eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_cal]
 
     todos_eventos = sorted(eventos_macro + eventos_earnings, key=lambda x: x['data'])
