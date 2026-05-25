@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.graph_objects as go
-from google import genai
 import datetime
 import time
 from fredapi import Fred
@@ -29,6 +28,7 @@ from utils.tickers import (
 )
 from utils.health_engine import calcular_health_score
 from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card
+from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 
 # 1. configuração da página
@@ -500,29 +500,26 @@ with tab_setup:
         st.markdown("---")
         if not df_setup[df_setup['status'].str.contains("🟢")].empty:
             if st.button("🤖 ia: analisar top picks (acumulação forte)", use_container_width=True, type="primary"):
-                with st.spinner("gemini a elaborar o racional..."):
+                with st.spinner("deepseek analisando top picks..."):
                     try:
-                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
-                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        alvos = df_setup[df_setup['status'].str.contains("🟢")]
-                        tabela = alvos[['ticker','score','setor']].to_csv(index=False)
-                        
-                        prompt = f"""
-                        você é um gestor de portfólio sênior. 
-                        o sistema FinTerminal classificou estes ativos como "🟢 ACUMULAÇÃO FORTE" (excelente qualidade e preço atrativo).
-                        
-                        ativos detectados:
-                        {tabela}
-                        
-                        responda de forma técnica e suscinta (máx 300 palavras):
-                        1. **análise setorial**: por que esses setores estão oferecendo oportunidades agora?
-                        2. **fatores de risco**: o que pode invalidar o score alto desses ativos no médio prazo?
-                        
-                        inicie todas as frases e tópicos com letra minúscula.
-                        """
-                        resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                        st.session_state['setup_ia_result'] = resp.text
-                    except Exception as e: 
+                        _alvos = df_setup[df_setup['status'].str.contains("🟢")]
+                        _tabela = _alvos[['ticker', 'score', 'setor']].to_csv(index=False)
+                        _prompt_setup = (
+                            "ativos classificados como acumulação forte (excelente qualidade e preço atrativo):\n"
+                            f"{_tabela}\n\n"
+                            "responda de forma técnica e concisa (máx 300 palavras), letra minúscula:\n"
+                            "1. análise setorial: por que esses setores estão oferecendo oportunidades agora.\n"
+                            "2. fatores de risco: o que pode invalidar o score alto desses ativos no médio prazo."
+                        )
+                        _resp_setup = chamar_ia(
+                            prompt_usuario = _prompt_setup,
+                            system         = SYSTEM_ANALISTA,
+                            max_tokens     = 500,
+                            temperatura    = 0.3,
+                            stream         = False,
+                        )
+                        st.session_state['setup_ia_result'] = _resp_setup
+                    except Exception as e:
                         st.error(f"erro na conexão com a ia. tente novamente. detalhe: {e}")
             
             if st.session_state.get('setup_ia_result'):
@@ -634,16 +631,19 @@ with tab_magic:
             
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🧠 ia: analisar o ranking magic formula", type="primary", use_container_width=True):
-            with st.spinner("analisando ranking e fundamentos..."):
-                try:
-                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    dados_texto = df_res_magic.head(10).to_csv(index=False)
-                    prompt = f"analise este ranking top 10 da magic formula de greenblatt:\n{dados_texto}\nidentifique padrões setoriais, riscos e qual dos ativos tem a melhor combination qualidade-preço. responda em minúsculas e direto."
-                    res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    status_card("análise ia — magic formula", res.text, "info")
-                except Exception as e:
-                    st.error(f"Erro na IA: {e}")
+            with st.spinner("deepseek analisando magic formula..."):
+                _dados_magic = df_res_magic.head(10).to_csv(index=False)
+                chamar_ia(
+                    prompt_usuario=(
+                        f"ranking top 10 da magic formula de greenblatt:\n{_dados_magic}\n\n"
+                        "identifique padrões setoriais, riscos e qual ativo tem a melhor "
+                        "combinação qualidade-preço. letra minúscula, direto ao ponto."
+                    ),
+                    system      = SYSTEM_ANALISTA,
+                    max_tokens  = 500,
+                    temperatura = 0.3,
+                    stream      = True,
+                )
 
 # ==========================================
 # tab 3 — radar de confluência
@@ -796,16 +796,21 @@ with tab_radar:
         
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🧠 ia: analisar as confluências detectadas", type="primary", use_container_width=True):
-            with st.spinner("analisando confluências..."):
-                try:
-                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    csv_confl = df_rad.head(10).to_csv(index=False)
-                    prompt = f"analise este ranking de confluência (health score + magic formula):\n{csv_confl}\nqual ativo tem a tese mais sólida considerando os dois sistemas? quais setores estão concentrando as melhores confluências? qual o risco de cada um dos top 3? escreva em minúsculas e seja direto."
-                    res_conf = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    status_card("análise ia — radar de confluência", res_conf.text, "info")
-                except Exception as e:
-                    st.error(f"Erro IA: {e}")
+            with st.spinner("deepseek analisando confluências..."):
+                _csv_confl = df_rad.head(10).to_csv(index=False)
+                chamar_ia(
+                    prompt_usuario=(
+                        f"ranking de confluência (health score + magic formula):\n{_csv_confl}\n\n"
+                        "qual ativo tem a tese mais sólida considerando os dois sistemas? "
+                        "quais setores estão concentrando as melhores confluências? "
+                        "qual o risco de cada um dos top 3? "
+                        "letra minúscula, direto ao ponto."
+                    ),
+                    system      = SYSTEM_ANALISTA,
+                    max_tokens  = 500,
+                    temperatura = 0.3,
+                    stream      = True,
+                )
 
 # ==========================================
 # tab 4 — momentum screener
@@ -919,24 +924,22 @@ with tab_momentum:
 
         with col_a2:
             if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
-                with st.spinner("analisando momentum..."):
-                    try:
-                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
-                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        dados_texto = df_m[cols_mostrar].head(10).to_csv(index=False)
-                        prompt = f"""você é um analista técnico e quantitativo sênior. analise os dados de momentum abaixo e responda em 4 bullet points curtos em português:
-1. qual ativo tem o momentum mais consistente e por quê.
-2. quais setores estão liderando o movimento.
-3. algum ativo próximo do topo de 52 semanas que pode estar em breakout.
-4. riscos: algum ativo com momentum positivo mas fundamentos fracos que pode ser uma armadilha.
-
-dados:\n{dados_texto}
-
-inicie todas as frases com letra minúscula. seja direto e objetivo."""
-                        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                        status_card("análise de momentum — ia", response.text, tipo="info")
-                    except Exception as e:
-                        st.error(f"erro no agente de ia: {e}")
+                with st.spinner("deepseek analisando momentum..."):
+                    _dados_mom = df_m[cols_mostrar].head(10).to_csv(index=False)
+                    chamar_ia(
+                        prompt_usuario=(
+                            f"dados de momentum:\n{_dados_mom}\n\n"
+                            "responda em 4 bullet points curtos em português, letra minúscula:\n"
+                            "1. qual ativo tem o momentum mais consistente e por quê.\n"
+                            "2. quais setores estão liderando o movimento.\n"
+                            "3. algum ativo próximo do topo de 52 semanas que pode estar em breakout.\n"
+                            "4. riscos: algum ativo com momentum positivo mas fundamentos fracos."
+                        ),
+                        system      = SYSTEM_ANALISTA,
+                        max_tokens  = 500,
+                        temperatura = 0.3,
+                        stream      = True,
+                    )
 
 # ==========================================
 # tab 5 — screener quantitativo

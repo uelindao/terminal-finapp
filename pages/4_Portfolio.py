@@ -5,7 +5,6 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import datetime
-from google import genai
 import logging
 import time
 
@@ -20,6 +19,7 @@ from database.db import registrar_decisao, listar_decisoes, atualizar_resultado,
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
+from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 
@@ -698,30 +698,25 @@ with tab_stress:
             st.plotly_chart(fig_stress, use_container_width=True)
 
             if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
-                with st.spinner("analisando exposições e gerando recomendações..."):
-                    try:
-                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_PORTFOLIO
-                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        dados_texto = df_s.to_csv(index=False)
-                        prompt = f"""você é um gestor de risco de um fundo multimercado brasileiro. analise o stress test abaixo e recomende ações defensivas.
-
-cenário: {resumo['cenario']}
-impacto total estimado: {resumo['impacto_total_pct']:+.1f}% (R$ {resumo['impacto_total']:+,.2f})
-
-posições e impactos:
-{dados_texto}
-
-responda com 4 bullet points em português, letra minúscula:
-1. qual posição representa o maior risco no cenário e por quê.
-2. sugestão de hedge ou redução de exposição.
-3. quais posições podem se beneficiar neste cenário (naturalmente defensivas).
-4. recomendação de realocação para reduzir o impacto total em pelo menos 30%.
-
-seja direto e objetivo."""
-                        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                        status_card("recomendações de proteção — ia", response.text, tipo="info")
-                    except Exception as e:
-                        st.error(f"erro no agente de ia: {e}")
+                with st.spinner("deepseek analisando exposições..."):
+                    _prompt_stress = (
+                        f"cenário de stress: {resumo['cenario']}\n"
+                        f"impacto total estimado: {resumo['impacto_total_pct']:+.1f}% "
+                        f"(R$ {resumo['impacto_total']:+,.2f})\n\n"
+                        f"posições e impactos:\n{df_s.to_csv(index=False)}\n\n"
+                        "responda com 4 bullet points em português, letra minúscula:\n"
+                        "1. qual posição representa o maior risco no cenário e por quê.\n"
+                        "2. sugestão de hedge ou redução de exposição.\n"
+                        "3. quais posições podem se beneficiar neste cenário (naturalmente defensivas).\n"
+                        "4. recomendação de realocação para reduzir o impacto total em pelo menos 30%."
+                    )
+                    chamar_ia(
+                        prompt_usuario = _prompt_stress,
+                        system         = SYSTEM_PORTFOLIO,
+                        max_tokens     = 600,
+                        temperatura    = 0.3,
+                        stream         = True,
+                    )
 
 # ==========================================
 # tab 3: backtesting
@@ -967,27 +962,25 @@ with tab_diario:
 
         st.markdown("---")
         if st.button("🧠 ia: revisar padrões de decisão", type="primary"):
-            with st.spinner("analisando vieses cognitivos e padrões comportamentais..."):
+            with st.spinner("deepseek analisando padrões comportamentais..."):
                 try:
                     df_revisao = df_decisoes.head(10).drop(columns=['id'])
-                    csv_dados = df_revisao.to_csv(index=False, float_format='%.2f')
-                    
-                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_PORTFOLIO
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    prompt = f"""
-                    você é um mentor de investimentos e analista comportamental.
-                    analise o histórico das últimas decisões do investidor abaixo:
-                    
-                    {csv_dados}
-                    
-                    inicie todas as frases e tópicos com letra minúscula. essa é a forma da nossa escrita.
-                    1. **padrão de sucesso**: o que o investidor costuma fazer de certo nas decisões marcadas como "acerto"?
-                    2. **padrão de erro**: o que costuma falhar nas decisões de "erro"?
-                    3. **viés comportamental**: identifique o viés mais provável.
-                    4. **plano de ação**: uma sugestão prática de melhoria.
-                    """
-                    resposta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    status_card("mentoria comportamental ia", resposta.text, "info")
+                    csv_dados  = df_revisao.to_csv(index=False, float_format='%.2f')
+                    _prompt_diario = (
+                        f"histórico das últimas decisões de investimento:\n{csv_dados}\n\n"
+                        "analise os padrões e responda em 4 tópicos, letra minúscula:\n"
+                        "1. padrão de sucesso: o que o investidor costuma fazer de certo nas decisões marcadas como acerto.\n"
+                        "2. padrão de erro: o que costuma falhar nas decisões de erro.\n"
+                        "3. viés comportamental: identifique o viés mais provável.\n"
+                        "4. plano de ação: uma sugestão prática de melhoria."
+                    )
+                    chamar_ia(
+                        prompt_usuario = _prompt_diario,
+                        system         = SYSTEM_PORTFOLIO,
+                        max_tokens     = 600,
+                        temperatura    = 0.3,
+                        stream         = True,
+                    )
                 except Exception as e:
                     st.error(f"falha ao conectar com o mentor de ia: {e}")
 

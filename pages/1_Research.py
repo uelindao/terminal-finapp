@@ -5,8 +5,9 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-from google import genai
+import json as _json
 from fredapi import Fred
+from utils.ai_client import chamar_ia, SYSTEM_ANALISTA, SYSTEM_TESE
 from bcb import sgs
 import logging
 import requests
@@ -18,7 +19,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
-from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, init_db, get_historico_score
+from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, init_db, get_historico_score, get_health_scores
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -278,6 +279,165 @@ if len(historico) >= 3:
     fig_score.update_yaxes(range=[0, 100])
     st.plotly_chart(fig_score, use_container_width=True)
 
+# ── HEALTH RESULT DO BANCO (para o prompt de IA) ─────────────────────────
+_hs_all = get_health_scores()
+_hs_map = {r['ticker']: r for r in (_hs_all or [])}
+_hs_row = _hs_map.get(t_base, {})
+if _hs_row:
+    _raw = _hs_row.get('alertas_venda', '{}')
+    _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+    health_result = {
+        'score':     _hs_row.get('score', 50),
+        'status':    (_p.get('alertas') or ['—'])[0],
+        'alertas':   _p.get('alertas', []),
+        'breakdown': _p.get('breakdown', {}),
+    }
+else:
+    health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+
+# ── SEÇÃO: ANÁLISE IA — DEEPSEEK V4 PRO ──────────────────────────────────
+section_title("🧠 análise ia — deepseek v4 pro")
+
+
+def montar_prompt_ativo(
+    ticker, nome, setor, tipo_mercado,
+    fundamentos, health_result,
+    preco_atual, var_1d, macro_context
+) -> str:
+    """
+    Monta prompt em ordem cache-friendly.
+    Estático primeiro (identidade → fundamentos → score → macro), volátil por último.
+    """
+    fund = fundamentos or {}
+
+    # ── BLOCO 1: IDENTIDADE — mais estático, cacheia melhor ──
+    b1 = (
+        f"ativo: {ticker.upper()}\n"
+        f"nome: {nome}\n"
+        f"setor: {setor}\n"
+        f"mercado: {tipo_mercado}\n"
+        f"tipo: {'fii' if '11.SA' in ticker else 'acao br' if '.SA' in ticker else 'acao us'}\n"
+    )
+
+    # ── BLOCO 2: FUNDAMENTOS — muda a cada atualização semanal ──
+    b2 = (
+        f"\nfundamentos:\n"
+        f"p/l: {fund.get('p/l', 'n/d')}\n"
+        f"p/vp: {fund.get('p/vp', 'n/d')}\n"
+        f"roe: {fund.get('roe%', 'n/d')}%\n"
+        f"dividend yield: {fund.get('dy%', 'n/d')}%\n"
+        f"margem liquida: {fund.get('margem%', 'n/d')}%\n"
+        f"ev/ebitda: {fund.get('ev/ebitda', 'n/d')}\n"
+        f"qualidade dos dados: {fund.get('qualidade_dados', 0)}%\n"
+    )
+
+    # ── BLOCO 3: HEALTH SCORE — muda a cada recálculo ──
+    alertas      = health_result.get('alertas', [])
+    breakdown    = health_result.get('breakdown', {})
+    alertas_txt  = "\n".join([f"- {a}" for a in alertas[:8]])
+    bkdown_txt   = "\n".join([f"- {k}: {v}" for k, v in list(breakdown.items())[:10]])
+    b3 = (
+        f"\nhealth score: {health_result.get('score', 50)}/100\n"
+        f"status: {health_result.get('status', 'n/d')}\n\n"
+        f"alertas do motor quantitativo:\n{alertas_txt}\n\n"
+        f"breakdown:\n{bkdown_txt}\n"
+    )
+
+    # ── BLOCO 4: CONTEXTO MACRO — muda mensalmente ──
+    b4 = (
+        f"\ncontexto macro:\n"
+        f"selic: {macro_context.get('selic', 10.75):.2f}%\n"
+        f"vix: {macro_context.get('vix', 15.0):.1f}\n"
+        f"ipca: {macro_context.get('ipca', 4.5):.1f}%\n"
+        f"ambiente: {macro_context.get('label', 'neutro')}\n"
+    )
+
+    # ── BLOCO 5: DADOS VOLÁTEIS — SEMPRE POR ÚLTIMO ──
+    b5 = (
+        f"\ncotacao atual: r$ {preco_atual:,.2f}\n"
+        f"variacao hoje: {var_1d:+.2f}%\n"
+    )
+
+    instrucao = (
+        "\ncom base nos dados acima, forneça a análise nos seguintes tópicos:\n\n"
+        "tese central: argumento principal para manter ou não este ativo (2 linhas máximo)\n\n"
+        "pontos positivos: (3 bullets)\n"
+        "- o que está funcionando nos fundamentos ou no técnico\n\n"
+        "riscos principais: (3 bullets)\n"
+        "- o que pode destruir a tese ou prejudicar o retorno\n\n"
+        "impacto macro: (2 bullets)\n"
+        "- como o ambiente atual de juros e risco afeta especificamente este ativo\n\n"
+        "métrica para monitorar:\n"
+        "- uma métrica específica com frequência sugerida de acompanhamento\n\n"
+        "seja objetivo. use os dados fornecidos. não invente números."
+    )
+
+    return b1 + b2 + b3 + b4 + b5 + instrucao
+
+
+_col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
+with _col_ia1:
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
+        'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
+        'não é recomendação.</div>',
+        unsafe_allow_html=True,
+    )
+with _col_ia2:
+    usar_thinking = st.checkbox(
+        "modo reasoning",
+        value=False,
+        key="ia_thinking",
+        help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
+    )
+with _col_ia3:
+    btn_analise_ia = st.button(
+        "🧠 analisar",
+        type="primary",
+        use_container_width=True,
+        key="btn_analise_ia",
+    )
+
+if btn_analise_ia:
+    macro_ctx = st.session_state.get("macro_context", {
+        "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+    })
+
+    preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+    var_ia   = 0.0
+    if len(df_hist) >= 2:
+        _p_hoje = float(df_hist['Close'].iloc[-1])
+        _p_ant  = float(df_hist['Close'].iloc[-2])
+        if _p_ant > 0:
+            var_ia = (_p_hoje - _p_ant) / _p_ant * 100
+
+    _prompt_ia = montar_prompt_ativo(
+        ticker        = t_base,
+        nome          = cache_d.get("nome", nome_exibicao),
+        setor         = setor,
+        tipo_mercado  = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
+        fundamentos   = cache_d,
+        health_result = health_result,
+        preco_atual   = preco_ia,
+        var_1d        = var_ia,
+        macro_context = macro_ctx,
+    )
+
+    chamar_ia(
+        prompt_usuario = _prompt_ia,
+        system         = SYSTEM_ANALISTA,
+        max_tokens     = 900,
+        temperatura    = 0.3,
+        stream         = True,
+        thinking       = usar_thinking,
+    )
+    st.session_state[f"ia_analise_{t_base}"] = True
+
+elif st.session_state.get(f"ia_analise_{t_base}"):
+    st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
+
+st.markdown("---")
+
 # --- TABS ---
 tab_tec, tab_earn, tab_fund, tab_dcf, tab_sent, tab_macro = st.tabs([
     "📈 análise técnica (10y)", "📊 demonstrações (dre)", "💎 fundamentos", "🧮 valuation lab (dcf reverso)", "📰 notícias & ia", "🌍 overlay macro (10y)"
@@ -453,15 +613,27 @@ with tab_dcf:
             
             st.markdown("---")
             if st.button("🧠 ia: interpretar o valuation e gerar tese", type="primary"):
-                with st.spinner("analisando..."):
-                    prompt_ia = f"você é um analista de valuation sênior. analise o modelo de dcf reverso abaixo e dê sua opinião sobre o valuation do ativo. ativo: {ticker}. preço atual: {preco_input}. eps: {eps_input}. crescimento implícito no preço: {g_implicito_pct:.1f}%. wacc utilizado: {wacc_pct}%. crescimento terminal: {g_term_pct}%. horizonte: {n_anos} anos. responda com: 1. avaliação do crescimento implícito (é realista para o setor?). 2. comparação com pares do setor se souber. 3. cenário bull e bear para o preço em 3 anos baseado na sensibilidade. 4. recomendação de ação (comprar, aguardar, evitar) com justificativa. escreva em minúsculas e seja direto e objetivo."
-                    try:
-                        # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_TESE
-                        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                        res_ia = client.models.generate_content(model='gemini-2.5-flash', contents=prompt_ia).text
-                        status_card("interpretação ia do valuation lab", res_ia, "info")
-                    except Exception as e:
-                        st.error(f"Erro IA: {e}")
+                _prompt_dcf = (
+                    f"ativo: {ticker} | setor: {setor}\n\n"
+                    f"modelo dcf reverso:\n"
+                    f"eps: {eps_input:.2f} | wacc: {wacc_pct}% | g terminal: {g_term_pct}% | horizonte: {n_anos} anos\n\n"
+                    f"resultado:\n"
+                    f"crescimento implícito no preço: {g_implicito_pct:.1f}%\n"
+                    f"preço atual: {moeda.upper()} {preco_input:.2f}\n\n"
+                    "responda em 4 tópicos curtos, letra minúscula:\n"
+                    "1. o crescimento implícito é realista para o setor?\n"
+                    "2. comparação com pares do setor se souber.\n"
+                    "3. cenário bull e bear para o preço em 3 anos.\n"
+                    "4. recomendação (comprar / aguardar / evitar) com justificativa."
+                )
+                with st.spinner("deepseek analisando o valuation..."):
+                    chamar_ia(
+                        prompt_usuario = _prompt_dcf,
+                        system         = SYSTEM_TESE,
+                        max_tokens     = 600,
+                        temperatura    = 0.3,
+                        stream         = True,
+                    )
 
 with tab_sent:
     st.subheader("sentimento via notícias")
@@ -475,10 +647,20 @@ with tab_sent:
                     cn1.caption(f"{item.get('publisher')} | {datetime.datetime.fromtimestamp(item.get('providerPublishTime'))}")
                     if cn2.button("ia: analisar", key=item.get('uuid')):
                         with st.spinner("ia..."):
-                            # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_ANALISTA
-                            client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                            res = client.models.generate_content(model='gemini-2.5-flash', contents=f"analise se '{item.get('title')}' é positivo ou negativo para {ticker} em 1 frase curta com minúsculas.").text
-                            st.info(res)
+                            _res_news = chamar_ia(
+                                prompt_usuario=(
+                                    f"ativo: {ticker}\n\n"
+                                    f"manchete: {item.get('title')}\n\n"
+                                    "em 1 frase curta com letra minúscula, diga se esta notícia é "
+                                    "positiva, negativa ou neutra para o ativo e por quê."
+                                ),
+                                system      = SYSTEM_ANALISTA,
+                                max_tokens  = 120,
+                                temperatura = 0.2,
+                                stream      = False,
+                            )
+                            if _res_news:
+                                st.info(_res_news)
                     st.markdown("---")
     except: st.info("Sem notícias.")
 
@@ -508,36 +690,38 @@ with tab_macro:
             st.plotly_chart(fig_macro, use_container_width=True)
     except: st.warning("Erro overlay.")
 
-# --- DIAGNÓSTICO IA (FOOTER REFORMULADO) ---
+# --- TESE DE INVESTIMENTO (FOOTER) ---
 st.markdown("---")
-if st.button("🧠 gerar diagnóstico de tese via gemini", use_container_width=True, type="primary"):
-    with st.spinner("sintetizando fundamentos e construindo a tese..."):
-        try:
-            # Coleta de dados blindada para o prompt
-            val_pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE'))
-            val_pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
-            val_roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
-            val_dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
-            
-            val_pl_str = f"{val_pl:.2f}" if val_pl is not None else "N/D"
-            val_pvp_str = f"{val_pvp:.2f}" if val_pvp is not None else "N/D"
-            val_roe_str = f"{val_roe:.1f}%" if val_roe is not None else "N/D"
-            val_dy_str = f"{val_dy:.1f}%" if val_dy is not None else "N/D"
-            
-            # Cálculo de Alavancagem para FIIs
-            debt_val = safe_float(info_dict.get('totalDebt', 0))
-            assets_val = safe_float(info_dict.get('totalAssets', 1))
-            ltv_val = (debt_val / assets_val * 100) if assets_val > 0 else 0
+section_title("📋 tese de investimento — deepseek v4 pro")
+if st.button("📝 gerar tese de longo prazo", use_container_width=True, type="secondary", key="btn_tese_footer"):
+    val_pl  = safe_float(cache_d.get('p/l'))  or safe_float(info_dict.get('trailingPE'))
+    val_pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+    val_roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
+    val_dy  = safe_float(cache_d.get('dy%'))  or (safe_float(info_dict.get('dividendYield', 0)) * 100)
+    debt_f  = safe_float(info_dict.get('totalDebt', 0))
+    assets_f = safe_float(info_dict.get('totalAssets', 1))
+    ltv_f   = (debt_f / assets_f * 100) if assets_f and assets_f > 0 else 0
 
-            # Construção do Contexto Rico para a IA
-            if is_fii:
-                ctx = f"ativo: {ticker} (Fundo Imobiliário). Segmento: {setor}. P/VP: {val_pvp_str}. Dividend Yield: {val_dy_str}. Alavancagem (Dívida/Ativos): {ltv_val:.1f}%."
-            else:
-                ctx = f"ativo: {ticker}. P/L: {val_pl_str}. ROE: {val_roe_str}. Dividend Yield: {val_dy_str}. Setor: {setor}."
-
-            # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_TESE
-            client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-            res = client.models.generate_content(model='gemini-2.5-flash',
-                contents=f"você é um analista fundamentalista sênior. escreva uma tese de investimento de longo prazo para {ticker} baseada estritamente nestes dados: {ctx}. analise se o nível de dívida/alavancagem é adequado para o setor informado. escreva 4 parágrafos curtos em minúsculas.").text
-            status_card(f"racional: {ticker.lower()}", res, "info")
-        except Exception as e: st.error(f"Erro IA: {e}")
+    _prompt_tese = (
+        f"ativo: {ticker.upper()}\n"
+        f"setor: {setor}\n"
+        f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
+        f"fundamentos:\n"
+        f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
+        f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
+        f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
+        f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
+        f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
+        f"health score: {health_result.get('score', 50)}/100\n\n"
+        "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
+        "avalie se a alavancagem é adequada para o setor. "
+        "conclua com uma visão de risco/retorno. letra minúscula."
+    )
+    with st.spinner("deepseek elaborando tese..."):
+        chamar_ia(
+            prompt_usuario = _prompt_tese,
+            system         = SYSTEM_TESE,
+            max_tokens     = 700,
+            temperatura    = 0.3,
+            stream         = True,
+        )

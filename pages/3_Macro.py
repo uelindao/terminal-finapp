@@ -7,7 +7,6 @@ from bcb import sgs
 from fredapi import Fred
 import yfinance as yf
 import datetime
-from google import genai
 
 # importações do ecossistema finapp
 from utils.auth import require_auth, render_user_badge, get_current_user
@@ -19,6 +18,7 @@ logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator
+from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 
@@ -579,26 +579,26 @@ with tab_global:
         section_title("leitura macroeconômica (ai synthesis)")
         if st.button("gerar relatório do cenário atual >>", type="primary"):
             with st.spinner("processando vetores de juros, inflação e risco global..."):
-                try:
-                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    prompt = f"""
-                    aja como um estrategista macro de um hedge fund.
-                    brasil: selic {valor_atual_seguro(df_br, 'Selic') or 0:.2f}%, ipca {valor_atual_seguro(df_br, 'IPCA') or 0:.2f}%.
-                    eua: fed funds {valor_atual_seguro(df_global, 'FEDFUNDS') or 0:.2f}%, cpi {valor_atual_seguro(df_global, 'CPI_MoM') or 0:.2f}%.
-                    europa: bce {valor_atual_seguro(df_global, 'ECBDFR') or 0:.2f}%.
-                    risco: vix {valor_atual_seguro(df_global, 'VIXCLS') or 0:.2f}.
-                    
-                    escreva 3 bullet points curtos em português:
-                    1. relação juros brasil x eua.
-                    2. temperatura inflacionária global.
-                    3. apetite ao risco (vix).
-                    inicie todas as frases e tópicos com letra minúscula. essa é a forma da nossa escrita.
-                    sem uso de cifrões.
-                    """
-                    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    status_card("cenário macro", response.text, "info")
-                except Exception as e: st.error(f"erro no agente de ia: {e}")
+                _prompt_macro = (
+                    "dados macroeconômicos atuais:\n"
+                    f"brasil — selic: {valor_atual_seguro(df_br, 'Selic') or 0:.2f}%, "
+                    f"ipca: {valor_atual_seguro(df_br, 'IPCA') or 0:.2f}%\n"
+                    f"eua — fed funds: {valor_atual_seguro(df_global, 'FEDFUNDS') or 0:.2f}%, "
+                    f"cpi m/m: {valor_atual_seguro(df_global, 'CPI_MoM') or 0:.2f}%\n"
+                    f"europa — bce: {valor_atual_seguro(df_global, 'ECBDFR') or 0:.2f}%\n"
+                    f"risco global — vix: {valor_atual_seguro(df_global, 'VIXCLS') or 0:.2f}\n\n"
+                    "escreva 3 bullet points curtos em português, letra minúscula:\n"
+                    "1. relação juros brasil x eua e implicação para o câmbio.\n"
+                    "2. temperatura inflacionária global.\n"
+                    "3. apetite ao risco (vix) e o que isso sinaliza para emergentes."
+                )
+                chamar_ia(
+                    prompt_usuario = _prompt_macro,
+                    system         = SYSTEM_MACRO,
+                    max_tokens     = 400,
+                    temperatura    = 0.3,
+                    stream         = True,
+                )
         
         st.markdown("---")
         
@@ -800,22 +800,30 @@ with tab_ciclo:
     section_title("🧠 síntese de rotação (ia)")
     if st.button("gerar análise de rotação setorial >>", type="primary"):
         with st.spinner("o agente está analisando o ciclo e os dados setoriais..."):
-            try:
-                # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
-                client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                contexto_setores = ""
-                for index, row in df_setores.iterrows():
-                    v_1m = f"{row['1 mês']:.1f}%" if pd.notna(row['1 mês']) else "n/d"
-                    v_3m = f"{row['3 meses']:.1f}%" if pd.notna(row['3 meses']) else "n/d"
-                    v_6m = f"{row['6 meses']:.1f}%" if pd.notna(row['6 meses']) else "n/d"
-                    v_12m = f"{row['12 meses']:.1f}%" if pd.notna(row['12 meses']) else "n/d"
-                    contexto_setores += f"{index}: 1m={v_1m}, 3m={v_3m}, 6m={v_6m}, 12m={v_12m}. "
-                
-                prompt = f"aja como um estrategista de alocação de um fundo de investimentos multimercado. dados do ciclo econômico atual: fase identificada: {fase_ciclo}. yield curve 10y-2y: {v_t10y2y}%. vix: {v_vix}. spread high yield: {v_hy}%. retorno dos etfs setoriais: {contexto_setores}. escreva 4 bullet points curtos em português: 1. fase do ciclo e o que ela implica para alocação. 2. setor com melhor momentum (maior retorno consistente nas janelas). 3. setor para evitar ou reduzir. 4. recomendação de posicionamento para os próximos 3 meses. inicie todas as frases com letra minúscula. sem uso de cifrões."
-                response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                status_card("rotação setorial recomendada", response.text, "info")
-            except Exception as e:
-                st.error(f"erro no agente de ia: {e}")
+            _ctx_setores = ""
+            for _idx, _row in df_setores.iterrows():
+                _v1m  = f"{_row['1 mês']:.1f}%"    if pd.notna(_row['1 mês'])    else "n/d"
+                _v3m  = f"{_row['3 meses']:.1f}%"  if pd.notna(_row['3 meses'])  else "n/d"
+                _v6m  = f"{_row['6 meses']:.1f}%"  if pd.notna(_row['6 meses'])  else "n/d"
+                _v12m = f"{_row['12 meses']:.1f}%"  if pd.notna(_row['12 meses']) else "n/d"
+                _ctx_setores += f"{_idx}: 1m={_v1m}, 3m={_v3m}, 6m={_v6m}, 12m={_v12m}. "
+            _prompt_rotacao = (
+                f"ciclo econômico atual: {fase_ciclo}\n"
+                f"yield curve 10y-2y: {v_t10y2y}% | vix: {v_vix} | spread hy: {v_hy}%\n\n"
+                f"retorno dos etfs setoriais:\n{_ctx_setores}\n\n"
+                "escreva 4 bullet points curtos em português, letra minúscula:\n"
+                "1. fase do ciclo e o que ela implica para alocação.\n"
+                "2. setor com melhor momentum (maior retorno consistente nas janelas).\n"
+                "3. setor para evitar ou reduzir.\n"
+                "4. recomendação de posicionamento para os próximos 3 meses."
+            )
+            chamar_ia(
+                prompt_usuario = _prompt_rotacao,
+                system         = SYSTEM_MACRO,
+                max_tokens     = 500,
+                temperatura    = 0.3,
+                stream         = True,
+            )
 
 with tab_calendar:
     section_title("📅 calendário de eventos de mercado")
@@ -938,26 +946,27 @@ with tab_calendar:
 
         if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
             with st.spinner("analisando eventos e gerando briefing..."):
-                try:
-                    # TODO: migrar para DeepSeek V4 Pro — usar utils/ai_client.py chamar_ia() com SYSTEM_MACRO
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    eventos_texto = "\n".join([f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | {e['evento']} | impacto: {e['impacto']}" for e in todos_eventos[:15]])
-                    prompt = f"""você é um estrategista macro de um fundo multimercado. analise o calendário de eventos abaixo e gere um briefing executivo.
-
-calendário dos próximos {janela_dias} dias:
-{eventos_texto}
-
-responda em 4 bullet points em português, letra minúscula:
-1. evento de maior impacto potencial e o que monitorar.
-2. como o calendário pode afetar o mercado brasileiro especificamente.
-3. qual posicionamento defensivo faz sentido antes dos eventos críticos.
-4. após os eventos, quais serão os principais gatilhos para reposicionamento.
-
-seja direto e objetivo."""
-                    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-                    status_card("briefing macro — ia", response.text, tipo="info")
-                except Exception as e:
-                    st.error(f"erro no agente de ia: {e}")
+                _eventos_txt = "\n".join([
+                    f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | "
+                    f"{e['evento']} | impacto: {e['impacto']}"
+                    for e in todos_eventos[:15]
+                ])
+                _prompt_cal = (
+                    f"calendário dos próximos {janela_dias} dias:\n"
+                    f"{_eventos_txt}\n\n"
+                    "responda em 4 bullet points em português, letra minúscula:\n"
+                    "1. evento de maior impacto potencial e o que monitorar.\n"
+                    "2. como o calendário pode afetar o mercado brasileiro especificamente.\n"
+                    "3. qual posicionamento defensivo faz sentido antes dos eventos críticos.\n"
+                    "4. após os eventos, quais serão os principais gatilhos para reposicionamento."
+                )
+                chamar_ia(
+                    prompt_usuario = _prompt_cal,
+                    system         = SYSTEM_MACRO,
+                    max_tokens     = 600,
+                    temperatura    = 0.3,
+                    stream         = True,
+                )
 
 with tab_overlay:
     st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")
