@@ -436,6 +436,107 @@ if btn_analise_ia:
 elif st.session_state.get(f"ia_analise_{t_base}"):
     st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
 
+# ── SEÇÃO: EXPORTAR TESE EM PDF ───────────────────────────────────────────
+section_title("📄 exportar tese em pdf")
+
+_col_pdf1, _col_pdf2 = st.columns([3, 1])
+with _col_pdf1:
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.72rem; color:#333;">'
+        'gera um relatório profissional com fundamentos, análise ia e '
+        'health score em formato pdf. o deepseek redige a tese completa '
+        'antes da renderização — pode levar alguns segundos.</div>',
+        unsafe_allow_html=True,
+    )
+with _col_pdf2:
+    btn_gerar_pdf = st.button(
+        "📄 gerar pdf",
+        type             = "secondary",
+        use_container_width = True,
+        key              = "btn_gerar_pdf",
+    )
+
+if btn_gerar_pdf:
+    # Variáveis derivadas do contexto já carregado na página
+    _fund_pdf  = cache_d                  # fundamentos do cache
+    _alertas   = health_result.get("alertas", [])
+    _breakdown = health_result.get("breakdown", {})
+    _macro_ctx = st.session_state.get("macro_context", {
+        "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+    })
+    _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+
+    # 1. Gera texto da tese via DeepSeek (sem streaming — precisa do texto completo)
+    with st.spinner("deepseek v4 pro redigindo tese..."):
+        _prompt_pdf = (
+            f"ativo: {t_base.upper()}\n"
+            f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
+            f"setor: {setor}\n"
+            f"tipo: {'fii' if '11.SA' in t_base else 'acao br' if '.SA' in t_base else 'acao us'}\n\n"
+            f"fundamentos:\n"
+            f"p/l: {_fund_pdf.get('p/l', 'n/d')}\n"
+            f"p/vp: {_fund_pdf.get('p/vp', 'n/d')}\n"
+            f"roe: {_fund_pdf.get('roe%', 'n/d')}%\n"
+            f"dy: {_fund_pdf.get('dy%', 'n/d')}%\n"
+            f"margem: {_fund_pdf.get('margem%', 'n/d')}%\n\n"
+            f"health score: {health_result.get('score', 50)}/100\n"
+            f"status: {health_result.get('status', 'n/d')}\n\n"
+            f"alertas:\n"
+            + "\n".join([f"- {a}" for a in _alertas[:6]])
+            + f"\n\ncontexto macro:\n"
+            f"selic: {_macro_ctx.get('selic', 10.75):.2f}%\n"
+            f"vix: {_macro_ctx.get('vix', 15.0):.1f}\n"
+            f"ambiente: {_macro_ctx.get('label', 'neutro')}\n\n"
+            f"cotacao atual: r$ {_preco_pdf:,.2f}\n\n"
+            "redija uma tese de investimento completa com: "
+            "1. contexto do negocio, "
+            "2. drivers de valor, "
+            "3. riscos principais, "
+            "4. valuation e veredicto. "
+            "texto direto, sem asteriscos, letra minuscula."
+        )
+        _analise_pdf = chamar_ia(
+            prompt_usuario = _prompt_pdf,
+            system         = SYSTEM_TESE,
+            max_tokens     = 1200,
+            temperatura    = 0.3,
+            stream         = False,
+            thinking       = False,
+        )
+
+    # 2. Monta e disponibiliza o PDF
+    with st.spinner("montando pdf..."):
+        try:
+            from utils.pdf_generator import gerar_tese_pdf
+            _pdf_bytes = gerar_tese_pdf(
+                ticker        = t_base,
+                nome          = _fund_pdf.get("nome", nome_exibicao),
+                setor         = setor,
+                health_score  = health_result.get("score", 50),
+                preco_atual   = _preco_pdf,
+                fundamentos   = _fund_pdf,
+                analise_ia    = _analise_pdf or "análise indisponível.",
+                alertas       = _alertas,
+                breakdown     = _breakdown,
+                macro_context = _macro_ctx,
+            )
+            _nome_arquivo = (
+                f"tese_{t_base.replace('.SA', '').lower()}_"
+                f"{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
+            )
+            st.download_button(
+                label               = "⬇️ baixar tese em pdf",
+                data                = _pdf_bytes,
+                file_name           = _nome_arquivo,
+                mime                = "application/pdf",
+                type                = "primary",
+                use_container_width = True,
+                key                 = "btn_download_pdf",
+            )
+            st.success(f"✅ tese gerada: {_nome_arquivo}")
+        except Exception as _e_pdf:
+            st.error(f"erro ao gerar pdf: {_e_pdf}")
+
 st.markdown("---")
 
 # --- TABS ---
