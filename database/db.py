@@ -922,6 +922,81 @@ def salvar_earnings_date(ticker: str, data_str: str | None, fonte: str = '') -> 
         logger.warning(f"[db] salvar_earnings_date {ticker}: {e}")
 
 
+# ==========================================
+# CONFIGURAÇÕES PESSOAIS POR USUÁRIO
+# ==========================================
+
+def get_user_settings(user_id: int) -> dict:
+    """
+    Retorna as configurações de IA e preferências do usuário.
+    Sempre devolve um dict com todas as chaves — nunca lança exceção.
+    A api_key retornada já está descriptografada (string vazia se ausente).
+    """
+    defaults: dict = {
+        'ai_provider':     'deepseek',
+        'ai_api_key':      '',
+        'ai_model':        'deepseek-chat',
+        'moeda_base':      'BRL',
+        'benchmark':       'IBOV',
+        'alert_threshold': 40,
+    }
+    try:
+        res = (
+            get_supabase()
+            .table("user_settings")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if res.data:
+            from utils.crypto import decrypt_key
+            d = res.data[0]
+            defaults.update({
+                'ai_provider':     d.get('ai_provider', 'deepseek'),
+                'ai_api_key':      decrypt_key(d.get('ai_api_key_enc', '') or ''),
+                'ai_model':        d.get('ai_model', 'deepseek-chat'),
+                'moeda_base':      d.get('moeda_base', 'BRL'),
+                'benchmark':       d.get('benchmark', 'IBOV'),
+                'alert_threshold': d.get('alert_threshold', 40),
+            })
+    except Exception as e:
+        logger.warning(f"[db] get_user_settings user_id={user_id}: {e}")
+    return defaults
+
+
+def salvar_user_settings(user_id: int, settings: dict) -> None:
+    """
+    Salva (upsert) as configurações do usuário.
+    A api_key é criptografada antes de persistir; campo omitido se vazio
+    (preserva a chave anterior no banco).
+    """
+    try:
+        from utils.crypto import encrypt_key
+
+        payload: dict = {
+            "user_id":         user_id,
+            "ai_provider":     settings.get('ai_provider', 'deepseek'),
+            "ai_model":        settings.get('ai_model', 'deepseek-chat'),
+            "moeda_base":      settings.get('moeda_base', 'BRL'),
+            "benchmark":       settings.get('benchmark', 'IBOV'),
+            "alert_threshold": int(settings.get('alert_threshold', 40)),
+            "updated_at":      "now()",
+        }
+
+        api_key_raw = settings.get('ai_api_key', '').strip()
+        if api_key_raw:
+            enc = encrypt_key(api_key_raw)
+            if enc:
+                payload["ai_api_key_enc"] = enc
+
+        get_supabase().table("user_settings").upsert(
+            payload, on_conflict="user_id"
+        ).execute()
+
+    except Exception as e:
+        logger.warning(f"[db] salvar_user_settings user_id={user_id}: {e}")
+
+
 def get_earnings_dates(tickers: list[str]) -> dict:
     """
     Retorna dict {ticker: date} com próximas datas de resultado

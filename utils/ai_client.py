@@ -1,6 +1,12 @@
 """
 utils/ai_client.py
-Cliente centralizado de IA — DeepSeek V4 Pro.
+Cliente centralizado de IA — suporte a múltiplos providers.
+
+Providers disponíveis:
+  deepseek        → DeepSeek V4 Pro  (padrão)
+  openai          → OpenAI GPT-4o
+  gemini          → Google Gemini 2.5 Flash
+  anthropic_compat→ Anthropic Claude (via compatibilidade OpenAI)
 
 Estratégia de cache hit (120× mais barato que miss):
   - System prompts FIXOS nunca dinâmicos
@@ -8,7 +14,7 @@ Estratégia de cache hit (120× mais barato que miss):
   - Dados voláteis (preço, data) sempre no final
   - Temperatura baixa = respostas mais determinísticas = mais cache
 
-Preços (USD por 1M tokens):
+Preços DeepSeek (USD por 1M tokens):
   Cache hit:  input $0.003625 | output $0.87
   Cache miss: input $0.435    | output $0.87
 """
@@ -18,9 +24,41 @@ import json
 import re
 import streamlit as st
 
-# ── Constantes ───────────────────────────────────────────────────────────────
+from utils.logger import get_logger
 
-MODEL = "deepseek-chat"           # alias estável do V3/V4 Pro no endpoint DeepSeek
+logger = get_logger(__name__)
+
+# ── Providers suportados ──────────────────────────────────────────────────────
+
+PROVIDERS: dict[str, dict] = {
+    'deepseek': {
+        'base_url':      'https://api.deepseek.com/v1',
+        'model_default': 'deepseek-chat',
+        'secret_key':    'DEEPSEEK_API_KEY',
+        'label':         'DeepSeek V4 Pro',
+    },
+    'openai': {
+        'base_url':      'https://api.openai.com/v1',
+        'model_default': 'gpt-4o',
+        'secret_key':    'OPENAI_API_KEY',
+        'label':         'OpenAI GPT-4o',
+    },
+    'gemini': {
+        'base_url':      'https://generativelanguage.googleapis.com/v1beta/openai/',
+        'model_default': 'gemini-2.5-flash',
+        'secret_key':    'GEMINI_API_KEY',
+        'label':         'Google Gemini 2.5 Flash',
+    },
+    'anthropic_compat': {
+        'base_url':      'https://api.anthropic.com/v1',
+        'model_default': 'claude-sonnet-4-5',
+        'secret_key':    'ANTHROPIC_API_KEY',
+        'label':         'Anthropic Claude Sonnet',
+    },
+}
+
+# Constantes de compatibilidade (usadas internamente)
+MODEL    = "deepseek-chat"
 BASE_URL = "https://api.deepseek.com/v1"
 
 # ── System prompts FIXOS ─────────────────────────────────────────────────────
@@ -61,13 +99,14 @@ SYSTEM_TESE = (
 )
 
 
-# ── Singleton do cliente ──────────────────────────────────────────────────────
+# ── Singleton do cliente global (DeepSeek padrão) ────────────────────────────
 
 @st.cache_resource(show_spinner=False)
 def get_ai_client():
     """
     Retorna o cliente OpenAI apontando para a API do DeepSeek.
     Instanciado uma única vez por sessão de servidor (cache_resource).
+    Usado como fallback quando o usuário não configurou chave própria.
     """
     try:
         from openai import OpenAI
@@ -89,18 +128,71 @@ def get_ai_client():
     return OpenAI(api_key=api_key, base_url=BASE_URL)
 
 
+# ── Cliente por usuário (multi-provider, sem cache) ───────────────────────────
+
+def get_ai_client_for_user(user_settings: dict) -> tuple:
+    """
+    Cria e retorna (client, model_name) para o provider configurado pelo usuário.
+
+    Lógica de fallback para a API key:
+      1. Chave pessoal do usuário (user_settings['ai_api_key'])
+      2. Chave global do secrets.toml correspondente ao provider
+      3. ValueError com mensagem legível ao usuário
+
+    Não usa cache — o cliente é criado a cada chamada (barato, ~1ms).
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError(
+            "pacote `openai` não instalado. adicione `openai>=1.30.0` ao requirements.txt."
+        )
+
+    provider   = user_settings.get('ai_provider', 'deepseek')
+    model_name = user_settings.get('ai_model', '')
+    user_key   = user_settings.get('ai_api_key', '').strip()
+
+    cfg = PROVIDERS.get(provider, PROVIDERS['deepseek'])
+
+    # model: usa o do user_settings; se ausente, pega o default do provider
+    if not model_name:
+        model_name = cfg['model_default']
+
+    # api key: pessoal → global → erro
+    api_key = user_key
+    if not api_key:
+        try:
+            api_key = st.secrets.get(cfg['secret_key'], '')
+        except Exception:
+            api_key = ''
+
+    if not api_key:
+        raise ValueError(
+            f"nenhuma api key encontrada para o provider '{cfg['label']}'. "
+            f"configure em ⚙️ configurações → 🤖 minha ia."
+        )
+
+    client = OpenAI(api_key=api_key, base_url=cfg['base_url'])
+    logger.debug(f"[ai_client] usando provider={provider} model={model_name}")
+    return client, model_name
+
+
 # ── Chamada principal — streaming ─────────────────────────────────────────────
 
 def chamar_ia(
     prompt_usuario: str,
-    system: str = SYSTEM_ANALISTA,
-    max_tokens: int = 800,
-    temperatura: float = 0.3,
-    stream: bool = True,
-    thinking: bool = False,
+    system:         str   = SYSTEM_ANALISTA,
+    max_tokens:     int   = 800,
+    temperatura:    float = 0.3,
+    stream:         bool  = True,
+    thinking:       bool  = False,
+    user_settings:  dict  = None,       # ← configurações pessoais do usuário
 ) -> str:
     """
-    Envia uma mensagem ao DeepSeek e retorna a resposta como string.
+    Envia uma mensagem ao provider de IA e retorna a resposta como string.
+
+    Se user_settings for fornecido e contiver 'ai_api_key', usa o provider
+    e a chave configurados pelo usuário. Caso contrário, usa o DeepSeek global.
 
     Se stream=True (padrão), renderiza o texto progressivamente dentro de um
     st.chat_message com estilo Courier New e cursor animado.
@@ -108,17 +200,32 @@ def chamar_ia(
     Se thinking=True, ativa o modo de raciocínio profundo (budget: 2 000 tokens).
     Use apenas quando a qualidade justificar o custo extra de output.
     """
-    client = get_ai_client()
+    # Decide qual cliente usar
+    use_user = (
+        user_settings is not None
+        and user_settings.get('ai_api_key', '').strip()
+    )
+
+    if use_user:
+        try:
+            client, model_name = get_ai_client_for_user(user_settings)
+        except (ValueError, RuntimeError) as e:
+            st.error(str(e))
+            return ""
+    else:
+        client     = get_ai_client()
+        model_name = MODEL
+
     if client is None:
         return ""
 
     mensagens = [
-        {"role": "system",  "content": system},
-        {"role": "user",    "content": prompt_usuario},
+        {"role": "system", "content": system},
+        {"role": "user",   "content": prompt_usuario},
     ]
 
     kwargs: dict = {
-        "model":       MODEL,
+        "model":       model_name,
         "messages":    mensagens,
         "max_tokens":  max_tokens,
         "temperature": temperatura,
@@ -194,29 +301,44 @@ def _stream_para_ui(client, kwargs: dict) -> str:
 
 def chamar_ia_json(
     prompt_usuario: str,
-    system: str = SYSTEM_ANALISTA,
-    max_tokens: int = 600,
+    system:         str  = SYSTEM_ANALISTA,
+    max_tokens:     int  = 600,
+    user_settings:  dict = None,
 ) -> dict:
     """
-    Chama o DeepSeek em modo JSON e retorna um dict Python.
+    Chama o provider em modo JSON e retorna um dict Python.
 
     O prompt DEVE instruir o modelo a retornar JSON válido.
     Em caso de falha de parse, retorna {} e loga o erro no console.
-
     Temperatura fixada em 0.1 para máxima consistência e cache hit.
     """
-    client = get_ai_client()
+    use_user = (
+        user_settings is not None
+        and user_settings.get('ai_api_key', '').strip()
+    )
+
+    if use_user:
+        try:
+            client, model_name = get_ai_client_for_user(user_settings)
+        except (ValueError, RuntimeError) as e:
+            logger.warning(f"[ai_client] chamar_ia_json: {e}")
+            return {}
+    else:
+        client     = get_ai_client()
+        model_name = MODEL
+
     if client is None:
         return {}
 
     mensagens = [
-        {"role": "system",  "content": system},
-        {"role": "user",    "content": prompt_usuario},
+        {"role": "system", "content": system},
+        {"role": "user",   "content": prompt_usuario},
     ]
 
+    raw = "{}"
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
+            model=model_name,
             messages=mensagens,
             max_tokens=max_tokens,
             temperature=0.1,
@@ -251,11 +373,6 @@ def montar_prompt_analise(
       1. identificação do ativo (estática)
       2. dados fundamentais / históricos (estáticos)
       3. preços atuais / data (voláteis) — sempre no final
-
-    Args:
-        ticker:          símbolo do ativo (ex: WEGE3.SA)
-        dados_estaticos: fundamentos, múltiplos, histórico — CSV ou texto
-        dados_volateis:  cotação atual, variação do dia, data de referência
     """
     return (
         f"ativo: {ticker}\n\n"

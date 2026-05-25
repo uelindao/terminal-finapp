@@ -8,7 +8,9 @@ from database.db import (
     listar_relatorios_enviados,
     listar_watchlist,
     salvar_config_alerta, get_configs_alerta, deletar_config_alerta,
+    get_user_settings, salvar_user_settings,
 )
+from utils.ai_client import PROVIDERS
 from utils.notificacoes import solicitar_permissao_notificacao
 
 st.set_page_config(page_title="configurações", page_icon="⚙️", layout="wide")
@@ -67,8 +69,8 @@ except Exception:
     is_admin = False
 
 # ── tabs ───────────────────────────────────────────────────────────────────────
-tabs_labels = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "📧 email & alertas", "🛡️ administração"]
-tab_conta, tab_wl, tab_pf, tab_email, tab_admin = st.tabs(tabs_labels)
+tabs_labels = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "📧 email & alertas", "🤖 minha ia", "🛡️ administração"]
+tab_conta, tab_wl, tab_pf, tab_email, tab_ia, tab_admin = st.tabs(tabs_labels)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -553,7 +555,172 @@ with tab_email:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — ADMINISTRAÇÃO (apenas admin)
+# TAB 5 — MINHA IA
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_ia:
+    st.subheader("🤖 configurações de ia")
+
+    _user_ia = st.session_state.get('user_id')
+    if not _user_ia:
+        st.warning("faça login para configurar suas preferências de ia.", icon="🔒")
+    else:
+        _settings_atuais = get_user_settings(_user_ia)
+
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.75rem; color:#555; '
+            'margin-bottom:20px; line-height:1.6;">'
+            '🔑 configure sua própria chave de api para não depender da chave global do servidor.<br>'
+            'se o campo ficar vazio, o sistema usa automaticamente a chave global.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── provider labels ──────────────────────────────────────────────────
+        _provider_labels = {k: v['label'] for k, v in PROVIDERS.items()}
+        _provider_keys   = list(PROVIDERS.keys())
+
+        _cur_provider = _settings_atuais.get('ai_provider', 'deepseek')
+        _cur_provider_idx = _provider_keys.index(_cur_provider) if _cur_provider in _provider_keys else 0
+
+        # ── formulário ──────────────────────────────────────────────────────
+        with st.form("form_ai_settings"):
+            col_ai1, col_ai2 = st.columns(2)
+
+            with col_ai1:
+                provider_sel = st.selectbox(
+                    "provider de ia:",
+                    options=_provider_keys,
+                    format_func=lambda x: f"{'⚡' if x=='deepseek' else '🟢' if x=='openai' else '🔵' if x=='gemini' else '🟠'} {_provider_labels[x]}",
+                    index=_cur_provider_idx,
+                    key="cfg_ai_provider",
+                )
+
+                moeda_sel = st.selectbox(
+                    "moeda base:",
+                    options=['BRL', 'USD'],
+                    index=0 if _settings_atuais.get('moeda_base', 'BRL') == 'BRL' else 1,
+                    key="cfg_moeda",
+                )
+
+            with col_ai2:
+                api_key_input = st.text_input(
+                    "sua api key (opcional):",
+                    type="password",
+                    placeholder="sk-… ou deixe vazio para usar a chave global",
+                    value="",          # nunca pré-preenche por segurança
+                    key="cfg_api_key",
+                    help="deixe vazio para manter a chave já salva ou usar a global",
+                )
+
+                benchmark_sel = st.selectbox(
+                    "benchmark principal:",
+                    options=['IBOV', 'CDI', 'SP500', 'IBOV+SP500'],
+                    index=['IBOV', 'CDI', 'SP500', 'IBOV+SP500'].index(
+                        _settings_atuais.get('benchmark', 'IBOV')
+                    ),
+                    key="cfg_benchmark",
+                )
+
+            col_btn1, col_btn2 = st.columns([2, 1])
+            with col_btn1:
+                _btn_salvar = st.form_submit_button(
+                    "💾 salvar configurações",
+                    type="primary",
+                    use_container_width=True,
+                )
+            with col_btn2:
+                _btn_testar = st.form_submit_button(
+                    "🧪 testar conexão",
+                    type="secondary",
+                    use_container_width=True,
+                )
+
+            if _btn_salvar:
+                _model_map = {
+                    'deepseek':         'deepseek-chat',
+                    'openai':           'gpt-4o',
+                    'gemini':           'gemini-2.5-flash',
+                    'anthropic_compat': 'claude-sonnet-4-5',
+                }
+                _novas = {
+                    'ai_provider':     provider_sel,
+                    'ai_model':        _model_map.get(provider_sel, 'deepseek-chat'),
+                    'ai_api_key':      api_key_input,   # vazio → preserva anterior no banco
+                    'moeda_base':      moeda_sel,
+                    'benchmark':       benchmark_sel,
+                    'alert_threshold': _settings_atuais.get('alert_threshold', 40),
+                }
+                salvar_user_settings(_user_ia, _novas)
+                st.success("✅ configurações salvas com sucesso!")
+                st.rerun()
+
+            if _btn_testar:
+                from utils.ai_client import chamar_ia, SYSTEM_ANALISTA as _SYS
+                _model_map = {
+                    'deepseek':         'deepseek-chat',
+                    'openai':           'gpt-4o',
+                    'gemini':           'gemini-2.5-flash',
+                    'anthropic_compat': 'claude-sonnet-4-5',
+                }
+                _test_settings = {
+                    'ai_provider': provider_sel,
+                    'ai_model':    _model_map.get(provider_sel, 'deepseek-chat'),
+                    'ai_api_key':  api_key_input,
+                }
+                with st.spinner(f"testando conexão com {_provider_labels.get(provider_sel, provider_sel)}…"):
+                    try:
+                        _resp = chamar_ia(
+                            prompt_usuario="responda apenas: ok",
+                            system="você é um assistente. responda apenas: ok",
+                            max_tokens=10,
+                            stream=False,
+                            user_settings=_test_settings,
+                        )
+                        if _resp and 'ok' in _resp.lower():
+                            st.success(f"✅ conexão com {_provider_labels.get(provider_sel)} funcionando!")
+                        else:
+                            st.warning(f"resposta inesperada: '{_resp}' — verifique o modelo.")
+                    except Exception as _e_test:
+                        st.error(f"❌ falha na conexão: {_e_test}")
+
+        # ── status atual ─────────────────────────────────────────────────────
+        _tem_chave = bool(_settings_atuais.get('ai_api_key'))
+        _status_chave = "✅ chave pessoal configurada" if _tem_chave else "⚠️ usando chave global do servidor"
+        st.markdown(
+            f'<div style="font-family:Courier New; font-size:0.72rem; color:#555; '
+            f'margin-top:12px; padding:8px 12px; background:#0d0d0d; '
+            f'border:1px solid #1e1e1e; border-radius:4px;">'
+            f'provider ativo: <span style="color:#FF9900;">{_provider_labels.get(_cur_provider, _cur_provider)}</span>'
+            f'&nbsp;&nbsp;|&nbsp;&nbsp;'
+            f'api key: <span style="color:{"#00C853" if _tem_chave else "#FF9900"};">{_status_chave}</span>'
+            f'&nbsp;&nbsp;|&nbsp;&nbsp;'
+            f'benchmark: <span style="color:#FF9900;">{_settings_atuais.get("benchmark", "IBOV")}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        # ── referência de modelos ─────────────────────────────────────────────
+        with st.expander("📋 referência de providers e modelos", expanded=False):
+            _rows = []
+            for _k, _v in PROVIDERS.items():
+                _rows.append({
+                    'provider':      _k,
+                    'nome':          _v['label'],
+                    'modelo padrão': _v['model_default'],
+                    'variável secret': _v['secret_key'],
+                })
+            import pandas as _pd
+            st.dataframe(_pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "para usar a chave global, defina a variável correspondente em "
+                "`.streamlit/secrets.toml`. a chave pessoal tem prioridade sobre a global."
+            )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — ADMINISTRAÇÃO (apenas admin)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
     st.subheader("🛡️ administração do sistema")
