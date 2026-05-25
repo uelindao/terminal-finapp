@@ -23,6 +23,9 @@ from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 1. configuração da página
 st.set_page_config(page_title="terminal finapp | portfolio", layout="wide", page_icon="💼")
@@ -78,6 +81,18 @@ def calcular_betas(tickers_tuple: tuple) -> dict:
             betas[t] = {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')}
 
     return betas
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_cambio_usd_brl() -> float:
+    """Busca cotação atual do dólar via yfinance."""
+    try:
+        ticker_fx = yf.Ticker("BRL=X")
+        hist_fx   = ticker_fx.history(period="1d")
+        if not hist_fx.empty:
+            return float(hist_fx['Close'].iloc[-1])
+    except Exception as e:
+        logger.warning(f"[portfolio] câmbio: {e}")
+    return 5.80  # fallback
 
 # 4. criação das tabs
 tab_posicoes, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
@@ -448,6 +463,9 @@ with tab_posicoes:
         df_portfolio = pd.DataFrame(linhas_portfolio)
         df_portfolio['peso atual (%)'] = (df_portfolio['valor atual'] / valor_atual_carteira) * 100 if valor_atual_carteira > 0 else 0.0
 
+        pnl_global_valor = valor_atual_carteira - custo_total_carteira
+        pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
+
         # ── persiste dados para o chat IA (tab_chat usa estes) ──
         st.session_state['pesos_ativos_cache'] = [
             {
@@ -468,9 +486,6 @@ with tab_posicoes:
             'pnl_total_pct': pnl_global_pct,
             'num_posicoes':  len(df_portfolio),
         }
-
-        pnl_global_valor = valor_atual_carteira - custo_total_carteira
-        pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
 
         col_m1, col_m2, col_m3 = st.columns(3)
         with col_m1: metric_card("custo total alocado", fmt_preco(custo_total_carteira, "$"))
@@ -524,6 +539,172 @@ with tab_posicoes:
                 layout_bar['yaxis']['showgrid'] = False
             fig_bar.update_layout(**layout_bar)
             st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ── VISÃO CONSOLIDADA POR MOEDA ──────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        cambio_atual = get_cambio_usd_brl()
+
+        posicoes_brl = []
+        posicoes_usd = []
+
+        for t, dados in ativos_alocados.items():
+            qtd = float(dados.get('quantidade') or 0)
+            pm  = float(dados.get('preco_medio') or 0)
+            if qtd <= 0:
+                continue
+
+            t_base_moeda = mapear_ticker_base(t)
+            eh_br        = t_base_moeda.endswith('.SA')
+            preco_atual  = live_data.get(t, 0.0)
+
+            if preco_atual <= 0:
+                continue
+
+            valor_atual  = preco_atual * qtd
+            valor_custo  = pm * qtd
+            pl_moeda     = valor_atual - valor_custo
+            pl_pct       = ((valor_atual / valor_custo) - 1) * 100 if valor_custo > 0 else 0.0
+
+            entry = {
+                'ticker':          t,
+                'qtd':             qtd,
+                'pm':              pm,
+                'preco_atual':     preco_atual,
+                'valor_atual':     valor_atual,
+                'valor_custo':     valor_custo,
+                'pl_moeda':        pl_moeda,
+                'pl_pct':          pl_pct,
+                'moeda':           'BRL' if eh_br else 'USD',
+                'valor_atual_brl': valor_atual if eh_br else valor_atual * cambio_atual,
+                'valor_custo_brl': valor_custo if eh_br else valor_custo * cambio_atual,
+                'pl_brl':          pl_moeda if eh_br else pl_moeda * cambio_atual,
+            }
+
+            if eh_br:
+                posicoes_brl.append(entry)
+            else:
+                posicoes_usd.append(entry)
+
+        if posicoes_brl or posicoes_usd:
+            section_title("💰 visão consolidada por moeda")
+
+            total_brl_carteira = (
+                sum(p['valor_atual_brl'] for p in posicoes_brl) +
+                sum(p['valor_atual_brl'] for p in posicoes_usd)
+            )
+            total_custo_brl = (
+                sum(p['valor_custo_brl'] for p in posicoes_brl) +
+                sum(p['valor_custo_brl'] for p in posicoes_usd)
+            )
+            pl_total_brl = total_brl_carteira - total_custo_brl
+            pl_total_pct = ((total_brl_carteira / total_custo_brl) - 1) * 100 if total_custo_brl > 0 else 0.0
+
+            total_usd  = sum(p['valor_atual'] for p in posicoes_usd)
+            custo_usd  = sum(p['valor_custo'] for p in posicoes_usd)
+            pl_usd     = total_usd - custo_usd
+            pl_usd_pct = ((total_usd / custo_usd) - 1) * 100 if custo_usd > 0 else 0.0
+
+            # contribuição cambial = diferença entre converter o P&L USD pelo câmbio atual
+            # e o P&L BRL "real" das posições USD (custo em câmbio da época vs. câmbio hoje)
+            pl_brl_posicoes_usd   = sum(p['pl_brl'] for p in posicoes_usd)
+            pl_usd_em_brl_simples = pl_usd * cambio_atual
+            contrib_cambio        = pl_brl_posicoes_usd - pl_usd_em_brl_simples
+
+            cg1, cg2, cg3, cg4 = st.columns(4)
+            with cg1:
+                metric_card(
+                    "patrimônio total (brl)",
+                    f"R$ {total_brl_carteira:,.2f}",
+                    f"custo: R$ {total_custo_brl:,.2f}",
+                    cor_delta="info",
+                )
+            with cg2:
+                cor_total = "bull" if pl_total_brl >= 0 else "bear"
+                metric_card(
+                    "p&l total em brl",
+                    f"R$ {pl_total_brl:+,.2f}",
+                    f"{pl_total_pct:+.2f}% sobre custo",
+                    cor_delta=cor_total,
+                )
+            with cg3:
+                cor_usd = "bull" if pl_usd >= 0 else "bear"
+                metric_card(
+                    "p&l ativos eua (usd)",
+                    f"$ {pl_usd:+,.2f}",
+                    f"{pl_usd_pct:+.2f}% | câmbio R$ {cambio_atual:.2f}",
+                    cor_delta=cor_usd,
+                )
+            with cg4:
+                cor_camb = "bull" if contrib_cambio >= 0 else "bear"
+                metric_card(
+                    "contribuição cambial",
+                    f"R$ {contrib_cambio:+,.2f}",
+                    "efeito usd/brl no resultado",
+                    cor_delta=cor_camb,
+                )
+
+            st.markdown("---")
+            col_br, col_us = st.columns(2)
+
+            with col_br:
+                section_title("🇧🇷 ativos brasileiros (brl)")
+                total_br_val  = sum(p['valor_atual'] for p in posicoes_brl)
+                total_br_cust = sum(p['valor_custo'] for p in posicoes_brl)
+                pl_br         = total_br_val - total_br_cust
+                pl_br_pct     = ((total_br_val / total_br_cust) - 1) * 100 if total_br_cust > 0 else 0.0
+
+                st.markdown(
+                    f'<div style="font-family:Courier New; font-size:0.85rem; margin-bottom:8px;">'
+                    f'<span style="color:#555;">patrimônio: </span>'
+                    f'<span style="color:#E0E0E0; font-weight:bold;">R$ {total_br_val:,.2f}</span> | '
+                    f'<span style="color:#555;">p&l: </span>'
+                    f'<span style="color:{"#00C853" if pl_br >= 0 else "#FF1744"}; font-weight:bold;">'
+                    f'R$ {pl_br:+,.2f} ({pl_br_pct:+.1f}%)</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                for pos in sorted(posicoes_brl, key=lambda x: abs(x['pl_pct']), reverse=True):
+                    cor_p = "#00C853" if pos['pl_pct'] >= 0 else "#FF1744"
+                    st.markdown(
+                        f'<div style="display:flex; justify-content:space-between; '
+                        f'padding:4px 0; border-bottom:1px solid #111; '
+                        f'font-family:Courier New; font-size:0.75rem;">'
+                        f'<span style="color:#FF9900;">{pos["ticker"].replace(".SA","")}</span>'
+                        f'<span style="color:#555;">R$ {pos["preco_atual"]:,.2f}</span>'
+                        f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
+                        f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            with col_us:
+                section_title("🇺🇸 ativos eua (usd + brl)")
+
+                st.markdown(
+                    f'<div style="font-family:Courier New; font-size:0.85rem; margin-bottom:8px;">'
+                    f'<span style="color:#555;">em usd: </span>'
+                    f'<span style="color:#E0E0E0; font-weight:bold;">$ {total_usd:,.2f}</span> | '
+                    f'<span style="color:#555;">em brl: </span>'
+                    f'<span style="color:#E0E0E0; font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
+                    f'<br><span style="color:#555; font-size:0.65rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                for pos in sorted(posicoes_usd, key=lambda x: abs(x['pl_pct']), reverse=True):
+                    cor_p = "#00C853" if pos['pl_pct'] >= 0 else "#FF1744"
+                    st.markdown(
+                        f'<div style="display:flex; justify-content:space-between; '
+                        f'padding:4px 0; border-bottom:1px solid #111; '
+                        f'font-family:Courier New; font-size:0.75rem;">'
+                        f'<span style="color:#FF9900;">{pos["ticker"].replace(".SA","")}</span>'
+                        f'<span style="color:#555;">$ {pos["preco_atual"]:,.2f}</span>'
+                        f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
+                        f'<span style="color:{cor_p}; font-size:0.68rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
         # ── rebalanceamento inteligente ───────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
