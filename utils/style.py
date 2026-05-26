@@ -28,8 +28,8 @@ def aplicar_tema():
         --border-focus:  #FF8C00;
 
         --text-primary:   #F0F2FF;
-        --text-secondary: #8B8FA8;
-        --text-muted:     #4A4D6A;
+        --text-secondary: #9CA3B8;
+        --text-muted:     #6B7280;
 
         --accent:        #FF8C00;
         --accent-hover:  #FF6B00;
@@ -58,6 +58,8 @@ def aplicar_tema():
     html, body, .stApp {
         background-color: var(--bg-base) !important;
         color: var(--text-primary) !important;
+        -webkit-font-smoothing: antialiased !important;
+        -moz-osx-font-smoothing: grayscale !important;
     }
 
     [data-testid="stAppViewContainer"] {
@@ -438,22 +440,36 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stSidebar"] {
-        background: #0F1018 !important;
+        background: #0B0C15 !important;
         border-right: 1px solid var(--border-subtle) !important;
-        min-width: 180px !important;
-        max-width: 200px !important;
+        min-width: 220px !important;
+        max-width: 240px !important;
     }
     [data-testid="stSidebar"] > div {
-        padding-top: 0.6rem !important;
+        padding-top: 0 !important;
+    }
+    /* Logo pseudo-element */
+    [data-testid="stSidebar"] > div:first-child::before {
+        content: "⚡  FINTERMINAL";
+        display: block;
+        font-family: var(--font-ui);
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 0.20em;
+        text-transform: uppercase;
+        padding: 16px 18px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+        margin-bottom: 6px;
     }
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
         font-family: var(--font-ui) !important;
-        font-size: 0.78rem !important;
+        font-size: 0.80rem !important;
         font-weight: 500 !important;
-        color: var(--text-muted) !important;
-        padding: 8px 14px !important;
+        color: var(--text-secondary) !important;
+        padding: 9px 16px !important;
         border-radius: var(--radius-sm) !important;
-        margin: 1px 8px !important;
+        margin: 1px 10px !important;
         transition: all 0.15s ease !important;
         display: block !important;
         letter-spacing: 0.01em !important;
@@ -472,6 +488,28 @@ def aplicar_tema():
         font-family: var(--font-ui) !important;
         font-size: 0.75rem !important;
         color: var(--text-muted) !important;
+    }
+    /* Sidebar expanders */
+    [data-testid="stSidebar"] [data-testid="stExpander"] {
+        background: rgba(255,255,255,0.02) !important;
+        border-color: var(--border-subtle) !important;
+        margin: 4px 10px !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        font-size: 0.75rem !important;
+        padding: 8px 12px !important;
+    }
+    /* Sidebar inputs */
+    [data-testid="stSidebar"] [data-testid="stTextInput"] input,
+    [data-testid="stSidebar"] [data-testid="stNumberInput"] input {
+        font-size: 0.80rem !important;
+        height: 32px !important;
+    }
+    /* Sidebar buttons */
+    [data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+        width: 100% !important;
+        margin: 2px 0 !important;
     }
 
     /* ═══════════════════════════════════════════════════

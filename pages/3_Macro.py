@@ -1090,14 +1090,14 @@ with tab_sentimento:
                     'ticktext': ['0', '25', '45', '55', '75', '100'],
                 },
                 'bar': {'color': fg['cor'], 'thickness': 0.25},
-                'bgcolor': '#0d0d0d',
+                'bgcolor': '#13141E',
                 'borderwidth': 0,
                 'steps': [
-                    {'range': [0,  25], 'color': '#330000'},
-                    {'range': [25, 45], 'color': '#331a00'},
-                    {'range': [45, 55], 'color': '#1a1a1a'},
-                    {'range': [55, 75], 'color': '#001a00'},
-                    {'range': [75, 100], 'color': '#00330d'},
+                    {'range': [0,  25], 'color': '#2a0a0a'},
+                    {'range': [25, 45], 'color': '#2a1800'},
+                    {'range': [45, 55], 'color': '#1C1D2B'},
+                    {'range': [55, 75], 'color': '#082010'},
+                    {'range': [75, 100], 'color': '#0a2a12'},
                 ],
                 'threshold': {
                     'line': {'color': fg['cor'], 'width': 3},
@@ -1109,8 +1109,8 @@ with tab_sentimento:
 
         layout_gauge = base_layout(height=300)
         layout_gauge.update({
-            'paper_bgcolor': '#0d0d0d',
-            'plot_bgcolor': '#0d0d0d',
+            'paper_bgcolor': '#13141E',
+            'plot_bgcolor': '#13141E',
             'margin': {'t': 20, 'b': 10, 'l': 20, 'r': 20},
         })
         fig_gauge.update_layout(**layout_gauge)

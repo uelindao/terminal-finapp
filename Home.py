@@ -123,14 +123,40 @@ with st.sidebar:
 # NAVEGAÇÃO RÁPIDA
 # ==========================================
 section_title("🧭 navegação rápida")
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1: st.page_link("pages/1_Research.py", label="micro (research)", icon="🔬")
-with c2: st.page_link("pages/2_Discovery.py", label="oportunidades", icon="🎯")
-with c3: st.page_link("pages/3_Macro.py", label="macro global", icon="🌍")
-with c4: st.page_link("pages/4_Portfolio.py", label="meu portfólio", icon="💼")
-with c5: st.page_link("pages/5_Solana.py", label="on-chain (rwa)", icon="⛓️")
 
-st.markdown("---")
+_nav_items = [
+    ("pages/1_Research.py",  "🔬", "Research",   "análise micro por ativo"),
+    ("pages/2_Discovery.py", "🎯", "Discovery",  "screener de oportunidades"),
+    ("pages/3_Macro.py",     "🌍", "Macro",      "cenário global e juros"),
+    ("pages/4_Portfolio.py", "💼", "Portfólio",  "posições e P&L"),
+    ("pages/5_Solana.py",    "⛓️",  "On-Chain",   "RWA e dados on-chain"),
+]
+_nav_cols = st.columns(5)
+for _col, (_page, _icon, _titulo, _desc) in zip(_nav_cols, _nav_items):
+    with _col:
+        st.markdown(
+            f'<div style="'
+            f'background:var(--bg-surface);'
+            f'border:1px solid var(--border-subtle);'
+            f'border-radius:var(--radius-md);'
+            f'padding:14px 10px 10px;'
+            f'text-align:center;'
+            f'margin-bottom:2px;'
+            f'transition:all 0.15s ease;"'
+            f' onmouseover="this.style.borderColor=\'#FF8C00\';this.style.background=\'#23243A\'"'
+            f' onmouseout="this.style.borderColor=\'#2A2C3E\';this.style.background=\'#1C1D2B\'">'
+            f'<div style="font-size:1.3rem; margin-bottom:5px;">{_icon}</div>'
+            f'<div style="font-family:var(--font-ui); font-size:0.78rem;'
+            f' font-weight:600; color:var(--text-primary);'
+            f' margin-bottom:3px;">{_titulo}</div>'
+            f'<div style="font-family:var(--font-ui); font-size:0.63rem;'
+            f' color:var(--text-muted); line-height:1.4;">{_desc}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.page_link(_page, label="abrir →")
+
+st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
 
 # ==========================================
 # FAIXA 1 — PULSO DO MERCADO
@@ -166,12 +192,40 @@ def buscar_indices_completo():
         pass
     return resultados
 
+def render_pulso_card(label: str, valor: str, var_pct: float):
+    """Card de índice com badge-pill de variação colorido."""
+    positivo = var_pct >= 0
+    seta      = "▲" if positivo else "▼"
+    cor_bg    = "rgba(16,185,129,0.10)"  if positivo else "rgba(239,68,68,0.10)"
+    cor_borda = "rgba(16,185,129,0.25)"  if positivo else "rgba(239,68,68,0.25)"
+    cor_txt   = "#10B981" if positivo else "#EF4444"
+    st.markdown(
+        f'<div style="background:var(--bg-surface);'
+        f' border:1px solid var(--border-subtle);'
+        f' border-radius:var(--radius-md);'
+        f' padding:12px 14px; margin-bottom:6px;'
+        f' transition:border-color 0.15s;">'
+        f'<div style="font-family:var(--font-ui); font-size:0.62rem;'
+        f' font-weight:600; color:var(--text-muted);'
+        f' text-transform:uppercase; letter-spacing:0.08em;'
+        f' margin-bottom:6px;">{label}</div>'
+        f'<div style="font-family:var(--font-data); font-size:1.05rem;'
+        f' font-weight:700; color:var(--text-primary);'
+        f' line-height:1.2; margin-bottom:7px;">{valor}</div>'
+        f'<span style="display:inline-flex; align-items:center;'
+        f' gap:3px; padding:2px 8px; border-radius:20px;'
+        f' background:{cor_bg}; border:1px solid {cor_borda};'
+        f' font-family:var(--font-data); font-size:0.68rem;'
+        f' font-weight:700; color:{cor_txt};">'
+        f'{seta} {abs(var_pct):.2f}%</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 indices = buscar_indices_completo()
 if indices:
     cols = st.columns(len(indices))
     for i, (nome, dados) in enumerate(indices.items()):
-        cor_d = "bull" if dados['var'] >= 0 else "bear"
-        sinal = "▲" if dados['var'] >= 0 else "▼"
         tk = dados['ticker']
         if tk == "BRL=X":
             valor_fmt = f"R$ {dados['preco']:.4f}"
@@ -184,12 +238,7 @@ if indices:
         else:
             valor_fmt = f"{dados['preco']:,.2f}"
         with cols[i]:
-            metric_card(
-                label=nome,
-                valor=valor_fmt,
-                delta=f"{sinal} {abs(dados['var']):.2f}%",
-                cor_delta=cor_d
-            )
+            render_pulso_card(nome, valor_fmt, dados['var'])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -447,13 +496,13 @@ with col_gauge_mac:
                 'tickfont': {'color': '#444', 'size': 9},
             },
             'bar': {'color': ambiente['cor'], 'thickness': 0.25},
-            'bgcolor': '#050505',
-            'bordercolor': '#1e1e1e',
+            'bgcolor': '#13141E',
+            'bordercolor': '#2A2C3E',
             'steps': [
-                {'range': [0,  35],  'color': '#1a0005'},
-                {'range': [35, 50],  'color': '#1a0f00'},
-                {'range': [50, 70],  'color': '#111111'},
-                {'range': [70, 100], 'color': '#001a08'},
+                {'range': [0,  35],  'color': '#2a0a12'},
+                {'range': [35, 50],  'color': '#2a1a00'},
+                {'range': [50, 70],  'color': '#1C1D2B'},
+                {'range': [70, 100], 'color': '#0a2218'},
             ],
             'threshold': {
                 'line': {'color': ambiente['cor'], 'width': 3},
@@ -469,7 +518,7 @@ with col_gauge_mac:
     layout_mac = base_layout(height=230)
     layout_mac.update({
         'margin':       {'l': 10, 'r': 10, 't': 50, 'b': 10},
-        'paper_bgcolor': '#050505',
+        'paper_bgcolor': '#13141E',
     })
     fig_mac.update_layout(**layout_mac)
     st.plotly_chart(fig_mac, use_container_width=True)

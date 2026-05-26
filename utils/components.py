@@ -30,15 +30,19 @@ def page_header(titulo: str, subtitulo: str = ""):
 
 
 def section_title(titulo: str):
-    """Título de seção."""
+    """Título de seção com barra de acento âmbar à esquerda."""
     st.markdown(
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.65rem; font-weight:600;'
-        f' color:var(--text-muted); text-transform:uppercase;'
-        f' letter-spacing:0.08em; padding-bottom:8px;'
-        f' margin-bottom:10px; margin-top:16px;'
-        f' border-bottom:1px solid var(--border-subtle);">'
-        f'{titulo}</div>',
+        f'<div style="display:flex; align-items:center;'
+        f' gap:10px; margin-top:20px; margin-bottom:12px;">'
+        f'<div style="width:3px; height:16px;'
+        f' background:var(--accent); border-radius:2px;'
+        f' flex-shrink:0;"></div>'
+        f'<span style="font-family:var(--font-ui);'
+        f' font-size:0.68rem; font-weight:700;'
+        f' color:var(--text-secondary); text-transform:uppercase;'
+        f' letter-spacing:0.10em;">'
+        f'{titulo}</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
