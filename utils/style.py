@@ -1,128 +1,153 @@
 """
-utils/style.py — v4.0  Bloomberg/Eikon institutional theme.
-Paleta de 4 camadas com variáveis CSS, contraste real, informação máxima por pixel.
+utils/style.py — v5.0  Design system moderno.
+Paleta azul-escuro com profundidade real, Inter + Courier New,
+border-radius generoso, laranja como acento preciso.
+Referências: Virtus, Metric Flow, Plutio dark mode.
 """
 import streamlit as st
 
 
 def aplicar_tema():
-    """Injeta o CSS global do design system institucional."""
+    """Injeta o CSS global do design system."""
     css = """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     /* ═══════════════════════════════════════════════════
-       DESIGN TOKENS — 4-LAYER PALETTE
+       VARIÁVEIS GLOBAIS
        ═══════════════════════════════════════════════════ */
 
     :root {
-        --bg-base:     #0e1117;   /* fundo — cinza azulado escuro */
-        --bg-surface:  #161b27;   /* cards — distinguível do fundo */
-        --bg-elevated: #1e2433;   /* inputs, hover — contraste claro */
-        --bg-overlay:  #252d40;   /* dropdowns */
+        --bg-base:       #13141E;
+        --bg-surface:    #1C1D2B;
+        --bg-elevated:   #23243A;
+        --bg-overlay:    #2C2D45;
 
-        --border-dim:    #252d3d;
-        --border-normal: #2e3850;
-        --border-active: #FF9900;
+        --border-subtle: #2A2C3E;
+        --border-normal: #353755;
+        --border-focus:  #FF8C00;
 
-        --text-primary:   #E8EAF6; /* branco levemente azulado */
-        --text-secondary: #8892A4; /* cinza médio — legível */
-        --text-muted:     #4A5568; /* cinza escuro */
+        --text-primary:   #F0F2FF;
+        --text-secondary: #8B8FA8;
+        --text-muted:     #4A4D6A;
 
-        --accent:     #FF9900;
-        --accent-dim: #2a1f00;
+        --accent:        #FF8C00;
+        --accent-hover:  #FF6B00;
+        --accent-soft:   rgba(255,140,0,0.08);
+        --accent-border: rgba(255,140,0,0.25);
 
-        --bull:     #00D97E;
-        --bull-dim: #00261a;
-        --bear:     #FF4560;
-        --bear-dim: #2a0010;
-        --amber:    #FFB800;
-        --info:     #4DA6FF;
+        --bull:      #10B981;
+        --bull-soft: rgba(16,185,129,0.10);
+        --bear:      #EF4444;
+        --bear-soft: rgba(239,68,68,0.10);
+        --amber:     #F59E0B;
+        --info:      #3B82F6;
+
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+
+        --font-ui:   'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --font-data: 'Courier New', 'Consolas', monospace;
     }
 
     /* ═══════════════════════════════════════════════════
-       RESET E LAYOUT BASE
+       BASE
        ═══════════════════════════════════════════════════ */
 
-    body, .stApp {
-        background-color: #0e1117 !important;
+    html, body, .stApp {
+        background-color: var(--bg-base) !important;
+        color: var(--text-primary) !important;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        background-color: var(--bg-base) !important;
+    }
+    [data-testid="stHeader"] {
+        background: transparent !important;
+    }
+    .main > div {
+        padding-top: 0 !important;
     }
 
     .block-container {
-        padding-top: 0.75rem !important;
-        padding-bottom: 1rem !important;
-        padding-left: 1.25rem !important;
-        padding-right: 1.25rem !important;
+        padding-top: 1.2rem !important;
+        padding-bottom: 1.5rem !important;
+        padding-left: 1.8rem !important;
+        padding-right: 1.8rem !important;
         max-width: 100% !important;
     }
 
-    /* Remove espaço em branco padrão do Streamlit */
-    .main > div { padding-top: 0 !important; }
-    [data-testid="stAppViewContainer"] { background-color: var(--bg-base); }
-    [data-testid="stHeader"] { background: transparent; }
-
     /* ═══════════════════════════════════════════════════
-       TIPOGRAFIA COMPACTA
+       TIPOGRAFIA
        ═══════════════════════════════════════════════════ */
 
     .page-title {
-        font-family: 'Courier New', monospace;
-        font-size: 0.82rem;
-        font-weight: bold;
-        color: var(--accent);
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
-        border-bottom: 1px solid var(--border-dim);
-        padding-bottom: 5px;
-        margin-bottom: 10px;
+        font-family: var(--font-ui);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.01em;
+        margin-bottom: 4px;
     }
 
     .section-title {
-        font-family: 'Courier New', monospace;
+        font-family: var(--font-ui);
         font-size: 0.68rem;
-        font-weight: bold;
+        font-weight: 600;
         color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.14em;
-        border-bottom: 1px solid var(--border-dim);
-        padding-bottom: 3px;
-        margin-bottom: 8px;
-        margin-top: 14px;
+        letter-spacing: 0.08em;
+        padding-bottom: 8px;
+        margin-bottom: 10px;
+        margin-top: 16px;
+        border-bottom: 1px solid var(--border-subtle);
     }
 
     .field-label {
-        font-family: 'Courier New', monospace;
-        font-size: 0.62rem;
+        font-family: var(--font-ui);
+        font-size: 0.70rem;
+        font-weight: 500;
         color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.10em;
+        letter-spacing: 0.06em;
     }
 
     .body-text {
-        font-family: 'Courier New', monospace;
-        font-size: 0.78rem;
+        font-family: var(--font-ui);
+        font-size: 0.85rem;
         color: var(--text-secondary);
-        line-height: 1.5;
+        line-height: 1.6;
     }
 
+    /* Markdown do Streamlit */
     .stMarkdown p, .stMarkdown li {
-        font-family: 'Courier New', monospace;
-        font-size: 0.82rem;
-        color: var(--text-secondary);
-        line-height: 1.5;
+        font-family: var(--font-ui) !important;
+        font-size: 0.85rem !important;
+        color: var(--text-secondary) !important;
+        line-height: 1.6 !important;
     }
     .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        font-family: 'Courier New', monospace;
-        color: var(--accent);
-        letter-spacing: 0.06em;
+        font-family: var(--font-ui) !important;
+        color: var(--text-primary) !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.01em !important;
     }
     .stMarkdown h5 {
-        font-family: 'Courier New', monospace;
-        font-size: 0.72rem;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        font-weight: bold;
-        margin-bottom: 6px;
+        font-family: var(--font-ui) !important;
+        font-size: 0.72rem !important;
+        font-weight: 600 !important;
+        color: var(--text-muted) !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+    }
+    .stMarkdown code {
+        font-family: var(--font-data) !important;
+        font-size: 0.80rem !important;
+        background: var(--bg-elevated) !important;
+        padding: 1px 5px !important;
+        border-radius: 4px !important;
+        color: var(--accent) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -135,297 +160,353 @@ def aplicar_tema():
     .color-info  { color: var(--info)  !important; }
     .color-muted { color: var(--text-muted) !important; }
 
-    .bg-bull  { background-color: var(--bull-dim);  border-left: 2px solid var(--bull); }
-    .bg-bear  { background-color: var(--bear-dim);  border-left: 2px solid var(--bear); }
-    .bg-amber { background-color: var(--accent-dim); border-left: 2px solid var(--amber); }
-    .bg-info  { background-color: #001833;           border-left: 2px solid var(--info); }
+    .bg-bull  { background: var(--bull-soft);  border-left: 3px solid var(--bull); }
+    .bg-bear  { background: var(--bear-soft);  border-left: 3px solid var(--bear); }
+    .bg-amber { background: rgba(245,158,11,0.10); border-left: 3px solid var(--amber); }
+    .bg-info  { background: rgba(59,130,246,0.10); border-left: 3px solid var(--info); }
 
     /* ═══════════════════════════════════════════════════
-       CARDS — CANTOS RETOS, GRADIENTE SUTIL
+       CARDS
        ═══════════════════════════════════════════════════ */
 
     .card {
         background: var(--bg-surface) !important;
-        border: 1px solid var(--border-normal) !important;
-        border-radius: 3px !important;
-        padding: 8px 10px;
-        margin-bottom: 6px;
+        border: 1px solid var(--border-subtle) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 14px 16px !important;
+        margin-bottom: 8px !important;
+        transition: border-color 0.15s ease !important;
     }
+    .card:hover {
+        border-color: var(--border-normal) !important;
+    }
+    .card-bull  { border-left: 3px solid var(--bull)  !important; }
+    .card-bear  { border-left: 3px solid var(--bear)  !important; }
+    .card-amber { border-left: 3px solid var(--amber) !important; }
+    .card-info  { border-left: 3px solid var(--info)  !important; }
 
-    .card-bull  { border-left: 2px solid var(--bull)  !important; }
-    .card-bear  { border-left: 2px solid var(--bear)  !important; }
-    .card-amber { border-left: 2px solid var(--amber) !important; }
-    .card-info  { border-left: 2px solid var(--info)  !important; }
-
+    /* Metric card */
     .metric-card {
-        background: linear-gradient(
-            135deg,
-            var(--bg-surface) 0%,
-            var(--bg-elevated) 100%
-        );
-        border: 1px solid var(--border-normal);
-        border-radius: 3px;
-        padding: 7px 10px;
-        text-align: left;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        transition: all 0.15s ease;
+    }
+    .metric-card:hover {
+        border-color: var(--border-normal);
+        transform: translateY(-1px);
     }
     .metric-card .metric-label {
-        font-family: 'Courier New', monospace;
-        font-size: 0.60rem;
+        font-family: var(--font-ui);
+        font-size: 0.68rem;
+        font-weight: 500;
         color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.12em;
-        margin-bottom: 2px;
+        letter-spacing: 0.07em;
+        margin-bottom: 6px;
     }
     .metric-card .metric-value {
-        font-family: 'Courier New', monospace;
-        font-size: 1.2rem;
+        font-family: var(--font-data);
+        font-size: 1.35rem;
         font-weight: bold;
         color: var(--text-primary);
         line-height: 1.15;
     }
     .metric-card .metric-delta {
-        font-family: 'Courier New', monospace;
-        font-size: 0.68rem;
-        margin-top: 1px;
+        font-family: var(--font-ui);
+        font-size: 0.72rem;
         color: var(--text-muted);
+        margin-top: 4px;
+        font-weight: 500;
     }
 
     /* ═══════════════════════════════════════════════════
-       BADGES — MICRO TAGS
+       BADGES
        ═══════════════════════════════════════════════════ */
 
     .badge {
-        display: inline-block;
-        padding: 1px 5px;
-        border-radius: 2px;
-        font-family: 'Courier New', monospace;
-        font-size: 0.60rem;
-        font-weight: bold;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 20px;
+        font-family: var(--font-ui);
+        font-size: 0.62rem;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    .badge-bull  { background: var(--bull-dim);   color: var(--bull);  border: 1px solid var(--bull); }
-    .badge-bear  { background: var(--bear-dim);   color: var(--bear);  border: 1px solid var(--bear); }
-    .badge-amber { background: var(--accent-dim); color: var(--amber); border: 1px solid var(--amber); }
-    .badge-info  { background: #001833;           color: var(--info);  border: 1px solid var(--info); }
-    .badge-muted { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-normal); }
+    .badge-bull  { background: var(--bull-soft);         color: var(--bull);  border: 1px solid rgba(16,185,129,0.2); }
+    .badge-bear  { background: var(--bear-soft);         color: var(--bear);  border: 1px solid rgba(239,68,68,0.2); }
+    .badge-amber { background: rgba(245,158,11,0.10);    color: var(--amber); border: 1px solid rgba(245,158,11,0.2); }
+    .badge-info  { background: rgba(59,130,246,0.10);    color: var(--info);  border: 1px solid rgba(59,130,246,0.2); }
+    .badge-muted { background: rgba(74,77,106,0.15);     color: var(--text-muted); border: 1px solid var(--border-subtle); }
 
     /* ═══════════════════════════════════════════════════
-       BOTÕES — 28 PX, RETANGULARES
+       BOTÕES
        ═══════════════════════════════════════════════════ */
 
+    /* Primário */
     [data-testid="stBaseButton-primary"] {
-        background-color: var(--accent) !important;
+        background: var(--accent) !important;
         color: #000 !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.70rem !important;
-        font-weight: bold !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.07em !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.75rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.03em !important;
         border: none !important;
-        border-radius: 2px !important;
-        height: 28px !important;
-        min-height: 28px !important;
-        padding: 0 10px !important;
-        line-height: 28px !important;
+        border-radius: var(--radius-sm) !important;
+        height: 34px !important;
+        min-height: 34px !important;
+        padding: 0 16px !important;
+        transition: all 0.15s ease !important;
+        box-shadow: 0 2px 8px rgba(255,140,0,0.25) !important;
     }
     [data-testid="stBaseButton-primary"]:hover {
-        background-color: #e68a00 !important;
+        background: var(--accent-hover) !important;
+        box-shadow: 0 4px 12px rgba(255,140,0,0.35) !important;
+        transform: translateY(-1px) !important;
     }
 
+    /* Secundário */
     [data-testid="stBaseButton-secondary"] {
-        background-color: transparent !important;
-        color: var(--text-muted) !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.70rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.06em !important;
+        background: var(--bg-elevated) !important;
+        color: var(--text-secondary) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.75rem !important;
+        font-weight: 500 !important;
         border: 1px solid var(--border-normal) !important;
-        border-radius: 2px !important;
-        height: 28px !important;
-        min-height: 28px !important;
-        padding: 0 10px !important;
-        line-height: 28px !important;
+        border-radius: var(--radius-sm) !important;
+        height: 34px !important;
+        min-height: 34px !important;
+        padding: 0 14px !important;
+        transition: all 0.15s ease !important;
     }
     [data-testid="stBaseButton-secondary"]:hover {
-        border-color: var(--accent) !important;
-        color: var(--accent) !important;
-        background-color: var(--accent-dim) !important;
+        background: var(--bg-overlay) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-focus) !important;
     }
 
+    /* Texto dos botões */
     [data-testid="stBaseButton-primary"] p,
     [data-testid="stBaseButton-secondary"] p {
-        font-size: 0.70rem !important;
+        font-size: 0.75rem !important;
+        font-family: var(--font-ui) !important;
         margin: 0 !important;
-        line-height: 28px !important;
+        line-height: 34px !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       INPUTS — COMPACTOS
+       INPUTS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stTextInput"] input,
-    [data-testid="stNumberInput"] input,
-    [data-testid="stTextArea"] textarea {
-        background-color: var(--bg-elevated) !important;
+    [data-testid="stNumberInput"] input {
+        background: var(--bg-elevated) !important;
         border: 1px solid var(--border-normal) !important;
-        border-radius: 2px !important;
+        border-radius: var(--radius-sm) !important;
         color: var(--text-primary) !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.80rem !important;
-        padding: 4px 8px !important;
+        font-family: var(--font-data) !important;
+        font-size: 0.85rem !important;
+        height: 36px !important;
+        padding: 0 12px !important;
+        transition: border-color 0.15s ease !important;
     }
     [data-testid="stTextInput"] input:focus,
-    [data-testid="stNumberInput"] input:focus,
+    [data-testid="stNumberInput"] input:focus {
+        border-color: var(--border-focus) !important;
+        box-shadow: 0 0 0 3px rgba(255,140,0,0.12) !important;
+        outline: none !important;
+    }
+    [data-testid="stTextArea"] textarea {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: var(--radius-sm) !important;
+        color: var(--text-primary) !important;
+        font-family: var(--font-data) !important;
+        font-size: 0.82rem !important;
+        padding: 8px 12px !important;
+    }
     [data-testid="stTextArea"] textarea:focus {
-        border-color: var(--border-active) !important;
-        box-shadow: 0 0 0 1px rgba(255,153,0,0.20) !important;
+        border-color: var(--border-focus) !important;
+        box-shadow: 0 0 0 3px rgba(255,140,0,0.12) !important;
     }
 
+    /* Labels dos campos */
     [data-testid="stTextInput"] label,
     [data-testid="stNumberInput"] label,
     [data-testid="stSelectbox"] label,
     [data-testid="stMultiSelect"] label,
     [data-testid="stTextArea"] label,
-    [data-testid="stRadio"] label,
-    [data-testid="stCheckbox"] label {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.65rem !important;
-        color: var(--text-muted) !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.08em !important;
-    }
-
-    [data-testid="stSelectbox"] > div > div {
-        background-color: var(--bg-elevated) !important;
-        border: 1px solid var(--border-normal) !important;
-        border-radius: 2px !important;
-        color: var(--text-primary) !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.80rem !important;
-        min-height: 30px !important;
-    }
-
-    [data-testid="stMultiSelect"] > div > div {
-        background-color: var(--bg-elevated) !important;
-        border: 1px solid var(--border-normal) !important;
-        border-radius: 2px !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.78rem !important;
-    }
-
-    [data-testid="stRadio"] > div {
-        gap: 4px !important;
-    }
-    [data-testid="stRadio"] label {
-        font-size: 0.72rem !important;
+    [data-testid="stSlider"] label,
+    [data-testid="stRadio"] > label,
+    [data-testid="stCheckbox"] > label {
+        font-family: var(--font-ui) !important;
+        font-size: 0.70rem !important;
+        font-weight: 500 !important;
         color: var(--text-secondary) !important;
-        padding: 2px 6px !important;
-        text-transform: none !important;
-    }
-
-    /* ═══════════════════════════════════════════════════
-       TABELAS E DATAFRAMES
-       ═══════════════════════════════════════════════════ */
-
-    [data-testid="stDataFrame"] {
-        border: 1px solid var(--border-normal);
-        border-radius: 2px;
-        overflow: hidden;
-    }
-    [data-testid="stDataFrame"] thead tr th {
-        background-color: var(--bg-surface) !important;
-        color: var(--accent) !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.62rem !important;
         text-transform: uppercase !important;
-        letter-spacing: 0.09em !important;
-        border-bottom: 1px solid var(--border-normal) !important;
-        padding: 4px 8px !important;
+        letter-spacing: 0.06em !important;
+        margin-bottom: 4px !important;
     }
-    [data-testid="stDataFrame"] tbody tr td {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.74rem !important;
-        padding: 3px 8px !important;
-        border-bottom: 1px solid var(--border-dim) !important;
+
+    /* Selectbox */
+    [data-testid="stSelectbox"] > div > div {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: var(--radius-sm) !important;
+        color: var(--text-primary) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.85rem !important;
+        min-height: 36px !important;
+        transition: border-color 0.15s !important;
     }
-    [data-testid="stDataFrame"] tbody tr:nth-child(even) td {
-        background-color: var(--bg-surface) !important;
+    [data-testid="stSelectbox"] > div > div:hover {
+        border-color: var(--border-focus) !important;
     }
-    [data-testid="stDataFrame"] tbody tr:hover td {
-        background-color: var(--bg-elevated) !important;
+
+    /* Multiselect */
+    [data-testid="stMultiSelect"] > div > div {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: var(--radius-sm) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.82rem !important;
+    }
+
+    /* Number input step buttons */
+    [data-testid="stNumberInput"] button {
+        background: var(--bg-overlay) !important;
+        border-color: var(--border-normal) !important;
+        color: var(--text-secondary) !important;
+        border-radius: 4px !important;
+    }
+
+    /* Radio */
+    [data-testid="stRadio"] label p,
+    [data-testid="stCheckbox"] label p {
+        font-family: var(--font-ui) !important;
+        font-size: 0.80rem !important;
+        color: var(--text-secondary) !important;
+    }
+    [data-testid="stRadio"] > div {
+        gap: 6px !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       SIDEBAR — MAIS ESCURA E COMPACTA
-       ═══════════════════════════════════════════════════ */
-
-    [data-testid="stSidebar"] {
-        background-color: #111827 !important;
-        border-right: 1px solid var(--border-normal) !important;
-    }
-    [data-testid="stSidebar"] > div {
-        padding-top: 0.5rem;
-    }
-    [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
-        font-family: 'Courier New', monospace;
-        font-size: 0.72rem;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        padding: 5px 10px;
-        border-radius: 2px;
-    }
-    [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {
-        background-color: var(--bg-elevated);
-        color: var(--accent);
-    }
-    [data-testid="stSidebar"] [data-testid="stSidebarNav"] [aria-current="page"] {
-        background-color: var(--accent-dim);
-        color: var(--accent) !important;
-        border-left: 2px solid var(--accent);
-        padding-left: 8px;
-    }
-
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] .stMarkdown p {
-        font-size: 0.72rem !important;
-        color: var(--text-muted) !important;
-    }
-
-    /* ═══════════════════════════════════════════════════
-       ABAS (TABS) — PLANAS E COMPACTAS
+       TABS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stTabs"] [role="tablist"] {
-        border-bottom: 1px solid var(--border-dim);
-        gap: 1px;
-        padding-bottom: 0;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        padding: 4px;
+        gap: 2px;
+        display: inline-flex;
+        margin-bottom: 4px;
     }
     [data-testid="stTabs"] [role="tab"] {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.65rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.10em !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.72rem !important;
+        font-weight: 500 !important;
         color: var(--text-muted) !important;
-        padding: 5px 12px !important;
-        border-radius: 0 !important;
+        padding: 6px 14px !important;
+        border-radius: var(--radius-sm) !important;
         border: none !important;
-        border-bottom: 2px solid transparent !important;
         background: transparent !important;
+        transition: all 0.15s ease !important;
+        letter-spacing: 0.02em !important;
     }
     [data-testid="stTabs"] [role="tab"]:hover {
         color: var(--text-secondary) !important;
-        background-color: var(--bg-elevated) !important;
+        background: var(--bg-elevated) !important;
     }
     [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-        color: var(--accent) !important;
-        background-color: transparent !important;
-        border-bottom: 2px solid var(--accent) !important;
+        color: var(--text-primary) !important;
+        background: var(--bg-elevated) !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.35) !important;
+    }
+    [data-testid="stTabsContent"] {
+        padding-top: 1rem !important;
     }
 
-    [data-testid="stTabsContent"] {
-        padding-top: 0.75rem !important;
+    /* ═══════════════════════════════════════════════════
+       SIDEBAR
+       ═══════════════════════════════════════════════════ */
+
+    [data-testid="stSidebar"] {
+        background: #0F1018 !important;
+        border-right: 1px solid var(--border-subtle) !important;
+        min-width: 180px !important;
+        max-width: 200px !important;
+    }
+    [data-testid="stSidebar"] > div {
+        padding-top: 0.6rem !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
+        font-family: var(--font-ui) !important;
+        font-size: 0.78rem !important;
+        font-weight: 500 !important;
+        color: var(--text-muted) !important;
+        padding: 8px 14px !important;
+        border-radius: var(--radius-sm) !important;
+        margin: 1px 8px !important;
+        transition: all 0.15s ease !important;
+        display: block !important;
+        letter-spacing: 0.01em !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {
+        color: var(--text-primary) !important;
+        background: var(--bg-elevated) !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarNav"] [aria-current="page"] {
+        background: var(--accent-soft) !important;
+        color: var(--accent) !important;
+        border: 1px solid var(--accent-border) !important;
+    }
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] .stMarkdown p {
+        font-family: var(--font-ui) !important;
+        font-size: 0.75rem !important;
+        color: var(--text-muted) !important;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       DATAFRAMES
+       ═══════════════════════════════════════════════════ */
+
+    [data-testid="stDataFrame"] {
+        border: 1px solid var(--border-subtle) !important;
+        border-radius: var(--radius-md) !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stDataFrame"] thead tr th {
+        background: var(--bg-elevated) !important;
+        color: var(--text-muted) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.65rem !important;
+        font-weight: 600 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        padding: 8px 12px !important;
+        border-bottom: 1px solid var(--border-normal) !important;
+    }
+    [data-testid="stDataFrame"] tbody tr td {
+        font-family: var(--font-data) !important;
+        font-size: 0.80rem !important;
+        color: var(--text-secondary) !important;
+        padding: 6px 12px !important;
+        border-bottom: 1px solid var(--border-subtle) !important;
+    }
+    [data-testid="stDataFrame"] tbody tr:nth-child(even) td {
+        background: var(--bg-surface) !important;
+    }
+    [data-testid="stDataFrame"] tbody tr:hover td {
+        background: var(--bg-elevated) !important;
+        color: var(--text-primary) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -433,105 +514,109 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stExpander"] {
-        border: 1px solid var(--border-dim) !important;
-        border-radius: 2px !important;
-        background-color: var(--bg-surface) !important;
-        margin-bottom: 5px !important;
+        background: var(--bg-surface) !important;
+        border: 1px solid var(--border-subtle) !important;
+        border-radius: var(--radius-md) !important;
+        margin-bottom: 8px !important;
+        overflow: hidden !important;
     }
     [data-testid="stExpander"] summary {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.70rem !important;
-        color: var(--text-muted) !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.08em !important;
-        padding: 7px 10px !important;
-        min-height: 0 !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.78rem !important;
+        font-weight: 500 !important;
+        color: var(--text-secondary) !important;
+        padding: 10px 14px !important;
+        background: var(--bg-elevated) !important;
+        transition: all 0.15s ease !important;
     }
     [data-testid="stExpander"] summary:hover {
-        color: var(--accent) !important;
-        background-color: var(--bg-elevated) !important;
+        color: var(--text-primary) !important;
+        background: var(--bg-overlay) !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       MÉTRICAS NATIVAS DO STREAMLIT
+       MÉTRICAS NATIVAS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stMetric"] {
-        background: linear-gradient(
-            135deg,
-            var(--bg-surface) 0%,
-            var(--bg-elevated) 100%
-        );
-        border: 1px solid var(--border-normal);
-        border-radius: 3px;
-        padding: 6px 10px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        padding: 14px 16px !important;
+        transition: border-color 0.15s;
     }
-    [data-testid="stMetricLabel"] {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.60rem !important;
+    [data-testid="stMetric"]:hover {
+        border-color: var(--border-normal);
+    }
+    [data-testid="stMetricLabel"] p {
+        font-family: var(--font-ui) !important;
+        font-size: 0.68rem !important;
+        font-weight: 600 !important;
         color: var(--text-muted) !important;
         text-transform: uppercase !important;
-        letter-spacing: 0.10em !important;
+        letter-spacing: 0.07em !important;
     }
     [data-testid="stMetricValue"] {
-        font-family: 'Courier New', monospace !important;
-        font-size: 1.1rem !important;
-        font-weight: bold !important;
+        font-family: var(--font-data) !important;
+        font-size: 1.4rem !important;
         color: var(--text-primary) !important;
     }
     [data-testid="stMetricDelta"] {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.66rem !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.72rem !important;
+        font-weight: 500 !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       ALERTAS / STATUS CARDS
+       ALERTAS NATIVOS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stAlert"] {
-        border-radius: 2px !important;
-        padding: 6px 10px !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.74rem !important;
+        border-radius: var(--radius-md) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.80rem !important;
+        padding: 10px 14px !important;
     }
     [data-testid="stSuccess"] {
-        background-color: var(--bull-dim) !important;
-        border: 1px solid var(--bull) !important;
+        background: var(--bull-soft) !important;
+        border: 1px solid rgba(16,185,129,0.25) !important;
         color: var(--bull) !important;
     }
     [data-testid="stError"] {
-        background-color: var(--bear-dim) !important;
-        border: 1px solid var(--bear) !important;
+        background: var(--bear-soft) !important;
+        border: 1px solid rgba(239,68,68,0.25) !important;
         color: var(--bear) !important;
     }
     [data-testid="stWarning"] {
-        background-color: var(--accent-dim) !important;
-        border: 1px solid var(--amber) !important;
+        background: rgba(245,158,11,0.10) !important;
+        border: 1px solid rgba(245,158,11,0.25) !important;
         color: var(--amber) !important;
     }
     [data-testid="stInfo"] {
-        background-color: #001833 !important;
-        border: 1px solid var(--info) !important;
+        background: rgba(59,130,246,0.10) !important;
+        border: 1px solid rgba(59,130,246,0.25) !important;
         color: var(--info) !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       CHAT / MENSAGENS IA
+       CHAT
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stChatMessage"] {
-        background-color: var(--bg-surface) !important;
-        border: 1px solid var(--border-dim) !important;
-        border-radius: 2px !important;
-        padding: 8px 12px !important;
-        margin-bottom: 4px !important;
+        background: var(--bg-surface) !important;
+        border: 1px solid var(--border-subtle) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 10px 14px !important;
+        margin-bottom: 6px !important;
+    }
+    [data-testid="stChatInput"] {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: var(--radius-md) !important;
     }
     [data-testid="stChatInput"] textarea {
-        background-color: var(--bg-elevated) !important;
-        border: 1px solid var(--border-normal) !important;
-        border-radius: 2px !important;
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.78rem !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.85rem !important;
         color: var(--text-primary) !important;
     }
 
@@ -539,99 +624,118 @@ def aplicar_tema():
        SPINNER / PROGRESS
        ═══════════════════════════════════════════════════ */
 
-    [data-testid="stSpinner"] {
-        font-family: 'Courier New', monospace !important;
-        font-size: 0.72rem !important;
+    [data-testid="stSpinner"] p {
+        font-family: var(--font-ui) !important;
+        font-size: 0.75rem !important;
         color: var(--text-muted) !important;
     }
     [data-testid="stProgress"] > div > div {
-        background-color: var(--accent) !important;
-        height: 2px !important;
-        border-radius: 0 !important;
+        background: var(--accent) !important;
+        height: 3px !important;
+        border-radius: var(--radius-sm) !important;
     }
     [data-testid="stProgress"] > div {
-        background-color: var(--bg-elevated) !important;
-        height: 2px !important;
-        border-radius: 0 !important;
+        background: var(--bg-elevated) !important;
+        height: 3px !important;
+        border-radius: var(--radius-sm) !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       DIVISORES — GRADIENTE
+       DOWNLOAD BUTTON
+       ═══════════════════════════════════════════════════ */
+
+    [data-testid="stDownloadButton"] button {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: var(--radius-sm) !important;
+        color: var(--text-secondary) !important;
+        font-family: var(--font-ui) !important;
+        font-size: 0.72rem !important;
+        font-weight: 500 !important;
+        height: 34px !important;
+    }
+    [data-testid="stDownloadButton"] button:hover {
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       PLOTLY CHARTS
+       ═══════════════════════════════════════════════════ */
+
+    [data-testid="stPlotlyChart"] {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       SCROLLBAR
+       ═══════════════════════════════════════════════════ */
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb {
+        background: var(--border-normal);
+        border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--accent);
+    }
+
+    /* ═══════════════════════════════════════════════════
+       DIVIDER
        ═══════════════════════════════════════════════════ */
 
     hr {
         border: none !important;
         height: 1px !important;
-        background: linear-gradient(
-            90deg,
-            transparent,
-            var(--border-normal),
-            transparent
-        ) !important;
-        margin: 8px 0 !important;
+        background: var(--border-subtle) !important;
+        margin: 12px 0 !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       SCROLLBAR — QUASE INVISÍVEL
-       ═══════════════════════════════════════════════════ */
-
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border-normal); border-radius: 0; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-
-    /* ═══════════════════════════════════════════════════
-       COLUNA / GRID — ESPAÇAMENTO REDUZIDO
+       GRID / COLUNAS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="column"] {
-        padding-left: 4px !important;
-        padding-right: 4px !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
     }
-
     [data-testid="stHorizontalBlock"] {
-        gap: 0.5rem !important;
+        gap: 0.6rem !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       PLOTLY / CHARTS
+       OCULTAR DECORAÇÕES STREAMLIT
        ═══════════════════════════════════════════════════ */
 
-    [data-testid="stPlotlyChart"] {
-        border: 1px solid var(--border-dim);
-        border-radius: 2px;
-        overflow: hidden;
-    }
+    footer { display: none !important; }
+    #MainMenu { display: none !important; }
+    [data-testid="stDecoration"] { display: none !important; }
 
     /* ═══════════════════════════════════════════════════
-       TOOLTIPS E POPOVERS
-       ═══════════════════════════════════════════════════ */
-
-    [data-testid="stPopover"] [data-testid="stBaseButton-secondary"] {
-        border: none !important;
-        padding: 0 4px !important;
-    }
-
-    /* ═══════════════════════════════════════════════════
-       RESPONSIVE MÍNIMO
-       ═══════════════════════════════════════════════════ */
-
-    @media (max-width: 768px) {
-        .block-container {
-            padding-left: 0.75rem !important;
-            padding-right: 0.75rem !important;
-        }
-        .metric-card .metric-value { font-size: 1rem !important; }
-    }
-
-    /* ═══════════════════════════════════════════════════
-       TRANSIÇÕES — APENAS ONDE NECESSÁRIO
+       TRANSITIONS — SELETIVO
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stBaseButton-primary"],
     [data-testid="stBaseButton-secondary"],
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
-        transition: color 0.1s, background-color 0.1s, border-color 0.1s !important;
+        transition: all 0.15s ease !important;
+    }
+
+    /* ═══════════════════════════════════════════════════
+       MOBILE
+       ═══════════════════════════════════════════════════ */
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 0.8rem !important;
+            padding-right: 0.8rem !important;
+        }
+        .metric-card .metric-value {
+            font-size: 1.1rem !important;
+        }
     }
 
     </style>

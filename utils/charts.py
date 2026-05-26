@@ -8,26 +8,34 @@ from plotly.subplots import make_subplots
 
 # Paleta de cores padrão para séries múltiplas
 CORES_SERIES = [
-    "#FF9900",  # amber (primário)
-    "#00B0FF",  # azul info
-    "#00C853",  # verde
-    "#FF1744",  # vermelho
-    "#E040FB",  # roxo
-    "#00BCD4",  # ciano
-    "#FFEB3B",  # amarelo
-    "#FF7043",  # laranja
+    "#FF8C00",  # laranja primário
+    "#3B82F6",  # azul info
+    "#10B981",  # verde esmeralda
+    "#EF4444",  # vermelho
+    "#8B5CF6",  # roxo
+    "#06B6D4",  # ciano
+    "#F59E0B",  # âmbar
+    "#EC4899",  # rosa
 ]
 
 LAYOUT_BASE = dict(
-    paper_bgcolor="#010101",
-    plot_bgcolor="#010101",
-    font=dict(family="Courier New", color="#888888", size=11),
+    paper_bgcolor="#13141E",
+    plot_bgcolor="#13141E",
+    font=dict(
+        family="Inter, system-ui, sans-serif",
+        color="#8B8FA8",
+        size=11,
+    ),
     margin=dict(l=0, r=0, t=30, b=0),
     hovermode="x unified",
     hoverlabel=dict(
-        bgcolor="#111111",
-        bordercolor="#333333",
-        font=dict(family="Courier New", color="#E0E0E0", size=11)
+        bgcolor="#23243A",
+        bordercolor="#353755",
+        font=dict(
+            family="Inter, system-ui, sans-serif",
+            color="#F0F2FF",
+            size=11,
+        ),
     ),
     legend=dict(
         orientation="h",
@@ -35,20 +43,27 @@ LAYOUT_BASE = dict(
         y=1.02,
         xanchor="right",
         x=1,
-        font=dict(color="#888888", size=10),
+        font=dict(
+            color="#8B8FA8",
+            size=10,
+            family="Inter, system-ui, sans-serif",
+        ),
         bgcolor="rgba(0,0,0,0)",
-        bordercolor="#333",
-        borderwidth=0
-    )
+        borderwidth=0,
+    ),
 )
 
 AXIS_BASE = dict(
     showgrid=True,
-    gridcolor="#1e1e1e",
+    gridcolor="#2A2C3E",
     gridwidth=1,
     zeroline=False,
-    linecolor="#2a2a2a",
-    tickfont=dict(family="Courier New", size=10),
+    linecolor="#353755",
+    tickfont=dict(
+        family="Inter, system-ui, sans-serif",
+        size=10,
+        color="#4A4D6A",
+    ),
 )
 
 def base_layout(height=400, title="") -> dict:
@@ -104,15 +119,15 @@ def velas(df, titulo="", height=500, mostrar_volume=True):
         open=df["Open"], high=df["High"],
         low=df["Low"],   close=df["Close"],
         name="Preço",
-        increasing=dict(line=dict(color="#00C853"), fillcolor="#00C85320"),
-        decreasing=dict(line=dict(color="#FF1744"), fillcolor="#FF174420"),
-        hoverlabel=dict(font=dict(family="Courier New"))
+        increasing=dict(line=dict(color="#10B981"), fillcolor="#10B98120"),
+        decreasing=dict(line=dict(color="#EF4444"), fillcolor="#EF444420"),
+        hoverlabel=dict(font=dict(family="Inter, system-ui, sans-serif")),
     )
 
     if mostrar_volume:
         fig.add_trace(candle, row=1, col=1)
         cores_vol = [
-            "#00C853" if c >= o else "#FF1744"
+            "#10B981" if c >= o else "#EF4444"
             for c, o in zip(df["Close"], df["Open"])
         ]
         fig.add_trace(go.Bar(
@@ -151,7 +166,7 @@ def barras(categorias, valores, titulo="", cor="#FF9900", cor_negativo="#FF1744"
         xaxis={**AXIS_BASE, "title": ""},
         yaxis={**AXIS_BASE, "title": ""}
     )
-    fig.add_hline(y=0, line_color="#333", line_width=1)
+    fig.add_hline(y=0, line_color="#353755", line_width=1)
     fig.update_layout(**layout)
     return fig
 
@@ -168,7 +183,7 @@ def base100(df, titulo="", height=400):
             line=dict(color=cor, width=1.8),
             hovertemplate=f"{col}<br>%{{x}}<br>Base 100: %{{y:.1f}}<extra></extra>"
         ))
-    fig.add_hline(y=100, line_color="#2a2a2a", line_dash="dash", line_width=1)
+    fig.add_hline(y=100, line_color="#353755", line_dash="dash", line_width=1)
     layout = base_layout(height=height, title=titulo)
     layout.update(
         xaxis={**AXIS_BASE},

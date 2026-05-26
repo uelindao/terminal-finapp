@@ -1123,8 +1123,6 @@ else:
                 health_score  = h_info.get('score'),
                 alertas       = lista_alertas,
                 earnings_info = _earnings_info_map.get(t_base),
-                on_delete     = t,
-                on_memorial   = t,
             )
 
             # Confirmação de deleção
