@@ -31,7 +31,8 @@ from utils.tickers import mapear_ticker_base
 
 from utils.components import (
     page_header, section_title, metric_card,
-    watchlist_card, empty_state, progress_steps,
+    watchlist_card, watchlist_row, watchlist_header_row,
+    empty_state, progress_steps,
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator
 )
 from utils.formatters import fmt_preco, fmt_pct
@@ -1066,77 +1067,100 @@ else:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── GRID DE CARDS (usa watchlist_filtrada) ───────────────────────────────
-    mercados = {}
+    # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
+    mercados_dict = {}
     for item in watchlist_filtrada:
-        m = item['mercado']
-        if m not in mercados:
-            mercados[m] = []
-        mercados[m].append(item)
+        m = item.get('mercado', 'outros').lower()
+        mercados_dict.setdefault(m, []).append(item)
 
-    if not mercados:
+    if not mercados_dict:
         empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
                     "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
-    for mercado, ativos in mercados.items():
-        st.markdown(f"##### 📍 {mercado.lower()}")
-        cols = st.columns(4)
-        for idx, item in enumerate(ativos):
-            t = item['ticker']
-            d = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
+    for mercado, ativos in mercados_dict.items():
+        # Header do grupo de mercado
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' font-size:0.60rem; font-weight:bold;'
+            f' color:var(--text-muted); text-transform:uppercase;'
+            f' letter-spacing:0.14em; padding:8px 0 4px;">'
+            f'▸ {mercado}</div>',
+            unsafe_allow_html=True,
+        )
 
+        # Header das colunas (uma vez por grupo)
+        watchlist_header_row()
+
+        for item in ativos:
+            t      = item['ticker']
             t_base = mapear_ticker_base(t)
-            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas": [], "breakdown": {}}'})
+            d      = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
+            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas":[],"breakdown":{}}'})
 
-            # DECODIFICAÇÃO ROBUSTA PROTEGIDA
+            # Decodificação robusta
             try:
-                raw_data = h_info['alertas_venda']
+                raw_data    = h_info['alertas_venda']
                 parsed_data = json.loads(raw_data)
-
-                # Se ainda for string (devido ao histórico corrompido de JSON duplo), decodifica novamente
                 if isinstance(parsed_data, str):
                     parsed_data = json.loads(parsed_data)
-
                 if isinstance(parsed_data, dict):
                     lista_alertas = parsed_data.get('alertas', [])
-                    breakdown = parsed_data.get('breakdown', {})
+                    breakdown     = parsed_data.get('breakdown', {})
                 else:
                     lista_alertas = parsed_data if isinstance(parsed_data, list) else []
-                    breakdown = {}
-            except:
+                    breakdown     = {}
+            except Exception:
                 lista_alertas = []
-                breakdown = {}
+                breakdown     = {}
 
-            with cols[idx % 4]:
-                watchlist_card(
-                    ticker        = t,
-                    nome          = item['nome'],
-                    preco         = d['preco'],
-                    var_1d        = d['var_1d'],
-                    moeda         = "r$" if t_base.endswith(".SA") else "$",
-                    health_score  = h_info['score'],
-                    alertas       = lista_alertas,
-                    earnings_info = _earnings_info_map.get(t_base),
-                )
-                
-                # Botões de Ação do Card
-                c1, c2, c3 = st.columns(3)
+            watchlist_row(
+                ticker        = t,
+                nome          = item.get('nome', t),
+                preco         = d.get('preco', 0.0),
+                var_1d        = d.get('var_1d', 0.0),
+                var_1m        = d.get('var_1m', 0.0),
+                moeda         = "R$" if t_base.endswith(".SA") else "$",
+                health_score  = h_info.get('score'),
+                alertas       = lista_alertas,
+                earnings_info = _earnings_info_map.get(t_base),
+                on_delete     = t,
+                on_memorial   = t,
+            )
+
+            # Confirmação de deleção
+            if st.session_state.get(f"confirm_del_{t}"):
+                st.warning(f"remover {t.replace('.SA', '')} da watchlist?")
+                c1, c2 = st.columns([1, 3])
                 with c1:
-                    if st.button("🗑️", key=f"del_{t}", use_container_width=True, help="remover ativo"):
+                    if st.button("confirmar", type="primary", key=f"conf_del_{t}"):
                         remover_ativo(t, watchlist_id=watchlist_id_ativo)
+                        st.session_state.pop(f"confirm_del_{t}", None)
                         st.rerun()
                 with c2:
-                    nova_nota = st.popover("📝", use_container_width=True)
-                    with nova_nota:
-                        txt = st.text_area("anotações da tese:", value=item['notas'] or "", key=f"nota_{t}")
-                        if st.button("salvar", key=f"btn_nota_{t}"):
-                            atualizar_notas(t, txt, watchlist_id=watchlist_id_ativo)
-                            st.rerun()
-                with c3:
-                    if st.button("🧮", key=f"calc_{t}", use_container_width=True, help="memorial de cálculo"):
-                        exibir_memorial(t, h_info['score'], breakdown, lista_alertas)
-                        
-                st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+                    if st.button("cancelar", key=f"canc_del_{t}"):
+                        st.session_state.pop(f"confirm_del_{t}", None)
+                        st.rerun()
+
+            # Memorial de cálculo
+            if st.session_state.get(f"show_memorial_{t}"):
+                exibir_memorial(t, h_info.get('score', 0), breakdown, lista_alertas)
+                if st.button("fechar", key=f"close_mem_{t}"):
+                    st.session_state.pop(f"show_memorial_{t}", None)
+                    st.rerun()
+
+            # Nota inline (popover)
+            with st.expander(f"📝 nota — {t.replace('.SA', '')}", expanded=False):
+                txt = st.text_area(
+                    "anotações da tese:",
+                    value=item.get('notas') or "",
+                    key=f"nota_{t}",
+                    label_visibility="collapsed",
+                )
+                if st.button("salvar nota", key=f"btn_nota_{t}"):
+                    atualizar_notas(t, txt, watchlist_id=watchlist_id_ativo)
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # RELATÓRIO SEMANAL

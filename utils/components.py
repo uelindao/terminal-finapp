@@ -315,6 +315,202 @@ def kpi_row(itens: list[dict]):
             )
 
 
+def watchlist_row(
+    ticker:        str,
+    nome:          str,
+    preco:         float,
+    var_1d:        float,
+    var_1m:        float = 0.0,
+    moeda:         str   = "R$",
+    health_score:  float = None,
+    alertas:       list  = None,
+    earnings_info: dict  = None,
+    on_delete:     str   = None,
+    on_memorial:   str   = None,
+):
+    """
+    Linha densa de watchlist — uma linha de ~48px por ativo.
+    Informação máxima, ações mínimas e inline.
+    """
+    cor_var  = "var(--bull)" if var_1d >= 0 else "var(--bear)"
+    cor_1m   = "var(--bull)" if var_1m >= 0 else "var(--bear)"
+    seta     = "▲" if var_1d >= 0 else "▼"
+    seta_1m  = "▲" if var_1m >= 0 else "▼"
+    tem_alert = bool(alertas and len(alertas) > 0)
+
+    # Health score — barra mini + número
+    hs_html = ""
+    if health_score is not None:
+        hs = int(health_score)
+        cor_hs = ("var(--bull)"  if hs >= 65 else
+                  "var(--amber)" if hs >= 40 else
+                  "var(--bear)")
+        hs_html = (
+            f'<div style="display:flex; align-items:center;'
+            f' gap:5px; min-width:80px; padding:10px 0 2px;">'
+            f'<div style="flex:1; background:var(--bg-elevated);'
+            f' height:3px; border-radius:1px;">'
+            f'<div style="width:{hs}%; height:100%;'
+            f' background:{cor_hs}; border-radius:1px;"></div>'
+            f'</div>'
+            f'<span style="font-size:0.68rem; color:{cor_hs};'
+            f' font-weight:bold; min-width:20px;'
+            f' text-align:right;">{hs}</span>'
+            f'</div>'
+        )
+
+    # Badges compactos
+    badges_html = ""
+    if tem_alert:
+        badges_html += (
+            '<span style="font-size:0.52rem; color:var(--bear);'
+            ' border:1px solid var(--bear); padding:0 3px;'
+            ' border-radius:2px; margin-right:3px;">⚠</span>'
+        )
+    if earnings_info and 0 <= earnings_info.get("dias", 99) <= 14:
+        dias_e = earnings_info["dias"]
+        cor_e  = ("var(--bear)"  if dias_e <= 3 else
+                  "var(--amber)" if dias_e <= 7 else
+                  "var(--text-muted)")
+        badges_html += (
+            f'<span style="font-size:0.52rem; color:{cor_e};'
+            f' border:1px solid {cor_e}; padding:0 3px;'
+            f' border-radius:2px;">res·{dias_e}d</span>'
+        )
+
+    # Primeiro alerta resumido
+    alerta_resumo = ""
+    if tem_alert and alertas:
+        txt = alertas[0][:60] + "…" if len(alertas[0]) > 60 else alertas[0]
+        alerta_resumo = (
+            f'<div style="font-size:0.58rem;'
+            f' color:var(--text-muted);'
+            f' margin-top:2px; line-height:1.2;">{txt}</div>'
+        )
+
+    # Layout: 8 colunas
+    col_tk, col_nm, col_pr, col_1d, col_1m, \
+        col_hs, col_bd, col_ac = st.columns(
+            [1.2, 2.5, 1.5, 0.9, 0.9, 1.3, 0.8, 0.7]
+        )
+
+    with col_tk:
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' font-weight:bold; color:var(--accent);'
+            f' font-size:0.78rem; padding:10px 0 2px;">'
+            f'{ticker.replace(".SA", "")}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_nm:
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' color:var(--text-muted); font-size:0.65rem;'
+            f' padding:10px 0 2px; overflow:hidden;'
+            f' text-overflow:ellipsis; white-space:nowrap;">'
+            f'{nome[:30]}</div>'
+            f'{alerta_resumo}',
+            unsafe_allow_html=True,
+        )
+
+    with col_pr:
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' font-weight:bold; color:var(--text-primary);'
+            f' font-size:0.82rem; padding:10px 0 2px;">'
+            f'{moeda} {preco:,.2f}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_1d:
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' color:{cor_var}; font-size:0.72rem;'
+            f' padding:10px 0 2px; font-weight:bold;">'
+            f'{seta} {abs(var_1d):.2f}%</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_1m:
+        st.markdown(
+            f'<div style="font-family:Courier New;'
+            f' color:{cor_1m}; font-size:0.68rem;'
+            f' padding:10px 0 2px;">'
+            f'{seta_1m} {abs(var_1m):.2f}% 1m</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_hs:
+        if health_score is not None:
+            st.markdown(hs_html, unsafe_allow_html=True)
+
+    with col_bd:
+        if badges_html:
+            st.markdown(
+                f'<div style="padding:8px 0;">{badges_html}</div>',
+                unsafe_allow_html=True,
+            )
+
+    with col_ac:
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button(
+                "🗑", key=f"del_{on_delete or ticker}",
+                help="remover da watchlist",
+            ):
+                st.session_state[f"confirm_del_{ticker}"] = True
+        with btn_col2:
+            if st.button(
+                "📊", key=f"mem_{on_memorial or ticker}",
+                help="memorial de cálculo",
+            ):
+                st.session_state[f"show_memorial_{ticker}"] = True
+
+    # Linha separadora
+    st.markdown(
+        '<div style="height:1px; background:linear-gradient('
+        '90deg, transparent, var(--border-dim), transparent);'
+        ' margin:0;"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def watchlist_header_row():
+    """
+    Header da lista densa — labels das colunas.
+    Chame uma vez antes do loop de watchlist_row().
+    """
+    col_tk, col_nm, col_pr, col_1d, col_1m, \
+        col_hs, col_bd, col_ac = st.columns(
+            [1.2, 2.5, 1.5, 0.9, 0.9, 1.3, 0.8, 0.7]
+        )
+
+    labels = [
+        (col_tk, "ativo"),
+        (col_nm, "nome"),
+        (col_pr, "preço"),
+        (col_1d, "1d"),
+        (col_1m, "1m"),
+        (col_hs, "health"),
+        (col_bd, ""),
+        (col_ac, ""),
+    ]
+
+    for col, label in labels:
+        with col:
+            st.markdown(
+                f'<div style="font-family:Courier New;'
+                f' font-size:0.55rem; color:var(--text-muted);'
+                f' text-transform:uppercase;'
+                f' letter-spacing:0.12em;'
+                f' padding-bottom:4px;'
+                f' border-bottom:1px solid var(--border-dim);">'
+                f'{label}</div>',
+                unsafe_allow_html=True,
+            )
+
+
 def inject_keyboard_shortcuts():
     """Atalho Enter → clica no botão primário da página."""
     st.markdown(

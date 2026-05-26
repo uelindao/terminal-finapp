@@ -1,7 +1,6 @@
 """
-utils/style.py — v3.0  Bloomberg/Eikon institutional theme.
-Denso, funcional, informação máxima por pixel.
-Princípios: padding -50%, fontes menores, cantos retos, cores sutis.
+utils/style.py — v4.0  Bloomberg/Eikon institutional theme.
+Paleta de 4 camadas com variáveis CSS, contraste real, informação máxima por pixel.
 """
 import streamlit as st
 
@@ -12,8 +11,41 @@ def aplicar_tema():
     <style>
 
     /* ═══════════════════════════════════════════════════
+       DESIGN TOKENS — 4-LAYER PALETTE
+       ═══════════════════════════════════════════════════ */
+
+    :root {
+        --bg-base:     #07080f;   /* fundo da página */
+        --bg-surface:  #0d0f1a;   /* cards, painéis */
+        --bg-elevated: #141626;   /* inputs, hover, expanders */
+        --bg-overlay:  #1c1f35;   /* dropdowns, tooltips */
+
+        --border-dim:    #1a1d2e;  /* bordas sutis */
+        --border-normal: #252840;  /* bordas de cards */
+        --border-active: #FF9900;  /* foco, seleção */
+
+        --text-primary:   #E2E4F0; /* texto principal */
+        --text-secondary: #7B7F9E; /* labels, subtítulos */
+        --text-muted:     #3D4060; /* placeholders, desabilitado */
+
+        --accent:     #FF9900;    /* laranja primário */
+        --accent-dim: #2a1f00;    /* fundo de elementos accent */
+
+        --bull:     #00D97E;    /* verde mais saturado */
+        --bull-dim: #00261a;
+        --bear:     #FF4560;    /* vermelho mais vivo */
+        --bear-dim: #2a0010;
+        --amber:    #FFB800;    /* amarelo alerta */
+        --info:     #4DA6FF;    /* azul info */
+    }
+
+    /* ═══════════════════════════════════════════════════
        RESET E LAYOUT BASE
        ═══════════════════════════════════════════════════ */
+
+    body, .stApp {
+        background-color: var(--bg-base) !important;
+    }
 
     .block-container {
         padding-top: 0.75rem !important;
@@ -25,73 +57,68 @@ def aplicar_tema():
 
     /* Remove espaço em branco padrão do Streamlit */
     .main > div { padding-top: 0 !important; }
-    [data-testid="stAppViewContainer"] { background-color: #030303; }
+    [data-testid="stAppViewContainer"] { background-color: var(--bg-base); }
     [data-testid="stHeader"] { background: transparent; }
 
     /* ═══════════════════════════════════════════════════
        TIPOGRAFIA COMPACTA
        ═══════════════════════════════════════════════════ */
 
-    /* Nível 1: Título de página — menor e mais tenso */
     .page-title {
         font-family: 'Courier New', monospace;
         font-size: 0.82rem;
         font-weight: bold;
-        color: #FF9900;
+        color: var(--accent);
         text-transform: uppercase;
         letter-spacing: 0.14em;
-        border-bottom: 1px solid #1a1a1a;
+        border-bottom: 1px solid var(--border-dim);
         padding-bottom: 5px;
         margin-bottom: 10px;
     }
 
-    /* Nível 2: Título de seção */
     .section-title {
         font-family: 'Courier New', monospace;
         font-size: 0.68rem;
         font-weight: bold;
-        color: #666;
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.14em;
-        border-bottom: 1px solid #141414;
+        border-bottom: 1px solid var(--border-dim);
         padding-bottom: 3px;
         margin-bottom: 8px;
         margin-top: 14px;
     }
 
-    /* Nível 3: Label de campo */
     .field-label {
         font-family: 'Courier New', monospace;
         font-size: 0.62rem;
-        color: #444;
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.10em;
     }
 
-    /* Corpo de texto analítico */
     .body-text {
         font-family: 'Courier New', monospace;
         font-size: 0.78rem;
-        color: #aaa;
+        color: var(--text-secondary);
         line-height: 1.5;
     }
 
-    /* Override de markdown gerado pelo Streamlit */
     .stMarkdown p, .stMarkdown li {
         font-family: 'Courier New', monospace;
         font-size: 0.82rem;
-        color: #aaa;
+        color: var(--text-secondary);
         line-height: 1.5;
     }
     .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         font-family: 'Courier New', monospace;
-        color: #FF9900;
+        color: var(--accent);
         letter-spacing: 0.06em;
     }
     .stMarkdown h5 {
         font-family: 'Courier New', monospace;
         font-size: 0.72rem;
-        color: #555;
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.12em;
         font-weight: bold;
@@ -102,47 +129,53 @@ def aplicar_tema():
        CORES SEMÂNTICAS
        ═══════════════════════════════════════════════════ */
 
-    .color-bull  { color: #00C853 !important; }
-    .color-bear  { color: #FF1744 !important; }
-    .color-amber { color: #FF9900 !important; }
-    .color-info  { color: #00B0FF !important; }
-    .color-muted { color: #444444 !important; }
+    .color-bull  { color: var(--bull)  !important; }
+    .color-bear  { color: var(--bear)  !important; }
+    .color-amber { color: var(--amber) !important; }
+    .color-info  { color: var(--info)  !important; }
+    .color-muted { color: var(--text-muted) !important; }
 
-    /* Fundos com borda esquerda — sem background excessivo */
-    .bg-bull  { background-color: #050f08; border-left: 2px solid #00C853; }
-    .bg-bear  { background-color: #0f0305; border-left: 2px solid #FF1744; }
-    .bg-amber { background-color: #0f0800; border-left: 2px solid #FF9900; }
-    .bg-info  { background-color: #000c12; border-left: 2px solid #00B0FF; }
+    .bg-bull  { background-color: var(--bull-dim);  border-left: 2px solid var(--bull); }
+    .bg-bear  { background-color: var(--bear-dim);  border-left: 2px solid var(--bear); }
+    .bg-amber { background-color: var(--accent-dim); border-left: 2px solid var(--amber); }
+    .bg-info  { background-color: #001833;           border-left: 2px solid var(--info); }
 
     /* ═══════════════════════════════════════════════════
-       CARDS — CANTOS RETOS, PADDING MÍNIMO
+       CARDS — CANTOS RETOS, GRADIENTE SUTIL
        ═══════════════════════════════════════════════════ */
 
     .card {
-        background-color: #080808;
-        border: 1px solid #181818;
-        border-radius: 2px;
+        background: linear-gradient(
+            135deg,
+            var(--bg-surface) 0%,
+            var(--bg-elevated) 100%
+        ) !important;
+        border: 1px solid var(--border-normal) !important;
+        border-radius: 3px !important;
         padding: 8px 10px;
         margin-bottom: 6px;
     }
 
-    .card-bull  { border-left: 2px solid #00C853; }
-    .card-bear  { border-left: 2px solid #FF1744; }
-    .card-amber { border-left: 2px solid #FF9900; }
-    .card-info  { border-left: 2px solid #00B0FF; }
+    .card-bull  { border-left: 2px solid var(--bull)  !important; }
+    .card-bear  { border-left: 2px solid var(--bear)  !important; }
+    .card-amber { border-left: 2px solid var(--amber) !important; }
+    .card-info  { border-left: 2px solid var(--info)  !important; }
 
-    /* Card de métrica — compacto */
     .metric-card {
-        background-color: #080808;
-        border: 1px solid #181818;
-        border-radius: 2px;
+        background: linear-gradient(
+            135deg,
+            var(--bg-surface) 0%,
+            var(--bg-elevated) 100%
+        );
+        border: 1px solid var(--border-normal);
+        border-radius: 3px;
         padding: 7px 10px;
         text-align: left;
     }
     .metric-card .metric-label {
         font-family: 'Courier New', monospace;
         font-size: 0.60rem;
-        color: #444;
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.12em;
         margin-bottom: 2px;
@@ -151,14 +184,14 @@ def aplicar_tema():
         font-family: 'Courier New', monospace;
         font-size: 1.2rem;
         font-weight: bold;
-        color: #E8E8E8;
+        color: var(--text-primary);
         line-height: 1.15;
     }
     .metric-card .metric-delta {
         font-family: 'Courier New', monospace;
         font-size: 0.68rem;
         margin-top: 1px;
-        color: #555;
+        color: var(--text-muted);
     }
 
     /* ═══════════════════════════════════════════════════
@@ -168,26 +201,25 @@ def aplicar_tema():
     .badge {
         display: inline-block;
         padding: 1px 5px;
-        border-radius: 1px;
+        border-radius: 2px;
         font-family: 'Courier New', monospace;
         font-size: 0.60rem;
         font-weight: bold;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    .badge-bull  { background: #050f08; color: #00C853; border: 1px solid #00C853; }
-    .badge-bear  { background: #0f0305; color: #FF1744; border: 1px solid #FF1744; }
-    .badge-amber { background: #0f0800; color: #FF9900; border: 1px solid #FF9900; }
-    .badge-info  { background: #000c12; color: #00B0FF; border: 1px solid #00B0FF; }
-    .badge-muted { background: #0d0d0d; color: #444;    border: 1px solid #222; }
+    .badge-bull  { background: var(--bull-dim);   color: var(--bull);  border: 1px solid var(--bull); }
+    .badge-bear  { background: var(--bear-dim);   color: var(--bear);  border: 1px solid var(--bear); }
+    .badge-amber { background: var(--accent-dim); color: var(--amber); border: 1px solid var(--amber); }
+    .badge-info  { background: #001833;           color: var(--info);  border: 1px solid var(--info); }
+    .badge-muted { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-normal); }
 
     /* ═══════════════════════════════════════════════════
        BOTÕES — 28 PX, RETANGULARES
        ═══════════════════════════════════════════════════ */
 
-    /* Primário */
     [data-testid="stBaseButton-primary"] {
-        background-color: #FF9900 !important;
+        background-color: var(--accent) !important;
         color: #000 !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.70rem !important;
@@ -205,15 +237,14 @@ def aplicar_tema():
         background-color: #e68a00 !important;
     }
 
-    /* Secundário */
     [data-testid="stBaseButton-secondary"] {
         background-color: transparent !important;
-        color: #555 !important;
+        color: var(--text-muted) !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.70rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.06em !important;
-        border: 1px solid #242424 !important;
+        border: 1px solid var(--border-normal) !important;
         border-radius: 2px !important;
         height: 28px !important;
         min-height: 28px !important;
@@ -221,12 +252,11 @@ def aplicar_tema():
         line-height: 28px !important;
     }
     [data-testid="stBaseButton-secondary"]:hover {
-        border-color: #FF9900 !important;
-        color: #FF9900 !important;
-        background-color: #0f0800 !important;
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+        background-color: var(--accent-dim) !important;
     }
 
-    /* Tamanho uniforme independente de use_container_width */
     [data-testid="stBaseButton-primary"] p,
     [data-testid="stBaseButton-secondary"] p {
         font-size: 0.70rem !important;
@@ -241,10 +271,10 @@ def aplicar_tema():
     [data-testid="stTextInput"] input,
     [data-testid="stNumberInput"] input,
     [data-testid="stTextArea"] textarea {
-        background-color: #080808 !important;
-        border: 1px solid #1e1e1e !important;
+        background-color: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
         border-radius: 2px !important;
-        color: #D0D0D0 !important;
+        color: var(--text-primary) !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.80rem !important;
         padding: 4px 8px !important;
@@ -252,11 +282,10 @@ def aplicar_tema():
     [data-testid="stTextInput"] input:focus,
     [data-testid="stNumberInput"] input:focus,
     [data-testid="stTextArea"] textarea:focus {
-        border-color: #FF9900 !important;
+        border-color: var(--border-active) !important;
         box-shadow: 0 0 0 1px rgba(255,153,0,0.20) !important;
     }
 
-    /* Labels dos inputs */
     [data-testid="stTextInput"] label,
     [data-testid="stNumberInput"] label,
     [data-testid="stSelectbox"] label,
@@ -266,38 +295,35 @@ def aplicar_tema():
     [data-testid="stCheckbox"] label {
         font-family: 'Courier New', monospace !important;
         font-size: 0.65rem !important;
-        color: #444 !important;
+        color: var(--text-muted) !important;
         text-transform: uppercase !important;
         letter-spacing: 0.08em !important;
     }
 
-    /* Selectbox */
     [data-testid="stSelectbox"] > div > div {
-        background-color: #080808 !important;
-        border: 1px solid #1e1e1e !important;
+        background-color: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
         border-radius: 2px !important;
-        color: #D0D0D0 !important;
+        color: var(--text-primary) !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.80rem !important;
         min-height: 30px !important;
     }
 
-    /* Multiselect */
     [data-testid="stMultiSelect"] > div > div {
-        background-color: #080808 !important;
-        border: 1px solid #1e1e1e !important;
+        background-color: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
         border-radius: 2px !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.78rem !important;
     }
 
-    /* Radio */
     [data-testid="stRadio"] > div {
         gap: 4px !important;
     }
     [data-testid="stRadio"] label {
         font-size: 0.72rem !important;
-        color: #666 !important;
+        color: var(--text-secondary) !important;
         padding: 2px 6px !important;
         text-transform: none !important;
     }
@@ -307,31 +333,31 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stDataFrame"] {
-        border: 1px solid #141414;
+        border: 1px solid var(--border-normal);
         border-radius: 2px;
         overflow: hidden;
     }
     [data-testid="stDataFrame"] thead tr th {
-        background-color: #0a0a0a !important;
-        color: #FF9900 !important;
+        background-color: var(--bg-surface) !important;
+        color: var(--accent) !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.62rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.09em !important;
-        border-bottom: 1px solid #1a1a1a !important;
+        border-bottom: 1px solid var(--border-normal) !important;
         padding: 4px 8px !important;
     }
     [data-testid="stDataFrame"] tbody tr td {
         font-family: 'Courier New', monospace !important;
         font-size: 0.74rem !important;
         padding: 3px 8px !important;
-        border-bottom: 1px solid #0e0e0e !important;
+        border-bottom: 1px solid var(--border-dim) !important;
     }
     [data-testid="stDataFrame"] tbody tr:nth-child(even) td {
-        background-color: #060606 !important;
+        background-color: var(--bg-surface) !important;
     }
     [data-testid="stDataFrame"] tbody tr:hover td {
-        background-color: #101010 !important;
+        background-color: var(--bg-elevated) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -339,8 +365,8 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stSidebar"] {
-        background-color: #030303;
-        border-right: 1px solid #141414;
+        background-color: var(--bg-base);
+        border-right: 1px solid var(--border-dim);
     }
     [data-testid="stSidebar"] > div {
         padding-top: 0.5rem;
@@ -348,28 +374,27 @@ def aplicar_tema():
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
         font-family: 'Courier New', monospace;
         font-size: 0.72rem;
-        color: #555;
+        color: var(--text-muted);
         text-transform: uppercase;
         letter-spacing: 0.08em;
         padding: 5px 10px;
         border-radius: 2px;
     }
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {
-        background-color: #0a0a0a;
-        color: #FF9900;
+        background-color: var(--bg-elevated);
+        color: var(--accent);
     }
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] [aria-current="page"] {
-        background-color: #0f0800;
-        color: #FF9900 !important;
-        border-left: 2px solid #FF9900;
+        background-color: var(--accent-dim);
+        color: var(--accent) !important;
+        border-left: 2px solid var(--accent);
         padding-left: 8px;
     }
 
-    /* Texto na sidebar */
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] .stMarkdown p {
         font-size: 0.72rem !important;
-        color: #555 !important;
+        color: var(--text-muted) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -377,7 +402,7 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stTabs"] [role="tablist"] {
-        border-bottom: 1px solid #141414;
+        border-bottom: 1px solid var(--border-dim);
         gap: 1px;
         padding-bottom: 0;
     }
@@ -386,7 +411,7 @@ def aplicar_tema():
         font-size: 0.65rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.10em !important;
-        color: #444 !important;
+        color: var(--text-muted) !important;
         padding: 5px 12px !important;
         border-radius: 0 !important;
         border: none !important;
@@ -394,42 +419,41 @@ def aplicar_tema():
         background: transparent !important;
     }
     [data-testid="stTabs"] [role="tab"]:hover {
-        color: #888 !important;
-        background-color: #0a0a0a !important;
+        color: var(--text-secondary) !important;
+        background-color: var(--bg-elevated) !important;
     }
     [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-        color: #FF9900 !important;
+        color: var(--accent) !important;
         background-color: transparent !important;
-        border-bottom: 2px solid #FF9900 !important;
+        border-bottom: 2px solid var(--accent) !important;
     }
 
-    /* Conteúdo da aba — padding mínimo */
     [data-testid="stTabsContent"] {
         padding-top: 0.75rem !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       EXPANDERS — MENOS DESTAQUE, MAIS FUNCIONAL
+       EXPANDERS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stExpander"] {
-        border: 1px solid #141414 !important;
+        border: 1px solid var(--border-dim) !important;
         border-radius: 2px !important;
-        background-color: #060606 !important;
+        background-color: var(--bg-surface) !important;
         margin-bottom: 5px !important;
     }
     [data-testid="stExpander"] summary {
         font-family: 'Courier New', monospace !important;
         font-size: 0.70rem !important;
-        color: #555 !important;
+        color: var(--text-muted) !important;
         text-transform: uppercase !important;
         letter-spacing: 0.08em !important;
         padding: 7px 10px !important;
         min-height: 0 !important;
     }
     [data-testid="stExpander"] summary:hover {
-        color: #FF9900 !important;
-        background-color: #0a0a0a !important;
+        color: var(--accent) !important;
+        background-color: var(--bg-elevated) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -437,15 +461,19 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stMetric"] {
-        background-color: #080808;
-        border: 1px solid #181818;
-        border-radius: 2px;
+        background: linear-gradient(
+            135deg,
+            var(--bg-surface) 0%,
+            var(--bg-elevated) 100%
+        );
+        border: 1px solid var(--border-normal);
+        border-radius: 3px;
         padding: 6px 10px;
     }
     [data-testid="stMetricLabel"] {
         font-family: 'Courier New', monospace !important;
         font-size: 0.60rem !important;
-        color: #444 !important;
+        color: var(--text-muted) !important;
         text-transform: uppercase !important;
         letter-spacing: 0.10em !important;
     }
@@ -453,7 +481,7 @@ def aplicar_tema():
         font-family: 'Courier New', monospace !important;
         font-size: 1.1rem !important;
         font-weight: bold !important;
-        color: #E8E8E8 !important;
+        color: var(--text-primary) !important;
     }
     [data-testid="stMetricDelta"] {
         font-family: 'Courier New', monospace !important;
@@ -471,24 +499,24 @@ def aplicar_tema():
         font-size: 0.74rem !important;
     }
     [data-testid="stSuccess"] {
-        background-color: #050f08 !important;
-        border: 1px solid #00C853 !important;
-        color: #00C853 !important;
+        background-color: var(--bull-dim) !important;
+        border: 1px solid var(--bull) !important;
+        color: var(--bull) !important;
     }
     [data-testid="stError"] {
-        background-color: #0f0305 !important;
-        border: 1px solid #FF1744 !important;
-        color: #FF1744 !important;
+        background-color: var(--bear-dim) !important;
+        border: 1px solid var(--bear) !important;
+        color: var(--bear) !important;
     }
     [data-testid="stWarning"] {
-        background-color: #0f0800 !important;
-        border: 1px solid #FF9900 !important;
-        color: #FF9900 !important;
+        background-color: var(--accent-dim) !important;
+        border: 1px solid var(--amber) !important;
+        color: var(--amber) !important;
     }
     [data-testid="stInfo"] {
-        background-color: #000c12 !important;
-        border: 1px solid #00B0FF !important;
-        color: #00B0FF !important;
+        background-color: #001833 !important;
+        border: 1px solid var(--info) !important;
+        color: var(--info) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -496,19 +524,19 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stChatMessage"] {
-        background-color: #060606 !important;
-        border: 1px solid #141414 !important;
+        background-color: var(--bg-surface) !important;
+        border: 1px solid var(--border-dim) !important;
         border-radius: 2px !important;
         padding: 8px 12px !important;
         margin-bottom: 4px !important;
     }
     [data-testid="stChatInput"] textarea {
-        background-color: #080808 !important;
-        border: 1px solid #1e1e1e !important;
+        background-color: var(--bg-elevated) !important;
+        border: 1px solid var(--border-normal) !important;
         border-radius: 2px !important;
         font-family: 'Courier New', monospace !important;
         font-size: 0.78rem !important;
-        color: #D0D0D0 !important;
+        color: var(--text-primary) !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -518,27 +546,33 @@ def aplicar_tema():
     [data-testid="stSpinner"] {
         font-family: 'Courier New', monospace !important;
         font-size: 0.72rem !important;
-        color: #555 !important;
+        color: var(--text-muted) !important;
     }
     [data-testid="stProgress"] > div > div {
-        background-color: #FF9900 !important;
+        background-color: var(--accent) !important;
         height: 2px !important;
         border-radius: 0 !important;
     }
     [data-testid="stProgress"] > div {
-        background-color: #141414 !important;
+        background-color: var(--bg-elevated) !important;
         height: 2px !important;
         border-radius: 0 !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       DIVISORES — LINHA FINA
+       DIVISORES — GRADIENTE
        ═══════════════════════════════════════════════════ */
 
     hr {
-        border: none;
-        border-top: 1px solid #111;
-        margin: 10px 0;
+        border: none !important;
+        height: 1px !important;
+        background: linear-gradient(
+            90deg,
+            transparent,
+            var(--border-normal),
+            transparent
+        ) !important;
+        margin: 8px 0 !important;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -547,30 +581,28 @@ def aplicar_tema():
 
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #1e1e1e; border-radius: 0; }
-    ::-webkit-scrollbar-thumb:hover { background: #FF9900; }
+    ::-webkit-scrollbar-thumb { background: var(--border-normal); border-radius: 0; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
     /* ═══════════════════════════════════════════════════
        COLUNA / GRID — ESPAÇAMENTO REDUZIDO
        ═══════════════════════════════════════════════════ */
 
-    /* Remove espaçamento extra entre colunas */
     [data-testid="column"] {
         padding-left: 4px !important;
         padding-right: 4px !important;
     }
 
-    /* Reduz gap de st.columns */
     [data-testid="stHorizontalBlock"] {
         gap: 0.5rem !important;
     }
 
     /* ═══════════════════════════════════════════════════
-       PLOTLY / CHARTS — REMOVE BORDA PADRÃO
+       PLOTLY / CHARTS
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stPlotlyChart"] {
-        border: 1px solid #141414;
+        border: 1px solid var(--border-dim);
         border-radius: 2px;
         overflow: hidden;
     }
