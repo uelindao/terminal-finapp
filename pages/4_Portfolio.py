@@ -891,7 +891,40 @@ with tab_posicoes:
 # tab 2: concentração de risco
 # ==========================================
 with tab_concentracao:
-    from utils.fmp_client import get_profile as _fmp_get_profile
+    # ── CARREGA DADOS INDEPENDENTE DA ABA POSIÇÕES ────────────────────────
+    _pesos_conc = st.session_state.get("pesos_ativos_cache", [])
+    if not _pesos_conc:
+        _pesos_conc = [p for p in get_pesos() if float(p.get('quantidade') or 0) > 0]
+        st.session_state["pesos_ativos_cache"] = _pesos_conc
+
+    _live_conc = st.session_state.get("live_data_cache", {})
+    if not _live_conc and _pesos_conc:
+        _tickers_conc = list(set([
+            mapear_ticker_base(p['ticker']) for p in _pesos_conc
+        ]))
+        try:
+            _hist_c = yf.download(
+                _tickers_conc, period="2d",
+                auto_adjust=True, progress=False,
+                multi_level_index=False,
+            )
+            if isinstance(_hist_c.columns, pd.MultiIndex):
+                _hist_c.columns = _hist_c.columns.get_level_values(0)
+            _close_c = _hist_c.get('Close', _hist_c)
+            for _tc in _tickers_conc:
+                try:
+                    if isinstance(_close_c, pd.DataFrame) and _tc in _close_c.columns:
+                        _s = _close_c[_tc].dropna()
+                    elif isinstance(_close_c, pd.Series):
+                        _s = _close_c.dropna()
+                    else:
+                        continue
+                    _live_conc[_tc] = {'preco': float(_s.iloc[-1])}
+                except Exception:
+                    _live_conc[_tc] = {'preco': 0.0}
+            st.session_state["live_data_cache"] = _live_conc
+        except Exception as _ec:
+            logger.warning(f"[conc] cotações: {_ec}")
 
     section_title("🎯 análise de concentração de risco")
 
@@ -899,9 +932,10 @@ with tab_concentracao:
     _cache_fund = get_todos_fundamentos_cache()
 
     _total_cart = 0.0
-    for _t, _d in ativos_alocados.items():
-        _qtd = float(_d.get('quantidade') or 0)
-        _pr  = live_data.get(_t, 0.0)
+    for _p in _pesos_conc:
+        _qtd = float(_p.get('quantidade') or 0)
+        _tb  = mapear_ticker_base(_p['ticker'])
+        _pr  = _live_conc.get(_tb, {}).get('preco', 0.0)
         _total_cart += _pr * _qtd
 
     if _total_cart <= 0:
@@ -912,13 +946,14 @@ with tab_concentracao:
     else:
         dados_conc = []
 
-        for _t, _d in ativos_alocados.items():
-            _qtd = float(_d.get('quantidade') or 0)
+        for _p in _pesos_conc:
+            _t   = _p['ticker']
+            _qtd = float(_p.get('quantidade') or 0)
             if _qtd <= 0:
                 continue
 
             _t_base = mapear_ticker_base(_t)
-            _preco  = live_data.get(_t, 0.0)
+            _preco  = _live_conc.get(_t_base, {}).get('preco', 0.0)
             _valor  = _preco * _qtd
             _peso   = (_valor / _total_cart * 100) if _total_cart > 0 else 0.0
 

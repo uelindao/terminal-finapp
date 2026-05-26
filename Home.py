@@ -82,36 +82,41 @@ def buscar_ativo_yahoo(query):
 # ==========================================
 page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
 
-render_painel_admin()
+# ── Admin e Perfil na sidebar ───────────────────────────────────────────
+with st.sidebar:
+    _user_sidebar = get_current_user()
 
-with st.expander("👤 meu perfil", expanded=False):
-    user = get_current_user()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(f"**usuário:** {user['username']}")
-        st.markdown(f"**nome:** {user['nome'] or '—'}")
-        st.markdown(f"**perfil:** {'administrador' if user['is_admin'] else 'usuário'}")
-    with c2:
-        with st.form("form_minha_senha", clear_on_submit=True):
-            st.markdown("**alterar senha:**")
-            senha_atual = st.text_input("senha atual:", type="password")
-            senha_nova  = st.text_input("nova senha:", type="password")
-            senha_conf  = st.text_input("confirmar:", type="password")
+    # Perfil compacto
+    if _user_sidebar:
+        with st.expander("👤 meu perfil", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**usuário:** {_user_sidebar['username']}")
+                st.markdown(f"**nome:** {_user_sidebar['nome'] or '—'}")
+                st.markdown(f"**perfil:** {'administrador' if _user_sidebar['is_admin'] else 'usuário'}")
+            with c2:
+                with st.form("form_minha_senha", clear_on_submit=True):
+                    st.markdown("**alterar senha:**")
+                    senha_atual = st.text_input("senha atual:", type="password", key="sb_pwd_atual")
+                    senha_nova  = st.text_input("nova senha:", type="password", key="sb_pwd_nova")
+                    senha_conf  = st.text_input("confirmar:", type="password", key="sb_pwd_conf")
+                    if st.form_submit_button("alterar senha"):
+                        from database.db import autenticar_usuario, alterar_senha
+                        if autenticar_usuario(_user_sidebar['username'], senha_atual):
+                            if senha_nova == senha_conf and len(senha_nova) >= 4:
+                                alterar_senha(_user_sidebar['user_id'], senha_nova)
+                                st.success("✅ senha alterada!")
+                            elif senha_nova != senha_conf:
+                                st.error("senhas não coincidem.")
+                            else:
+                                st.error("mínimo 4 caracteres.")
+                        else:
+                            st.error("senha atual incorreta.")
 
-            if st.form_submit_button("alterar senha"):
-                from database.db import autenticar_usuario, alterar_senha
-                if autenticar_usuario(user['username'], senha_atual):
-                    if senha_nova == senha_conf and len(senha_nova) >= 4:
-                        alterar_senha(user['user_id'], senha_nova)
-                        st.success("✅ senha alterada com sucesso!")
-                    elif senha_nova != senha_conf:
-                        st.error("as senhas não coincidem.")
-                    else:
-                        st.error("senha deve ter pelo menos 4 caracteres.")
-                else:
-                    st.error("senha atual incorreta.")
-
-st.markdown("---")
+    # Painel admin (somente admins)
+    if _user_sidebar and _user_sidebar.get('is_admin'):
+        with st.expander("⚙️ admin", expanded=False):
+            render_painel_admin()
 
 # ==========================================
 # NAVEGAÇÃO RÁPIDA
