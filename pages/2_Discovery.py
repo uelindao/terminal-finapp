@@ -283,35 +283,69 @@ def rodar_screener(
         setor   = fund.get('setor', '—')
         score   = health.get('score', 0) or 0
 
-        # Filtros — None passa (dado ausente não bloqueia)
-        if pl is not None:
-            if pl_min > 0 and pl < pl_min: continue
-            if pl_max > 0 and pl > pl_max: continue
+        # Score 0 = nunca calculado
+        nao_calculado = (score == 0)
 
-        if pvp is not None and pvp_max > 0:
-            if pvp > pvp_max: continue
+        # ── Filtro health score ──────────────────────────────────
+        # Se score_min > 0 e o ativo nunca teve score calculado
+        # (score == 0), exclui — 0 não é "ótimo", é "sem dados".
+        if score_min > 0:
+            if nao_calculado or score < score_min:
+                continue
 
-        if roe is not None and roe_min > 0:
-            if roe < roe_min: continue
+        # ── Filtros fundamentalistas ─────────────────────────────
+        # Regra: se o usuário definiu o filtro E o dado é None,
+        # exclui o ativo. Dado ausente ≠ filtro aprovado.
+        algum_filtro_fund = (
+            pl_min > 0 or pl_max > 0 or
+            pvp_max > 0 or roe_min > 0 or dy_min > 0
+        )
 
-        if dy_min > 0 and dy < dy_min:
-            continue
+        if pl_min > 0 or pl_max > 0:
+            if pl is None:
+                continue
+            if pl_min > 0 and pl < pl_min:
+                continue
+            if pl_max > 0 and pl > pl_max:
+                continue
 
-        if score_min > 0 and score < score_min:
-            continue
+        if pvp_max > 0:
+            if pvp is None:
+                continue
+            if pvp > pvp_max:
+                continue
+
+        if roe_min > 0:
+            if roe is None:
+                continue
+            if roe < roe_min:
+                continue
+
+        if dy_min > 0:
+            if dy is None or dy < dy_min:
+                continue
+
+        # Se nenhum filtro fundamentalista foi definido mas o ativo
+        # não tem nenhum dado, ainda inclui (com flag sem_dados)
+        sem_dados_fund = (
+            pl is None and pvp is None and
+            roe is None and (dy == 0 or dy is None)
+        )
 
         resultados.append({
-            'ticker':       ticker.replace('.SA', ''),
-            'nome':         nome[:30] if nome else '—',
-            'setor':        setor[:25] if setor else '—',
-            'p/l':          pl,
-            'p/vp':         pvp,
-            'roe%':         roe,
-            'dy%':          dy if dy else None,
-            'margem%':      margem,
-            'ev/ebitda':    ev_ebit,
-            'score':        score,
-            '_ticker_full': ticker,
+            'ticker':        ticker.replace('.SA', ''),
+            'nome':          nome[:30] if nome else '—',
+            'setor':         setor[:25] if setor else '—',
+            'p/l':           pl,
+            'p/vp':          pvp,
+            'roe%':          roe,
+            'dy%':           dy if dy else None,
+            'margem%':       margem,
+            'ev/ebitda':     ev_ebit,
+            'score':         score,
+            '_nao_calc':     nao_calculado,
+            '_sem_dados':    sem_dados_fund,
+            '_ticker_full':  ticker,
         })
 
     if not resultados:
@@ -642,7 +676,8 @@ with tab_screener:
                 )
             with col_r3:
                 csv_scr = df_res.drop(
-                    columns=['_ticker_full'], errors='ignore'
+                    columns=['_ticker_full', '_nao_calc', '_sem_dados'],
+                    errors='ignore',
                 ).to_csv(index=False).encode('utf-8')
                 st.download_button(
                     "📥 exportar CSV",
@@ -653,15 +688,34 @@ with tab_screener:
                     key="sc_download",
                 )
 
-            # Tabela principal
-            cols_display = ['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
-            cols_display = [c for c in cols_display if c in df_res.columns]
-            df_display   = df_res[cols_display].copy()
+            # ── PROBLEMA 4: aviso cache incompleto ──────────────
+            ativos_sem_dados = int(df_res.get('_sem_dados', pd.Series(dtype=bool)).sum()) if '_sem_dados' in df_res.columns else 0
+            if ativos_sem_dados > len(df_res) * 0.3:
+                status_card(
+                    "⚠️ cache de fundamentos incompleto",
+                    f"{ativos_sem_dados} de {len(df_res)} ativos sem dados fundamentalistas. "
+                    f"clique em '🔄 sync cache eua' no topo da página para atualizar os dados "
+                    f"antes de rodar o screener.",
+                    tipo="amber",
+                )
+
+            # ── Tabela principal ─────────────────────────────────
+            cols_display = ['ticker', 'nome', 'health', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
+            df_display   = df_res[['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']].copy()
+
+            # PROBLEMA 3: Barra de health como texto (evita cor invertida do ProgressColumn)
+            df_display.insert(2, 'health', df_res['score'].apply(
+                lambda s: (
+                    f"{'█' * (int(s) // 10)}{'░' * (10 - int(s) // 10)} {int(s)}"
+                    if s and s > 0 else "— n/c"
+                )
+            ))
+            df_display = df_display.drop(columns=['score'])
 
             for col in ['p/l', 'p/vp', 'roe%', 'dy%', 'margem%']:
                 if col in df_display.columns:
                     df_display[col] = df_display[col].apply(
-                        lambda x: f"{x:.1f}" if pd.notna(x) else "—"
+                        lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
                     )
 
             st.dataframe(
@@ -671,12 +725,12 @@ with tab_screener:
                 column_config={
                     'ticker': st.column_config.TextColumn("Ticker", width="small"),
                     'nome':   st.column_config.TextColumn("Nome",   width="medium"),
-                    'score':  st.column_config.ProgressColumn(
-                        "Health Score",
-                        min_value=0, max_value=100,
-                        format="%d",
-                        width="medium",
-                    ),
+                    'health': st.column_config.TextColumn("Health Score", width="medium"),
+                    'p/l':    st.column_config.TextColumn("P/L",   width="small"),
+                    'p/vp':   st.column_config.TextColumn("P/VP",  width="small"),
+                    'roe%':   st.column_config.TextColumn("ROE %", width="small"),
+                    'dy%':    st.column_config.TextColumn("DY %",  width="small"),
+                    'margem%':st.column_config.TextColumn("Margem %", width="small"),
                 },
             )
 
