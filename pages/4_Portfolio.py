@@ -1762,45 +1762,154 @@ with tab_chat:
         unsafe_allow_html=True,
     )
 
-    # ── monta contexto da carteira (uma vez por sessão) ───────────────────
+    # ── CARREGA DADOS SE NÃO ESTIVEREM NO SESSION_STATE ─────────────────
 
-    def montar_contexto_carteira(posicoes_cache: list, metricas_cache: dict) -> str:
+    # 1. Posições do portfólio
+    pesos_chat = st.session_state.get("pesos_ativos_cache", [])
+    if not pesos_chat:
+        pesos_chat = get_pesos()
+        st.session_state["pesos_ativos_cache"] = pesos_chat
+
+    # 2. Health scores
+    health_chat = st.session_state.get("health_chat_cache", {})
+    if not health_chat:
+        health_chat = {h['ticker']: h for h in get_health_scores()}
+        st.session_state["health_chat_cache"] = health_chat
+
+    # 3. Cotações atuais (busca apenas tickers com posição)
+    live_chat = st.session_state.get("live_data_cache", {})
+    if not live_chat and pesos_chat:
+        _tickers_chat = list(set([
+            mapear_ticker_base(p['ticker'])
+            for p in pesos_chat
+            if float(p.get('quantidade') or 0) > 0
+        ]))
+
+        if _tickers_chat:
+            try:
+                with st.spinner("carregando dados da carteira..."):
+                    _hist_chat = yf.download(
+                        _tickers_chat,
+                        period="2d",
+                        auto_adjust=True,
+                        progress=False,
+                        multi_level_index=False,
+                    )
+
+                    if isinstance(_hist_chat.columns, pd.MultiIndex):
+                        _hist_chat.columns = _hist_chat.columns.get_level_values(0)
+
+                    _close = _hist_chat.get('Close', _hist_chat)
+
+                    for _tc in _tickers_chat:
+                        try:
+                            if isinstance(_close, pd.DataFrame) and _tc in _close.columns:
+                                _serie = _close[_tc].dropna()
+                            elif isinstance(_close, pd.Series):
+                                _serie = _close.dropna()
+                            else:
+                                continue
+
+                            _pa = float(_serie.iloc[-1])
+                            _pb = float(_serie.iloc[-2]) if len(_serie) >= 2 else _pa
+                            _v1d = ((_pa / _pb) - 1) * 100 if _pb > 0 else 0.0
+                            live_chat[_tc] = {'preco': _pa, 'var_1d': _v1d}
+                        except Exception:
+                            live_chat[_tc] = {'preco': 0.0, 'var_1d': 0.0}
+
+                    st.session_state["live_data_cache"] = live_chat
+            except Exception as _e:
+                logger.warning(f"[chat] falha ao carregar cotações: {_e}")
+
+    # 4. Métricas globais (opcionais — usa vazio se não tiver)
+    metricas_chat = st.session_state.get("metricas_cache", {})
+
+    # ── DEFINIÇÃO DA FUNÇÃO DE CONTEXTO ──────────────────────────────────
+
+    def montar_contexto_carteira(
+        posicoes: list,
+        live_data_ctx: dict,
+        health_data_ctx: dict,
+        metricas_ctx: dict,
+    ) -> str:
         """
         Serializa o estado da carteira em texto estruturado.
-        Gerado UMA VEZ e armazenado no session_state para cache hit
-        em mensagens subsequentes da mesma sessão.
+        Aceita tanto o formato enriquecido (vindo de pesos_ativos_cache)
+        quanto o formato bruto do get_pesos(), enriquecendo on-the-fly com
+        live_data_ctx e health_data_ctx.
+        Gerado UMA VEZ e armazenado no session_state para cache hit.
         """
         linhas = ["estado atual da carteira do usuário:\n"]
 
-        if posicoes_cache:
+        # Calcula totais para peso relativo
+        _total_valor = 0.0
+        _enriched = []
+        for _p in posicoes:
+            _qtd = float(_p.get('quantidade') or 0)
+            _pm  = float(_p.get('preco_medio') or _p.get('preço médio') or 0)
+            if _qtd <= 0:
+                continue
+
+            _tk     = _p.get('ticker', '')
+            _tb     = mapear_ticker_base(_tk)
+            # preco_atual: enriquecido ou vivo ou zero
+            _pa     = float(_p.get('preco_atual') or
+                            live_data_ctx.get(_tb, {}).get('preco') or
+                            live_data_ctx.get(_tk, {}).get('preco') or 0)
+            _valor  = _pa * _qtd if _pa > 0 else _pm * _qtd
+            _total_valor += _valor
+
+            _hs_raw = _p.get('health_score') or health_data_ctx.get(_tb, {}).get('score') or 50
+            _pnl    = float(_p.get('pnl_pct') or
+                            (((_pa / _pm) - 1) * 100 if _pm > 0 and _pa > 0 else 0))
+
+            _enriched.append({
+                'ticker':    _tk,
+                'qtd':       _qtd,
+                'pm':        _pm,
+                'pa':        _pa,
+                'valor':     _valor,
+                'hs':        _hs_raw,
+                'pnl':       _pnl,
+            })
+
+        if _enriched:
             linhas.append("posições:")
-            for p in posicoes_cache:
-                hs = p.get('health_score', '—')
-                _hs_str = f"{hs}/100" if isinstance(hs, (int, float)) else str(hs)
-                try:
-                    _pnl_str = f"{float(p['pnl_pct']):+.1f}%"
-                except (TypeError, ValueError):
-                    _pnl_str = "n/d"
+            for _e in _enriched:
+                _peso_pct = (_e['valor'] / _total_valor * 100) if _total_valor > 0 else 0
+                _hs_str   = f"{_e['hs']}/100" if isinstance(_e['hs'], (int, float)) else str(_e['hs'])
+                _moeda    = "r$" if mapear_ticker_base(_e['ticker']).endswith('.SA') else "$"
                 linhas.append(
-                    f"- {p['ticker']}: "
-                    f"{p['quantidade']:.0f} cotas | "
-                    f"preço r$ {p['preco_atual']:,.2f} | "
-                    f"pm r$ {p['preco_medio']:,.2f} | "
-                    f"valor r$ {p['valor']:,.0f} | "
-                    f"peso {p['peso_pct']:.1f}% | "
+                    f"- {_e['ticker']}: "
+                    f"{_e['qtd']:.0f} cotas | "
+                    f"preço {_moeda} {_e['pa']:,.2f} | "
+                    f"pm {_moeda} {_e['pm']:,.2f} | "
+                    f"valor {_moeda} {_e['valor']:,.0f} | "
+                    f"peso {_peso_pct:.1f}% | "
                     f"health {_hs_str} | "
-                    f"p&l {_pnl_str}"
+                    f"p&l {_e['pnl']:+.1f}%"
                 )
         else:
             linhas.append("nenhuma posição encontrada.")
 
-        if metricas_cache:
+        if metricas_ctx:
             linhas.append(
                 f"\nresumo da carteira:\n"
-                f"- valor total (m2m): r$ {metricas_cache.get('valor_total', 0):,.2f}\n"
-                f"- custo total investido: r$ {metricas_cache.get('custo_total', 0):,.2f}\n"
-                f"- p&l total: {metricas_cache.get('pnl_total_pct', 0):+.1f}%\n"
-                f"- número de posições: {metricas_cache.get('num_posicoes', 0)}"
+                f"- valor total (m2m): r$ {metricas_ctx.get('valor_total', 0):,.2f}\n"
+                f"- custo total investido: r$ {metricas_ctx.get('custo_total', 0):,.2f}\n"
+                f"- p&l total: {metricas_ctx.get('pnl_total_pct', 0):+.1f}%\n"
+                f"- número de posições: {metricas_ctx.get('num_posicoes', 0)}"
+            )
+        elif _total_valor > 0:
+            # fallback: calcula métricas da lista enriquecida
+            _custo_total = sum(_e['pm'] * _e['qtd'] for _e in _enriched)
+            _pnl_total   = ((_total_valor / _custo_total) - 1) * 100 if _custo_total > 0 else 0
+            linhas.append(
+                f"\nresumo da carteira:\n"
+                f"- valor total (m2m): r$ {_total_valor:,.2f}\n"
+                f"- custo total investido: r$ {_custo_total:,.2f}\n"
+                f"- p&l total: {_pnl_total:+.1f}%\n"
+                f"- número de posições: {len(_enriched)}"
             )
 
         macro = st.session_state.get("macro_context", {})
@@ -1814,13 +1923,18 @@ with tab_chat:
 
         return "\n".join(linhas)
 
-    _ctx_key = "chat_portfolio_contexto"
+    # ── MONTA CONTEXTO (com invalidação se dados mudaram) ────────────────
+
+    _ctx_key     = "chat_portfolio_contexto"
+    _ctx_version = f"{len(pesos_chat)}_{len(live_chat)}"
+
+    if st.session_state.get("chat_ctx_version") != _ctx_version:
+        st.session_state.pop(_ctx_key, None)
+        st.session_state["chat_ctx_version"] = _ctx_version
 
     if _ctx_key not in st.session_state:
-        _pos_cache  = st.session_state.get('pesos_ativos_cache', [])
-        _met_cache  = st.session_state.get('metricas_cache', {})
         st.session_state[_ctx_key] = montar_contexto_carteira(
-            _pos_cache, _met_cache
+            pesos_chat, live_chat, health_chat, metricas_chat
         )
 
     contexto_carteira = st.session_state[_ctx_key]
