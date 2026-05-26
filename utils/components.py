@@ -347,25 +347,25 @@ def watchlist_row(
                   "var(--bear)")
         hs_html = (
             f'<div style="display:flex; align-items:center;'
-            f' gap:5px; min-width:80px; padding:10px 0 2px;">'
+            f' gap:5px; min-width:80px; padding:12px 0 4px;">'
             f'<div style="flex:1; background:var(--bg-elevated);'
-            f' height:3px; border-radius:1px;">'
+            f' height:4px; border-radius:1px;">'
             f'<div style="width:{hs}%; height:100%;'
             f' background:{cor_hs}; border-radius:1px;"></div>'
             f'</div>'
-            f'<span style="font-size:0.68rem; color:{cor_hs};'
-            f' font-weight:bold; min-width:20px;'
+            f'<span style="font-size:0.75rem; color:{cor_hs};'
+            f' font-weight:bold; min-width:22px;'
             f' text-align:right;">{hs}</span>'
             f'</div>'
         )
 
-    # Badges compactos
+    # Badges compactos (irão para dentro de col_nm)
     badges_html = ""
     if tem_alert:
         badges_html += (
-            '<span style="font-size:0.52rem; color:var(--bear);'
+            ' <span style="font-size:0.52rem; color:var(--bear);'
             ' border:1px solid var(--bear); padding:0 3px;'
-            ' border-radius:2px; margin-right:3px;">⚠</span>'
+            ' border-radius:2px; vertical-align:middle;">⚠</span>'
         )
     if earnings_info and 0 <= earnings_info.get("dias", 99) <= 14:
         dias_e = earnings_info["dias"]
@@ -373,44 +373,48 @@ def watchlist_row(
                   "var(--amber)" if dias_e <= 7 else
                   "var(--text-muted)")
         badges_html += (
-            f'<span style="font-size:0.52rem; color:{cor_e};'
+            f' <span style="font-size:0.52rem; color:{cor_e};'
             f' border:1px solid {cor_e}; padding:0 3px;'
-            f' border-radius:2px;">res·{dias_e}d</span>'
+            f' border-radius:2px; vertical-align:middle;">res·{dias_e}d</span>'
         )
 
-    # Primeiro alerta resumido
-    alerta_resumo = ""
+    # Primeiro alerta — texto puro (sem wrapper div)
+    alerta_resumo_txt = ""
     if tem_alert and alertas:
-        txt = alertas[0][:60] + "…" if len(alertas[0]) > 60 else alertas[0]
-        alerta_resumo = (
-            f'<div style="font-size:0.58rem;'
-            f' color:var(--text-muted);'
-            f' margin-top:2px; line-height:1.2;">{txt}</div>'
+        alerta_resumo_txt = (
+            alertas[0][:60] + "…" if len(alertas[0]) > 60 else alertas[0]
         )
 
-    # Layout: 8 colunas
+    # Layout: 7 colunas (badges migrados para col_nm)
     col_tk, col_nm, col_pr, col_1d, col_1m, \
-        col_hs, col_bd, col_ac = st.columns(
-            [1.2, 2.5, 1.5, 0.9, 0.9, 1.3, 0.8, 0.7]
+        col_hs, col_ac = st.columns(
+            [1.4, 2.8, 1.6, 1.0, 1.0, 1.5, 0.6]
         )
 
     with col_tk:
         st.markdown(
             f'<div style="font-family:Courier New;'
             f' font-weight:bold; color:var(--accent);'
-            f' font-size:0.78rem; padding:10px 0 2px;">'
+            f' font-size:0.85rem; padding:12px 0 4px;">'
             f'{ticker.replace(".SA", "")}</div>',
             unsafe_allow_html=True,
         )
 
     with col_nm:
+        alerta_sub = (
+            f'<div style="font-size:0.65rem;'
+            f' color:var(--text-muted); line-height:1.3;'
+            f' overflow:hidden; text-overflow:ellipsis;'
+            f' white-space:nowrap; max-width:280px;">'
+            f'{alerta_resumo_txt}</div>'
+        ) if alerta_resumo_txt else ""
         st.markdown(
             f'<div style="font-family:Courier New;'
-            f' color:var(--text-muted); font-size:0.65rem;'
-            f' padding:10px 0 2px; overflow:hidden;'
+            f' color:var(--text-secondary); font-size:0.75rem;'
+            f' padding:12px 0 4px; overflow:hidden;'
             f' text-overflow:ellipsis; white-space:nowrap;">'
-            f'{nome[:30]}</div>'
-            f'{alerta_resumo}',
+            f'{nome[:28]}{badges_html}</div>'
+            f'{alerta_sub}',
             unsafe_allow_html=True,
         )
 
@@ -418,7 +422,7 @@ def watchlist_row(
         st.markdown(
             f'<div style="font-family:Courier New;'
             f' font-weight:bold; color:var(--text-primary);'
-            f' font-size:0.82rem; padding:10px 0 2px;">'
+            f' font-size:0.92rem; padding:12px 0 4px;">'
             f'{moeda} {preco:,.2f}</div>',
             unsafe_allow_html=True,
         )
@@ -426,8 +430,8 @@ def watchlist_row(
     with col_1d:
         st.markdown(
             f'<div style="font-family:Courier New;'
-            f' color:{cor_var}; font-size:0.72rem;'
-            f' padding:10px 0 2px; font-weight:bold;">'
+            f' color:{cor_var}; font-size:0.78rem;'
+            f' padding:12px 0 4px; font-weight:bold;">'
             f'{seta} {abs(var_1d):.2f}%</div>',
             unsafe_allow_html=True,
         )
@@ -435,9 +439,9 @@ def watchlist_row(
     with col_1m:
         st.markdown(
             f'<div style="font-family:Courier New;'
-            f' color:{cor_1m}; font-size:0.68rem;'
-            f' padding:10px 0 2px;">'
-            f'{seta_1m} {abs(var_1m):.2f}% 1m</div>',
+            f' color:{cor_1m}; font-size:0.78rem;'
+            f' padding:12px 0 4px;">'
+            f'{seta_1m} {abs(var_1m):.2f}%</div>',
             unsafe_allow_html=True,
         )
 
@@ -445,22 +449,15 @@ def watchlist_row(
         if health_score is not None:
             st.markdown(hs_html, unsafe_allow_html=True)
 
-    with col_bd:
-        if badges_html:
-            st.markdown(
-                f'<div style="padding:8px 0;">{badges_html}</div>',
-                unsafe_allow_html=True,
-            )
-
     with col_ac:
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
+        btn_c1, btn_c2 = st.columns(2)
+        with btn_c1:
             if st.button(
                 "🗑", key=f"del_{on_delete or ticker}",
                 help="remover da watchlist",
             ):
                 st.session_state[f"confirm_del_{ticker}"] = True
-        with btn_col2:
+        with btn_c2:
             if st.button(
                 "📊", key=f"mem_{on_memorial or ticker}",
                 help="memorial de cálculo",
@@ -482,18 +479,17 @@ def watchlist_header_row():
     Chame uma vez antes do loop de watchlist_row().
     """
     col_tk, col_nm, col_pr, col_1d, col_1m, \
-        col_hs, col_bd, col_ac = st.columns(
-            [1.2, 2.5, 1.5, 0.9, 0.9, 1.3, 0.8, 0.7]
+        col_hs, col_ac = st.columns(
+            [1.4, 2.8, 1.6, 1.0, 1.0, 1.5, 0.6]
         )
 
     labels = [
         (col_tk, "ativo"),
-        (col_nm, "nome"),
+        (col_nm, "nome / alerta"),
         (col_pr, "preço"),
-        (col_1d, "1d"),
-        (col_1m, "1m"),
+        (col_1d, "1d %"),
+        (col_1m, "1m %"),
         (col_hs, "health"),
-        (col_bd, ""),
         (col_ac, ""),
     ]
 
@@ -501,7 +497,7 @@ def watchlist_header_row():
         with col:
             st.markdown(
                 f'<div style="font-family:Courier New;'
-                f' font-size:0.55rem; color:var(--text-muted);'
+                f' font-size:0.62rem; color:var(--text-muted);'
                 f' text-transform:uppercase;'
                 f' letter-spacing:0.12em;'
                 f' padding-bottom:4px;'

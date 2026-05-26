@@ -15,28 +15,28 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     :root {
-        --bg-base:     #07080f;   /* fundo da página */
-        --bg-surface:  #0d0f1a;   /* cards, painéis */
-        --bg-elevated: #141626;   /* inputs, hover, expanders */
-        --bg-overlay:  #1c1f35;   /* dropdowns, tooltips */
+        --bg-base:     #0e1117;   /* fundo — cinza azulado escuro */
+        --bg-surface:  #161b27;   /* cards — distinguível do fundo */
+        --bg-elevated: #1e2433;   /* inputs, hover — contraste claro */
+        --bg-overlay:  #252d40;   /* dropdowns */
 
-        --border-dim:    #1a1d2e;  /* bordas sutis */
-        --border-normal: #252840;  /* bordas de cards */
-        --border-active: #FF9900;  /* foco, seleção */
+        --border-dim:    #252d3d;
+        --border-normal: #2e3850;
+        --border-active: #FF9900;
 
-        --text-primary:   #E2E4F0; /* texto principal */
-        --text-secondary: #7B7F9E; /* labels, subtítulos */
-        --text-muted:     #3D4060; /* placeholders, desabilitado */
+        --text-primary:   #E8EAF6; /* branco levemente azulado */
+        --text-secondary: #8892A4; /* cinza médio — legível */
+        --text-muted:     #4A5568; /* cinza escuro */
 
-        --accent:     #FF9900;    /* laranja primário */
-        --accent-dim: #2a1f00;    /* fundo de elementos accent */
+        --accent:     #FF9900;
+        --accent-dim: #2a1f00;
 
-        --bull:     #00D97E;    /* verde mais saturado */
+        --bull:     #00D97E;
         --bull-dim: #00261a;
-        --bear:     #FF4560;    /* vermelho mais vivo */
+        --bear:     #FF4560;
         --bear-dim: #2a0010;
-        --amber:    #FFB800;    /* amarelo alerta */
-        --info:     #4DA6FF;    /* azul info */
+        --amber:    #FFB800;
+        --info:     #4DA6FF;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -44,7 +44,7 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     body, .stApp {
-        background-color: var(--bg-base) !important;
+        background-color: #0e1117 !important;
     }
 
     .block-container {
@@ -145,11 +145,7 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     .card {
-        background: linear-gradient(
-            135deg,
-            var(--bg-surface) 0%,
-            var(--bg-elevated) 100%
-        ) !important;
+        background: var(--bg-surface) !important;
         border: 1px solid var(--border-normal) !important;
         border-radius: 3px !important;
         padding: 8px 10px;
@@ -365,8 +361,8 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     [data-testid="stSidebar"] {
-        background-color: var(--bg-base);
-        border-right: 1px solid var(--border-dim);
+        background-color: #111827 !important;
+        border-right: 1px solid var(--border-normal) !important;
     }
     [data-testid="stSidebar"] > div {
         padding-top: 0.5rem;

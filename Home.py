@@ -1148,18 +1148,6 @@ else:
                     st.session_state.pop(f"show_memorial_{t}", None)
                     st.rerun()
 
-            # Nota inline (popover)
-            with st.expander(f"📝 nota — {t.replace('.SA', '')}", expanded=False):
-                txt = st.text_area(
-                    "anotações da tese:",
-                    value=item.get('notas') or "",
-                    key=f"nota_{t}",
-                    label_visibility="collapsed",
-                )
-                if st.button("salvar nota", key=f"btn_nota_{t}"):
-                    atualizar_notas(t, txt, watchlist_id=watchlist_id_ativo)
-                    st.rerun()
-
         st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
