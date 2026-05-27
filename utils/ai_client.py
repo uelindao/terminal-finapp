@@ -61,6 +61,10 @@ PROVIDERS: dict[str, dict] = {
 MODEL    = "deepseek-chat"
 BASE_URL = "https://api.deepseek.com/v1"
 
+# Free tier — Gemini Flash via chave global
+FREE_MODEL    = "gemini-2.5-flash"
+FREE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
 # ── System prompts FIXOS ─────────────────────────────────────────────────────
 # NUNCA interpolar variáveis aqui — qualquer mudança quebra o cache hit.
 
@@ -97,6 +101,59 @@ SYSTEM_TESE = (
     "escreve em português do brasil, iniciando frases com letra minúscula. "
     "não usa emojis. estrutura clara, leitura rápida."
 )
+
+
+# ── Tier detection ───────────────────────────────────────────────────────────
+
+def get_tier_and_client(user_settings: dict = None) -> tuple:
+    """
+    Retorna (client, model, tier) onde tier é 'pro' ou 'free'.
+
+    tier 'pro':  usuário tem chave própria configurada
+    tier 'free': fallback para Gemini 2.5 Flash via GEMINI_API_KEY global.
+                 Se GEMINI_API_KEY ausente, tenta DEEPSEEK_API_KEY global.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError(
+            "pacote `openai` não instalado. adicione `openai>=1.30.0` ao requirements.txt."
+        )
+
+    # ── Tier PRO: chave pessoal do usuário ────────────────────────────────────
+    if user_settings:
+        user_key = user_settings.get('ai_api_key', '').strip()
+        if user_key:
+            provider = user_settings.get('ai_provider', 'deepseek')
+            model    = user_settings.get('ai_model', '')
+            cfg      = PROVIDERS.get(provider, PROVIDERS['deepseek'])
+            if not model:
+                model = cfg['model_default']
+            try:
+                client = OpenAI(api_key=user_key, base_url=cfg['base_url'])
+                logger.debug(f"[ai] tier=pro provider={provider} model={model}")
+                return client, model, 'pro'
+            except Exception as e:
+                logger.warning(f"[ai] falha ao criar client pro: {e} — usando free tier")
+
+    # ── Tier FREE: Gemini Flash global ────────────────────────────────────────
+    gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+    if gemini_key:
+        client = OpenAI(api_key=gemini_key, base_url=FREE_BASE_URL)
+        logger.debug(f"[ai] tier=free model={FREE_MODEL}")
+        return client, FREE_MODEL, 'free'
+
+    # ── Fallback: DeepSeek global (chave legada) ──────────────────────────────
+    deepseek_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+    if deepseek_key:
+        client = OpenAI(api_key=deepseek_key, base_url=BASE_URL)
+        logger.debug(f"[ai] tier=free (deepseek global) model={MODEL}")
+        return client, MODEL, 'free'
+
+    raise ValueError(
+        "nenhuma chave de IA encontrada. configure GEMINI_API_KEY em secrets.toml "
+        "(gratuita em aistudio.google.com) ou sua chave pessoal em Configurações → Minha IA."
+    )
 
 
 # ── Singleton do cliente global (DeepSeek padrão) ────────────────────────────
@@ -200,24 +257,16 @@ def chamar_ia(
     Se thinking=True, ativa o modo de raciocínio profundo (budget: 2 000 tokens).
     Use apenas quando a qualidade justificar o custo extra de output.
     """
-    # Decide qual cliente usar
-    use_user = (
-        user_settings is not None
-        and user_settings.get('ai_api_key', '').strip()
-    )
-
-    if use_user:
-        try:
-            client, model_name = get_ai_client_for_user(user_settings)
-        except (ValueError, RuntimeError) as e:
-            st.error(str(e))
-            return ""
-    else:
-        client     = get_ai_client()
-        model_name = MODEL
-
-    if client is None:
+    try:
+        client, model_name, tier = get_tier_and_client(user_settings)
+    except (ValueError, RuntimeError) as e:
+        st.error(str(e))
         return ""
+
+    # Tier free: sem thinking, tokens reduzidos
+    if tier == 'free':
+        thinking   = False
+        max_tokens = min(max_tokens, 600)
 
     mensagens = [
         {"role": "system", "content": system},
@@ -232,14 +281,14 @@ def chamar_ia(
         "stream":      stream,
     }
 
-    if thinking:
+    if thinking and tier == 'pro':
         kwargs["extra_body"] = {
             "thinking": {"type": "enabled", "budget_tokens": 2000}
         }
 
     try:
         if stream:
-            return _stream_para_ui(client, kwargs)
+            return _stream_para_ui(client, kwargs, tier=tier)
         else:
             resp = client.chat.completions.create(**kwargs)
             return resp.choices[0].message.content or ""
@@ -249,25 +298,43 @@ def chamar_ia(
         return ""
 
 
-def _stream_para_ui(client, kwargs: dict) -> str:
+def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
     """
     Consome o stream de tokens e renderiza em tempo real na UI do Streamlit.
     Retorna o texto completo ao final.
+    Exibe badge de tier (FREE · Gemini ou PRO) acima do texto.
     """
+    if tier == 'pro':
+        tier_badge = (
+            '<span style="font-family:var(--font-ui,Inter,sans-serif);'
+            ' font-size:0.58rem; font-weight:700; color:#FF8C00;'
+            ' border:1px solid rgba(255,140,0,0.35);'
+            ' padding:1px 7px; border-radius:10px;'
+            ' margin-right:8px; vertical-align:middle;">PRO</span>'
+        )
+    else:
+        tier_badge = (
+            '<span style="font-family:var(--font-ui,Inter,sans-serif);'
+            ' font-size:0.58rem; font-weight:600; color:#6B7280;'
+            ' border:1px solid #2A2C3E;'
+            ' padding:1px 7px; border-radius:10px;'
+            ' margin-right:8px; vertical-align:middle;">FREE · Gemini</span>'
+        )
+
     texto_completo = ""
 
     with st.chat_message("assistant", avatar="⚡"):
         placeholder = st.empty()
 
-        # CSS do cursor piscante
+        # Estado inicial: badge + cursor
         placeholder.markdown(
             '<style>'
             '@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }'
             '.ft-cursor { animation: blink 1s infinite; color:#FF9900; }'
             '</style>'
-            '<div style="font-family:\'Courier New\',monospace; '
-            'font-size:0.82rem; line-height:1.7; color:#ccc;">'
-            '<span class="ft-cursor">▋</span></div>',
+            f'<div>{tier_badge}'
+            '<span class="ft-cursor" style="font-family:\'Courier New\',monospace;'
+            ' font-size:0.82rem; color:#FF9900;">▋</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -279,18 +346,20 @@ def _stream_para_ui(client, kwargs: dict) -> str:
             if hasattr(delta, "content") and delta.content:
                 texto_completo += delta.content
                 placeholder.markdown(
-                    f'<div style="font-family:\'Courier New\',monospace; '
-                    f'font-size:0.82rem; line-height:1.7; color:#ccc;">'
+                    f'<div>{tier_badge}'
+                    f'<span style="font-family:\'Courier New\',monospace;'
+                    f' font-size:0.82rem; line-height:1.7; color:#ccc;">'
                     f'{texto_completo}'
-                    f'<span class="ft-cursor">▋</span></div>',
+                    f'<span class="ft-cursor">▋</span></span></div>',
                     unsafe_allow_html=True,
                 )
 
         # Render final sem cursor
         placeholder.markdown(
-            f'<div style="font-family:\'Courier New\',monospace; '
-            f'font-size:0.82rem; line-height:1.7; color:#ccc;">'
-            f'{texto_completo}</div>',
+            f'<div>{tier_badge}'
+            f'<span style="font-family:\'Courier New\',monospace;'
+            f' font-size:0.82rem; line-height:1.7; color:#ccc;">'
+            f'{texto_completo}</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -312,22 +381,10 @@ def chamar_ia_json(
     Em caso de falha de parse, retorna {} e loga o erro no console.
     Temperatura fixada em 0.1 para máxima consistência e cache hit.
     """
-    use_user = (
-        user_settings is not None
-        and user_settings.get('ai_api_key', '').strip()
-    )
-
-    if use_user:
-        try:
-            client, model_name = get_ai_client_for_user(user_settings)
-        except (ValueError, RuntimeError) as e:
-            logger.warning(f"[ai_client] chamar_ia_json: {e}")
-            return {}
-    else:
-        client     = get_ai_client()
-        model_name = MODEL
-
-    if client is None:
+    try:
+        client, model_name, _tier = get_tier_and_client(user_settings)
+    except (ValueError, RuntimeError) as e:
+        logger.warning(f"[ai_client] chamar_ia_json: {e}")
         return {}
 
     mensagens = [
