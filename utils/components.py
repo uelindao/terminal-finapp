@@ -353,6 +353,12 @@ def watchlist_card(ticker: str, nome: str, preco: float,
             f' vertical-align:middle;">res·{dias_e}d</span>'
         )
 
+    _alert_badge = (
+        '<span style="font-family:var(--font-ui); font-size:0.55rem;'
+        ' color:var(--bear); border:1px solid var(--bear);'
+        ' padding:0 3px; border-radius:3px; margin-left:5px;">⚠</span>'
+        if tem_alert else ""
+    )
     st.markdown(
         f'<div style="background:var(--bg-surface);'
         f' border:1px solid var(--border-subtle);'
@@ -364,7 +370,7 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         f' font-weight:bold; color:var(--accent);'
         f' font-size:0.85rem;">'
         f'{ticker.replace(".SA", "")}{earn_html}</span>'
-        f'{"<span style=\'font-family:var(--font-ui); font-size:0.55rem; color:var(--bear); border:1px solid var(--bear); padding:0 3px; border-radius:3px; margin-left:5px;\'>⚠</span>" if tem_alert else ""}'
+        f'{_alert_badge}'
         f'</div>'
         f'<div style="font-family:var(--font-ui);'
         f' font-size:0.70rem; color:var(--text-muted);'
