@@ -20,7 +20,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
-from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores
+from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores, get_user_settings
 from utils.scrapers import buscar_dados_b3, buscar_dados_us
 from utils.fmp_client import get_multiplos_medios, get_peers
 
@@ -40,6 +40,17 @@ aplicar_tema()
 inject_keyboard_shortcuts()
 garantir_macro_context()
 init_db()
+
+# Carrega configurações pessoais do usuário (chave de IA, provider, etc.)
+_current_user = get_current_user()
+_user_settings = {}
+if _current_user:
+    try:
+        _raw_settings = get_user_settings(_current_user['user_id'])
+        if _raw_settings:
+            _user_settings = dict(_raw_settings)
+    except Exception:
+        pass  # sem configurações — usa tier free
 
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
@@ -650,15 +661,17 @@ section_title("🧠 análise ia — deepseek v4 pro")
 def montar_prompt_ativo(
     ticker, nome, setor, tipo_mercado,
     fundamentos, health_result,
-    preco_atual, var_1d, macro_context
+    preco_atual, var_1d, macro_context,
+    multiplos_historicos: dict = None,   # ← novo parâmetro
 ) -> str:
     """
     Monta prompt em ordem cache-friendly.
-    Estático primeiro (identidade → fundamentos → score → macro), volátil por último.
+    Estático primeiro (identidade → fundamentos → histórico FMP →
+    score → macro), volátil por último.
     """
     fund = fundamentos or {}
 
-    # ── BLOCO 1: IDENTIDADE — mais estático, cacheia melhor ──
+    # ── BLOCO 1: IDENTIDADE ──────────────────────────────────────────────
     b1 = (
         f"ativo: {ticker.upper()}\n"
         f"nome: {nome}\n"
@@ -667,9 +680,9 @@ def montar_prompt_ativo(
         f"tipo: {'fii' if '11.SA' in ticker else 'acao br' if '.SA' in ticker else 'acao us'}\n"
     )
 
-    # ── BLOCO 2: FUNDAMENTOS — muda a cada atualização semanal ──
+    # ── BLOCO 2: FUNDAMENTOS ATUAIS ─────────────────────────────────────
     b2 = (
-        f"\nfundamentos:\n"
+        f"\nfundamentos atuais:\n"
         f"p/l: {fund.get('p/l', 'n/d')}\n"
         f"p/vp: {fund.get('p/vp', 'n/d')}\n"
         f"roe: {fund.get('roe%', 'n/d')}%\n"
@@ -679,29 +692,73 @@ def montar_prompt_ativo(
         f"qualidade dos dados: {fund.get('qualidade_dados', 0)}%\n"
     )
 
-    # ── BLOCO 3: HEALTH SCORE — muda a cada recálculo ──
-    alertas      = health_result.get('alertas', [])
-    breakdown    = health_result.get('breakdown', {})
-    alertas_txt  = "\n".join([f"- {a}" for a in alertas[:8]])
-    bkdown_txt   = "\n".join([f"- {k}: {v}" for k, v in list(breakdown.items())[:10]])
-    b3 = (
+    # ── BLOCO 3: VALUATION HISTÓRICO FMP (5 anos) ────────────────────────
+    # Dados já carregados na página — só formata para o prompt
+    b3 = ""
+    if multiplos_historicos:
+        linhas_hist = []
+
+        def _fmt_stats(stats, sufixo="x"):
+            if not stats:
+                return "sem dados"
+            atual  = stats.get("atual")
+            media  = stats.get("media")
+            minv   = stats.get("min")
+            maxv   = stats.get("max")
+            if atual is None or media is None:
+                return "sem dados"
+            banda  = (maxv - minv) if maxv and minv and maxv != minv else 1.0
+            pct    = int(max(0, min(100, (atual - minv) / banda * 100))) if banda else 50
+            desvio = (atual - media) / media * 100 if media != 0 else 0
+            sinal  = "caro" if desvio > 20 else ("barato" if desvio < -15 else "justo")
+            return (
+                f"atual {atual:.1f}{sufixo} | "
+                f"média 5a {media:.1f}{sufixo} | "
+                f"percentil histórico {pct}% | "
+                f"sinal: {sinal} ({desvio:+.0f}% vs média)"
+            )
+
+        if multiplos_historicos.get("pe"):
+            linhas_hist.append(f"p/l: {_fmt_stats(multiplos_historicos['pe'])}")
+        if multiplos_historicos.get("pb"):
+            linhas_hist.append(f"p/vp: {_fmt_stats(multiplos_historicos['pb'])}")
+        if multiplos_historicos.get("ev_ebitda"):
+            linhas_hist.append(f"ev/ebitda: {_fmt_stats(multiplos_historicos['ev_ebitda'])}")
+        if multiplos_historicos.get("dy"):
+            linhas_hist.append(f"dividend yield: {_fmt_stats(multiplos_historicos['dy'], sufixo='%')}")
+        if multiplos_historicos.get("roe"):
+            linhas_hist.append(f"roe histórico: {_fmt_stats(multiplos_historicos['roe'], sufixo='%')}")
+
+        if linhas_hist:
+            b3 = (
+                "\nvaluation em contexto histórico (5 anos via FMP):\n"
+                + "\n".join(linhas_hist)
+                + "\n"
+            )
+
+    # ── BLOCO 4: HEALTH SCORE ────────────────────────────────────────────
+    alertas   = health_result.get('alertas', [])
+    breakdown = health_result.get('breakdown', {})
+    alertas_txt = "\n".join([f"- {a}" for a in alertas[:8]])
+    bkdown_txt  = "\n".join([f"- {k}: {v}" for k, v in list(breakdown.items())[:10]])
+    b4 = (
         f"\nhealth score: {health_result.get('score', 50)}/100\n"
         f"status: {health_result.get('status', 'n/d')}\n\n"
         f"alertas do motor quantitativo:\n{alertas_txt}\n\n"
         f"breakdown:\n{bkdown_txt}\n"
     )
 
-    # ── BLOCO 4: CONTEXTO MACRO — muda mensalmente ──
-    b4 = (
+    # ── BLOCO 5: CONTEXTO MACRO ──────────────────────────────────────────
+    b5 = (
         f"\ncontexto macro:\n"
         f"selic: {macro_context.get('selic', 10.75):.2f}%\n"
         f"vix: {macro_context.get('vix', 15.0):.1f}\n"
         f"ipca: {macro_context.get('ipca', 4.5):.1f}%\n"
-        f"ambiente: {macro_context.get('label', 'neutro')}\n"
+        f"regime: {macro_context.get('label', 'neutro')}\n"
     )
 
-    # ── BLOCO 5: DADOS VOLÁTEIS — SEMPRE POR ÚLTIMO ──
-    b5 = (
+    # ── BLOCO 6: DADOS VOLÁTEIS — SEMPRE POR ÚLTIMO ──────────────────────
+    b6 = (
         f"\ncotacao atual: r$ {preco_atual:,.2f}\n"
         f"variacao hoje: {var_1d:+.2f}%\n"
     )
@@ -713,14 +770,17 @@ def montar_prompt_ativo(
         "- o que está funcionando nos fundamentos ou no técnico\n\n"
         "riscos principais: (3 bullets)\n"
         "- o que pode destruir a tese ou prejudicar o retorno\n\n"
+        "valuation: (2 bullets)\n"
+        "- interprete se o ativo está caro ou barato considerando o histórico de 5 anos\n"
+        "- use os dados de percentil histórico fornecidos acima\n\n"
         "impacto macro: (2 bullets)\n"
-        "- como o ambiente atual de juros e risco afeta especificamente este ativo\n\n"
+        "- como o regime atual de juros e risco afeta especificamente este ativo\n\n"
         "métrica para monitorar:\n"
         "- uma métrica específica com frequência sugerida de acompanhamento\n\n"
         "seja objetivo. use os dados fornecidos. não invente números."
     )
 
-    return b1 + b2 + b3 + b4 + b5 + instrucao
+    return b1 + b2 + b3 + b4 + b5 + b6 + instrucao
 
 
 _col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
@@ -769,6 +829,7 @@ if btn_analise_ia:
         preco_atual   = preco_ia,
         var_1d        = var_ia,
         macro_context = macro_ctx,
+        multiplos_historicos = _medios,
     )
 
     chamar_ia(
@@ -778,6 +839,7 @@ if btn_analise_ia:
         temperatura    = 0.3,
         stream         = True,
         thinking       = usar_thinking,
+        user_settings  = _user_settings,
     )
     st.session_state[f"ia_analise_{t_base}"] = True
 
@@ -850,6 +912,7 @@ if btn_gerar_pdf:
             temperatura    = 0.3,
             stream         = False,
             thinking       = False,
+            user_settings  = _user_settings,
         )
 
     # 2. Monta e disponibiliza o PDF
@@ -1082,6 +1145,7 @@ with tab_dcf:
                         max_tokens     = 600,
                         temperatura    = 0.3,
                         stream         = True,
+                        user_settings  = _user_settings,
                     )
 
 with tab_sent:
@@ -1107,6 +1171,7 @@ with tab_sent:
                                 max_tokens  = 120,
                                 temperatura = 0.2,
                                 stream      = False,
+                                user_settings  = _user_settings,
                             )
                             if _res_news:
                                 st.info(_res_news)
@@ -1173,4 +1238,5 @@ if st.button("📝 gerar tese de longo prazo", use_container_width=True, type="s
             max_tokens     = 700,
             temperatura    = 0.3,
             stream         = True,
+            user_settings  = _user_settings,
         )
