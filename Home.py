@@ -11,7 +11,7 @@ import logging
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # importações do ecossistema finapp
-from utils.auth import require_auth, render_user_badge, render_painel_admin, get_current_user
+from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from database.db import (
     init_db, popular_watchlist_inicial, listar_watchlist,
@@ -113,11 +113,6 @@ with st.sidebar:
                                 st.error("mínimo 4 caracteres.")
                         else:
                             st.error("senha atual incorreta.")
-
-    # Painel admin (somente admins)
-    if _user_sidebar and _user_sidebar.get('is_admin'):
-        with st.expander("⚙️ admin", expanded=False):
-            render_painel_admin()
 
 # ==========================================
 # NAVEGAÇÃO RÁPIDA

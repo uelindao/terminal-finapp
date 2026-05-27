@@ -546,17 +546,6 @@ def aplicar_tema():
         width: 100% !important;
         padding: 0 8px !important;
     }
-    /* Colunas dentro dos expanders — empilha para caber na sidebar */
-    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-        flex-direction: column !important;
-        gap: 4px !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]
-        [data-testid="stVerticalBlock"] {
-        width: 100% !important;
-        min-width: 0 !important;
-        flex: none !important;
-    }
 
     /* ═══════════════════════════════════════════════════
        DATAFRAMES
