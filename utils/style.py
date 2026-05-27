@@ -439,40 +439,48 @@ def aplicar_tema():
        SIDEBAR
        ═══════════════════════════════════════════════════ */
 
+    /* ─── SIDEBAR ─────────────────────────────────────────── */
     [data-testid="stSidebar"] {
         background: #0B0C15 !important;
         border-right: 1px solid var(--border-subtle) !important;
-        min-width: 220px !important;
-        max-width: 240px !important;
+        min-width: 200px !important;
+        max-width: 220px !important;
     }
-    [data-testid="stSidebar"] > div {
-        padding-top: 0 !important;
+    [data-testid="stSidebar"] > div:first-child {
+        padding: 0 !important;
     }
-    /* Logo pseudo-element */
+    /* Logo */
     [data-testid="stSidebar"] > div:first-child::before {
         content: "⚡  FINTERMINAL";
         display: block;
         font-family: var(--font-ui);
-        font-size: 0.68rem;
+        font-size: 0.66rem;
         font-weight: 700;
         color: var(--accent);
         letter-spacing: 0.20em;
         text-transform: uppercase;
-        padding: 16px 18px 14px;
+        padding: 16px 16px 12px;
         border-bottom: 1px solid var(--border-subtle);
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
+    /* Nav container */
+    [data-testid="stSidebar"] [data-testid="stSidebarNav"] {
+        padding: 6px 0 !important;
+    }
+    /* Nav links */
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {
         font-family: var(--font-ui) !important;
         font-size: 0.80rem !important;
         font-weight: 500 !important;
         color: var(--text-secondary) !important;
-        padding: 9px 16px !important;
-        border-radius: var(--radius-sm) !important;
-        margin: 1px 10px !important;
-        transition: all 0.15s ease !important;
+        padding: 8px 14px !important;
+        margin: 1px 8px !important;
+        border-radius: 6px !important;
         display: block !important;
-        letter-spacing: 0.01em !important;
+        transition: all 0.12s ease !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
     [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {
         color: var(--text-primary) !important;
@@ -482,34 +490,72 @@ def aplicar_tema():
         background: var(--accent-soft) !important;
         color: var(--accent) !important;
         border: 1px solid var(--accent-border) !important;
+        font-weight: 600 !important;
     }
+    /* Área de conteúdo abaixo da nav */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        padding: 0 8px !important;
+    }
+    /* Texto geral */
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] .stMarkdown p {
         font-family: var(--font-ui) !important;
         font-size: 0.75rem !important;
         color: var(--text-muted) !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
-    /* Sidebar expanders */
+    /* Expanders */
     [data-testid="stSidebar"] [data-testid="stExpander"] {
-        background: rgba(255,255,255,0.02) !important;
-        border-color: var(--border-subtle) !important;
-        margin: 4px 10px !important;
+        margin: 4px 0 !important;
+        border-radius: 6px !important;
+        border: 1px solid var(--border-subtle) !important;
+        background: var(--bg-surface) !important;
     }
     [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        font-family: var(--font-ui) !important;
         font-size: 0.75rem !important;
-        padding: 8px 12px !important;
+        font-weight: 500 !important;
+        color: var(--text-secondary) !important;
+        padding: 7px 10px !important;
+        white-space: nowrap !important;
     }
-    /* Sidebar inputs */
-    [data-testid="stSidebar"] [data-testid="stTextInput"] input,
-    [data-testid="stSidebar"] [data-testid="stNumberInput"] input {
-        font-size: 0.80rem !important;
-        height: 32px !important;
+    /* Inputs dentro dos expanders */
+    [data-testid="stSidebar"] [data-testid="stExpander"]
+        [data-testid="stTextInput"] {
+        width: 100% !important;
     }
-    /* Sidebar buttons */
+    [data-testid="stSidebar"] [data-testid="stExpander"]
+        [data-testid="stTextInput"] input {
+        width: 100% !important;
+        font-size: 0.75rem !important;
+        height: 30px !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"]
+        [data-testid="stTextInput"] label {
+        font-size: 0.65rem !important;
+    }
+    /* Botões dentro dos expanders */
     [data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
     [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+        height: 28px !important;
+        min-height: 28px !important;
+        font-size: 0.70rem !important;
         width: 100% !important;
-        margin: 2px 0 !important;
+        padding: 0 8px !important;
+    }
+    /* Colunas dentro dos expanders — empilha para caber na sidebar */
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+        gap: 4px !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"]
+        [data-testid="stVerticalBlock"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: none !important;
     }
 
     /* ═══════════════════════════════════════════════════

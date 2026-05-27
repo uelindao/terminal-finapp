@@ -113,7 +113,7 @@ def status_card(titulo: str, corpo: str,
 
 def watchlist_header_row():
     """Header da lista densa — labels das colunas."""
-    cols = st.columns([1.4, 2.8, 1.6, 1.0, 1.0, 1.6, 0.7])
+    cols = st.columns([1.2, 3.2, 1.5, 0.9, 0.9, 1.5, 0.6])
     labels = ["ativo", "nome / sinal", "preço", "1d", "1m", "health", ""]
     for col, label in zip(cols, labels):
         with col:
@@ -173,21 +173,23 @@ def watchlist_row(
             f'</div>'
         )
 
-    # ── Sinal de alerta (dot + texto) ────────────────────────
+    # ── Sinal de alerta (dot + texto, até 2 linhas) ──────────
     sinal_html = ""
     if tem_alert and alertas:
-        txt = alertas[0][:55] + "…" if len(alertas[0]) > 55 else alertas[0]
         sinal_html = (
-            f'<div style="display:flex; align-items:center;'
-            f' gap:5px; margin-top:3px;">'
-            f'<span style="width:5px; height:5px;'
-            f' border-radius:50%; background:var(--bear);'
-            f' flex-shrink:0; display:inline-block;"></span>'
+            f'<div style="display:flex; align-items:flex-start;'
+            f' gap:5px; margin-top:4px;">'
+            f'<span style="width:6px; height:6px;'
+            f' border-radius:50%; background:var(--amber);'
+            f' flex-shrink:0; margin-top:3px;'
+            f' display:inline-block;"></span>'
             f'<span style="font-family:var(--font-ui);'
-            f' font-size:0.65rem; color:var(--text-muted);'
-            f' overflow:hidden; text-overflow:ellipsis;'
-            f' white-space:nowrap; max-width:240px;">'
-            f'{txt}</span></div>'
+            f' font-size:0.68rem; color:var(--text-secondary);'
+            f' line-height:1.4; overflow:hidden;'
+            f' display:-webkit-box; -webkit-line-clamp:2;'
+            f' -webkit-box-orient:vertical;">'
+            f'{alertas[0][:80]}'
+            f'</span></div>'
         )
 
     # ── Badge earnings ────────────────────────────────────────
@@ -211,7 +213,7 @@ def watchlist_row(
 
     # ── Layout 7 colunas ─────────────────────────────────────
     col_tk, col_nm, col_pr, col_1d, col_1m, col_hs, col_ac = st.columns(
-        [1.4, 2.8, 1.6, 1.0, 1.0, 1.6, 0.7]
+        [1.2, 3.2, 1.5, 0.9, 0.9, 1.5, 0.6]
     )
 
     with col_tk:
@@ -228,11 +230,12 @@ def watchlist_row(
         st.markdown(
             f'<div style="font-family:var(--font-ui);'
             f' color:var(--text-secondary); font-size:0.78rem;'
-            f' padding:11px 0 3px; font-weight:400;'
+            f' padding:11px 0 2px; font-weight:400;'
             f' overflow:hidden; text-overflow:ellipsis;'
             f' white-space:nowrap;">'
             f'{nome[:30]}</div>'
-            f'{sinal_html}',
+            f'{sinal_html}'
+            f'<div style="height:4px;"></div>',
             unsafe_allow_html=True,
         )
 

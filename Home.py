@@ -122,41 +122,62 @@ with st.sidebar:
 # ==========================================
 # NAVEGAÇÃO RÁPIDA
 # ==========================================
-section_title("🧭 navegação rápida")
+section_title("⚡ navegação rápida")
+
+# CSS: botão "abrir →" vira rodapé colado ao card
+st.markdown("""
+<style>
+.nav-btn-footer [data-testid="stBaseButton-secondary"] {
+    border-top-left-radius:  0 !important;
+    border-top-right-radius: 0 !important;
+    border-top: none !important;
+    margin-top: -4px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    font-size: 0.68rem !important;
+    font-weight: 500 !important;
+    color: var(--text-muted) !important;
+    background: var(--bg-elevated) !important;
+}
+.nav-btn-footer [data-testid="stBaseButton-secondary"]:hover {
+    color: var(--accent) !important;
+    border-color: var(--accent-border) !important;
+    background: var(--bg-overlay) !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 _nav_items = [
-    ("pages/1_Research.py",  "🔬", "Research",   "análise micro por ativo"),
-    ("pages/2_Discovery.py", "🎯", "Discovery",  "screener de oportunidades"),
-    ("pages/3_Macro.py",     "🌍", "Macro",      "cenário global e juros"),
-    ("pages/4_Portfolio.py", "💼", "Portfólio",  "posições e P&L"),
-    ("pages/5_Solana.py",    "⛓️",  "On-Chain",   "RWA e dados on-chain"),
+    ("pages/1_Research.py",  "📊", "Research",  "análise micro"),
+    ("pages/2_Discovery.py", "🎯", "Discovery", "screener"),
+    ("pages/3_Macro.py",     "🌍", "Macro",     "ambiente global"),
+    ("pages/4_Portfolio.py", "💼", "Portfólio", "posições & P&L"),
+    ("pages/5_Solana.py",    "⛓",  "On-Chain",  "RWA & DeFi"),
 ]
 _nav_cols = st.columns(5)
 for _col, (_page, _icon, _titulo, _desc) in zip(_nav_cols, _nav_items):
     with _col:
         st.markdown(
-            f'<div style="'
-            f'background:var(--bg-surface);'
-            f'border:1px solid var(--border-subtle);'
-            f'border-radius:var(--radius-md);'
-            f'padding:14px 10px 10px;'
-            f'text-align:center;'
-            f'margin-bottom:2px;'
-            f'transition:all 0.15s ease;"'
-            f' onmouseover="this.style.borderColor=\'#FF8C00\';this.style.background=\'#23243A\'"'
-            f' onmouseout="this.style.borderColor=\'#2A2C3E\';this.style.background=\'#1C1D2B\'">'
-            f'<div style="font-size:1.3rem; margin-bottom:5px;">{_icon}</div>'
-            f'<div style="font-family:var(--font-ui); font-size:0.78rem;'
-            f' font-weight:600; color:var(--text-primary);'
-            f' margin-bottom:3px;">{_titulo}</div>'
+            f'<div style="background:var(--bg-surface);'
+            f' border:1px solid var(--border-subtle);'
+            f' border-radius:var(--radius-md) var(--radius-md) 0 0;'
+            f' padding:16px 10px 12px; text-align:center;">'
+            f'<div style="font-size:1.5rem; margin-bottom:7px;">{_icon}</div>'
+            f'<div style="font-family:var(--font-ui); font-size:0.82rem;'
+            f' font-weight:600; color:var(--text-primary);">{_titulo}</div>'
             f'<div style="font-family:var(--font-ui); font-size:0.63rem;'
-            f' color:var(--text-muted); line-height:1.4;">{_desc}</div>'
+            f' color:var(--text-muted); margin-top:3px;">{_desc}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
-        st.page_link(_page, label="abrir →")
+        with st.container():
+            st.markdown('<div class="nav-btn-footer">', unsafe_allow_html=True)
+            if st.button("abrir →", key=f"nav_{_titulo}",
+                         use_container_width=True, type="secondary"):
+                st.switch_page(_page)
+            st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
 # ==========================================
 # FAIXA 1 — PULSO DO MERCADO
