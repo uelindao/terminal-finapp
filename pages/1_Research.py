@@ -26,6 +26,7 @@ from utils.fmp_client import get_multiplos_medios, get_peers
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
+from utils.macro_context import garantir_macro_context
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, CORES_SERIES, base100, linha
 
@@ -37,6 +38,7 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+garantir_macro_context()
 init_db()
 
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()

@@ -40,6 +40,7 @@ import plotly.graph_objects as go
 from utils.charts import base_layout
 from utils.notificacoes import (solicitar_permissao_notificacao,
                                  verificar_e_disparar_alertas)
+from utils.macro_context import garantir_macro_context
 
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
@@ -56,6 +57,9 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+
+# Garante macro_context atualizado em todas as páginas filhas
+garantir_macro_context()
 
 # Solicita permissão de notificação browser (uma vez por sessão)
 if not st.session_state.get('notif_permission_asked'):

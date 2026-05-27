@@ -22,6 +22,7 @@ from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
+from utils.macro_context import garantir_macro_context
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -31,6 +32,7 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+garantir_macro_context()
 
 page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
 
@@ -588,6 +590,35 @@ with tab_global:
             df_comm = df_comm_master[df_comm_master.index >= data_corte]
             if isinstance(df_comm.columns, pd.MultiIndex): df_comm.columns = df_comm.columns.get_level_values(1)
         else: df_comm = df_comm_master
+
+        # Atualiza macro_context global para uso nas outras páginas
+        _selic_ss  = valor_atual_seguro(df_br, 'Selic')
+        _ipca_ss   = valor_atual_seguro(df_br, 'IPCA')
+        _vix_ss    = valor_atual_seguro(df_global, 'VIXCLS')
+
+        if _selic_ss is not None or _vix_ss is not None:
+            _selic_val = float(_selic_ss) if _selic_ss is not None else st.session_state.get("macro_context", {}).get("selic", 10.75)
+            _ipca_val  = float(_ipca_ss)  if _ipca_ss  is not None else st.session_state.get("macro_context", {}).get("ipca", 4.5)
+            _vix_val   = float(_vix_ss)   if _vix_ss   is not None else st.session_state.get("macro_context", {}).get("vix", 15.0)
+
+            _juros_altos = _selic_val > 10.0
+            _risco_alto  = _vix_val   > 20.0
+
+            if _juros_altos and not _risco_alto:
+                _regime_label = "juros altos / risco controlado"
+            elif _juros_altos and _risco_alto:
+                _regime_label = "juros altos / stress global"
+            elif not _juros_altos and _risco_alto:
+                _regime_label = "juros baixos / stress global"
+            else:
+                _regime_label = "juros baixos / risco controlado"
+
+            st.session_state["macro_context"] = {
+                "selic": round(_selic_val, 2),
+                "ipca":  round(_ipca_val, 2),
+                "vix":   round(_vix_val, 1),
+                "label": _regime_label,
+            }
 
         section_title("leitura macroeconômica (ai synthesis)")
         if st.button("gerar relatório do cenário atual >>", type="primary"):
