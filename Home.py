@@ -119,35 +119,46 @@ with st.sidebar:
 # ==========================================
 section_title("⚡ navegação rápida")
 
-# CSS: botão "abrir →" vira rodapé colado ao card
+# CSS: page_link vira rodapé do card
 st.markdown("""
 <style>
-.nav-btn-footer [data-testid="stBaseButton-secondary"] {
-    border-top-left-radius:  0 !important;
-    border-top-right-radius: 0 !important;
+[data-testid="stPageLink"] a {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border-subtle) !important;
     border-top: none !important;
-    margin-top: -4px !important;
-    height: 28px !important;
-    min-height: 28px !important;
-    font-size: 0.68rem !important;
+    border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
+    display: block !important;
+    padding: 6px 10px !important;
+    text-align: center !important;
+    text-decoration: none !important;
+    transition: all 0.15s ease !important;
+}
+[data-testid="stPageLink"] a:hover {
+    background: var(--bg-overlay) !important;
+    border-color: var(--accent-border) !important;
+}
+[data-testid="stPageLink"] p {
+    font-family: var(--font-ui) !important;
+    font-size: 0.70rem !important;
     font-weight: 500 !important;
     color: var(--text-muted) !important;
-    background: var(--bg-elevated) !important;
+    margin: 0 !important;
 }
-.nav-btn-footer [data-testid="stBaseButton-secondary"]:hover {
+[data-testid="stPageLink"] a:hover p {
     color: var(--accent) !important;
-    border-color: var(--accent-border) !important;
-    background: var(--bg-overlay) !important;
+}
+[data-testid="stPageLink"] svg {
+    display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 _nav_items = [
-    ("pages/1_Research.py",  "📊", "Research",  "análise micro"),
-    ("pages/2_Discovery.py", "🎯", "Discovery", "screener"),
-    ("pages/3_Macro.py",     "🌍", "Macro",     "ambiente global"),
-    ("pages/4_Portfolio.py", "💼", "Portfólio", "posições & P&L"),
-    ("pages/5_Solana.py",    "⛓",  "On-Chain",  "RWA & DeFi"),
+    ("pages/1_Research.py",       "📊", "Research",       "análise micro"),
+    ("pages/2_Discovery.py",      "🎯", "Discovery",      "screener"),
+    ("pages/3_Macro.py",          "🌍", "Macro",          "ambiente global"),
+    ("pages/4_Portfolio.py",      "💼", "Portfólio",      "posições & P&L"),
+    ("pages/5_Configuracoes.py",  "⚙️",  "Configurações",  "conta & preferências"),
 ]
 _nav_cols = st.columns(5)
 for _col, (_page, _icon, _titulo, _desc) in zip(_nav_cols, _nav_items):
@@ -165,12 +176,7 @@ for _col, (_page, _icon, _titulo, _desc) in zip(_nav_cols, _nav_items):
             f'</div>',
             unsafe_allow_html=True,
         )
-        with st.container():
-            st.markdown('<div class="nav-btn-footer">', unsafe_allow_html=True)
-            if st.button("abrir →", key=f"nav_{_titulo}",
-                         use_container_width=True, type="secondary"):
-                st.switch_page(_page)
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.page_link(_page, label="abrir →", use_container_width=True)
 
 st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
