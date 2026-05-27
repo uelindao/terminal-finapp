@@ -331,6 +331,115 @@ if len(historico) >= 3:
     fig_score.update_yaxes(range=[0, 100])
     st.plotly_chart(fig_score, use_container_width=True)
 
+    # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
+    _breakdown_vis = health_result.get('breakdown', {})
+    if _breakdown_vis:
+        section_title("🔬 breakdown do health score")
+
+        # Mapeamento de nomes internos para labels amigáveis
+        _label_map = {
+            # Piotroski
+            'roa_positivo':          'ROA positivo (Piotroski)',
+            'fcf_positivo':          'FCF positivo (Piotroski)',
+            'roa_crescendo':         'ROA crescendo (Piotroski)',
+            'accrual_ok':            'Qualidade do lucro (Piotroski)',
+            'alavancagem_ok':        'Alavancagem saudável (Piotroski)',
+            'liquidez_ok':           'Liquidez corrente (Piotroski)',
+            'sem_diluicao':          'Sem diluição de ações (Piotroski)',
+            'margem_crescendo':      'Margem bruta crescendo (Piotroski)',
+            'giro_crescendo':        'Giro do ativo crescendo (Piotroski)',
+            # ROIC/WACC
+            'roic_vs_wacc':          'ROIC vs WACC (geração de valor)',
+            'roic_acima_wacc':       'ROIC acima do custo de capital',
+            # Valuation
+            'pl_atrativo':           'P/L atrativo',
+            'pvp_atrativo':          'P/VP atrativo',
+            'dy_atrativo':           'Dividend yield atrativo',
+            'ev_ebitda_ok':          'EV/EBITDA razoável',
+            # Qualidade
+            'roe_alto':              'ROE elevado',
+            'margem_liquida_ok':     'Margem líquida saudável',
+            'divida_controlada':     'Dívida controlada',
+            # Momentum
+            'momentum_12_1':         'Momentum 12-1 meses',
+            'acima_mm200':           'Preço acima da MM200',
+            'tendencia_alta':        'Tendência de alta',
+            # FII específicos
+            'pvp_fii_ok':            'P/VP atrativo (FII)',
+            'yield_vs_selic':        'Yield vs Selic (FII)',
+            'yield_atrativo':        'Dividend yield atrativo (FII)',
+        }
+
+        # Separa pilares com pontos e sem pontos
+        _itens_bd = []
+        for k, v in _breakdown_vis.items():
+            try:
+                pontos = float(v)
+            except (TypeError, ValueError):
+                # Tenta extrair número de strings como "8/10" ou "sim"
+                if isinstance(v, str) and '/' in v:
+                    try:
+                        pontos = float(v.split('/')[0])
+                    except Exception:
+                        pontos = 1.0 if v.lower() in ('sim', 'yes', 'true', '✅') else 0.0
+                elif isinstance(v, bool):
+                    pontos = float(v)
+                else:
+                    pontos = 0.0
+
+            label = _label_map.get(k, k.replace('_', ' '))
+            _itens_bd.append({'label': label, 'pontos': pontos, 'chave': k})
+
+        if _itens_bd:
+            # Ordena: maiores pontos primeiro
+            _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
+
+            _labels_bd = [i['label'] for i in _itens_bd]
+            _valores_bd = [i['pontos'] for i in _itens_bd]
+            _cores_bd = [
+                "#00C853" if v > 0 else "#FF1744"
+                for v in _valores_bd
+            ]
+
+            _fig_bd = go.Figure(go.Bar(
+                x=_valores_bd,
+                y=_labels_bd,
+                orientation='h',
+                marker_color=_cores_bd,
+                hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
+                text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
+                textposition='outside',
+                textfont=dict(size=10, color='#888'),
+            ))
+            _lay_bd = base_layout(
+                height=max(200, len(_itens_bd) * 28),
+                title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
+            )
+            _lay_bd.update(
+                xaxis={**{'showgrid': True, 'gridcolor': '#2A2C3E',
+                          'zeroline': True, 'zerolinecolor': '#444',
+                          'title': 'pontos contribuídos'},
+                       'range': [min(0, min(_valores_bd)) - 1,
+                                 max(_valores_bd) + 2]},
+                yaxis={'showgrid': False, 'title': ''},
+                margin=dict(l=220, r=60, t=40, b=20),
+            )
+            _fig_bd.update_layout(**_lay_bd)
+            st.plotly_chart(_fig_bd, use_container_width=True)
+
+            # Linha de resumo abaixo do gráfico
+            _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
+            _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
+            st.markdown(
+                f'<div style="font-family:Courier New; font-size:0.72rem; '
+                f'color:#555; margin-top:-8px;">'
+                f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
+                f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
+                f'score total: {health_result.get("score", 0)}/100'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
 # ── HEALTH RESULT DO BANCO (para o prompt de IA) ─────────────────────────
 _hs_all = get_health_scores()
 _hs_map = {r['ticker']: r for r in (_hs_all or [])}

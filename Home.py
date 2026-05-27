@@ -118,6 +118,66 @@ with st.sidebar:
                         else:
                             st.error("senha atual incorreta.")
 
+    # ── CARD DE REGIME MACRO ─────────────────────────────────────────────
+    _macro_home = st.session_state.get("macro_context", {})
+    if _macro_home:
+        _selic_h = _macro_home.get("selic", 10.75)
+        _vix_h   = _macro_home.get("vix", 15.0)
+        _ipca_h  = _macro_home.get("ipca", 4.5)
+        _label_h = _macro_home.get("label", "neutro")
+
+        # Cor do regime
+        _cor_regime = (
+            "#FF1744" if "stress" in _label_h
+            else "#FF9900" if "altos" in _label_h
+            else "#00C853"
+        )
+
+        # Ícone do VIX
+        _icone_vix = "🔴" if _vix_h > 25 else ("🟡" if _vix_h > 18 else "🟢")
+
+        st.markdown(
+            f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
+            f'border-left:3px solid {_cor_regime}; border-radius:6px; '
+            f'padding:12px 20px; margin-bottom:20px; '
+            f'display:flex; align-items:center; gap:32px; flex-wrap:wrap;">'
+
+            f'<div style="font-family:Courier New; font-size:0.68rem; '
+            f'color:#555; text-transform:uppercase; letter-spacing:.1em; '
+            f'min-width:80px;">regime macro</div>'
+
+            f'<div style="font-family:Courier New; font-size:0.82rem; '
+            f'color:{_cor_regime}; font-weight:600;">{_label_h}</div>'
+
+            f'<div style="display:flex; gap:24px; margin-left:auto; flex-wrap:wrap;">'
+
+            f'<div style="text-align:center;">'
+            f'<div style="font-size:0.65rem; color:#444; '
+            f'text-transform:uppercase;">selic</div>'
+            f'<div style="font-size:0.9rem; color:#FF9900; '
+            f'font-family:Courier New; font-weight:600;">'
+            f'{_selic_h:.2f}%</div>'
+            f'</div>'
+
+            f'<div style="text-align:center;">'
+            f'<div style="font-size:0.65rem; color:#444; '
+            f'text-transform:uppercase;">ipca</div>'
+            f'<div style="font-size:0.9rem; color:#ccc; '
+            f'font-family:Courier New;">{_ipca_h:.1f}%</div>'
+            f'</div>'
+
+            f'<div style="text-align:center;">'
+            f'<div style="font-size:0.65rem; color:#444; '
+            f'text-transform:uppercase;">vix {_icone_vix}</div>'
+            f'<div style="font-size:0.9rem; color:#ccc; '
+            f'font-family:Courier New;">{_vix_h:.1f}</div>'
+            f'</div>'
+
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
 # ==========================================
 # NAVEGAÇÃO RÁPIDA
 # ==========================================
