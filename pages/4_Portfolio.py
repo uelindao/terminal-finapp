@@ -27,10 +27,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 1. configuração da página
-st.set_page_config(page_title="terminal finapp | portfolio", layout="wide", page_icon="💼")
-
-# 2. barreira de segurança multi-usuário
+# 1. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
 

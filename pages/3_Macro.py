@@ -23,10 +23,7 @@ from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 
-# 1. configuração da página
-st.set_page_config(page_title="terminal finapp | macro", layout="wide", page_icon="🌍")
-
-# 2. barreira de segurança multi-usuário
+# 1. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
 

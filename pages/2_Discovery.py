@@ -31,10 +31,7 @@ from utils.components import page_header, section_title, status_card, empty_stat
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 
-# 1. configuração da página
-st.set_page_config(page_title="terminal finapp | discovery", layout="wide", page_icon="🎯")
-
-# 2. barreira de segurança multi-usuário
+# 1. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
 

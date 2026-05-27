@@ -29,10 +29,7 @@ from utils.components import page_header, section_title, metric_card, status_car
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, CORES_SERIES, base100, linha
 
-# 1. configuração da página
-st.set_page_config(page_title="terminal finapp | research", layout="wide", page_icon="🔬")
-
-# 2. barreira de segurança multi-usuário
+# 1. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
 

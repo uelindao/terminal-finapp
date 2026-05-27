@@ -19,12 +19,6 @@ from database.db import (
     get_user_settings, salvar_user_settings,
 )
 
-st.set_page_config(
-    page_title="configurações",
-    page_icon="⚙️",
-    layout="wide",
-)
-
 if not require_auth():
     st.stop()
 
