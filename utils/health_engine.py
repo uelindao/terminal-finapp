@@ -26,6 +26,16 @@ MULTIPLOS_SETOR: dict[str, tuple] = {
 }
 
 
+def safe_float(val, default=None) -> float | None:
+    """Converte valor para float de forma segura, tratando string/None."""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def _is_fii(ticker: str) -> bool:
     """Determina se o ativo é um Fundo Imobiliário (FII)."""
     nao_fiis = [
@@ -347,8 +357,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         qualidade = dados_base.get('qualidade_dados', 50)
         dados_confiaveis = qualidade >= 40
 
-        pvp = dados_base.get('p/vp') or info.get('priceToBook', None)
-        dy = dados_base.get('dy%') or (info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0)
+        pvp = safe_float(dados_base.get('p/vp')) or safe_float(info.get('priceToBook'))
+        dy = safe_float(dados_base.get('dy%')) or (safe_float(info.get('dividendYield'), 0) * 100 if info.get('dividendYield') else 0)
         
         score = 0
         alertas = []
@@ -374,7 +384,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             penalidade_tec = -15
             
         penalidade_vix = 0
-        if vix_alto and (info.get('beta', 1) > 1.2):
+        beta_seguro = safe_float(info.get('beta'), default=1.0)
+        if vix_alto and (beta_seguro > 1.2):
             alertas.append("⚠️ ativo volátil em cenário de stress (VIX alto).")
             penalidade_vix = -10
 
@@ -439,11 +450,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             else:
                 f_score, f_detalhamento = 0, {}
             
-            pl = dados_base.get('p/l') or info.get('trailingPE', info.get('forwardPE', None))
-            roe = dados_base.get('roe%') or (info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else None)
-            margem = dados_base.get('margem%') or (info.get('profitMargins', 0) * 100 if info.get('profitMargins') else None)
-            ev_ebitda = dados_base.get('ev/ebitda') or info.get('enterpriseToEbitda', None)
-            debt_equity = info.get('debtToEquity', None)
+            pl = safe_float(dados_base.get('p/l')) or safe_float(info.get('trailingPE')) or safe_float(info.get('forwardPE'))
+            raw_roe = safe_float(info.get('returnOnEquity'))
+            roe = safe_float(dados_base.get('roe%')) or (raw_roe * 100 if raw_roe is not None else None)
+            raw_margem = safe_float(info.get('profitMargins'))
+            margem = safe_float(dados_base.get('margem%')) or (raw_margem * 100 if raw_margem is not None else None)
+            ev_ebitda = safe_float(dados_base.get('ev/ebitda')) or safe_float(info.get('enterpriseToEbitda'))
+            debt_equity = safe_float(info.get('debtToEquity'))
 
             # --- Qualidade e Rentabilidade (máx 24pts) ---
             score_q = 0
