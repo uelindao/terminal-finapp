@@ -17,7 +17,7 @@ import requests
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # importações do ecossistema finapp
-from utils.auth import require_auth, render_user_badge
+from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
 from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores, get_user_settings
