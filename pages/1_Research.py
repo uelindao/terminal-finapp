@@ -137,6 +137,100 @@ with st.sidebar:
     st.markdown("---")
     st.caption("v2.4 — busca universal implementada")
 
+    # ── HEALTH SCORE DO ATIVO ATUAL (sidebar) ──────────────────────────────
+    st.markdown(
+        '<div style="height:1px;background:#1e1e1e;margin:12px 0;"></div>',
+        unsafe_allow_html=True,
+    )
+    _tk_sidebar = st.session_state.get('research_ticker', '')
+    _tk_base_sb = mapear_ticker_base(_tk_sidebar) if _tk_sidebar else ''
+    if _tk_sidebar:
+        _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
+        _hs_score = _hs_all_sb.get(_tk_base_sb) or _hs_all_sb.get(_tk_sidebar) or 50
+        _cor_sb = (
+            "#00C853" if _hs_score >= 65
+            else "#FF9900" if _hs_score >= 40
+            else "#FF1744"
+        )
+        _label_sb = (
+            "acumulação" if _hs_score >= 65
+            else "manutenção" if _hs_score >= 40
+            else "reduzir"
+        )
+        st.markdown(
+            f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
+            f'border-left:3px solid {_cor_sb}; border-radius:4px; '
+            f'padding:10px 12px; margin-bottom:8px;">'
+            f'<div style="font-size:0.62rem; color:#555; '
+            f'text-transform:uppercase; letter-spacing:.08em; '
+            f'margin-bottom:4px;">health score</div>'
+            f'<div style="font-family:Courier New; font-size:1.6rem; '
+            f'font-weight:700; color:{_cor_sb}; line-height:1;">'
+            f'{_hs_score}<span style="font-size:0.8rem;color:#555;">/100</span>'
+            f'</div>'
+            f'<div style="font-family:Courier New; font-size:0.7rem; '
+            f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── ADICIONAR À WATCHLIST ─────────────────────────────────────────────
+    st.markdown(
+        '<div style="height:1px;background:#1e1e1e;margin:8px 0;"></div>',
+        unsafe_allow_html=True,
+    )
+    section_title("+ watchlist")
+    _watchlists_sb = listar_watchlists()
+    if _watchlists_sb:
+        _opcoes_wl_sb = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in _watchlists_sb}
+        _dest_wl_sb = st.selectbox(
+            "destino:", list(_opcoes_wl_sb.keys()),
+            key="sb_dest_wl", label_visibility="collapsed",
+        )
+        if st.button(
+            f"+ adicionar {_tk_sidebar.replace('.SA','')}",
+            key="sb_btn_add_wl", use_container_width=True,
+        ):
+            from database.db import adicionar_ativo
+            _wl_id_sb = _opcoes_wl_sb[_dest_wl_sb]
+            _merc_sb  = "Brasil (B3)" if _tk_sidebar.endswith('.SA') else "EUA"
+            _nome_sb  = CACHE_FUNDAMENTOS.get(_tk_base_sb, {}).get('nome') or _tk_sidebar
+            adicionar_ativo(
+                ticker=_tk_sidebar, nome=_nome_sb,
+                mercado=_merc_sb, watchlist_id=_wl_id_sb,
+            )
+            st.success(f"✅ {_tk_sidebar.replace('.SA','')} adicionado!")
+
+    # ── ÚLTIMOS 5 ATIVOS VISITADOS ────────────────────────────────────────
+    _hist_sb = st.session_state.get('research_historico', [])
+    _hist_exibir = [t for t in _hist_sb if t != _tk_sidebar][:4]
+    if _hist_exibir:
+        st.markdown(
+            '<div style="height:1px;background:#1e1e1e;margin:8px 0;"></div>',
+            unsafe_allow_html=True,
+        )
+        section_title("visitados recentemente")
+        _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
+        for _ht in _hist_exibir:
+            _hs_ht  = _hs_all_sb.get(_ht, 50)
+            _cor_ht = (
+                "#00C853" if _hs_ht >= 65 else "#FF9900" if _hs_ht >= 40 else "#FF1744"
+            )
+            _col_ht1, _col_ht2 = st.columns([3, 1])
+            with _col_ht1:
+                if st.button(
+                    _ht.replace('.SA', '').lower(),
+                    key=f"hist_btn_{_ht}", use_container_width=True,
+                ):
+                    st.session_state['research_ticker'] = _ht
+                    st.rerun()
+            with _col_ht2:
+                st.markdown(
+                    f'<div style="font-family:Courier New; font-size:0.75rem; '
+                    f'color:{_cor_ht}; text-align:right; padding-top:6px;">{_hs_ht}</div>',
+                    unsafe_allow_html=True,
+                )
+
 # Trava de segurança para números
 def safe_float(val):
     try:
@@ -291,6 +385,14 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
 ticker = st.session_state['research_ticker']
 t_base = mapear_ticker_base(ticker)
 is_fii = ticker in FII_TODOS or (ticker.endswith("11.SA") and ticker not in ['TAEE11.SA', 'KLBN11.SA', 'ENGI11.SA'])
+
+# Registra ativo no histórico de visitados (máx 5)
+_hist_key = 'research_historico'
+_hist = st.session_state.get(_hist_key, [])
+if ticker and (not _hist or _hist[0] != ticker):
+    _hist = [t for t in _hist if t != ticker]
+    _hist.insert(0, ticker)
+    st.session_state[_hist_key] = _hist[:5]
 
 @st.cache_resource(ttl=3600)
 def carregar_dados_ativo(tk):
