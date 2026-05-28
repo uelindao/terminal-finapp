@@ -1024,13 +1024,397 @@ with tab_fund:
                 ]
             }
         st.table(pd.DataFrame(f_d))
+
+        # ── HISTÓRICO DE DIVIDENDOS (FII) ─────────────────────────────────
+        if is_fii:
+            st.markdown("<br>", unsafe_allow_html=True)
+            section_title("💰 histórico de proventos (últimos 24 meses)")
+
+            try:
+                _divs_raw = acao_obj.dividends
+                if _divs_raw is not None and not _divs_raw.empty:
+                    _divs = _divs_raw.copy()
+                    if getattr(_divs.index, 'tz', None) is not None:
+                        _divs.index = _divs.index.tz_localize(None)
+
+                    _cutoff = pd.Timestamp.now() - pd.DateOffset(months=24)
+                    _divs   = _divs[_divs.index >= _cutoff].sort_index()
+
+                    if not _divs.empty:
+                        _div_vals  = _divs.values
+                        _n_divs    = len(_div_vals)
+                        _media_div = float(_divs.mean())
+                        _ult_div   = float(_divs.iloc[-1])
+
+                        _meio     = _n_divs // 2
+                        _media_1h = float(_divs.iloc[:_meio].mean()) if _meio > 0 else _media_div
+                        _media_2h = float(_divs.iloc[_meio:].mean()) if _meio > 0 else _media_div
+                        _var_tend  = (_media_2h / _media_1h - 1) * 100 if _media_1h > 0 else 0
+
+                        if _var_tend >= 5:
+                            _tend_label = "📈 crescendo"
+                            _tend_cor   = "#00C853"
+                            _tend_tipo  = "bull"
+                        elif _var_tend <= -5:
+                            _tend_label = "📉 caindo"
+                            _tend_cor   = "#FF1744"
+                            _tend_tipo  = "bear"
+                        else:
+                            _tend_label = "➡️ estável"
+                            _tend_cor   = "#FF9900"
+                            _tend_tipo  = "amber"
+
+                        _dv1, _dv2, _dv3, _dv4 = st.columns(4)
+                        with _dv1:
+                            metric_card("último provento", f"r$ {_ult_div:.4f}", "por cota")
+                        with _dv2:
+                            metric_card("média mensal (24m)", f"r$ {_media_div:.4f}", "por cota")
+                        with _dv3:
+                            metric_card("tendência dos proventos", _tend_label,
+                                        f"{_var_tend:+.1f}% (1ª vs 2ª metade)", _tend_tipo)
+                        with _dv4:
+                            metric_card("pagamentos no período", str(_n_divs),
+                                        "últimos 24 meses", "bull" if _n_divs >= 20 else "amber")
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        import plotly.graph_objects as go
+                        _datas_div = [str(d.date()) for d in _divs.index]
+                        _vals_div  = _divs.values.tolist()
+                        _cores_div = ["#00C853" if v >= _media_div else "#FF9900" for v in _vals_div]
+
+                        _fig_div = go.Figure()
+                        _fig_div.add_trace(go.Bar(
+                            x=_datas_div, y=_vals_div,
+                            marker_color=_cores_div, name="provento",
+                        ))
+                        _fig_div.add_hline(
+                            y=_media_div, line_color="#FF9900", line_dash="dash",
+                            line_width=1, annotation_text=f"média r$ {_media_div:.4f}",
+                            annotation_font_color="#FF9900", annotation_font_size=9,
+                        )
+
+                        if _n_divs >= 4:
+                            import numpy as np
+                            _x_reg = list(range(_n_divs))
+                            _coef  = np.polyfit(_x_reg, _vals_div, 1)
+                            _trend = [_coef[0] * x + _coef[1] for x in _x_reg]
+                            _fig_div.add_trace(go.Scatter(
+                                x=_datas_div, y=_trend,
+                                mode="lines",
+                                line=dict(color=_tend_cor, width=1.5, dash="dot"),
+                                name="tendência",
+                            ))
+
+                        _lay_div = base_layout(
+                            height=280,
+                            title=f"proventos mensais — {ticker.lower()} (24 meses)",
+                        )
+                        _lay_div.update(
+                            xaxis=dict(showgrid=False, tickangle=-45, tickfont=dict(size=9)),
+                            yaxis=dict(showgrid=True, gridcolor="#2A2C3E", title="r$ por cota"),
+                            margin=dict(l=60, r=20, t=40, b=60),
+                        )
+                        _fig_div.update_layout(**_lay_div)
+                        st.plotly_chart(_fig_div, use_container_width=True)
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        section_title("últimos 12 proventos")
+                        _ultimos12 = _divs.iloc[-12:].sort_index(ascending=False)
+                        _rows_div  = []
+                        _prev_val  = None
+                        for _dt_div, _val_div in _ultimos12.items():
+                            _val_f = float(_val_div)
+                            if _prev_val is not None and _prev_val > 0:
+                                _var_m = (_val_f / _prev_val - 1) * 100
+                                _var_s = f"{_var_m:+.1f}%"
+                                _cor_v = "#00C853" if _var_m >= 0 else "#FF1744"
+                            else:
+                                _var_s = "—"
+                                _cor_v = "#555"
+                            _rows_div.append({
+                                'data': str(_dt_div.date()),
+                                'provento': f"r$ {_val_f:.4f}",
+                                'vs anterior': _var_s,
+                                'vs média': f"{(_val_f/_media_div - 1)*100:+.1f}%" if _media_div > 0 else "—",
+                            })
+                            _prev_val = _val_f
+                        st.dataframe(pd.DataFrame(_rows_div), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("nenhum provento encontrado nos últimos 24 meses.")
+                else:
+                    st.info("dados de dividendos não disponíveis para este ativo.")
+            except Exception as _e_div:
+                st.warning(f"não foi possível carregar o histórico de proventos: {_e_div}")
+
     with c_f2:
         st.markdown("**descrição**")
         st.write(info_dict.get('longBusinessSummary', 'Sem descrição.')[:800] + "...")
 
 with tab_dcf:
     if is_fii:
-        empty_state("🧮", "dcf não aplicável", "o modelo de dcf reverso é projetado para ações com lucro por ação. fiis são avaliados por p/vp e dividend yield.")
+        section_title("🏢 modelo de valuation — p/vp justo (fii)")
+
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.75rem; '
+            'color:#555; margin-bottom:16px; line-height:1.7;">'
+            'para fiis o modelo correto não é dcf, mas sim a comparação entre '
+            '<b>cap rate implícito</b> (yield real do fii) e o '
+            '<b>custo de oportunidade</b> (ntn-b + spread de risco do segmento). '
+            'o p/vp justo é derivado dessa relação: quando o yield real supera '
+            'o custo de oportunidade, o fii merece negociar acima de 1.0x p/vp.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        from utils.health_engine import _buscar_yield_ntnb, _detectar_segmento_fii
+
+        _ntnb_dcf    = _buscar_yield_ntnb()
+        _seg_dcf     = _detectar_segmento_fii(t_base, cache_d)
+        _dy_dcf      = safe_float(cache_d.get('dy%')) or 0.0
+        _pvp_dcf     = safe_float(cache_d.get('p/vp')) or 1.0
+        _ipca_dcf    = st.session_state.get("macro_context", {}).get("ipca", 4.5)
+        _dy_real_dcf = ((1 + _dy_dcf/100) / (1 + _ipca_dcf/100) - 1) * 100
+
+        section_title("⚙️ parâmetros do modelo")
+
+        _spreads_default = {
+            'papel':       1.5,
+            'logistica':   2.5,
+            'lajes':       3.0,
+            'shopping':    3.0,
+            'fof':         2.0,
+            'residencial': 2.5,
+            'hibrido':     2.5,
+            'desconhecido':2.5,
+        }
+        _spread_default = _spreads_default.get(_seg_dcf, 2.5)
+
+        _fv1, _fv2, _fv3, _fv4 = st.columns(4)
+
+        with _fv1:
+            _ntnb_input = st.number_input(
+                "yield ntn-b real (% a.a.)",
+                value=float(_ntnb_dcf),
+                min_value=2.0,
+                max_value=12.0,
+                step=0.1,
+                format="%.2f",
+            )
+        with _fv2:
+            _spread_input = st.slider(
+                "spread de risco do segmento (pp)",
+                min_value=0.5,
+                max_value=6.0,
+                value=float(_spread_default),
+                step=0.25,
+                format="%.2f",
+            )
+        with _fv3:
+            _dy_input = st.number_input(
+                "dividend yield atual (%)",
+                value=float(_dy_dcf) if _dy_dcf > 0 else 8.0,
+                min_value=0.1,
+                max_value=30.0,
+                step=0.1,
+                format="%.2f",
+            )
+        with _fv4:
+            _ipca_input = st.number_input(
+                "ipca esperado (%)",
+                value=float(_ipca_dcf),
+                min_value=1.0,
+                max_value=12.0,
+                step=0.1,
+                format="%.1f",
+            )
+
+        st.markdown("---")
+
+        _custo_op     = _ntnb_input + _spread_input
+        _dy_real_calc = ((1 + _dy_input/100) / (1 + _ipca_input/100) - 1) * 100
+        _pvp_justo    = _dy_real_calc / _custo_op if _custo_op > 0 else 1.0
+        _pvp_justo    = round(_pvp_justo, 3)
+        _pvp_atual    = _pvp_dcf
+        _upside_pvp   = (_pvp_justo / _pvp_atual - 1) * 100 if _pvp_atual > 0 else 0
+        _spread_efetivo = _dy_real_calc - _custo_op
+
+        _rc1, _rc2, _rc3, _rc4 = st.columns(4)
+
+        _cor_pvpj = "#00C853" if _pvp_justo > _pvp_atual else "#FF1744"
+        _cor_spread_ef = "#00C853" if _spread_efetivo >= 0 else "#FF1744"
+        _cor_upside = "#00C853" if _upside_pvp > 0 else "#FF1744"
+
+        with _rc1:
+            metric_card(
+                "p/vp justo calculado",
+                f"{_pvp_justo:.3f}×",
+                f"p/vp mercado: {_pvp_atual:.3f}×",
+                "bull" if _pvp_justo > _pvp_atual else "bear",
+            )
+        with _rc2:
+            metric_card(
+                "upside / downside",
+                f"{_upside_pvp:+.1f}%",
+                "vs p/vp atual de mercado",
+                "bull" if _upside_pvp > 0 else "bear",
+            )
+        with _rc3:
+            metric_card(
+                "spread efetivo",
+                f"{_spread_efetivo:+.2f}pp",
+                f"yield real {_dy_real_calc:.1f}% − custo {_custo_op:.1f}%",
+                "bull" if _spread_efetivo >= 0 else "bear",
+            )
+        with _rc4:
+            metric_card(
+                "segmento detectado",
+                _seg_dcf,
+                f"spread padrão: {_spread_default:.1f}pp",
+            )
+
+        if _pvp_justo > _pvp_atual * 1.10:
+            _interp = (
+                f"fii potencialmente subavaliado: p/vp justo de {_pvp_justo:.3f}× "
+                f"supera o preço de mercado de {_pvp_atual:.3f}× em "
+                f"{_upside_pvp:.1f}%. o yield real compensa o custo de "
+                f"oportunidade com folga de {_spread_efetivo:.2f}pp."
+            )
+            _tipo_interp = "bull"
+        elif _pvp_justo > _pvp_atual:
+            _interp = (
+                f"fii levemente subavaliado: p/vp justo ({_pvp_justo:.3f}×) "
+                f"acima do mercado ({_pvp_atual:.3f}×). spread efetivo de "
+                f"{_spread_efetivo:.2f}pp — margem estreita, monitorar dividendos."
+            )
+            _tipo_interp = "amber"
+        elif _pvp_justo > _pvp_atual * 0.90:
+            _interp = (
+                f"fii próximo do valor justo: p/vp calculado de {_pvp_justo:.3f}× "
+                f"vs mercado {_pvp_atual:.3f}×. spread negativo de "
+                f"{_spread_efetivo:.2f}pp — yield real insuficiente vs "
+                f"ntn-b + spread de risco."
+            )
+            _tipo_interp = "amber"
+        else:
+            _interp = (
+                f"fii potencialmente sobreavaliado: p/vp justo de {_pvp_justo:.3f}× "
+                f"abaixo do mercado de {_pvp_atual:.3f}×. o yield real "
+                f"({_dy_real_calc:.1f}%) não remunera adequadamente o risco "
+                f"vs ntn-b ({_ntnb_input:.1f}%) + spread ({_spread_input:.1f}pp)."
+            )
+            _tipo_interp = "bear"
+
+        status_card("interpretação do modelo", _interp, _tipo_interp)
+
+        section_title("🗺️ sensibilidade — p/vp justo por yield real e spread")
+
+        import numpy as np
+        import plotly.graph_objects as go
+
+        _dy_reais_range   = [round(x, 1) for x in list(np.arange(4.0, 14.1, 0.5))]
+        _spreads_cenarios = [
+            round(_spread_input - 1.0, 2),
+            round(_spread_input, 2),
+            round(_spread_input + 1.0, 2),
+        ]
+        _spreads_cenarios = [max(0.5, s) for s in _spreads_cenarios]
+
+        _fig_fii_sens = go.Figure()
+
+        for _i_sp, _sp in enumerate(_spreads_cenarios):
+            _custo_c = _ntnb_input + _sp
+            _pvps_c  = [
+                round(dy_r / _custo_c, 3) if _custo_c > 0 else 1.0
+                for dy_r in _dy_reais_range
+            ]
+            from utils.charts import CORES_SERIES
+            _fig_fii_sens.add_trace(go.Scatter(
+                x=_dy_reais_range,
+                y=_pvps_c,
+                name=f"spread {_sp:.1f}pp",
+                line=dict(
+                    color=CORES_SERIES[_i_sp % len(CORES_SERIES)],
+                    width=1.8,
+                ),
+            ))
+
+        _fig_fii_sens.add_scatter(
+            x=[_dy_real_calc],
+            y=[_pvp_justo],
+            mode="markers",
+            marker=dict(color="#FF9900", size=12, symbol="diamond"),
+            name="posição atual",
+        )
+
+        _fig_fii_sens.add_hline(
+            y=_pvp_atual,
+            line_color="#888",
+            line_dash="dash",
+            line_width=1,
+            annotation_text=f"p/vp mercado ({_pvp_atual:.2f}×)",
+            annotation_font_color="#888",
+            annotation_font_size=9,
+        )
+        _fig_fii_sens.add_hline(
+            y=1.0,
+            line_color="#333",
+            line_dash="dot",
+            line_width=1,
+        )
+
+        _lay_fii = base_layout(
+            height=380,
+            title="p/vp justo por yield real e spread de risco (ntn-b fixo)",
+        )
+        _lay_fii.update(
+            xaxis=dict(title="yield real do fii (% a.a.)", showgrid=True, gridcolor="#2A2C3E"),
+            yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor="#2A2C3E"),
+        )
+        _fig_fii_sens.update_layout(**_lay_fii)
+        st.plotly_chart(_fig_fii_sens, use_container_width=True)
+
+        st.caption(
+            f"ntn-b fixo em {_ntnb_input:.2f}% | ipca {_ipca_input:.1f}% | "
+            f"segmento: {_seg_dcf} | diamante laranja = posição atual"
+        )
+
+        st.markdown("---")
+        if st.button(
+            "🧠 ia: interpretar valuation e gerar tese para este fii",
+            type="primary",
+            key="btn_ia_fii_dcf",
+        ):
+            _prompt_fii_val = (
+                f"fii: {ticker.upper()} | segmento: {_seg_dcf}\n\n"
+                f"modelo de valuation (p/vp justo):\n"
+                f"yield nominal: {_dy_input:.2f}%\n"
+                f"yield real: {_dy_real_calc:.2f}%\n"
+                f"ntn-b benchmark: {_ntnb_input:.2f}% (ipca+)\n"
+                f"spread de risco do segmento: {_spread_input:.2f}pp\n"
+                f"custo de oportunidade total: {_custo_op:.2f}%\n"
+                f"spread efetivo: {_spread_efetivo:+.2f}pp\n"
+                f"p/vp justo calculado: {_pvp_justo:.3f}×\n"
+                f"p/vp de mercado atual: {_pvp_atual:.3f}×\n"
+                f"upside/downside implícito: {_upside_pvp:+.1f}%\n\n"
+                f"health score: {health_result.get('score', 50)}/100\n"
+                f"contexto macro: selic {st.session_state.get('macro_context',{}).get('selic',10.75):.2f}%"
+                f" | ipca {_ipca_input:.1f}%\n\n"
+                "em 4 tópicos curtos (letra minúscula):\n"
+                "1. o yield real remunera adequadamente o risco vs título público?\n"
+                "2. o p/vp atual está justo, barato ou caro para o segmento?\n"
+                "3. cenário bull e bear para os proventos nos próximos 12 meses.\n"
+                "4. recomendação: acumular / manter / reduzir — com justificativa."
+            )
+            _us_fii = st.session_state.get('user_settings', {})
+            chamar_ia(
+                prompt_usuario = _prompt_fii_val,
+                system         = SYSTEM_TESE,
+                max_tokens     = 600,
+                temperatura    = 0.3,
+                stream         = True,
+                user_settings  = _us_fii,
+            )
     else:
         eps_base = safe_float(info_dict.get('trailingEps')) or safe_float(info_dict.get('forwardEps'))
         preco_base = safe_float(df_hist['Close'].iloc[-1]) if not df_hist.empty else None
