@@ -591,8 +591,8 @@ with tab_posicoes:
         }
 
         col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1: metric_card("custo total alocado", fmt_preco(custo_total_carteira, "$"))
-        with col_m2: metric_card("património atual (m2m)", fmt_preco(valor_atual_carteira, "$"), fmt_pct(pnl_global_pct), "bull" if pnl_global_pct >= 0 else "bear")
+        with col_m1: metric_card("custo total alocado", fmt_preco(custo_total_carteira, "$"), destaque=True)
+        with col_m2: metric_card("património atual (m2m)", fmt_preco(valor_atual_carteira, "$"), fmt_pct(pnl_global_pct), "bull" if pnl_global_pct >= 0 else "bear", destaque=True)
         with col_m3: metric_card("p&l global", fmt_preco(pnl_global_valor, "$"), "", "bull" if pnl_global_valor >= 0 else "bear")
 
         st.markdown("<br>", unsafe_allow_html=True)

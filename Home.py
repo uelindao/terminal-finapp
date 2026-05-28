@@ -1053,7 +1053,7 @@ if ativos_alocados:
     pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0
 
     pf1, pf2, pf3, pf4 = st.columns(4)
-    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear")
+    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear", destaque=True)
     with pf2: metric_card("p&l total", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
 
     if var_dia_port:

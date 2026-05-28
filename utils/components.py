@@ -47,65 +47,150 @@ def section_title(titulo: str):
     )
 
 
-def metric_card(label: str, valor: str,
-                delta: str = "", cor_delta: str = "muted"):
-    """Metric card com label UI e valor em fonte de dados."""
-    CORES = {
-        "bull":  "var(--bull)",
-        "bear":  "var(--bear)",
-        "amber": "var(--amber)",
-        "info":  "var(--info)",
-        "muted": "var(--text-muted)",
+def metric_card(
+    label:      str,
+    valor:      str,
+    sublabel:   str  = "",
+    cor_delta:  str  = "muted",
+    icone:      str  = "",
+    destaque:   bool = False,
+):
+    """
+    Renderiza card de métrica com 4 níveis visuais.
+
+    cor_delta:
+      "bull"  → borda e valor verde  (#00C853)
+      "bear"  → borda e valor vermelho (#FF1744)
+      "amber" → borda e valor laranja (#FF9900)
+      "muted" → borda cinza sutil (padrão)
+      "info"  → borda azul (#00B0FF)
+
+    destaque: True → card com background mais escuro e tamanho de
+              valor maior — para KPIs principais
+    """
+    _cores = {
+        "bull":  {"borda": "#00C853", "valor": "#00C853",
+                  "bg": "#001a0a", "bg_dest": "#002a10",
+                  "sublabel": "#2d6e42"},
+        "bear":  {"borda": "#FF1744", "valor": "#FF1744",
+                  "bg": "#1a0005", "bg_dest": "#2a000a",
+                  "sublabel": "#7a2030"},
+        "amber": {"borda": "#FF9900", "valor": "#FF9900",
+                  "bg": "#0d0d0d", "bg_dest": "#1a0f00",
+                  "sublabel": "#7a5500"},
+        "info":  {"borda": "#00B0FF", "valor": "#00B0FF",
+                  "bg": "#00080d", "bg_dest": "#00101a",
+                  "sublabel": "#005580"},
+        "muted": {"borda": "#2a2a2a", "valor": "#C0C0C0",
+                  "bg": "#0d0d0d", "bg_dest": "#141414",
+                  "sublabel": "#444"},
     }
-    cor = CORES.get(cor_delta, "var(--text-muted)")
-    delta_html = (
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.68rem; color:{cor};'
-        f' margin-top:4px; font-weight:500;">'
-        f'{delta}</div>'
-        if delta else ""
-    )
+    _c = _cores.get(cor_delta, _cores["muted"])
+
+    _sz_label  = "0.65rem"
+    _sz_valor  = "1.3rem" if destaque else "1.05rem"
+    _sz_sub    = "0.68rem"
+    _pad       = "16px 18px" if destaque else "12px 14px"
+    _bg        = _c["bg_dest"] if destaque else _c["bg"]
+
+    _icone_html = (
+        f'<span style="font-size:1.1rem;margin-right:6px;">{icone}</span>'
+    ) if icone else ''
+
     st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="metric-label">{label}</div>'
-        f'<div class="metric-value">{valor}</div>'
-        f'{delta_html}'
+        f'<div style="'
+        f'background:{_bg}; '
+        f'border:1px solid #1e1e1e; '
+        f'border-left:3px solid {_c["borda"]}; '
+        f'border-radius:6px; '
+        f'padding:{_pad}; '
+        f'margin-bottom:4px; '
+        f'transition:border-color .2s;">'
+
+        f'<div style="'
+        f'font-family:Courier New; '
+        f'font-size:{_sz_label}; '
+        f'color:#555; '
+        f'text-transform:uppercase; '
+        f'letter-spacing:.08em; '
+        f'margin-bottom:4px;">'
+        f'{label}</div>'
+
+        f'<div style="'
+        f'font-family:Courier New; '
+        f'font-size:{_sz_valor}; '
+        f'font-weight:700; '
+        f'color:{_c["valor"]}; '
+        f'line-height:1.2; '
+        f'margin-bottom:2px;">'
+        f'{_icone_html}{valor}</div>'
+
+        + (
+            f'<div style="'
+            f'font-family:Courier New; '
+            f'font-size:{_sz_sub}; '
+            f'color:{_c["sublabel"]};">'
+            f'{sublabel}</div>'
+            if sublabel else ''
+        ) +
+
         f'</div>',
         unsafe_allow_html=True,
     )
 
 
-def status_card(titulo: str, corpo: str,
-                tipo: str = "info", subtitulo: str = ""):
-    """Card de status com borda lateral colorida."""
-    CORES = {
-        "bull":  "var(--bull)",
-        "bear":  "var(--bear)",
-        "amber": "var(--amber)",
-        "info":  "var(--info)",
-        "muted": "var(--text-muted)",
+def status_card(
+    titulo:  str,
+    corpo:   str,
+    tipo:    str = "amber",
+    icone:   str = "",
+):
+    """
+    Card de status/alerta com fundo colorido.
+
+    tipo:
+      "bull"  → fundo verde escuro
+      "bear"  → fundo vermelho escuro
+      "amber" → fundo laranja escuro
+      "info"  → fundo azul escuro
+      "muted" → fundo cinza
+    """
+    _mapa_status = {
+        "bull":  ("#00C853", "#001a0a", "✅"),
+        "bear":  ("#FF1744", "#1a0005", "⚠️"),
+        "amber": ("#FF9900", "#0d0800", "💡"),
+        "info":  ("#00B0FF", "#00080d", "ℹ️"),
+        "muted": ("#444444", "#0d0d0d", "📋"),
     }
-    cor = CORES.get(tipo, "var(--info)")
-    sub_html = (
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.68rem; color:var(--text-muted);'
-        f' margin-top:2px;">{subtitulo}</div>'
-        if subtitulo else ""
-    )
+    _cor, _bg, _icone_def = _mapa_status.get(tipo, _mapa_status["amber"])
+    _ic = icone or _icone_def
+
     st.markdown(
-        f'<div style="background:var(--bg-surface);'
-        f' border:1px solid var(--border-subtle);'
-        f' border-left:3px solid {cor};'
-        f' border-radius:0 var(--radius-md) var(--radius-md) 0;'
-        f' padding:10px 14px; margin-bottom:8px;">'
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.65rem; font-weight:600;'
-        f' color:var(--text-muted); text-transform:uppercase;'
-        f' letter-spacing:0.07em;">{titulo}</div>'
-        f'{sub_html}'
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.82rem; color:var(--text-secondary);'
-        f' margin-top:5px; line-height:1.55;">{corpo}</div>'
+        f'<div style="'
+        f'background:{_bg}; '
+        f'border:1px solid {_cor}33; '
+        f'border-left:4px solid {_cor}; '
+        f'border-radius:6px; '
+        f'padding:14px 18px; '
+        f'margin:8px 0;">'
+
+        f'<div style="'
+        f'font-family:Courier New; '
+        f'font-size:0.75rem; '
+        f'color:{_cor}; '
+        f'font-weight:700; '
+        f'text-transform:uppercase; '
+        f'letter-spacing:.08em; '
+        f'margin-bottom:6px;">'
+        f'{_ic} {titulo}</div>'
+
+        f'<div style="'
+        f'font-family:Courier New; '
+        f'font-size:0.80rem; '
+        f'color:#aaa; '
+        f'line-height:1.7;">'
+        f'{corpo}</div>'
+
         f'</div>',
         unsafe_allow_html=True,
     )
