@@ -97,7 +97,7 @@ with st.sidebar:
         
         # --- NOVA BUSCA GLOBAL (YAHOO FINANCE API) ---
         termo = st.text_input("buscar qualquer ativo global:", placeholder="nome ou ticker (ex: nubank, aapl)...")
-        if st.button("🔍 buscar ativo", use_container_width=True):
+        if st.button("🔍 buscar ativo", use_container_width=True, config={'responsive': True}):
             if termo:
                 with st.spinner("procurando na rede global..."):
                     resultados = buscar_ativo_yahoo(termo)
@@ -395,7 +395,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                 if not hist_all.empty:
                     df_b100 = (hist_all / hist_all.iloc[0]) * 100
                     fig_b100 = base100(df_b100, height=350)
-                    st.plotly_chart(fig_b100, use_container_width=True)
+                    st.plotly_chart(fig_b100, use_container_width=True, config={'responsive': True})
 
     # ── HEALTH SCORES LADO A LADO ─────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -746,7 +746,7 @@ if len(historico) >= 3:
     fig_score.add_hline(y=40, line_color="#FF1744", line_dash="dash",
                         line_width=1, annotation_text="reduzir")
     fig_score.update_yaxes(range=[0, 100])
-    st.plotly_chart(fig_score, use_container_width=True)
+    st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
 
     # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
     _breakdown_vis = health_result.get('breakdown', {})
@@ -842,7 +842,7 @@ if len(historico) >= 3:
                 margin=dict(l=220, r=60, t=40, b=20),
             )
             _fig_bd.update_layout(**_lay_bd)
-            st.plotly_chart(_fig_bd, use_container_width=True)
+            st.plotly_chart(_fig_bd, use_container_width=True, config={'responsive': True})
 
             # Linha de resumo abaixo do gráfico
             _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
@@ -1077,7 +1077,7 @@ with tab_val:
     if _peers_list:
         section_title("👥 comparação com peers")
 
-        _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+        _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1, 1, 1, 1], gap="small")
         for _hcol, _htxt in zip([_h1, _h2, _h3, _h4, _h5, _h6], ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"]):
             _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
 
@@ -1098,7 +1098,7 @@ with tab_val:
                 try:    return f"{float(v):.{dec}f}" if v is not None else "—"
                 except: return "—"
 
-            _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+            _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1, 1, 1, 1], gap="small")
             _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
             _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
             _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
@@ -1117,7 +1117,7 @@ with tab_tec:
         if len(df_hist) >= 200: fig_tec.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'].rolling(200).mean(), name="mm200", line=dict(color=CORES_SERIES[3], width=1.5)))
         fig_tec.update_layout(**base_layout(height=500, title=f"price action histórico (10 anos): {ticker.lower()}"))
         fig_tec.update_layout(xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig_tec, use_container_width=True)
+        st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True})
     except Exception as e: st.error(f"Erro gráfico técnico: {e}")
 
 with tab_earn:
@@ -1139,7 +1139,7 @@ with tab_earn:
                     fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'], name="receita", marker_color=CORES_SERIES[1]))
                     fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'], name="lucro", marker_color=CORES_SERIES[2]))
                     fig_earn.update_layout(**base_layout(height=400), barmode='group')
-                    st.plotly_chart(fig_earn, use_container_width=True)
+                    st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
         except: st.error("Erro earnings.")
 
 with tab_ia:
@@ -1172,7 +1172,7 @@ with tab_ia:
     else:
         st.caption("nenhuma análise gerada ainda para este ativo.")
 
-    _col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
+    _col_ia1, _col_ia2, _col_ia3 = st.columns([3, 1, 1], gap="small")
     with _col_ia1:
         st.markdown(
             '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
@@ -1512,7 +1512,7 @@ with tab_fund:
                             margin=dict(l=60, r=20, t=40, b=60),
                         )
                         _fig_div.update_layout(**_lay_div)
-                        st.plotly_chart(_fig_div, use_container_width=True)
+                        st.plotly_chart(_fig_div, use_container_width=True, config={'responsive': True})
 
                         st.markdown("<br>", unsafe_allow_html=True)
                         section_title("últimos 12 proventos")
@@ -1768,7 +1768,7 @@ with tab_dcf:
             yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor="#2A2C3E"),
         )
         _fig_fii_sens.update_layout(**_lay_fii)
-        st.plotly_chart(_fig_fii_sens, use_container_width=True)
+        st.plotly_chart(_fig_fii_sens, use_container_width=True, config={'responsive': True})
 
         st.caption(
             f"ntn-b fixo em {_ntnb_input:.2f}% | ipca {_ipca_input:.1f}% | "
@@ -1909,7 +1909,7 @@ with tab_dcf:
                 
             fig.add_hline(y=preco_input, line_color="#FF9900", line_dash="dash", annotation_text="preço atual")
             fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
             
             st.markdown("---")
             if st.button("🧠 ia: interpretar o valuation e gerar tese", type="primary"):
@@ -1989,7 +1989,7 @@ with tab_macro:
             fig_macro.add_trace(go.Scatter(x=stk_p.index, y=stk_p, name=ticker.lower(), line=dict(color="#FF9900")), secondary_y=False)
             fig_macro.add_trace(go.Scatter(x=m_data.index, y=m_data, name=m_name, line=dict(color="#00B0FF", dash="dot")), secondary_y=True)
             fig_macro.update_layout(**base_layout(height=450, title=f"{ticker.lower()} vs {ind_macro.lower()}"))
-            st.plotly_chart(fig_macro, use_container_width=True)
+            st.plotly_chart(fig_macro, use_container_width=True, config={'responsive': True})
     except: st.warning("Erro overlay.")
 
 # Fim da página

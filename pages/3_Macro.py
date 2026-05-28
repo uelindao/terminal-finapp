@@ -661,11 +661,11 @@ with tab_global:
             with c4: metric_card("desemprego", fmt_pct(v_desemp, sinal=False))
             
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", "#00C853"), use_container_width=True)
-            with g2: st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True)
+            with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", "#00C853"), use_container_width=True, config={'responsive': True})
+            with g2: st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
             g3, g4 = st.columns(2)
-            with g3: st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True)
-            with g4: st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True)
+            with g3: st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
+            with g4: st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
 
             # ── FISCAL BRASILEIRO ──────────────────────────────────────────────
             st.markdown("---")
@@ -713,12 +713,13 @@ with tab_global:
                     annotation_text="limite prudencial 60% pib",
                     annotation_font=dict(color="#FF9900", size=10, family="Courier New"),
                 )
-                st.plotly_chart(fig_divida, use_container_width=True)
+                st.plotly_chart(fig_divida, use_container_width=True, config={'responsive': True})
             with gf2:
                 st.plotly_chart(
                     criar_grafico_macro(df_br, 'Result_Primario',
                                         "resultado primário do setor público (% pib)", "#00B0FF"),
                     use_container_width=True,
+                    config={'responsive': True},
                 )
 
             if fiscal['status'] == 'critico':
@@ -754,18 +755,18 @@ with tab_global:
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
             
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", "#00C853"), use_container_width=True)
-            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'CPI_MoM', "inflação mensal cpi (%)", "#00B0FF"), use_container_width=True)
+            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", "#00C853"), use_container_width=True, config={'responsive': True})
+            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'CPI_MoM', "inflação mensal cpi (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
             g3, g4 = st.columns(2)
-            with g3: st.plotly_chart(criar_grafico_macro(df_global, 'DGS10', "treasury yield 10y (%)", "#FFFFFF"), use_container_width=True)
-            with g4: st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True)
+            with g3: st.plotly_chart(criar_grafico_macro(df_global, 'DGS10', "treasury yield 10y (%)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
+            with g4: st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌍 europa/ásia":
             v_ecb = valor_atual_seguro(df_global, 'ECBDFR')
-            if v_ecb is not None: st.plotly_chart(criar_grafico_macro(df_global, 'ECBDFR', "bce - taxa de juros europeia (%)", "#FF9900"), use_container_width=True)
+            if v_ecb is not None: st.plotly_chart(criar_grafico_macro(df_global, 'ECBDFR', "bce - taxa de juros europeia (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01EZM156N', "euro area 10y yield (%)", "#00B0FF"), use_container_width=True)
-            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01JPM156N', "japan 10y yield (%)", "#FF1744"), use_container_width=True)
+            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01EZM156N', "euro area 10y yield (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01JPM156N', "japan 10y yield (%)", "#FF1744"), use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌐 risco":
             section_title("curva de juros eua & spreads de crédito")
@@ -794,17 +795,17 @@ with tab_global:
             fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", "#00B0FF")
             fig_t10.add_hline(y=0, line_color="#FF1744", line_dash="dash", line_width=1)
             fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color="#FF1744", size=10, family="Courier New"), showarrow=False, yshift=-14)
-            st.plotly_chart(fig_t10, use_container_width=True)
+            st.plotly_chart(fig_t10, use_container_width=True, config={'responsive': True})
             
-            st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", "#FF1744"), use_container_width=True)
+            st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", "#FF1744"), use_container_width=True, config={'responsive': True})
             st.info("o vix mede a volatilidade esperada do s&p 500.")
             
-            st.plotly_chart(criar_grafico_macro(df_global, 'BAMLH0A0HYM2', "spread crédito high yield (%)", "#E040FB"), use_container_width=True)
+            st.plotly_chart(criar_grafico_macro(df_global, 'BAMLH0A0HYM2', "spread crédito high yield (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🛢️ commodities":
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_comm, 'CL=F', "petróleo wti (us$ / barril)", "#E040FB"), use_container_width=True)
-            with g2: st.plotly_chart(criar_grafico_macro(df_comm, 'GC=F', "ouro futuros (us$ / onça)", "#FFEB3B"), use_container_width=True)
+            with g1: st.plotly_chart(criar_grafico_macro(df_comm, 'CL=F', "petróleo wti (us$ / barril)", "#E040FB"), use_container_width=True, config={'responsive': True})
+            with g2: st.plotly_chart(criar_grafico_macro(df_comm, 'GC=F', "ouro futuros (us$ / onça)", "#FFEB3B"), use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "📰 macro news":
             col_news1, col_news2 = st.columns(2)
@@ -836,7 +837,7 @@ with tab_ciclo:
         fig_heat.update_layout(**layout_heat)
         fig_heat.update_traces(textfont=dict(family="Courier New", size=11, color="#FFFFFF"))
         fig_heat.update_coloraxes(showscale=False)
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, use_container_width=True, config={'responsive': True})
         st.caption("verde = retorno positivo no período | vermelho = retorno negativo | dados: etfs setoriais s&p 500 via yahoo finance")
     else:
         empty_state("📊", "sem dados setoriais", "não foi possível carregar os retornos dos etfs setoriais.")
@@ -1004,7 +1005,7 @@ with tab_calendar:
 
         st.markdown("---")
 
-        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
+        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True, config={'responsive': True}):
             with st.spinner("analisando eventos e gerando briefing..."):
                 _eventos_txt = "\n".join([
                     f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | "
@@ -1043,7 +1044,7 @@ with tab_overlay:
     ticker_input = ticker_manual_ov if ticker_manual_ov else (ticker_from_label(selecao_ov) or "PETR4.SA")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("gerar overlay macro", type="primary", use_container_width=True):
+    if st.button("gerar overlay macro", type="primary", use_container_width=True, config={'responsive': True}):
         if not ticker_input or ticker_input.startswith("─"):
             st.warning("selecione um ativo válido para iniciar a análise.")
         else:
@@ -1081,7 +1082,7 @@ with tab_overlay:
                         fig.update_yaxes(title_text=macro_name, showgrid=False, secondary_y=True)
                         fig.update_xaxes(showgrid=True, gridcolor='#1e1e1e')
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
                     else: st.warning("não foi possível obter a série de dados macroeconómicos.")
                 except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
 
@@ -1142,7 +1143,7 @@ with tab_sentimento:
             'margin': {'t': 20, 'b': 10, 'l': 20, 'r': 20},
         })
         fig_gauge.update_layout(**layout_gauge)
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge, use_container_width=True, config={'responsive': True})
 
         st.markdown(
             f'<div style="text-align:center; font-family:Courier New; font-size:1.4rem; '
@@ -1339,7 +1340,7 @@ with tab_correlacoes:
         fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family='Courier New'))
         fig_heat.update_yaxes(tickfont=dict(size=9, family='Courier New'))
 
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, use_container_width=True, config={'responsive': True})
         st.caption(
             f"correlação de pearson calculada sobre os últimos {janela_corr} pregões. "
             "diagonal principal sempre = 1. benchmarks: ^bvsp (ibovespa), ^gspc (s&p500), "
@@ -1442,7 +1443,7 @@ with tab_correlacoes:
                       'gridcolor': '#1e1e1e', 'showgrid': True},
         })
         fig_roll.update_layout(**layout_roll)
-        st.plotly_chart(fig_roll, use_container_width=True)
+        st.plotly_chart(fig_roll, use_container_width=True, config={'responsive': True})
         st.caption(
             "cada linha representa a correlação rolante entre um ativo da watchlist "
             "e seu benchmark natural (ativos .SA vs ibovespa; ativos globais vs s&p500). "

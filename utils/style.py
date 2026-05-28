@@ -9,6 +9,21 @@ import streamlit as st
 
 def aplicar_tema():
     """Injeta o CSS global do design system."""
+    import streamlit.components.v1 as _components
+    _components.html("""
+    <script>
+    (function() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'viewport';
+            document.head.appendChild(meta);
+        }
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0';
+    })();
+    </script>
+    """, height=0)
+
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -801,13 +816,84 @@ def aplicar_tema():
        MOBILE
        ═══════════════════════════════════════════════════ */
 
+    /* ═══════════════════════════════════════════════════
+       RESPONSIVO — mobile-first
+       ═══════════════════════════════════════════════════ */
     @media (max-width: 768px) {
         .block-container {
             padding-left: 0.8rem !important;
             padding-right: 0.8rem !important;
         }
-        .metric-card .metric-value {
+        [data-testid="stSidebar"] {
+            min-width: 260px !important;
+            width: 260px !important;
+        }
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.4rem !important;
+        }
+        [data-testid="column"] {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        [data-testid="column"] .element-container {
+            width: 100% !important;
+        }
+        .metric-card-valor {
             font-size: 1.1rem !important;
+        }
+        .metric-card {
+            padding: 0.5rem 0.6rem !important;
+        }
+        .stDataFrame {
+            font-size: 0.75rem !important;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            flex-wrap: wrap !important;
+            gap: 0.25rem !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.4rem 0.6rem !important;
+            font-size: 0.75rem !important;
+        }
+        .stButton button {
+            width: 100% !important;
+        }
+        [data-testid="stMetric"] {
+            min-width: 100% !important;
+        }
+        div[data-testid="stMarkdownContainer"] > p {
+            word-break: break-word !important;
+        }
+        .st-emotion-cache-1r4qj8v {
+            flex-wrap: wrap !important;
+        }
+    }
+    @media (max-width: 480px) {
+        .block-container {
+            padding-left: 0.4rem !important;
+            padding-right: 0.4rem !important;
+        }
+        .metric-card-valor {
+            font-size: 0.95rem !important;
+        }
+        .metric-card-label {
+            font-size: 0.65rem !important;
+        }
+        .stDataFrame {
+            font-size: 0.65rem !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.3rem 0.4rem !important;
+            font-size: 0.65rem !important;
+        }
+        [data-testid="stSidebar"] {
+            min-width: 220px !important;
+            width: 220px !important;
+        }
+        .stPlotlyChart {
+            min-height: 280px !important;
+            height: auto !important;
         }
     }
 

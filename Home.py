@@ -936,7 +936,7 @@ with col_gauge_mac:
         'paper_bgcolor': '#13141E',
     })
     fig_mac.update_layout(**layout_mac)
-    st.plotly_chart(fig_mac, use_container_width=True)
+    st.plotly_chart(fig_mac, use_container_width=True, config={'responsive': True})
 
     st.markdown(
         f'<div style="text-align:center; font-family:Courier New; font-size:1.1rem; '

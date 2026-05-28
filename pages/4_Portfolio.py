@@ -259,7 +259,7 @@ with tab_posicoes:
                 if pf['padrao']:
                     pc2.markdown('<span class="badge badge-amber">padrão</span>', unsafe_allow_html=True)
                 else:
-                    if pc2.button("⭐ padrão", key=f"pf_pad_{pf['id']}", use_container_width=True):
+                    if pc2.button("⭐ padrão", key=f"pf_pad_{pf['id']}", use_container_width=True, config={'responsive': True}):
                         definir_portfolio_padrao(pf['id'])
                         st.rerun()
                 if pc3.button("🗑️ excluir", key=f"pf_del_{pf['id']}", use_container_width=True, disabled=(len(portfolios_lista) <= 1)):
@@ -440,7 +440,7 @@ with tab_posicoes:
         with c_txt:
             st.markdown(f"<div style='font-family: Courier New; font-size: 0.85rem; color: #888; padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
         with c_btn:
-            btn_salvar = st.button("💾 salvar correções da tabela", type="primary", use_container_width=True)
+            btn_salvar = st.button("💾 salvar correções da tabela", type="primary", use_container_width=True, config={'responsive': True})
             
         if btn_salvar:
             df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
@@ -463,7 +463,7 @@ with tab_posicoes:
     section_title("➕ lançar operação (compra / venda)")
     
     with st.form("form_add_posicao", clear_on_submit=True):
-        col_op, col_f1, col_f2, col_f3 = st.columns([2, 3, 2, 2])
+        col_op, col_f1, col_f2, col_f3 = st.columns([1, 2, 1, 1], gap="small")
         
         with col_op:
             tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
@@ -481,7 +481,7 @@ with tab_posicoes:
         ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
         
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_add = st.form_submit_button("registrar operação no portfólio", type="primary", use_container_width=True)
+        btn_add = st.form_submit_button("registrar operação no portfólio", type="primary", use_container_width=True, config={'responsive': True})
         
         if btn_add:
             ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
@@ -631,7 +631,7 @@ with tab_posicoes:
             if 'yaxis' in layout_pie:
                 layout_pie['yaxis']['visible'] = False
             fig_pie.update_layout(**layout_pie)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True, config={'responsive': True})
 
         with col_g2:
             section_title("📈 p&l por ativo")
@@ -641,7 +641,7 @@ with tab_posicoes:
             if 'yaxis' in layout_bar:
                 layout_bar['yaxis']['showgrid'] = False
             fig_bar.update_layout(**layout_bar)
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True, config={'responsive': True})
 
         # ── VISÃO CONSOLIDADA POR MOEDA ──────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -924,7 +924,7 @@ with tab_posicoes:
                             op_txt = "COMPRAR" if d['diferença R$'] > 0 else "VENDER"
                             seta   = "▲" if d['diferença R$'] > 0 else "▼"
 
-                            r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3])
+                            r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3], gap="small")
                             with r1:
                                 st.markdown(
                                     f'<div style="font-family:Courier New; color:#FF9900; font-weight:bold;">{d["ticker"]}</div>'
@@ -1204,6 +1204,7 @@ with tab_concentracao:
             st.plotly_chart(
                 _pizza_chart(_labels_a, _values_a, "por ativo"),
                 use_container_width=True,
+                config={'responsive': True},
             )
 
         with _cg2:
@@ -1212,6 +1213,7 @@ with tab_concentracao:
             st.plotly_chart(
                 _pizza_chart(_labels_s, _values_s, "por setor"),
                 use_container_width=True,
+                config={'responsive': True},
             )
 
         with _cg3:
@@ -1220,6 +1222,7 @@ with tab_concentracao:
             st.plotly_chart(
                 _pizza_chart(_labels_m, _values_m, "por moeda"),
                 use_container_width=True,
+                config={'responsive': True},
             )
 
         # ── MATRIZ DE CORRELAÇÃO ─────────────────────────────────────────
@@ -1324,7 +1327,7 @@ with tab_concentracao:
                     ),
                 ))
 
-                _dim_corr = max(300, len(_ticks) * 60)
+                _dim_corr = max(280, min(len(_ticks) * 55, 600))
                 _lay_corr = base_layout(
                     height=_dim_corr,
                     title=f"correlação de retornos diários — {_periodo_corr}"
@@ -1333,9 +1336,10 @@ with tab_concentracao:
                     xaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
                     yaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
                     margin=dict(l=80, r=40, t=40, b=80),
+                    autosize=True,
                 )
                 _fig_corr.update_layout(**_lay_corr)
-                st.plotly_chart(_fig_corr, use_container_width=True)
+                st.plotly_chart(_fig_corr, use_container_width=True, config={'responsive': True})
 
                 # Alertas de correlação
                 if _alertas_corr:
@@ -1438,7 +1442,7 @@ with tab_stress:
                     choque_sp = st.slider("s&p500 (%):", -60.0, 30.0, -15.0, 5.0, key="stress_sp")
                     choque_selic = st.slider("selic (pp):", -3.0, 5.0, 1.0, 0.5, key="stress_selic")
 
-        btn_stress = st.button("⚡ rodar stress test", type="primary", use_container_width=True)
+        btn_stress = st.button("⚡ rodar stress test", type="primary", use_container_width=True, config={'responsive': True})
 
         if btn_stress:
             with st.spinner("calculando betas e simulando cenários..."):
@@ -1533,9 +1537,9 @@ with tab_stress:
             ))
             fig_stress.add_vline(x=0, line_color="#333", line_width=1)
             fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
-            st.plotly_chart(fig_stress, use_container_width=True)
+            st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
 
-            if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
+            if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True, config={'responsive': True}):
                 with st.spinner("deepseek analisando exposições..."):
                     _prompt_stress = (
                         f"cenário de stress: {resumo['cenario']}\n"
@@ -1583,7 +1587,7 @@ with tab_backtest:
         opcoes = {f"{w['icone']} {w['nome']}": w['id'] for w in wls}
         selecionadas = st.multiselect("selecione as watchlists:", list(opcoes.keys()))
 
-        if st.button("📥 confirmar importação", type="primary", use_container_width=True):
+        if st.button("📥 confirmar importação", type="primary", use_container_width=True, config={'responsive': True}):
             if selecionadas:
                 tkrs_importar = []
                 for sel in selecionadas:
@@ -1604,12 +1608,12 @@ with tab_backtest:
     st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
     cb1, cb2, cb3, cb4 = st.columns([2, 2, 2, 4])
     with cb1: 
-        st.button("💼 importar portfólio", on_click=carregar_portfolio, use_container_width=True)
+        st.button("💼 importar portfólio", on_click=carregar_portfolio, use_container_width=True, config={'responsive': True})
     with cb2: 
-        if st.button("👁️ importar watchlist", use_container_width=True):
+        if st.button("👁️ importar watchlist", use_container_width=True, config={'responsive': True}):
             modal_importar_watchlists()
     with cb3: 
-        st.button("🧹 limpar ativos", on_click=limpar_selecao, use_container_width=True)
+        st.button("🧹 limpar ativos", on_click=limpar_selecao, use_container_width=True, config={'responsive': True})
 
     c1, c2, c3 = st.columns([5, 2, 2])
     with c1:
@@ -1633,7 +1637,7 @@ with tab_backtest:
 
     with c3:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_calcular = st.button("calcular backtest", type="primary", use_container_width=True)
+        btn_calcular = st.button("calcular backtest", type="primary", use_container_width=True, config={'responsive': True})
 
     if btn_calcular or selecionados:
         if not selecionados:
@@ -1669,7 +1673,7 @@ with tab_backtest:
                     fig.update_layout(**layout_bt)
                     fig.add_hline(y=100, line_dash="dash", line_color="#333", opacity=0.8)
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
 
                     section_title("resumo de performance no período")
                     cols_metrics = st.columns(len(selecionados))
@@ -1692,7 +1696,7 @@ with tab_backtest:
                     df_metricas = pd.DataFrame(metricas).T
                     st.markdown("---")
                     section_title("🧮 métricas de risco")
-                    st.dataframe(df_metricas, use_container_width=True)
+                    st.dataframe(df_metricas, use_container_width=True, config={'responsive': True})
                 except Exception as e:
                     st.error(f"erro ao calcular backtest: {str(e)}")
 
@@ -1792,7 +1796,7 @@ with tab_diario:
             with c_u2: novo_status = st.selectbox("veredicto:", ['acerto', 'erro', 'neutro', '⏳ aguardando'])
             with c_u3:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("atualizar resultado", type="primary", use_container_width=True):
+                if st.button("atualizar resultado", type="primary", use_container_width=True, config={'responsive': True}):
                     status_db = None if novo_status == '⏳ aguardando' else novo_status
                     atualizar_resultado(id_selecionado, status_db)
                     st.success("julgamento atualizado!")

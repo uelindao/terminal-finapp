@@ -470,7 +470,7 @@ with tab_momentum:
         mom_top_n = st.slider("top N ativos:", 5, 30, 15, 5, key="mom_top_n")
     with mc3:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True)
+        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True, config={'responsive': True})
 
     score_minimo = st.slider("score mínimo de momentum:", 0, 100, 50, 10, key="mom_score_min")
 
@@ -539,7 +539,7 @@ with tab_momentum:
 
         fig_mom.add_hline(y=0, line_color="#333", line_dash="dash", line_width=1)
         fig_mom.update_layout(**base_layout(height=400, title="retorno acumulado por janela — top 10 ativos"))
-        st.plotly_chart(fig_mom, use_container_width=True)
+        st.plotly_chart(fig_mom, use_container_width=True, config={'responsive': True})
 
         st.markdown("---")
 
@@ -552,12 +552,12 @@ with tab_momentum:
                 cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
                 barra = "█" * int(score // 10) + "░" * int(10 - score // 10)
                 c2.markdown(f'<span style="font-family:Courier New; font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
-                if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True):
+                if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True, config={'responsive': True}):
                     mercado = "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua"
                     modal_salvar_screener(row['ticker'], row['nome'], mercado)
 
         with col_a2:
-            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
+            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True, config={'responsive': True}):
                 with st.spinner("deepseek analisando momentum..."):
                     _dados_mom = df_m[cols_mostrar].head(10).to_csv(index=False)
                     chamar_ia(
@@ -632,7 +632,7 @@ with tab_screener:
             st.rerun()
     with col_p3:
         if st.button("↺ resetar filtros", key="btn_reset_filtros",
-                     use_container_width=True):
+                     use_container_width=True, config={'responsive': True}):
             for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w',
                        'disc_dy_w', 'disc_score_w', 'disc_pvp_w',
                        'disc_mm_w']:
@@ -883,7 +883,7 @@ with tab_setorial:
     with _col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 recalcular", key="btn_refresh_setorial",
-                     use_container_width=True):
+                     use_container_width=True, config={'responsive': True}):
             st.cache_data.clear()
             st.rerun()
 
@@ -970,7 +970,7 @@ with tab_setorial:
             margin=dict(l=180, r=60, t=40, b=20),
         )
         _fig_set.update_layout(**_lay_set)
-        st.plotly_chart(_fig_set, use_container_width=True)
+        st.plotly_chart(_fig_set, use_container_width=True, config={'responsive': True})
 
         st.markdown("<br>", unsafe_allow_html=True)
         section_title("detalhamento por setor")
