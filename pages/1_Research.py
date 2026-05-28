@@ -363,6 +363,22 @@ else:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
+_hs_all = get_health_scores()
+_hs_map = {r['ticker']: r for r in (_hs_all or [])}
+_hs_row = _hs_map.get(t_base, {})
+if _hs_row:
+    _raw = _hs_row.get('alertas_venda', '{}')
+    _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+    health_result = {
+        'score':     _hs_row.get('score', 50),
+        'status':    (_p.get('alertas') or ['—'])[0],
+        'alertas':   _p.get('alertas', []),
+        'breakdown': _p.get('breakdown', {}),
+    }
+else:
+    health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+
 # --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
 historico = get_historico_score(t_base, dias=180)
 if len(historico) >= 3:
@@ -488,22 +504,6 @@ if len(historico) >= 3:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-
-# ── HEALTH RESULT DO BANCO (para o prompt de IA) ─────────────────────────
-_hs_all = get_health_scores()
-_hs_map = {r['ticker']: r for r in (_hs_all or [])}
-_hs_row = _hs_map.get(t_base, {})
-if _hs_row:
-    _raw = _hs_row.get('alertas_venda', '{}')
-    _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
-    health_result = {
-        'score':     _hs_row.get('score', 50),
-        'status':    (_p.get('alertas') or ['—'])[0],
-        'alertas':   _p.get('alertas', []),
-        'breakdown': _p.get('breakdown', {}),
-    }
-else:
-    health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
 
 # ── SEÇÃO: VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
 def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: str = "×"):
