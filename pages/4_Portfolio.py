@@ -215,6 +215,19 @@ with tab_posicoes:
     portfolio_ativo = portfolios_lista[portfolio_idx]
     portfolio_id_ativo = portfolio_ativo['id']
 
+    # Detecta troca de portfólio e limpa caches do chat
+    _prev_portfolio_id = st.session_state.get('_prev_portfolio_id_chat')
+    if _prev_portfolio_id and _prev_portfolio_id != portfolio_id_ativo:
+        for _ck in ['chat_portfolio_contexto', 'chat_ctx_version',
+                    'pesos_ativos_cache', 'live_data_cache',
+                    'health_chat_cache', 'metricas_cache',
+                    'chat_portfolio_msgs']:
+            st.session_state.pop(_ck, None)
+        st.session_state.pop(
+            f"pesos_ativos_cache_{_prev_portfolio_id}", None
+        )
+    st.session_state['_prev_portfolio_id_chat'] = portfolio_id_ativo
+
     with col_btn:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("⚙️ gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
@@ -2047,10 +2060,13 @@ with tab_chat:
     # ── CARREGA DADOS SE NÃO ESTIVEREM NO SESSION_STATE ─────────────────
 
     # 1. Posições do portfólio
-    pesos_chat = st.session_state.get("pesos_ativos_cache", [])
+    # Usa o portfolio_id_ativo definido em tab_posicoes
+    _portfolio_id_chat = portfolio_id_ativo
+    _cache_key_pesos = f"pesos_ativos_cache_{_portfolio_id_chat}"
+    pesos_chat = st.session_state.get(_cache_key_pesos, [])
     if not pesos_chat:
-        pesos_chat = get_pesos()
-        st.session_state["pesos_ativos_cache"] = pesos_chat
+        pesos_chat = get_pesos(portfolio_id=_portfolio_id_chat)
+        st.session_state[_cache_key_pesos] = pesos_chat
 
     # 2. Health scores
     health_chat = st.session_state.get("health_chat_cache", {})
@@ -2208,7 +2224,7 @@ with tab_chat:
     # ── MONTA CONTEXTO (com invalidação se dados mudaram) ────────────────
 
     _ctx_key     = "chat_portfolio_contexto"
-    _ctx_version = f"{len(pesos_chat)}_{len(live_chat)}"
+    _ctx_version = f"{_portfolio_id_chat}_{len(pesos_chat)}_{len(live_chat)}"
 
     if st.session_state.get("chat_ctx_version") != _ctx_version:
         st.session_state.pop(_ctx_key, None)

@@ -42,6 +42,86 @@ from utils.notificacoes import (solicitar_permissao_notificacao,
                                  verificar_e_disparar_alertas)
 from utils.macro_context import garantir_macro_context
 
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
+    """
+    Identifica ativos da watchlist com maior assimetria positiva:
+    health score alto + momentum recente positivo + longe do topo 52w.
+    Retorna top 3 ordenados por score de assimetria composto.
+    """
+    tickers = list(tickers_tuple)
+    if not tickers:
+        return []
+
+    from database.db import get_health_scores, get_todos_fundamentos_cache
+    from utils.tickers import mapear_ticker_base
+
+    hs_all   = {h['ticker']: h for h in (get_health_scores() or [])}
+    fund_all = get_todos_fundamentos_cache()
+
+    resultados = []
+
+    for ticker in tickers:
+        t_base = mapear_ticker_base(ticker)
+        hs_row = hs_all.get(t_base) or hs_all.get(ticker)
+        if not hs_row:
+            continue
+
+        score_hs = hs_row.get('score', 50)
+        if score_hs < 55:   # só considera ativos com score razoável
+            continue
+
+        try:
+            hist = yf.Ticker(t_base).history(period="1y", auto_adjust=True)
+            if hist.empty or len(hist) < 60:
+                continue
+
+            close       = hist['Close']
+            preco_atual = float(close.iloc[-1])
+            preco_1m    = float(close.iloc[-21]) if len(close) >= 21 else preco_atual
+            preco_3m    = float(close.iloc[-63]) if len(close) >= 63 else preco_atual
+            high_52w    = float(close.max())
+
+            ret_1m   = (preco_atual / preco_1m - 1) * 100
+            ret_3m   = (preco_atual / preco_3m - 1) * 100
+            dist_top = (preco_atual / high_52w - 1) * 100
+
+            # Score de assimetria composto (0-100)
+            pts_hs = min(40, (score_hs / 100) * 40)
+            pts_mom = 0
+            if ret_1m > 0:  pts_mom += 15
+            if ret_3m > 0:  pts_mom += 15
+
+            if dist_top < -30:    pts_top = 30
+            elif dist_top < -15:  pts_top = 20
+            elif dist_top < -5:   pts_top = 10
+            else:                 pts_top = 3
+
+            score_assim = round(pts_hs + pts_mom + pts_top, 1)
+
+            fund_d = fund_all.get(t_base, {})
+            nome   = fund_d.get('nome') or ticker.replace('.SA', '')
+            setor  = fund_d.get('setor') or '—'
+
+            resultados.append({
+                'ticker':       ticker,
+                'nome':         nome[:28],
+                'setor':        setor,
+                'score_hs':     score_hs,
+                'score_assim':  score_assim,
+                'ret_1m':       round(ret_1m, 2),
+                'ret_3m':       round(ret_3m, 2),
+                'dist_top':     round(dist_top, 2),
+                'preco_atual':  round(preco_atual, 2),
+            })
+
+        except Exception:
+            continue
+
+    return sorted(resultados, key=lambda x: x['score_assim'], reverse=True)[:3]
+
+
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
 
@@ -177,6 +257,122 @@ with st.sidebar:
             f'</div>',
             unsafe_allow_html=True,
         )
+
+# ── OPORTUNIDADES DO MOMENTO ─────────────────────────────────────────
+_wl_home = listar_watchlist()
+_tickers_wl_home = tuple([
+    item['ticker'] for item in _wl_home
+    if item.get('ticker')
+])
+
+if _tickers_wl_home:
+    with st.spinner("identificando oportunidades..."):
+        _opps = calcular_oportunidades_watchlist(_tickers_wl_home)
+
+    if _opps:
+        section_title("⚡ oportunidades do momento — sua watchlist")
+
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.72rem; '
+            'color:#555; margin-bottom:12px; line-height:1.6;">'
+            'ativos com health score ≥ 55, momentum positivo recente '
+            'e maior distância do topo de 52 semanas — '
+            'maior assimetria risco/retorno no momento.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        _opp_cols = st.columns(len(_opps))
+
+        for _ci, (_col_opp, _opp) in enumerate(zip(_opp_cols, _opps)):
+            with _col_opp:
+                _hs_opp = _opp['score_hs']
+                _cor_hs = (
+                    "#00C853" if _hs_opp >= 65
+                    else "#FF9900" if _hs_opp >= 45
+                    else "#FF1744"
+                )
+                _cor_1m = "#00C853" if _opp['ret_1m'] >= 0 else "#FF1744"
+                _cor_3m = "#00C853" if _opp['ret_3m'] >= 0 else "#FF1744"
+                _badges = ["🥇", "🥈", "🥉"]
+                _badge  = _badges[_ci] if _ci < 3 else ""
+
+                st.markdown(
+                    f'<div style="background:#0d0d0d; '
+                    f'border:1px solid #1e1e1e; '
+                    f'border-top:2px solid {_cor_hs}; '
+                    f'border-radius:6px; padding:16px; '
+                    f'height:100%;">'
+
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'align-items:center; margin-bottom:6px;">'
+                    f'<span style="font-family:Courier New; font-size:1rem; '
+                    f'font-weight:700; color:#FF9900;">'
+                    f'{_opp["ticker"].replace(".SA","")}</span>'
+                    f'<span style="font-size:1.1rem;">{_badge}</span>'
+                    f'</div>'
+
+                    f'<div style="font-family:Courier New; font-size:0.68rem; '
+                    f'color:#444; margin-bottom:12px; line-height:1.4;">'
+                    f'{_opp["nome"].lower()}<br>'
+                    f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
+                    f'</div>'
+
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'margin-bottom:6px;">'
+                    f'<span style="font-size:0.65rem; color:#555; '
+                    f'text-transform:uppercase;">health score</span>'
+                    f'<span style="font-family:Courier New; color:{_cor_hs}; '
+                    f'font-weight:700; font-size:0.9rem;">'
+                    f'{_hs_opp}/100</span>'
+                    f'</div>'
+
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'margin-bottom:4px;">'
+                    f'<span style="font-size:0.65rem; color:#555;">ret 1m</span>'
+                    f'<span style="font-family:Courier New; color:{_cor_1m}; '
+                    f'font-size:0.82rem;">{_opp["ret_1m"]:+.1f}%</span>'
+                    f'</div>'
+
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'margin-bottom:4px;">'
+                    f'<span style="font-size:0.65rem; color:#555;">ret 3m</span>'
+                    f'<span style="font-family:Courier New; color:{_cor_3m}; '
+                    f'font-size:0.82rem;">{_opp["ret_3m"]:+.1f}%</span>'
+                    f'</div>'
+
+                    f'<div style="display:flex; justify-content:space-between; '
+                    f'margin-bottom:12px;">'
+                    f'<span style="font-size:0.65rem; color:#555;">'
+                    f'dist. topo 52w</span>'
+                    f'<span style="font-family:Courier New; color:#888; '
+                    f'font-size:0.82rem;">{_opp["dist_top"]:.1f}%</span>'
+                    f'</div>'
+
+                    f'<div style="background:#111; border-radius:4px; '
+                    f'padding:6px 10px; text-align:center;">'
+                    f'<div style="font-size:0.6rem; color:#444; '
+                    f'text-transform:uppercase; margin-bottom:2px;">'
+                    f'score de assimetria</div>'
+                    f'<div style="font-family:Courier New; font-size:1rem; '
+                    f'color:#FF9900; font-weight:700;">'
+                    f'{_opp["score_assim"]:.0f}/100</div>'
+                    f'</div>'
+
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("<br style='margin:4px'>", unsafe_allow_html=True)
+                if st.button(
+                    f"🔬 analisar {_opp['ticker'].replace('.SA','')}",
+                    key=f"btn_opp_research_{_ci}",
+                    use_container_width=True,
+                ):
+                    st.session_state['research_ticker_externo'] = _opp['ticker']
+                    st.switch_page("pages/1_Research.py")
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # NAVEGAÇÃO RÁPIDA
