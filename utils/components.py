@@ -9,22 +9,26 @@ import time
 
 def page_header(titulo: str, subtitulo: str = ""):
     """Header compacto de página."""
-    sub = (
-        f'<span style="font-family:var(--font-ui);'
-        f' font-size:0.78rem; color:var(--text-muted);'
-        f' font-weight:400; margin-left:10px;">'
-        f'{subtitulo}</span>'
-        if subtitulo else ""
-    )
     st.markdown(
-        f'<div style="display:flex; align-items:center;'
-        f' padding-bottom:12px; margin-bottom:16px;'
-        f' border-bottom:1px solid var(--border-subtle);">'
-        f'<h1 style="font-family:var(--font-ui);'
-        f' font-size:1.05rem; font-weight:700;'
-        f' color:var(--text-primary); margin:0;'
-        f' letter-spacing:-0.01em;">{titulo}</h1>'
-        f'{sub}</div>',
+        f'<div style="margin-bottom: 16px;">'
+        f'<div style="'
+        f'font-family: Courier New, monospace; '
+        f'font-size: 1.3rem; '
+        f'font-weight: 700; '
+        f'color: #FF9900; '
+        f'letter-spacing: 0.05em;">'
+        f'{titulo}</div>'
+        + (
+            f'<div style="'
+            f'font-family: Courier New, monospace; '
+            f'font-size: 0.75rem; '
+            f'color: #444; '
+            f'margin-top: 2px; '
+            f'letter-spacing: 0.05em;">'
+            f'{subtitulo}</div>'
+            if subtitulo else ''
+        ) +
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -32,16 +36,17 @@ def page_header(titulo: str, subtitulo: str = ""):
 def section_title(titulo: str):
     """Título de seção com barra de acento âmbar à esquerda."""
     st.markdown(
-        f'<div style="display:flex; align-items:center;'
-        f' gap:10px; margin-top:20px; margin-bottom:12px;">'
-        f'<div style="width:3px; height:16px;'
-        f' background:var(--accent); border-radius:2px;'
-        f' flex-shrink:0;"></div>'
-        f'<span style="font-family:var(--font-ui);'
-        f' font-size:0.68rem; font-weight:700;'
-        f' color:var(--text-secondary); text-transform:uppercase;'
-        f' letter-spacing:0.10em;">'
-        f'{titulo}</span>'
+        f'<div style="'
+        f'font-family: Courier New, monospace; '
+        f'font-size: 0.72rem; '
+        f'color: #FF9900; '
+        f'text-transform: uppercase; '
+        f'letter-spacing: 0.12em; '
+        f'font-weight: 600; '
+        f'border-left: 2px solid #FF9900; '
+        f'padding-left: 8px; '
+        f'margin: 16px 0 8px 0;">'
+        f'{titulo}'
         f'</div>',
         unsafe_allow_html=True,
     )

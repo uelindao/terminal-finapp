@@ -612,13 +612,24 @@ def carregar_dados_ativo(tk):
 
 acao_obj, df_hist, info_dict = carregar_dados_ativo(t_base)
 if acao_obj is None or df_hist.empty:
-    empty_state("❌", "ativo não encontrado", "não foi possível carregar os dados históricos.")
+    empty_state(
+        "🔍",
+        "ativo não encontrado",
+        f"não foi possível carregar dados para '{ticker}'. "
+        "verifique se o ticker está correto ou tente buscar "
+        "pelo nome da empresa na barra de pesquisa acima.",
+    )
+    st.info(
+        "💡 dica: ações BR precisam do sufixo .SA "
+        "(ex: WEGE3.SA). ações EUA sem sufixo (ex: AAPL)."
+    )
     st.stop()
 
 cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
 
 # Busca múltiplos históricos FMP (escopo global — usado no prompt IA e na tab_val)
-_medios = get_multiplos_medios(t_base, anos=5)
+with st.spinner("carregando histórico de múltiplos (fmp)..."):
+    _medios = get_multiplos_medios(t_base, anos=5)
 
 # ── Fallback: busca fundamentos diretamente quando não está no cache ──────
 # Ativos externos (buscados manualmente) não passam pelo sync do screener.
@@ -1073,7 +1084,8 @@ with tab_val:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── COMPARAÇÃO COM PEERS (FMP) ────────────────────────────────────
-    _peers_list = get_peers(t_base)
+    with st.spinner("buscando peers do setor (fmp)..."):
+        _peers_list = get_peers(t_base)
     if _peers_list:
         section_title("👥 comparação com peers")
 

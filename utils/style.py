@@ -24,6 +24,42 @@ def aplicar_tema():
     </script>
     """, height=0)
 
+    import streamlit.components.v1 as _comp_topo
+    _comp_topo.html("""
+    <style>
+    #btn-topo {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: #FF9900;
+        color: #000;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        font-size: 1.1rem;
+        cursor: pointer;
+        display: none;
+        z-index: 9999;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        transition: opacity 0.2s;
+    }
+    #btn-topo:hover { background: #ffb300; }
+    </style>
+
+    <button id="btn-topo" onclick="window.scrollTo({top:0,behavior:'smooth'})"
+            title="voltar ao topo">↑</button>
+
+    <script>
+    window.addEventListener('scroll', function() {
+        var btn = document.getElementById('btn-topo');
+        if (btn) {
+            btn.style.display = window.scrollY > 400 ? 'block' : 'none';
+        }
+    });
+    </script>
+    """, height=0)
+
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');

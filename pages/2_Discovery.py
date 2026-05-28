@@ -55,6 +55,12 @@ with c_head3:
     if st.button("🔄 sync cache eua", use_container_width=True, type="primary", help="sincroniza ativos do mercado americano."):
         st.session_state['run_sync_us'] = True
 
+from database.db import get_todos_fundamentos_cache
+import datetime
+_n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
+_n_cache_us = sum(1 for t in CACHE_FUNDAMENTOS if not str(t).endswith('.SA'))
+st.caption(f"cache: {_n_cache_br} ativos BR | {_n_cache_us} ativos EUA")
+
 st.markdown("---")
 
 def traduzir_setor(setor_raw: str) -> str:
@@ -736,8 +742,11 @@ with tab_screener:
 
         if df_res.empty:
             empty_state(
-                "🔍", "nenhum ativo encontrado",
-                "tente relaxar os filtros ou mudar o universo.",
+                "🎯",
+                "nenhum ativo encontrado",
+                "tente relaxar os filtros — reduza o ROE mínimo, "
+                "aumente o P/L máximo ou diminua o health score mínimo. "
+                "use o botão '↺ resetar filtros' para voltar aos defaults.",
             )
         else:
             col_r1, col_r2, col_r3 = st.columns([2, 2, 1])
