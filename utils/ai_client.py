@@ -321,47 +321,63 @@ def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
             ' margin-right:8px; vertical-align:middle;">FREE · Gemini</span>'
         )
 
+    _STYLE_TEXTO = (
+        "font-family:'Courier New',monospace;"
+        " font-size:0.83rem;"
+        " line-height:1.8;"
+        " color:#C0C0C0;"
+        " white-space:pre-wrap;"
+        " word-wrap:break-word;"
+        " overflow:visible;"
+        " max-height:none;"
+        " height:auto;"
+        " display:block;"
+    )
+
     texto_completo = ""
 
     with st.chat_message("assistant", avatar="⚡"):
-        placeholder = st.empty()
-
-        # Estado inicial: badge + cursor
-        placeholder.markdown(
+        # Injetar CSS do cursor uma única vez fora do placeholder
+        st.markdown(
             '<style>'
-            '@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }'
-            '.ft-cursor { animation: blink 1s infinite; color:#FF9900; }'
-            '</style>'
-            f'<div>{tier_badge}'
-            '<span class="ft-cursor" style="font-family:\'Courier New\',monospace;'
-            ' font-size:0.82rem; color:#FF9900;">▋</span></div>',
+            '@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}'
+            '.ft-cursor{animation:blink 1s infinite;color:#FF9900;}'
+            '</style>',
             unsafe_allow_html=True,
         )
+        with st.container():
+            placeholder = st.empty()
 
-        resp_stream = client.chat.completions.create(**kwargs)
+            # Estado inicial: badge + cursor
+            placeholder.markdown(
+                f'<div style="margin-top:4px;">{tier_badge}'
+                f'<span class="ft-cursor" style="font-family:\'Courier New\','
+                f'monospace; font-size:0.83rem; color:#FF9900;">▋</span></div>',
+                unsafe_allow_html=True,
+            )
 
-        for chunk in resp_stream:
-            delta = chunk.choices[0].delta
-            # thinking chunks não têm .content; ignorar
-            if hasattr(delta, "content") and delta.content:
-                texto_completo += delta.content
-                placeholder.markdown(
-                    f'<div>{tier_badge}'
-                    f'<span style="font-family:\'Courier New\',monospace;'
-                    f' font-size:0.82rem; line-height:1.7; color:#ccc;">'
-                    f'{texto_completo}'
-                    f'<span class="ft-cursor">▋</span></span></div>',
-                    unsafe_allow_html=True,
-                )
+            resp_stream = client.chat.completions.create(**kwargs)
 
-        # Render final sem cursor
-        placeholder.markdown(
-            f'<div>{tier_badge}'
-            f'<span style="font-family:\'Courier New\',monospace;'
-            f' font-size:0.82rem; line-height:1.7; color:#ccc;">'
-            f'{texto_completo}</span></div>',
-            unsafe_allow_html=True,
-        )
+            for chunk in resp_stream:
+                delta = chunk.choices[0].delta
+                # thinking chunks não têm .content; ignorar
+                if hasattr(delta, "content") and delta.content:
+                    texto_completo += delta.content
+                    placeholder.markdown(
+                        f'<div style="margin-top:4px;">{tier_badge}'
+                        f'<div style="{_STYLE_TEXTO}">'
+                        f'{texto_completo}'
+                        f'<span class="ft-cursor">▋</span></div></div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # Render final sem cursor
+            placeholder.markdown(
+                f'<div style="margin-top:4px;">{tier_badge}'
+                f'<div style="{_STYLE_TEXTO}">'
+                f'{texto_completo}</div></div>',
+                unsafe_allow_html=True,
+            )
 
     return texto_completo
 

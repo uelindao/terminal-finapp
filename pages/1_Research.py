@@ -845,7 +845,7 @@ with tab_ia:
         chamar_ia(
             prompt_usuario = _prompt_ia,
             system         = SYSTEM_ANALISTA,
-            max_tokens     = 900,
+            max_tokens     = 1500,
             temperatura    = 0.3,
             stream         = True,
             thinking       = usar_thinking,
@@ -990,7 +990,7 @@ with tab_ia:
         chamar_ia(
             prompt_usuario = _prompt_tese,
             system         = SYSTEM_TESE,
-            max_tokens     = 700,
+            max_tokens     = 1000,
             temperatura    = 0.3,
             stream         = True,
             user_settings  = _user_settings,
@@ -1410,7 +1410,7 @@ with tab_dcf:
             chamar_ia(
                 prompt_usuario = _prompt_fii_val,
                 system         = SYSTEM_TESE,
-                max_tokens     = 600,
+                max_tokens     = 800,
                 temperatura    = 0.3,
                 stream         = True,
                 user_settings  = _us_fii,
@@ -1534,7 +1534,7 @@ with tab_dcf:
                     chamar_ia(
                         prompt_usuario = _prompt_dcf,
                         system         = SYSTEM_TESE,
-                        max_tokens     = 600,
+                        max_tokens     = 800,
                         temperatura    = 0.3,
                         stream         = True,
                         user_settings  = _user_settings,
