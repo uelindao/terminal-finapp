@@ -43,6 +43,99 @@ from utils.notificacoes import (solicitar_permissao_notificacao,
 from utils.macro_context import garantir_macro_context
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
+    """
+    Busca preço atual e variação do dia para uma lista de tickers.
+    Cache de 5 minutos. Retorna dict: {ticker: {preco, var_1d, volume}}
+    """
+    tickers = list(tickers_tuple)
+    resultado = {}
+    if not tickers:
+        return resultado
+    try:
+        from utils.tickers import mapear_ticker_base
+        tickers_base = [mapear_ticker_base(t) for t in tickers]
+        hist = yf.download(
+            tickers_base,
+            period="2d",
+            auto_adjust=True,
+            progress=False,
+            multi_level_index=False,
+        )
+        close = hist.get('Close', hist)
+        volume = hist.get('Volume', None)
+
+        for i, t in enumerate(tickers):
+            tb = tickers_base[i]
+            try:
+                if isinstance(close, pd.DataFrame):
+                    serie = close[tb].dropna() if tb in close.columns else pd.Series()
+                else:
+                    serie = close.dropna()
+
+                if len(serie) < 1:
+                    continue
+
+                preco_atual = float(serie.iloc[-1])
+                preco_ant   = float(serie.iloc[-2]) if len(serie) >= 2 else preco_atual
+                var_1d      = ((preco_atual / preco_ant) - 1) * 100 if preco_ant > 0 else 0.0
+
+                vol = None
+                if volume is not None and isinstance(volume, pd.DataFrame):
+                    if tb in volume.columns:
+                        vol = float(volume[tb].dropna().iloc[-1])
+
+                resultado[t] = {
+                    'preco': round(preco_atual, 2),
+                    'var_1d': round(var_1d, 2),
+                    'volume': vol,
+                }
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return resultado
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_earnings_proximos(tickers_tuple: tuple) -> dict:
+    """
+    Retorna dict {ticker: dias_ate_earnings} para ativos
+    com resultado nos próximos 14 dias.
+    Usa o banco de dados local (salvo pelo earnings_scraper).
+    """
+    import datetime
+    resultado = {}
+    try:
+        from database.db import get_earnings_dates
+        tickers = list(tickers_tuple)
+        hoje    = datetime.date.today()
+
+        for ticker in tickers:
+            try:
+                data_str = get_earnings_dates(ticker)
+                if not data_str:
+                    continue
+                dt = None
+                for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%m/%d/%Y']:
+                    try:
+                        dt = datetime.datetime.strptime(data_str, fmt).date()
+                        break
+                    except ValueError:
+                        pass
+                if dt is None:
+                    continue
+                dias = (dt - hoje).days
+                if 0 <= dias <= 14:
+                    resultado[ticker] = dias
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return resultado
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
     """
@@ -87,16 +180,32 @@ def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
             ret_3m   = (preco_atual / preco_3m - 1) * 100
             dist_top = (preco_atual / high_52w - 1) * 100
 
+            # Filtro obrigatório de momentum mínimo
+            if ret_1m < -15 and ret_3m < 0:
+                continue   # queda forte em ambos os períodos — tendência baixista
+            if ret_1m <= 0 and ret_3m <= 0:
+                continue   # sem momentum em nenhum período — não é oportunidade
+
             # Score de assimetria composto (0-100)
             pts_hs = min(40, (score_hs / 100) * 40)
             pts_mom = 0
             if ret_1m > 0:  pts_mom += 15
             if ret_3m > 0:  pts_mom += 15
 
-            if dist_top < -30:    pts_top = 30
-            elif dist_top < -15:  pts_top = 20
-            elif dist_top < -5:   pts_top = 10
-            else:                 pts_top = 3
+            # Distância do topo (peso 30%) — penaliza quedas rápidas
+            if dist_top < -30:
+                preco_6m = float(close.iloc[-126]) if len(close) >= 126 else preco_atual
+                ret_6m   = (preco_atual / preco_6m - 1) * 100
+                if ret_6m < -25:
+                    pts_top = 10   # queda rápida nos últimos 6m — penaliza
+                else:
+                    pts_top = 30   # queda acumulada de longo prazo — pode ser desconto real
+            elif dist_top < -15:
+                pts_top = 20
+            elif dist_top < -5:
+                pts_top = 10
+            else:
+                pts_top = 3
 
             score_assim = round(pts_hs + pts_mom + pts_top, 1)
 
@@ -114,12 +223,13 @@ def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
                 'ret_3m':       round(ret_3m, 2),
                 'dist_top':     round(dist_top, 2),
                 'preco_atual':  round(preco_atual, 2),
+                'mercado':      'BR' if ticker.endswith('.SA') else 'EUA',
             })
 
         except Exception:
             continue
 
-    return sorted(resultados, key=lambda x: x['score_assim'], reverse=True)[:3]
+    return sorted(resultados, key=lambda x: x['score_assim'], reverse=True)[:5]
 
 
 # 1. configuração da página (tem de ser o primeiro comando)
@@ -282,95 +392,118 @@ if _tickers_wl_home:
             unsafe_allow_html=True,
         )
 
-        _opp_cols = st.columns(len(_opps))
+        def _render_opp_card(_opp, _rank):
+            _hs_opp = _opp['score_hs']
+            _cor_hs = (
+                "#00C853" if _hs_opp >= 65
+                else "#FF9900" if _hs_opp >= 45
+                else "#FF1744"
+            )
+            _cor_1m = "#00C853" if _opp['ret_1m'] >= 0 else "#FF1744"
+            _cor_3m = "#00C853" if _opp['ret_3m'] >= 0 else "#FF1744"
+            _badges = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            _badge  = _badges[_rank] if _rank < 5 else ""
 
-        for _ci, (_col_opp, _opp) in enumerate(zip(_opp_cols, _opps)):
-            with _col_opp:
-                _hs_opp = _opp['score_hs']
-                _cor_hs = (
-                    "#00C853" if _hs_opp >= 65
-                    else "#FF9900" if _hs_opp >= 45
-                    else "#FF1744"
-                )
-                _cor_1m = "#00C853" if _opp['ret_1m'] >= 0 else "#FF1744"
-                _cor_3m = "#00C853" if _opp['ret_3m'] >= 0 else "#FF1744"
-                _badges = ["🥇", "🥈", "🥉"]
-                _badge  = _badges[_ci] if _ci < 3 else ""
+            st.markdown(
+                f'<div style="background:#0d0d0d; '
+                f'border:1px solid #1e1e1e; '
+                f'border-top:2px solid {_cor_hs}; '
+                f'border-radius:6px; padding:16px; '
+                f'height:100%;">'
 
-                st.markdown(
-                    f'<div style="background:#0d0d0d; '
-                    f'border:1px solid #1e1e1e; '
-                    f'border-top:2px solid {_cor_hs}; '
-                    f'border-radius:6px; padding:16px; '
-                    f'height:100%;">'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'align-items:center; margin-bottom:6px;">'
+                f'<span style="font-family:Courier New; font-size:1rem; '
+                f'font-weight:700; color:#FF9900;">'
+                f'{_opp["ticker"].replace(".SA","")}</span>'
+                f'<span style="font-size:1.1rem;">{_badge}</span>'
+                f'</div>'
 
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'align-items:center; margin-bottom:6px;">'
-                    f'<span style="font-family:Courier New; font-size:1rem; '
-                    f'font-weight:700; color:#FF9900;">'
-                    f'{_opp["ticker"].replace(".SA","")}</span>'
-                    f'<span style="font-size:1.1rem;">{_badge}</span>'
-                    f'</div>'
+                f'<div style="font-family:Courier New; font-size:0.68rem; '
+                f'color:#444; margin-bottom:12px; line-height:1.4;">'
+                f'{_opp["nome"].lower()}<br>'
+                f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
+                f'</div>'
 
-                    f'<div style="font-family:Courier New; font-size:0.68rem; '
-                    f'color:#444; margin-bottom:12px; line-height:1.4;">'
-                    f'{_opp["nome"].lower()}<br>'
-                    f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
-                    f'</div>'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'margin-bottom:6px;">'
+                f'<span style="font-size:0.65rem; color:#555; '
+                f'text-transform:uppercase;">health score</span>'
+                f'<span style="font-family:Courier New; color:{_cor_hs}; '
+                f'font-weight:700; font-size:0.9rem;">'
+                f'{_hs_opp}/100</span>'
+                f'</div>'
 
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'margin-bottom:6px;">'
-                    f'<span style="font-size:0.65rem; color:#555; '
-                    f'text-transform:uppercase;">health score</span>'
-                    f'<span style="font-family:Courier New; color:{_cor_hs}; '
-                    f'font-weight:700; font-size:0.9rem;">'
-                    f'{_hs_opp}/100</span>'
-                    f'</div>'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'margin-bottom:4px;">'
+                f'<span style="font-size:0.65rem; color:#555;">ret 1m</span>'
+                f'<span style="font-family:Courier New; color:{_cor_1m}; '
+                f'font-size:0.82rem;">{_opp["ret_1m"]:+.1f}%</span>'
+                f'</div>'
 
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'margin-bottom:4px;">'
-                    f'<span style="font-size:0.65rem; color:#555;">ret 1m</span>'
-                    f'<span style="font-family:Courier New; color:{_cor_1m}; '
-                    f'font-size:0.82rem;">{_opp["ret_1m"]:+.1f}%</span>'
-                    f'</div>'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'margin-bottom:4px;">'
+                f'<span style="font-size:0.65rem; color:#555;">ret 3m</span>'
+                f'<span style="font-family:Courier New; color:{_cor_3m}; '
+                f'font-size:0.82rem;">{_opp["ret_3m"]:+.1f}%</span>'
+                f'</div>'
 
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'margin-bottom:4px;">'
-                    f'<span style="font-size:0.65rem; color:#555;">ret 3m</span>'
-                    f'<span style="font-family:Courier New; color:{_cor_3m}; '
-                    f'font-size:0.82rem;">{_opp["ret_3m"]:+.1f}%</span>'
-                    f'</div>'
+                f'<div style="display:flex; justify-content:space-between; '
+                f'margin-bottom:12px;">'
+                f'<span style="font-size:0.65rem; color:#555;">'
+                f'dist. topo 52w</span>'
+                f'<span style="font-family:Courier New; color:#888; '
+                f'font-size:0.82rem;">{_opp["dist_top"]:.1f}%</span>'
+                f'</div>'
 
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'margin-bottom:12px;">'
-                    f'<span style="font-size:0.65rem; color:#555;">'
-                    f'dist. topo 52w</span>'
-                    f'<span style="font-family:Courier New; color:#888; '
-                    f'font-size:0.82rem;">{_opp["dist_top"]:.1f}%</span>'
-                    f'</div>'
+                f'<div style="background:#111; border-radius:4px; '
+                f'padding:6px 10px; text-align:center;">'
+                f'<div style="font-size:0.6rem; color:#444; '
+                f'text-transform:uppercase; margin-bottom:2px;">'
+                f'score de assimetria</div>'
+                f'<div style="font-family:Courier New; font-size:1rem; '
+                f'color:#FF9900; font-weight:700;">'
+                f'{_opp["score_assim"]:.0f}/100</div>'
+                f'</div>'
 
-                    f'<div style="background:#111; border-radius:4px; '
-                    f'padding:6px 10px; text-align:center;">'
-                    f'<div style="font-size:0.6rem; color:#444; '
-                    f'text-transform:uppercase; margin-bottom:2px;">'
-                    f'score de assimetria</div>'
-                    f'<div style="font-family:Courier New; font-size:1rem; '
-                    f'color:#FF9900; font-weight:700;">'
-                    f'{_opp["score_assim"]:.0f}/100</div>'
-                    f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+            st.markdown("<br style='margin:4px'>", unsafe_allow_html=True)
+            _btn_key = f"btn_opp_research_{_opp['ticker']}_{_rank}"
+            if st.button(
+                f"🔬 analisar {_opp['ticker'].replace('.SA','')}",
+                key=_btn_key,
+                use_container_width=True,
+            ):
+                st.session_state['research_ticker_externo'] = _opp['ticker']
+                st.switch_page("pages/1_Research.py")
 
-                st.markdown("<br style='margin:4px'>", unsafe_allow_html=True)
-                if st.button(
-                    f"🔬 analisar {_opp['ticker'].replace('.SA','')}",
-                    key=f"btn_opp_research_{_ci}",
-                    use_container_width=True,
-                ):
-                    st.session_state['research_ticker_externo'] = _opp['ticker']
-                    st.switch_page("pages/1_Research.py")
+        _opps_br  = [o for o in _opps if o.get('mercado') == 'BR']
+        _opps_eua = [o for o in _opps if o.get('mercado') == 'EUA']
+
+        if _opps_br:
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.72rem; '
+                'color:#555; margin:8px 0 4px 0;">🇧🇷 brasil</div>',
+                unsafe_allow_html=True,
+            )
+            _cols_br = st.columns(min(len(_opps_br), 3))
+            for _ci, (_col_opp, _opp) in enumerate(zip(_cols_br, _opps_br)):
+                with _col_opp:
+                    _render_opp_card(_opp, _ci)
+
+        if _opps_eua:
+            st.markdown(
+                '<div style="font-family:Courier New; font-size:0.72rem; '
+                'color:#555; margin:12px 0 4px 0;">🇺🇸 eua</div>',
+                unsafe_allow_html=True,
+            )
+            _cols_eua = st.columns(min(len(_opps_eua), 3))
+            for _ci, (_col_opp, _opp) in enumerate(zip(_cols_eua, _opps_eua)):
+                with _col_opp:
+                    _render_opp_card(_opp, _ci)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1262,6 +1395,16 @@ else:
         except:
             pass
 
+    # ── Complementa com cotações em lote (cache de 5min) ─────────────────
+    _tickers_cot = tuple([item['ticker'] for item in watchlist if item.get('ticker')])
+    _cotacoes = buscar_cotacoes_lote(_tickers_cot) if _tickers_cot else {}
+    for _tk_cot, _d_cot in _cotacoes.items():
+        if _tk_cot not in live_data or live_data[_tk_cot].get('preco', 0) == 0:
+            live_data[_tk_cot] = _d_cot
+
+    # Earnings próximos (próximos 14 dias)
+    _earnings_prox = buscar_earnings_proximos(_tickers_cot) if _tickers_cot else {}
+
     # ── Busca datas de earnings para os cards da watchlist ───────────────────
     import datetime as _dt_mod
     _hoje_home       = _dt_mod.date.today()
@@ -1312,6 +1455,15 @@ else:
                 }
         except Exception:
             pass
+
+    # Merge earnings_prox no info_map (complementa tickers sem cache)
+    for _ep_tk, _ep_dias in _earnings_prox.items():
+        _ep_base = mapear_ticker_base(_ep_tk)
+        if _ep_base not in _earnings_info_map:
+            _earnings_info_map[_ep_base] = {
+                'dias': _ep_dias,
+                'data': '—',
+            }
 
     # ── FILTRO POR TAG / TESE ────────────────────────────────────────────────
     tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)

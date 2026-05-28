@@ -193,25 +193,90 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             for t in ativos_comp:
                 t_base = mapear_ticker_base(t)
                 try:
-                    info = yf.Ticker(t_base).info
-                    cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
+                    # Fallback duplo: tenta t_base e t original no cache
+                    cache_d = (
+                        CACHE_FUNDAMENTOS.get(t_base)
+                        or CACHE_FUNDAMENTOS.get(t)
+                        or CACHE_FUNDAMENTOS.get(t_base.replace('.SA', ''))
+                        or {}
+                    )
+
+                    # Busca info do yfinance com timeout
+                    try:
+                        info = yf.Ticker(t_base).info or {}
+                    except Exception:
+                        info = {}
+
+                    # Helper seguro
+                    def _get_val(cache_key, yf_key, multiplier=1.0):
+                        v = cache_d.get(cache_key)
+                        if v is None:
+                            raw = info.get(yf_key)
+                            v = (float(raw) * multiplier) if raw is not None else None
+                        try:
+                            return float(v) if v is not None else None
+                        except (TypeError, ValueError):
+                            return None
+
                     dados_comp.append({
-                        "ticker": t,
-                        "p/l": safe_float(cache_d.get('p/l')) or safe_float(info.get('trailingPE')),
-                        "p/vp": safe_float(cache_d.get('p/vp')) or safe_float(info.get('priceToBook')),
-                        "roe%": safe_float(cache_d.get('roe%')) or (safe_float(info.get('returnOnEquity', 0))*100),
-                        "dy%": safe_float(cache_d.get('dy%')) or (safe_float(info.get('dividendYield', 0))*100),
-                        "mrg_liq%": safe_float(cache_d.get('margem%')) or (safe_float(info.get('profitMargins', 0))*100),
-                        "mkt_cap": safe_float(info.get('marketCap')) or safe_float(cache_d.get('market_cap'))
+                        "ticker":    t,
+                        "nome":      cache_d.get('nome') or info.get('shortName', t),
+                        "setor":     cache_d.get('setor') or info.get('sector', '—'),
+                        "p/l":       _get_val('p/l', 'trailingPE'),
+                        "p/vp":      _get_val('p/vp', 'priceToBook'),
+                        "roe%":      _get_val('roe%', 'returnOnEquity', 100),
+                        "dy%":       _get_val('dy%', 'dividendYield', 100),
+                        "mrg_liq%":  _get_val('margem%', 'profitMargins', 100),
+                        "ev/ebitda": _get_val('ev/ebitda', 'enterpriseToEbitda'),
+                        "mkt_cap":   _get_val('market_cap', 'marketCap'),
                     })
-                except: pass
+                except Exception as _e_comp:
+                    dados_comp.append({
+                        "ticker": t, "nome": t, "setor": "—",
+                        "p/l": None, "p/vp": None, "roe%": None,
+                        "dy%": None, "mrg_liq%": None,
+                        "ev/ebitda": None, "mkt_cap": None,
+                    })
 
             df_comp = pd.DataFrame(dados_comp)
+
+            # Adiciona health score ao comparativo
+            from database.db import get_health_scores
+            _hs_comp = {h['ticker']: h.get('score') for h in (get_health_scores() or [])}
+            df_comp['health'] = df_comp['ticker'].apply(
+                lambda tk: _hs_comp.get(tk) or _hs_comp.get(mapear_ticker_base(tk))
+            )
+
+            # Reordena colunas com health primeiro
+            _cols_order = ['ticker', 'nome', 'health', 'p/l', 'p/vp',
+                           'roe%', 'dy%', 'mrg_liq%', 'ev/ebitda']
+            df_comp = df_comp[[c for c in _cols_order if c in df_comp.columns]]
+
             c1, c2 = st.columns([6, 4])
             with c1:
                 st.markdown("**matriz de múltiplos quantitativos**")
                 if not df_comp.empty:
-                    st.dataframe(df_comp.style.format({"p/l": "{:.2f}", "p/vp": "{:.2f}", "roe%": "{:.1f}%", "dy%": "{:.1f}%", "mrg_liq%": "{:.1f}%", "mkt_cap": "${:,.0f}"}), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        df_comp.style.format({
+                            "p/l":      lambda x: f"{x:.1f}" if pd.notna(x) else "—",
+                            "p/vp":     lambda x: f"{x:.2f}" if pd.notna(x) else "—",
+                            "roe%":     lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
+                            "dy%":      lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
+                            "mrg_liq%": lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
+                            "ev/ebitda":lambda x: f"{x:.1f}" if pd.notna(x) else "—",
+                            "health":   lambda x: f"{int(x)}/100" if pd.notna(x) else "—",
+                        }).highlight_max(
+                            subset=['roe%', 'dy%', 'mrg_liq%', 'health'],
+                            color='#1a3a1a',
+                            axis=0,
+                        ).highlight_min(
+                            subset=['p/l', 'p/vp', 'ev/ebitda'],
+                            color='#1a3a1a',
+                            axis=0,
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
             with c2:
                 st.markdown("**performance relativa (base 100 — 10 anos)**")
                 if not hist_all.empty:
@@ -793,6 +858,33 @@ with tab_earn:
 with tab_ia:
     section_title("🧠 análise ia — deepseek v4 pro")
 
+    # Exibe análise anterior se existir
+    _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
+    if _cache_ia:
+        st.markdown(
+            f'<div style="background:#0a0a0a; border:1px solid #1a1a1a; '
+            f'border-left:3px solid #333; border-radius:6px; '
+            f'padding:12px 16px; margin-bottom:16px;">'
+
+            f'<div style="font-family:Courier New; font-size:0.65rem; '
+            f'color:#444; margin-bottom:8px;">'
+            f'📋 análise salva em {_cache_ia["timestamp"]} '
+            f'| health score na época: {_cache_ia["score"]}/100 '
+            f'| regime: {_cache_ia["macro"]}'
+            f'</div>'
+
+            f'<div style="font-family:Courier New; font-size:0.82rem; '
+            f'color:#C0C0C0; line-height:1.8; white-space:pre-wrap;">'
+            f'{_cache_ia["texto"]}'
+            f'</div>'
+
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("análise da sessão anterior — clique em 'analisar' para atualizar.")
+    else:
+        st.caption("nenhuma análise gerada ainda para este ativo.")
+
     _col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
     with _col_ia1:
         st.markdown(
@@ -842,7 +934,7 @@ with tab_ia:
             multiplos_historicos = _medios,
         )
 
-        chamar_ia(
+        _resposta_ia = chamar_ia(
             prompt_usuario = _prompt_ia,
             system         = SYSTEM_ANALISTA,
             max_tokens     = 1500,
@@ -851,6 +943,16 @@ with tab_ia:
             thinking       = usar_thinking,
             user_settings  = _user_settings,
         )
+
+        if _resposta_ia:
+            import datetime as _dt
+            st.session_state[f"ia_cache_{t_base}"] = {
+                'texto':     _resposta_ia,
+                'timestamp': _dt.datetime.now().strftime('%d/%m/%Y %H:%M'),
+                'score':     health_result.get('score', 50),
+                'macro':     macro_ctx.get('label', '—'),
+            }
+
         st.session_state[f"ia_analise_{t_base}"] = True
 
     elif st.session_state.get(f"ia_analise_{t_base}"):
@@ -956,45 +1058,52 @@ with tab_ia:
                 st.error(f"erro ao gerar pdf: {_e_pdf}")
 
     st.markdown("---")
-    section_title("📋 tese de investimento longo prazo")
-    try:
-        from utils.health_engine import safe_int as _si
-    except:
-        def _si(v, d=0):
-            try: return int(float(v)) if v is not None else d
-            except: return d
-    val_pl   = _si(cache_d.get('p/l'))
-    val_pvp  = _si(cache_d.get('p/vp'))
-    val_roe  = _si(cache_d.get('roe%'))
-    val_dy   = _si(cache_d.get('dy%'))
-    val_divida = _si(cache_d.get('divida_liquida'))
-    val_ativo  = _si(cache_d.get('ativos'))
-    ltv_f = (val_divida / val_ativo * 100) if val_ativo and val_ativo > 0 else 0
+    section_title("📋 tese de investimento — deepseek v4 pro")
 
-    _prompt_tese = (
-        f"ativo: {ticker.upper()}\n"
-        f"setor: {setor}\n"
-        f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
-        f"fundamentos:\n"
-        f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
-        f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
-        f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
-        f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
-        f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
-        f"health score: {health_result.get('score', 50)}/100\n\n"
-        "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
-        "avalie se a alavancagem é adequada para o setor. "
-        "conclua com uma visão de risco/retorno. letra minúscula."
-    )
-    with st.spinner("deepseek elaborando tese..."):
-        chamar_ia(
-            prompt_usuario = _prompt_tese,
-            system         = SYSTEM_TESE,
-            max_tokens     = 1000,
-            temperatura    = 0.3,
-            stream         = True,
-            user_settings  = _user_settings,
+    if st.button(
+        "📝 gerar tese de longo prazo",
+        use_container_width=True,
+        type="secondary",
+        key="btn_tese_footer"
+    ):
+        try:
+            from utils.health_engine import safe_int as _si
+        except:
+            def _si(v, d=0):
+                try: return int(float(v)) if v is not None else d
+                except: return d
+        val_pl   = _si(cache_d.get('p/l'))
+        val_pvp  = _si(cache_d.get('p/vp'))
+        val_roe  = _si(cache_d.get('roe%'))
+        val_dy   = _si(cache_d.get('dy%'))
+        val_divida = _si(cache_d.get('divida_liquida'))
+        val_ativo  = _si(cache_d.get('ativos'))
+        ltv_f = (val_divida / val_ativo * 100) if val_ativo and val_ativo > 0 else 0
+
+        _prompt_tese = (
+            f"ativo: {ticker.upper()}\n"
+            f"setor: {setor}\n"
+            f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
+            f"fundamentos:\n"
+            f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
+            f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
+            f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
+            f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
+            f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
+            f"health score: {health_result.get('score', 50)}/100\n\n"
+            "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
+            "avalie se a alavancagem é adequada para o setor. "
+            "conclua com uma visão de risco/retorno. letra minúscula."
         )
+        with st.spinner("deepseek elaborando tese..."):
+            chamar_ia(
+                prompt_usuario = _prompt_tese,
+                system         = SYSTEM_TESE,
+                max_tokens     = 1000,
+                temperatura    = 0.3,
+                stream         = True,
+                user_settings  = _user_settings,
+            )
 
 with tab_fund:
     c_f1, c_f2 = st.columns(2)

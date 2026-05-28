@@ -606,51 +606,40 @@ with tab_screener:
 
     st.markdown("---")
 
-    # ══ INICIALIZAÇÃO DOS DEFAULTS (primeira execução) ═══════════════════════
-    # Usa as mesmas keys dos widgets — só seta se ainda não existir
-    for _k, _v in {
-        "sc_pl_min_w":  0.0,
-        "sc_pl_max_w":  0.0,
-        "sc_pvp_w":     0.0,
-        "sc_roe_w":     0.0,
-        "sc_dy_w":      0.0,
-        "sc_score_w":   50,
-        "sc_mm_w":      False,
-    }.items():
-        if _k not in st.session_state:
-            st.session_state[_k] = _v
-
-    # ══ BOTÕES DE PRESET (ANTES de qualquer widget) ═══════════════════════════
-    # Setam diretamente as keys dos widgets no session_state,
-    # depois chamam st.rerun() — na próxima execução os widgets
-    # já encontram os valores corretos e os exibem sem conflito.
+    # ══ BOTÕES DE PRESET E RESET ════════════════════════════════════════════
     section_title("⚙️ filtros")
 
     col_p1, col_p2, col_p3 = st.columns([1, 1, 4])
     with col_p1:
         if st.button("💎 valor", key="btn_preset_valor",
                      use_container_width=True, help="P/L baixo + ROE alto"):
-            st.session_state["sc_pl_max_w"]  = 15.0
-            st.session_state["sc_pl_min_w"]  = 0.0
-            st.session_state["sc_roe_w"]     = 12.0
-            st.session_state["sc_score_w"]   = 55
-            st.session_state["sc_dy_w"]      = 0.0
-            st.session_state["sc_pvp_w"]     = 0.0
+            st.session_state["disc_pl_max_w"]  = 15.0
+            st.session_state["disc_pl_min_w"]  = 0.0
+            st.session_state["disc_roe_w"]     = 12.0
+            st.session_state["disc_score_w"]   = 55
+            st.session_state["disc_dy_w"]      = 0.0
+            st.session_state["disc_pvp_w"]     = 0.0
             st.rerun()
     with col_p2:
         if st.button("💰 dividendo", key="btn_preset_div",
                      use_container_width=True, help="DY alto + score ok"):
-            st.session_state["sc_dy_w"]      = 6.0
-            st.session_state["sc_score_w"]   = 45
-            st.session_state["sc_pl_max_w"]  = 0.0
-            st.session_state["sc_pl_min_w"]  = 0.0
-            st.session_state["sc_roe_w"]     = 0.0
-            st.session_state["sc_pvp_w"]     = 0.0
+            st.session_state["disc_dy_w"]      = 6.0
+            st.session_state["disc_score_w"]   = 45
+            st.session_state["disc_pl_max_w"]  = 0.0
+            st.session_state["disc_pl_min_w"]  = 0.0
+            st.session_state["disc_roe_w"]     = 0.0
+            st.session_state["disc_pvp_w"]     = 0.0
+            st.rerun()
+    with col_p3:
+        if st.button("↺ resetar filtros", key="btn_reset_filtros",
+                     use_container_width=True):
+            for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w',
+                       'disc_dy_w', 'disc_score_w', 'disc_pvp_w',
+                       'disc_mm_w']:
+                st.session_state.pop(_k, None)
             st.rerun()
 
-    # ══ WIDGETS DE FILTRO (DEPOIS dos botões) ════════════════════════════════
-    # SEM value= — o session_state[key] já foi setado acima e controla
-    # o valor exibido após o primeiro render.
+    # ══ WIDGETS DE FILTRO (com value= persistente via session_state) ════════
     f1, f2, f3, f4 = st.columns(4)
 
     with f1:
@@ -663,14 +652,16 @@ with tab_screener:
         with pl_col1:
             st.number_input(
                 "mín", min_value=0.0, max_value=200.0,
-                step=1.0, key="sc_pl_min_w",
+                step=1.0, key="disc_pl_min_w",
                 label_visibility="collapsed",
+                value=st.session_state.get('disc_pl_min_w', 0.0),
             )
         with pl_col2:
             st.number_input(
                 "máx", min_value=0.0, max_value=500.0,
-                step=1.0, key="sc_pl_max_w",
+                step=1.0, key="disc_pl_max_w",
                 label_visibility="collapsed",
+                value=st.session_state.get('disc_pl_max_w', 15.0),
             )
         st.caption("0 = sem limite")
 
@@ -678,11 +669,13 @@ with tab_screener:
         st.number_input(
             "p/vp máximo:", min_value=0.0, max_value=20.0,
             step=0.1, format="%.1f",
-            key="sc_pvp_w", help="0 = sem filtro",
+            key="disc_pvp_w", help="0 = sem filtro",
+            value=st.session_state.get('disc_pvp_w', 0.0),
         )
         st.number_input(
             "roe mínimo (%):", min_value=0.0, max_value=100.0,
-            step=1.0, key="sc_roe_w",
+            step=1.0, key="disc_roe_w",
+            value=st.session_state.get('disc_roe_w', 0.0),
         )
 
     with f3:
@@ -690,28 +683,31 @@ with tab_screener:
             "dividend yield mínimo (%):",
             min_value=0.0, max_value=30.0,
             step=0.5, format="%.1f",
-            key="sc_dy_w",
+            key="disc_dy_w",
+            value=st.session_state.get('disc_dy_w', 0.0),
         )
         st.slider(
             "health score mínimo:",
             min_value=0, max_value=100,
-            step=5, key="sc_score_w",
+            step=5, key="disc_score_w",
+            value=st.session_state.get('disc_score_w', 50),
         )
 
     with f4:
         st.checkbox(
             "apenas acima da MM200",
-            key="sc_mm_w",
+            key="disc_mm_w",
+            value=st.session_state.get('disc_mm_w', False),
         )
 
     # ══ LEITURA DOS VALORES (via session_state após render) ═══════════════════
-    pl_min    = st.session_state["sc_pl_min_w"]
-    pl_max    = st.session_state["sc_pl_max_w"]
-    pvp_max   = st.session_state["sc_pvp_w"]
-    roe_min   = st.session_state["sc_roe_w"]
-    dy_min    = st.session_state["sc_dy_w"]
-    score_min = st.session_state["sc_score_w"]
-    apenas_mm = st.session_state["sc_mm_w"]
+    pl_min    = st.session_state["disc_pl_min_w"]
+    pl_max    = st.session_state["disc_pl_max_w"]
+    pvp_max   = st.session_state["disc_pvp_w"]
+    roe_min   = st.session_state["disc_roe_w"]
+    dy_min    = st.session_state["disc_dy_w"]
+    score_min = st.session_state["disc_score_w"]
+    apenas_mm = st.session_state["disc_mm_w"]
 
     # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
     if st.button("🔍 rodar screener", type="primary",

@@ -32,24 +32,82 @@ XSTOCKS_INDICES = [
 # mercado brasileiro (b3)
 # =====================================================================
 
-# As ~130 empresas mais líquidas e relevantes da B3 (IBOV + IBrX100)
+# Lista ampliada de ativos B3 para rotação setorial mais rica
 SCREENER_B3 = [
-    "ABEV3.SA", "ALOS3.SA", "ALPA4.SA", "ANIM3.SA", "ARZZ3.SA", "ASAI4.SA", "AURE3.SA", "AZUL4.SA", 
-    "B3SA3.SA", "BBAS3.SA", "BBDC3.SA", "BBDC4.SA", "BBSE3.SA", "BEEF3.SA", "BPAC11.SA", "BRAP4.SA", 
-    "BRFS3.SA", "BRKM5.SA", "BRSR6.SA", "CCRO3.SA", "CEAB3.SA", "CMIG4.SA", "COGN3.SA", "CPFE3.SA", 
-    "CPLE3.SA", "CPLE6.SA", "CRFB3.SA", "CSAN3.SA", "CSMG3.SA", "CSNA3.SA", "CVCB3.SA", "CYRE3.SA", 
-    "DIRR3.SA", "DXCO3.SA", "EGIE3.SA", "ELET3.SA", "ELET6.SA", "EMBR3.SA", "ENEV3.SA", "ENGI11.SA", 
-    "EQTL3.SA", "EZTC3.SA", "FESA4.SA", "FLRY3.SA", "FRAS3.SA", "GGBR4.SA", "GOAU4.SA", "GOLL4.SA", 
-    "GRND3.SA", "HAPV3.SA", "HYPE3.SA", "IGTI11.SA", "INTB3.SA", "IRBR3.SA", "ITSA4.SA", "ITUB3.SA", 
-    "ITUB4.SA", "JBSS3.SA", "JSLG3.SA", "KEPL3.SA", "KLBN11.SA", "LREN3.SA", "LWSA3.SA", "MDIA3.SA", 
-    "MGLU3.SA", "MOVI3.SA", "MRFG3.SA", "MRVE3.SA", "MULT3.SA", "MYPK3.SA", "NTCO3.SA", "ODPV3.SA", 
-    "PARD3.SA", "PETR3.SA", "PETR4.SA", "PETZ3.SA", "POMO4.SA", "PRIO3.SA", "PSSA3.SA", "PTBL3.SA", 
-    "QUAL3.SA", "RADL3.SA", "RAPT4.SA", "RCSL3.SA", "RDOR3.SA", "RECV3.SA", "RENT3.SA", "ROMI3.SA", 
-    "RRRP3.SA", "SANB11.SA", "SAPR11.SA", "SAPR4.SA", "SBFG3.SA", "SBSP3.SA", "SLCE3.SA", "SMTO3.SA", 
-    "SOMA3.SA", "STBP3.SA", "SUZB3.SA", "TAEE11.SA", "TASA4.SA", "TEND3.SA", "TIMS3.SA", "TOTS3.SA", 
-    "TRPL4.SA", "TUPY3.SA", "UGPA3.SA", "UNIP6.SA", "USIM5.SA", "VALE3.SA", "VAMO3.SA", "VBBR3.SA", 
-    "VIVA3.SA", "VIVT3.SA", "VULC3.SA", "WEGE3.SA", "YDUQ3.SA", "ZAMP3.SA"
+    # ── FINANCEIRO ──────────────────────────────────────────────────────
+    "ABCB4.SA", "ABEV3.SA", "B3SA3.SA", "BBAS3.SA", "BBDC3.SA",
+    "BBDC4.SA", "BBSE3.SA", "BPAC11.SA", "BRSR6.SA", "CIEL3.SA",
+    "IRBR3.SA", "ITSA4.SA", "ITUB3.SA", "ITUB4.SA", "PSSA3.SA",
+    "SANB11.SA", "WIZC3.SA",
+
+    # ── ENERGIA / PETRÓLEO ───────────────────────────────────────────────
+    "CSAN3.SA", "ENEV3.SA", "PETR3.SA", "PETR4.SA", "PRIO3.SA",
+    "RECV3.SA", "RRRP3.SA", "VBBR3.SA", "UGPA3.SA", "DMMO3.SA",
+
+    # ── UTILITIES (ELÉTRICO + SANEAMENTO) ───────────────────────────────
+    "AURE3.SA", "CCEE3.SA", "CMIG4.SA", "CPFE3.SA", "CPLE3.SA",
+    "CPLE6.SA", "EGIE3.SA", "ELET3.SA", "ELET6.SA", "ENGI11.SA",
+    "EQTL3.SA", "CSMG3.SA", "SAPR11.SA", "SAPR4.SA", "SBSP3.SA",
+    "TAEE11.SA", "TRPL4.SA",
+
+    # ── MINERAÇÃO / SIDERURGIA / METALURGIA ─────────────────────────────
+    "BRAP4.SA", "CSNA3.SA", "FESA4.SA", "GGBR4.SA", "GOAU4.SA",
+    "USIM5.SA", "VALE3.SA",
+
+    # ── CONSTRUÇÃO E ENGENHARIA ──────────────────────────────────────────
+    "CYRE3.SA", "DIRR3.SA", "EVEN3.SA", "EZTC3.SA", "HBOR3.SA",
+    "MDNE3.SA", "MRVE3.SA", "PLPL3.SA", "TEND3.SA", "TRIS3.SA",
+
+    # ── AGRONEGÓCIO / ALIMENTOS / BEBIDAS ────────────────────────────────
+    "ABEV3.SA", "BEEF3.SA", "BRFS3.SA", "JBSS3.SA", "MRFG3.SA",
+    "MDIA3.SA", "SLCE3.SA", "SMTO3.SA", "CAML3.SA", "CRFB3.SA",
+
+    # ── SAÚDE ────────────────────────────────────────────────────────────
+    "FLRY3.SA", "HAPV3.SA", "HYPE3.SA", "PARD3.SA", "QUAL3.SA",
+    "RADL3.SA", "RDOR3.SA", "ONCO3.SA", "DASA3.SA", "AALR3.SA",
+
+    # ── TECNOLOGIA / SOFTWARE ────────────────────────────────────────────
+    "INTB3.SA", "LWSA3.SA", "TOTS3.SA", "POSI3.SA", "CASH3.SA",
+    "IFCM3.SA", "MOVI3.SA",
+
+    # ── TELECOM ──────────────────────────────────────────────────────────
+    "TIMS3.SA", "VIVT3.SA", "OIBR3.SA",
+
+    # ── VAREJO / CONSUMO ─────────────────────────────────────────────────
+    "ALOS3.SA", "ALPA4.SA", "ARZZ3.SA", "ASAI4.SA", "CEAB3.SA",
+    "COGN3.SA", "CVCB3.SA", "GRND3.SA", "LREN3.SA", "MGLU3.SA",
+    "NTCO3.SA", "ODPV3.SA", "PETZ3.SA", "SBFG3.SA", "SOMA3.SA",
+    "VIVA3.SA", "VULC3.SA", "ZAMP3.SA", "AMOB3.SA", "BTOW3.SA",
+
+    # ── INDÚSTRIA / MÁQUINAS / BENS DE CAPITAL ───────────────────────────
+    "EMBR3.SA", "FRAS3.SA", "KEPL3.SA", "ROMI3.SA", "TUPY3.SA",
+    "WEGE3.SA", "MYPK3.SA", "RAPT4.SA", "POMO4.SA", "FOBJ3.SA",
+
+    # ── PAPEL E CELULOSE ─────────────────────────────────────────────────
+    "DXCO3.SA", "KLBN11.SA", "SUZB3.SA",
+
+    # ── TRANSPORTE E LOGÍSTICA ───────────────────────────────────────────
+    "AZUL4.SA", "CCRO3.SA", "GOLL4.SA", "JSLG3.SA", "MULT3.SA",
+    "RAIL3.SA", "RENT3.SA", "STBP3.SA", "VAMO3.SA", "PSSA3.SA",
+
+    # ── IMOBILIÁRIO ──────────────────────────────────────────────────────
+    "BRML3.SA", "IGTI11.SA", "IRDM11.SA",
+
+    # ── EDUCAÇÃO ─────────────────────────────────────────────────────────
+    "ANIM3.SA", "COGN3.SA", "SEER3.SA", "YDUQ3.SA",
+
+    # ── QUÍMICOS / PETROQUÍMICOS ─────────────────────────────────────────
+    "BRKM5.SA", "UNIP6.SA",
+
+    # ── SEGUROS / PREVIDÊNCIA ────────────────────────────────────────────
+    "BBSE3.SA", "CXSE3.SA", "SULA11.SA",
+
+    # ── MINERAÇÃO NÃO-FERROSA ────────────────────────────────────────────
+    "CBAV3.SA", "CMIN3.SA",
 ]
+
+# Remove duplicatas mantendo ordem
+SCREENER_B3 = list(dict.fromkeys(SCREENER_B3))
 
 # Os ~70 fundos imobiliários mais líquidos do IFIX
 FII_TODOS = [
@@ -74,20 +132,66 @@ BR_LABELS = [f"{t} — b3 (brasil)" for t in BRASIL_TODOS]
 # mercado eua (ações diretas via yahoo finance)
 # =====================================================================
 
-# As ~130 maiores empresas dos EUA (Pesos relevantes do S&P500 e Nasdaq 100)
+# Lista ampliada de ativos dos EUA para rotação setorial mais rica
 SCREENER_US = [
-    "AAPL", "ABBV", "ABT", "ACN", "ADBE", "ADI", "ADP", "AMAT", "AMD", "AMGN", "AMT", "AMZN", 
-    "AON", "APH", "ASML", "AVGO", "AXP", "BA", "BAC", "BDX", "BK", "BLK", "BMY", "BRK-B", "C", 
-    "CAT", "CB", "CDNS", "CI", "CME", "CMG", "CMCSA", "COF", "COP", "COST", "CRM", "CSCO", "CSX", 
-    "CTAS", "CVS", "CVX", "DHR", "DIS", "DUK", "EOG", "ELV", "EMR", "ETN", "F", "FCX", "FI", "GD", 
-    "GE", "GILD", "GM", "GOOG", "GOOGL", "GPN", "GS", "HD", "HON", "IBM", "ICE", "INTC", "INTU", 
-    "ISRG", "ITW", "JNJ", "JPM", "KLAC", "KMB", "KO", "LIN", "LLY", "LMT", "LOW", "LRCX", "MA", 
-    "MAR", "MCD", "MCO", "MDT", "META", "MMC", "MMM", "MO", "MPC", "MRK", "MS", "MSFT", "MU", 
-    "NEE", "NFLX", "NKE", "NOC", "NOW", "NVDA", "ORCL", "PANW", "PEP", "PFE", "PG", "PGR", "PH", 
-    "PM", "PSX", "PYPL", "QCOM", "RTX", "SBUX", "SCHW", "SHW", "SLB", "SNPS", "SO", "SPGI", "SYK", 
-    "T", "TGT", "TJX", "TMO", "TMUS", "TSLA", "TXN", "UNH", "UNP", "UPS", "USB", "V", "VRTX", "VZ", 
-    "WFC", "WM", "WMT", "XOM"
+    # ── TECNOLOGIA ───────────────────────────────────────────────────────
+    "AAPL", "ADBE", "ADI", "AMAT", "AMD", "AMZN", "ANET", "ANSS",
+    "ASML", "AVGO", "CDNS", "CRM", "CSCO", "FTNT", "GOOG", "GOOGL",
+    "HPQ", "IBM", "INTC", "INTU", "KLAC", "LRCX", "META", "MSFT",
+    "MU", "NOW", "NVDA", "ORCL", "PANW", "PYPL", "QCOM", "SNPS",
+    "TXN", "ZBRA",
+
+    # ── SAÚDE ────────────────────────────────────────────────────────────
+    "ABBV", "ABT", "AMGN", "BAX", "BDX", "BIIB", "BMY", "BSX",
+    "CI", "CVS", "DHR", "ELV", "GILD", "HCA", "HUM", "IDXX",
+    "ISRG", "JNJ", "MDT", "MRK", "PFE", "REGN", "SYK", "TMO",
+    "UNH", "VRTX", "ZBH",
+
+    # ── FINANCEIRO ───────────────────────────────────────────────────────
+    "AIG", "AMP", "AON", "AXP", "BAC", "BK", "BLK", "BRK-B",
+    "C", "CB", "CFG", "CME", "COF", "DFS", "FI", "GS", "ICE",
+    "JPM", "MCO", "MMC", "MS", "MSCI", "PGR", "SCHW", "SPGI",
+    "TFC", "TRV", "USB", "V", "WFC",
+
+    # ── CONSUMO DISCRICIONÁRIO ────────────────────────────────────────────
+    "ABNB", "AMZN", "AZO", "BKNG", "CMG", "DHI", "EBAY", "F",
+    "GM", "HD", "LEN", "LOW", "LVS", "MAR", "MCD", "MGM", "NKE",
+    "ORLY", "PHM", "ROST", "SBUX", "TGT", "TJX", "TSLA", "YUM",
+
+    # ── CONSUMO BÁSICO ────────────────────────────────────────────────────
+    "CAG", "CL", "CLX", "COST", "EL", "GIS", "HSY", "K", "KMB",
+    "KO", "MDLZ", "MKC", "MO", "PEP", "PG", "PM", "SJM", "STZ",
+    "SYY", "WMT",
+
+    # ── ENERGIA ──────────────────────────────────────────────────────────
+    "BKR", "COP", "CVX", "DVN", "EOG", "FANG", "HAL", "HES",
+    "KMI", "MPC", "MRO", "OKE", "OXY", "PSX", "SLB", "VLO",
+    "WMB", "XOM",
+
+    # ── INDÚSTRIA ────────────────────────────────────────────────────────
+    "BA", "CAT", "CSX", "DE", "EMR", "ETN", "FDX", "GD", "GE",
+    "HON", "ITW", "LMT", "MMM", "NOC", "NSC", "PH", "RTX", "TT",
+    "UNP", "UPS", "WM",
+
+    # ── MATERIAIS ────────────────────────────────────────────────────────
+    "ALB", "APD", "CF", "DD", "ECL", "FCX", "FMC", "IP", "LIN",
+    "MOS", "NEM", "NUE", "PKG", "PPG", "SHW",
+
+    # ── UTILITIES ────────────────────────────────────────────────────────
+    "AEE", "AEP", "AES", "AWK", "D", "DTE", "DUK", "ED", "EIX",
+    "ES", "ETR", "EXC", "FE", "NEE", "NI", "PCG", "PEG", "SO",
+    "SRE", "WEC", "XEL",
+
+    # ── TELECOM ──────────────────────────────────────────────────────────
+    "CHTR", "CMCSA", "DISH", "LUMN", "T", "TMUS", "VZ",
+
+    # ── IMOBILIÁRIO (REITs) ────────────────────────────────────────────────
+    "AMT", "ARE", "AVB", "CCI", "DLR", "EQR", "EXR", "IRM",
+    "KIM", "O", "PSA", "PLD", "SBAC", "SPG", "WELL", "WY",
 ]
+
+# Remove duplicatas
+SCREENER_US = list(dict.fromkeys(SCREENER_US))
 
 # =====================================================================
 # utilitários
