@@ -314,6 +314,85 @@ def calcular_momentum(hist: pd.DataFrame) -> tuple[int, dict, list]:
     return score_mom, detalhes, alertas_mom
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _buscar_yield_ntnb() -> float:
+    """
+    Busca o yield atual da NTN-B 2035 (IPCA+spread) via BCB SGS.
+    Série 12466 = taxa indicativa NTN-B Principal 2035.
+    Fallback: 6.5% (valor conservador de longo prazo).
+    Retorna o yield REAL anualizado em percentual (ex: 6.8).
+    """
+    try:
+        import datetime
+        from bcb import sgs
+        inicio = (
+            datetime.datetime.today() - datetime.timedelta(days=30)
+        ).strftime('%Y-%m-%d')
+        df = sgs.get({'ntnb': 12466}, start=inicio)
+        if not df.empty and 'ntnb' in df.columns:
+            val = float(df['ntnb'].dropna().iloc[-1])
+            if 3.0 <= val <= 15.0:   # sanidade
+                return round(val, 2)
+    except Exception:
+        pass
+    return 6.5   # fallback conservador
+
+
+def _detectar_segmento_fii(ticker: str, dados: dict) -> str:
+    """
+    Detecta o segmento do FII com base no ticker e no nome/setor.
+    Retorna: 'papel' | 'logistica' | 'lajes' | 'shopping' |
+             'residencial' | 'hibrido' | 'fof' | 'desconhecido'
+    """
+    t = ticker.upper().replace('.SA', '')
+    nome = str(dados.get('nome', '') or '').lower()
+    setor = str(dados.get('setor', '') or '').lower()
+
+    # FOF — fundos de fundos (geralmente têm "fof" no nome ou ticker)
+    if any(x in nome for x in ['fof', 'fundo de fund']):
+        return 'fof'
+    if t in ['HFOF11', 'KFOF11', 'BCFF11', 'RBRF11', 'FEXC11']:
+        return 'fof'
+
+    # Papel (CRI/CRA — renda fixa)
+    if any(x in nome for x in ['receb', 'credito', 'cri', 'cra', 'renda fixa']):
+        return 'papel'
+    if t in ['MXRF11', 'KNCR11', 'KNIP11', 'IRDM11', 'CVBI11',
+             'HABT11', 'HCTR11', 'RBRY11', 'RBRR11', 'DEVA11',
+             'CPTS11', 'KNHY11', 'KNSC11', 'RZTR11', 'RZAK11',
+             'VGHF11', 'VGIR11', 'VGIP11', 'SNCI11', 'RECR11',
+             'CACR11', 'BARI11', 'MCCI11']:
+        return 'papel'
+
+    # Logística / Galpões
+    if any(x in nome for x in ['logist', 'galpão', 'industrial', 'armazem']):
+        return 'logistica'
+    if t in ['HGLG11', 'BTLG11', 'BRCO11', 'LVBI11', 'VILG11',
+             'XPLG11', 'GTWR11', 'TRXF11', 'TGAR11', 'GARE11']:
+        return 'logistica'
+
+    # Shoppings
+    if any(x in nome for x in ['shopping', 'mall', 'varejo']):
+        return 'shopping'
+    if t in ['XPML11', 'VISC11', 'MALL11', 'HSML11', 'JSFR11']:
+        return 'shopping'
+
+    # Lajes corporativas / Escritórios
+    if any(x in nome for x in ['laje', 'escritorio', 'comercial', 'corporate']):
+        return 'lajes'
+    if t in ['HGRE11', 'BRCR11', 'PVBI11', 'RCRB11', 'JSRE11',
+             'RECT11', 'SARE11']:
+        return 'lajes'
+
+    # Residencial
+    if any(x in nome for x in ['resid', 'habitac', 'moradia']):
+        return 'residencial'
+    if t in ['HGRU11', 'RBVA11']:
+        return 'residencial'
+
+    return 'hibrido'
+
+
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
@@ -389,57 +468,110 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             alertas.append("⚠️ ativo volátil em cenário de stress (VIX alto).")
             penalidade_vix = -10
 
-        # ==========================================
-        # MOTOR 1: FUNDOS IMOBILIÁRIOS (FIIs)
-        # ==========================================
+        # ══ MOTOR 1: FUNDOS IMOBILIÁRIOS (FIIs) ════════════════════════════════
+        # Benchmarks corrigidos: P/VP por segmento, yield vs NTN-B (IPCA+)
+        # ══════════════════════════════════════════════════════════════════════
         if is_fii:
-            score_pvp = 0
-            if pvp is not None and pvp > 0:
-                if 0.90 <= pvp <= 1.05: score_pvp += 40 
-                elif 0.80 <= pvp < 0.90: 
-                    score_pvp += 30 
-                    alertas.append("⚠️ desconto alto no p/vp. verificar risco de vacância.")
-                elif pvp < 0.80:
-                    score_pvp += 10
-                    alertas.append("🚨 p/vp crítico (< 0.80). o mercado precifica problemas graves.")
-                elif pvp > 1.05:
-                    score_pvp += 20
-                    alertas.append("⚠️ fundo negociado com ágio.")
-            else: score_pvp += 20
-                
-            score_y = 0
-            if dy is not None:
-                selic_atual = macro_context.get('selic', 10.5)
-                # yield mínimo aceitável = Selic + 2% (prêmio de risco imobiliário)
-                yield_minimo   = selic_atual + 2.0
-                yield_otimo    = selic_atual + 4.0
-                yield_excessivo = selic_atual + 8.0
+            segmento = _detectar_segmento_fii(ticker, dados)
+            yield_ntnb = _buscar_yield_ntnb()   # yield REAL NTN-B (ex: 6.8%)
 
-                if dy >= yield_otimo and dy <= yield_excessivo:
-                    score_y += 40
-                elif dy >= yield_minimo and dy < yield_otimo:
-                    score_y += 25
-                    alertas.append(f"ℹ️ yield ({dy:.1f}%) adequado mas abaixo do ótimo para selic {selic_atual:.1f}%.")
-                elif dy > yield_excessivo:
-                    score_y += 15
-                    alertas.append(f"🚨 yield trap? dividendo ({dy:.1f}%) excessivamente alto vs selic {selic_atual:.1f}%.")
-                elif dy < yield_minimo and dy >= selic_atual:
-                    score_y += 10
-                    alertas.append(f"⚠️ yield ({dy:.1f}%) abaixo do prêmio mínimo exigido vs selic {selic_atual:.1f}%.")
-                else:
-                    score_y += 0
-                    alertas.append(f"🚨 yield ({dy:.1f}%) muito baixo para FII com selic a {selic_atual:.1f}%.")
-            else:
-                score_y += 20
-
-            score_tec = 20 + penalidade_tec
-            score = score_pvp + score_y + score_tec
-            
-            breakdown = {
-                "Valuation Justo (P/VP)": score_pvp,
-                "Geração de Renda (Yield)": score_y,
-                "Momento Técnico": score_tec
+            # ── P/VP por segmento ──────────────────────────────────────────
+            pvp_thresholds = {
+                'papel':       (0.85, 0.95, 1.05),
+                'logistica':   (0.90, 1.00, 1.15),
+                'lajes':       (0.80, 0.95, 1.10),
+                'shopping':    (0.85, 1.00, 1.20),
+                'fof':         (0.85, 0.95, 1.05),
+                'residencial': (0.88, 1.00, 1.15),
+                'hibrido':     (0.88, 1.00, 1.12),
+                'desconhecido':(0.88, 1.00, 1.12),
             }
+            pvp_lim = pvp_thresholds.get(segmento, (0.88, 1.00, 1.12))
+
+            if pvp is not None:
+                try:
+                    pvp_f = float(pvp)
+                    if pvp_f <= pvp_lim[0]:
+                        score += 20
+                        breakdown[f'pvp_{segmento}'] = 20
+                        alertas.append(f"p/vp {pvp_f:.2f} — desconto atrativo para {segmento}")
+                    elif pvp_f <= pvp_lim[1]:
+                        score += 12
+                        breakdown[f'pvp_{segmento}'] = 12
+                    elif pvp_f <= pvp_lim[2]:
+                        score += 5
+                        breakdown[f'pvp_{segmento}'] = 5
+                    else:
+                        score -= 5
+                        breakdown[f'pvp_{segmento}'] = -5
+                        alertas.append(f"p/vp {pvp_f:.2f} — ágio elevado para {segmento}")
+                except (TypeError, ValueError):
+                    pass
+
+            # ── Yield vs NTN-B (benchmark correto para FII) ───────────────
+            if dy is not None:
+                try:
+                    dy_f = float(dy)
+
+                    ipca_atual = 4.5
+                    try:
+                        ipca_atual = st.session_state.get(
+                            "macro_context", {}
+                        ).get("ipca", 4.5)
+                    except Exception:
+                        pass
+                    dy_real = ((1 + dy_f/100) / (1 + ipca_atual/100) - 1) * 100
+
+                    spread = dy_real - yield_ntnb
+
+                    spread_min = {
+                        'papel':       1.0,
+                        'fof':         1.5,
+                        'logistica':   2.0,
+                        'shopping':    2.5,
+                        'lajes':       2.5,
+                        'residencial': 2.0,
+                        'hibrido':     2.0,
+                        'desconhecido':2.0,
+                    }.get(segmento, 2.0)
+
+                    if spread >= spread_min + 2.0:
+                        score += 25
+                        breakdown['yield_vs_ntnb'] = 25
+                        alertas.append(
+                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B ({yield_ntnb:.1f}%) — muito atrativo"
+                        )
+                    elif spread >= spread_min:
+                        score += 15
+                        breakdown['yield_vs_ntnb'] = 15
+                        alertas.append(
+                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B adequado"
+                        )
+                    elif spread >= 0:
+                        score += 5
+                        breakdown['yield_vs_ntnb'] = 5
+                        alertas.append(
+                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B — margem estreita"
+                        )
+                    else:
+                        score -= 10
+                        breakdown['yield_vs_ntnb'] = -10
+                        alertas.append(
+                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B — FII perde do título público sem risco"
+                        )
+                except (TypeError, ValueError):
+                    pass
+
+            # ── Segmento no breakdown para rastreabilidade ─────────────────
+            breakdown['segmento_fii'] = segmento
+            breakdown['ntnb_benchmark'] = f"{yield_ntnb:.2f}%"
+
+            # ── Penalidade técnica ─────────────────────────────────────────
+            score += penalidade_tec
 
         # ==========================================
         # MOTOR 2 e 3: AÇÕES (B3 vs EUA)

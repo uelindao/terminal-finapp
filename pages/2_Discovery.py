@@ -234,6 +234,92 @@ def calcular_momentum(tickers_tuple: tuple) -> list[dict]:
 
     return sorted(resultados, key=lambda x: x['score momentum'], reverse=True)
 
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def calcular_heatmap_setorial(universo: str = "BR") -> list[dict]:
+    """
+    Agrupa health scores por setor e calcula métricas setoriais.
+    Usa apenas dados já existentes no cache de fundamentos e health scores.
+    Retorna lista de dicts ordenada por score médio descendente.
+    """
+    # Pega todos os health scores do banco
+    todos_hs = get_health_scores()
+    if not todos_hs:
+        return []
+
+    # Mapa ticker → score
+    hs_map = {h['ticker']: h.get('score', 50) for h in todos_hs}
+
+    # Agrupa por setor usando cache de fundamentos
+    setores: dict = {}
+
+    for ticker, dados in CACHE_FUNDAMENTOS.items():
+        # Filtra por universo
+        if universo == "BR" and not ticker.endswith(".SA"):
+            continue
+        if universo == "US" and ticker.endswith(".SA"):
+            continue
+
+        setor_raw = dados.get('setor') or '—'
+        if not setor_raw or setor_raw == '—':
+            continue
+
+        setor = traduzir_setor(setor_raw)
+        score = hs_map.get(ticker)
+        if score is None:
+            continue
+
+        if setor not in setores:
+            setores[setor] = {
+                'setor':   setor,
+                'ativos':  [],
+                'scores':  [],
+            }
+
+        setores[setor]['ativos'].append(ticker)
+        setores[setor]['scores'].append(score)
+
+    # Calcula métricas por setor
+    resultado = []
+    for setor, dados_s in setores.items():
+        scores = dados_s['scores']
+        if not scores:
+            continue
+
+        score_medio = round(sum(scores) / len(scores), 1)
+        score_max   = max(scores)
+        score_min   = min(scores)
+        n_acum      = sum(1 for s in scores if s >= 65)
+        n_reduzir   = sum(1 for s in scores if s < 40)
+        n_ativos    = len(scores)
+
+        # Sinal do setor
+        if score_medio >= 65:
+            sinal = "acumulação"
+            cor   = "#00C853"
+        elif score_medio >= 45:
+            sinal = "neutro"
+            cor   = "#FF9900"
+        else:
+            sinal = "cautela"
+            cor   = "#FF1744"
+
+        resultado.append({
+            'setor':        setor,
+            'score_medio':  score_medio,
+            'score_max':    score_max,
+            'score_min':    score_min,
+            'n_ativos':     n_ativos,
+            'n_acumulacao': n_acum,
+            'n_reduzir':    n_reduzir,
+            'sinal':        sinal,
+            'cor':          cor,
+            'tickers':      dados_s['ativos'][:8],  # top 8 para exibição
+        })
+
+    return sorted(resultado, key=lambda x: x['score_medio'], reverse=True)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def rodar_screener(
     universo:        str,
@@ -354,9 +440,10 @@ def rodar_screener(
 
 
 # 6. interface de separadores (tabs)
-tab_momentum, tab_screener = st.tabs([
+tab_momentum, tab_screener, tab_setorial = st.tabs([
     "📈 Momentum (Força Relativa)",
     "🎯 Screener Quantitativo",
+    "🗺️ rotação setorial",
 ])
 
 # ==========================================
@@ -770,3 +857,145 @@ with tab_screener:
                     if adicionados > 0:
                         st.success(f"✅ {adicionados} ativo(s) adicionados à watchlist!")
                         st.rerun()
+
+with tab_setorial:
+    section_title("🗺️ rotação setorial — health score médio por setor")
+
+    st.markdown(
+        '<div style="font-family:Courier New; font-size:0.75rem; '
+        'color:#555; margin-bottom:16px; line-height:1.6;">'
+        'score médio dos ativos de cada setor no universo analisado. '
+        'setores verdes (≥65) em fase de acumulação. '
+        'vermelhos (<40) em cautela. dados baseados nos health scores '
+        'calculados pelo motor quantitativo.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    _col_univ, _col_refresh = st.columns([3, 1])
+    with _col_univ:
+        _univ_set = st.radio(
+            "universo:",
+            ["BR", "US"],
+            format_func=lambda x: {
+                "BR": "🇧🇷 Brasil (B3 + FIIs)",
+                "US": "🇺🇸 EUA (S&P500)",
+            }[x],
+            horizontal=True,
+            key="radio_univ_setorial",
+        )
+    with _col_refresh:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 recalcular", key="btn_refresh_setorial",
+                     use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    with st.spinner("agrupando setores..."):
+        _dados_set = calcular_heatmap_setorial(_univ_set)
+
+    if not _dados_set:
+        st.info(
+            "nenhum dado setorial disponível. "
+            "rode o sync de fundamentos no topo da página primeiro."
+        )
+    else:
+        _n_acum_total  = sum(1 for s in _dados_set if s['sinal'] == 'acumulação')
+        _n_neutro_total = sum(1 for s in _dados_set if s['sinal'] == 'neutro')
+        _n_caut_total  = sum(1 for s in _dados_set if s['sinal'] == 'cautela')
+
+        _rs1, _rs2, _rs3, _rs4 = st.columns(4)
+        with _rs1:
+            metric_card("setores analisados", str(len(_dados_set)), "com dados suficientes")
+        with _rs2:
+            metric_card("em acumulação", str(_n_acum_total),
+                        "score médio ≥ 65", "bull" if _n_acum_total > 0 else "muted")
+        with _rs3:
+            metric_card("neutros", str(_n_neutro_total), "score 45–64", "amber")
+        with _rs4:
+            metric_card("em cautela", str(_n_caut_total),
+                        "score médio < 45", "bear" if _n_caut_total > 0 else "muted")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        import plotly.graph_objects as go
+
+        _setores_nomes  = [d['setor'] for d in _dados_set]
+        _scores_medios  = [d['score_medio'] for d in _dados_set]
+        _cores_barras   = [d['cor'] for d in _dados_set]
+        _hover_texts    = [
+            f"<b>{d['setor']}</b><br>"
+            f"score médio: {d['score_medio']}<br>"
+            f"ativos: {d['n_ativos']}<br>"
+            f"acumulação: {d['n_acumulacao']} | cautela: {d['n_reduzir']}<br>"
+            f"range: {d['score_min']} – {d['score_max']}<br>"
+            f"tickers: {', '.join([t.replace('.SA','') for t in d['tickers']])}"
+            for d in _dados_set
+        ]
+
+        _fig_set = go.Figure()
+
+        _fig_set.add_trace(go.Bar(
+            x=_scores_medios,
+            y=_setores_nomes,
+            orientation='h',
+            marker_color=_cores_barras,
+            marker_opacity=0.85,
+            text=[f"{s:.0f}" for s in _scores_medios],
+            textposition='outside',
+            textfont=dict(size=10, color='#aaa', family='Courier New'),
+            hovertext=_hover_texts,
+            hoverinfo='text',
+            name='score médio',
+        ))
+
+        _fig_set.add_vline(
+            x=65, line_color="#00C853", line_dash="dash",
+            line_width=1, annotation_text="acumulação",
+            annotation_font_color="#00C853",
+            annotation_font_size=9,
+        )
+        _fig_set.add_vline(
+            x=40, line_color="#FF1744", line_dash="dash",
+            line_width=1, annotation_text="cautela",
+            annotation_font_color="#FF1744",
+            annotation_font_size=9,
+        )
+
+        _h_set = max(300, len(_dados_set) * 38)
+        _lay_set = base_layout(
+            height=_h_set,
+            title=f"health score médio por setor — {_univ_set}"
+        )
+        _lay_set.update(
+            xaxis=dict(range=[0, 110], showgrid=True,
+                       gridcolor='#2A2C3E', title='score médio'),
+            yaxis=dict(showgrid=False, title=''),
+            margin=dict(l=180, r=60, t=40, b=20),
+        )
+        _fig_set.update_layout(**_lay_set)
+        st.plotly_chart(_fig_set, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("detalhamento por setor")
+
+        for _ds in _dados_set:
+            _exp_label = (
+                f"{_ds['setor']} — "
+                f"score {_ds['score_medio']:.0f} | "
+                f"{_ds['n_ativos']} ativos | "
+                f"{_ds['sinal'].upper()}"
+            )
+            with st.expander(_exp_label, expanded=False):
+                _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+                _dc1.metric("score médio",   f"{_ds['score_medio']:.1f}")
+                _dc2.metric("melhor score",  f"{_ds['score_max']:.0f}")
+                _dc3.metric("pior score",    f"{_ds['score_min']:.0f}")
+                _dc4.metric("n° de ativos",  str(_ds['n_ativos']))
+
+                st.markdown(
+                    "**ativos com dados:** "
+                    + " · ".join([
+                        t.replace('.SA', '') for t in _ds['tickers']
+                    ]),
+                )

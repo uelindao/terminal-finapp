@@ -305,6 +305,52 @@ if is_fii:
     with c2: metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted")
     with c3: metric_card("mkt cap", fmt_numero(mcap, moeda))
     with c4: metric_card("patrimônio líq.", fmt_numero(assets, moeda))
+
+    # Segmento e spread NTN-B para FIIs
+    from utils.health_engine import _detectar_segmento_fii, _buscar_yield_ntnb
+    _segmento_fii = _detectar_segmento_fii(t_base, cache_d)
+    _ntnb_yield   = _buscar_yield_ntnb()
+
+    _dy_fii   = safe_float(cache_d.get('dy%')) or 0.0
+    _ipca_fii = st.session_state.get("macro_context", {}).get("ipca", 4.5)
+    _dy_real  = ((1 + _dy_fii/100) / (1 + _ipca_fii/100) - 1) * 100
+    _spread   = _dy_real - _ntnb_yield
+
+    _cor_spread = (
+        "#00C853" if _spread >= 2.5
+        else "#FF9900" if _spread >= 0
+        else "#FF1744"
+    )
+
+    st.markdown(
+        f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
+        f'border-radius:6px; padding:10px 16px; margin-top:8px; '
+        f'display:flex; gap:32px; align-items:center; flex-wrap:wrap;">'
+
+        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'text-transform:uppercase;">segmento</span><br>'
+        f'<span style="font-family:Courier New;color:#FF9900;'
+        f'font-size:0.85rem;">{_segmento_fii}</span></div>'
+
+        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'text-transform:uppercase;">yield real</span><br>'
+        f'<span style="font-family:Courier New;color:#ccc;'
+        f'font-size:0.85rem;">{_dy_real:.1f}%</span></div>'
+
+        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'text-transform:uppercase;">ntn-b benchmark</span><br>'
+        f'<span style="font-family:Courier New;color:#ccc;'
+        f'font-size:0.85rem;">{_ntnb_yield:.2f}% (ipca+)</span></div>'
+
+        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'text-transform:uppercase;">spread vs ntn-b</span><br>'
+        f'<span style="font-family:Courier New;color:{_cor_spread};'
+        f'font-weight:600;font-size:0.85rem;">{_spread:+.2f}pp</span></div>'
+
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 else:
     pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE')) or safe_float(info_dict.get('forwardPE'))
     roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
