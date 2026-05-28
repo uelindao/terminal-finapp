@@ -79,6 +79,94 @@ def calcular_betas(tickers_tuple: tuple) -> dict:
 
     return betas
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_matriz_correlacao(tickers_tuple: tuple, periodo: str = "1y") -> dict:
+    """
+    Calcula matriz de correlação entre os ativos do portfólio.
+    Retorna dict com:
+      - 'matriz': pd.DataFrame com correlações
+      - 'alertas': list[str] pares com correlação > 0.70
+      - 'diversificacao_score': int 0-100
+    """
+    tickers = list(tickers_tuple)
+    resultado = {'matriz': None, 'alertas': [], 'diversificacao_score': 50}
+
+    if len(tickers) < 2:
+        return resultado
+
+    try:
+        tickers_base = [mapear_ticker_base(t) for t in tickers]
+        hist = yf.download(
+            tickers_base,
+            period=periodo,
+            auto_adjust=True,
+            progress=False,
+        )['Close']
+
+        if isinstance(hist, pd.Series):
+            hist = hist.to_frame(name=tickers_base[0])
+
+        # Remove timezone e normaliza
+        if getattr(hist.index, 'tz', None) is not None:
+            hist.index = hist.index.tz_localize(None)
+
+        # Retornos diários
+        rets = hist.pct_change().dropna()
+
+        # Remove colunas com dados insuficientes
+        rets = rets.dropna(axis=1, thresh=int(len(rets) * 0.7))
+
+        if rets.shape[1] < 2:
+            return resultado
+
+        # Renomeia colunas para tickers originais
+        mapa_reverso = {mapear_ticker_base(t): t for t in tickers}
+        rets.columns = [mapa_reverso.get(c, c) for c in rets.columns]
+
+        corr = rets.corr().round(2)
+        resultado['matriz'] = corr
+
+        # Alertas de alta correlação (pares > 0.70)
+        alertas = []
+        cols = corr.columns.tolist()
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                val = corr.iloc[i, j]
+                if val > 0.70:
+                    alertas.append(
+                        f"{cols[i].replace('.SA','')} ↔ "
+                        f"{cols[j].replace('.SA','')} — "
+                        f"correlação {val:.2f} (alta)"
+                    )
+                elif val < -0.30:
+                    alertas.append(
+                        f"{cols[i].replace('.SA','')} ↔ "
+                        f"{cols[j].replace('.SA','')} — "
+                        f"correlação {val:.2f} (hedge natural)"
+                    )
+        resultado['alertas'] = alertas
+
+        # Score de diversificação: 100 = correlação média próxima de 0
+        # 0 = todos os ativos correlacionados > 0.9
+        n = len(cols)
+        if n > 1:
+            vals_upper = [
+                corr.iloc[i, j]
+                for i in range(n)
+                for j in range(i + 1, n)
+            ]
+            corr_media = float(np.mean(vals_upper)) if vals_upper else 0.5
+            # Score: 0 de corr = 100 pts, 1.0 de corr = 0 pts
+            score_div = int(max(0, min(100, (1 - corr_media) * 100)))
+            resultado['diversificacao_score'] = score_div
+
+    except Exception as e:
+        logger.warning(f"[portfolio] correlação: {e}")
+
+    return resultado
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_cambio_usd_brl() -> float:
     """Busca cotação atual do dólar via yfinance."""
@@ -1120,6 +1208,168 @@ with tab_concentracao:
                 _pizza_chart(_labels_m, _values_m, "por moeda"),
                 use_container_width=True,
             )
+
+        # ── MATRIZ DE CORRELAÇÃO ─────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("🔗 matriz de correlação entre ativos")
+
+        _tickers_corr = tuple([
+            p['ticker'] for p in _pesos_conc
+            if float(p.get('quantidade') or 0) > 0
+        ])
+
+        if len(_tickers_corr) < 2:
+            st.info("adicione pelo menos 2 posições para calcular a correlação.")
+        else:
+            _periodo_corr = st.radio(
+                "período de cálculo:",
+                ["6mo", "1y", "2y"],
+                format_func=lambda x: {"6mo": "6 meses", "1y": "1 ano", "2y": "2 anos"}[x],
+                horizontal=True,
+                key="radio_periodo_corr",
+            )
+
+            with st.spinner("calculando correlações..."):
+                _res_corr = calcular_matriz_correlacao(_tickers_corr, _periodo_corr)
+
+            _corr_df = _res_corr.get('matriz')
+            _score_div = _res_corr.get('diversificacao_score', 50)
+            _alertas_corr = _res_corr.get('alertas', [])
+
+            if _corr_df is not None and not _corr_df.empty:
+
+                # Cards de resumo
+                _cc1, _cc2, _cc3 = st.columns(3)
+                with _cc1:
+                    _cor_div = (
+                        "#00C853" if _score_div >= 60
+                        else "#FF9900" if _score_div >= 35
+                        else "#FF1744"
+                    )
+                    _label_div = (
+                        "boa diversificação" if _score_div >= 60
+                        else "diversificação moderada" if _score_div >= 35
+                        else "alta concentração"
+                    )
+                    metric_card(
+                        "score de diversificação",
+                        f"{_score_div}/100",
+                        _label_div,
+                        "bull" if _score_div >= 60 else ("amber" if _score_div >= 35 else "bear"),
+                    )
+                with _cc2:
+                    metric_card(
+                        "pares de alta correlação",
+                        str(sum(1 for a in _alertas_corr if "alta" in a)),
+                        "> 0.70 — risco de concentração oculta",
+                        "bear" if any("alta" in a for a in _alertas_corr) else "bull",
+                    )
+                with _cc3:
+                    metric_card(
+                        "hedges naturais",
+                        str(sum(1 for a in _alertas_corr if "hedge" in a)),
+                        "correlação < -0.30",
+                        "bull" if any("hedge" in a for a in _alertas_corr) else "muted",
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Heatmap de correlação
+                _ticks = _corr_df.columns.tolist()
+                _ticks_clean = [t.replace('.SA', '') for t in _ticks]
+                _z = _corr_df.values.tolist()
+
+                # Texto das células
+                _text = [
+                    [f"{_corr_df.iloc[i, j]:.2f}" for j in range(len(_ticks))]
+                    for i in range(len(_ticks))
+                ]
+
+                _fig_corr = go.Figure(go.Heatmap(
+                    z=_z,
+                    x=_ticks_clean,
+                    y=_ticks_clean,
+                    text=_text,
+                    texttemplate="%{text}",
+                    textfont=dict(size=11, color='white', family='Courier New'),
+                    colorscale=[
+                        [0.0,  "#1565C0"],   # azul escuro — correlação negativa
+                        [0.35, "#1a1a1a"],   # neutro — correlação zero
+                        [0.65, "#1a1a1a"],   # neutro
+                        [1.0,  "#B71C1C"],   # vermelho — correlação alta
+                    ],
+                    zmin=-1, zmax=1,
+                    colorbar=dict(
+                        title="correlação",
+                        titlefont=dict(color="#888", size=10),
+                        tickfont=dict(color="#888", size=9),
+                        thickness=12,
+                    ),
+                    hovertemplate=(
+                        "%{y} ↔ %{x}<br>"
+                        "correlação: %{z:.2f}<extra></extra>"
+                    ),
+                ))
+
+                _dim_corr = max(300, len(_ticks) * 60)
+                _lay_corr = base_layout(
+                    height=_dim_corr,
+                    title=f"correlação de retornos diários — {_periodo_corr}"
+                )
+                _lay_corr.update(
+                    xaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
+                    yaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
+                    margin=dict(l=80, r=40, t=40, b=80),
+                )
+                _fig_corr.update_layout(**_lay_corr)
+                st.plotly_chart(_fig_corr, use_container_width=True)
+
+                # Alertas de correlação
+                if _alertas_corr:
+                    st.markdown(
+                        '<div style="font-family:Courier New; font-size:0.72rem; '
+                        'color:#555; margin-top:4px;">⚠️ pares críticos:</div>',
+                        unsafe_allow_html=True,
+                    )
+                    for _ac in _alertas_corr:
+                        _cor_ac = "#FF9900" if "alta" in _ac else "#00C853"
+                        st.markdown(
+                            f'<div style="font-family:Courier New; font-size:0.75rem; '
+                            f'color:{_cor_ac}; padding:2px 0;">• {_ac}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                # Interpretação IA
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button(
+                    "🧠 ia: interpretar diversificação da carteira",
+                    key="btn_ia_corr",
+                    type="secondary",
+                ):
+                    _prompt_corr = (
+                        f"portfólio com {len(_ticks)} ativos.\n\n"
+                        f"score de diversificação: {_score_div}/100\n\n"
+                        f"pares com alta correlação (> 0.70):\n"
+                        + "\n".join([f"- {a}" for a in _alertas_corr if "alta" in a] or ["nenhum"])
+                        + f"\n\npares com correlação negativa (hedge natural):\n"
+                        + "\n".join([f"- {a}" for a in _alertas_corr if "hedge" in a] or ["nenhum"])
+                        + f"\n\nativos: {', '.join(_ticks_clean)}\n\n"
+                        "em 3 tópicos curtos (letra minúscula):\n"
+                        "1. o portfólio está bem diversificado ou há concentração oculta?\n"
+                        "2. quais pares representam o maior risco de correlação?\n"
+                        "3. que tipo de ativo poderia melhorar a diversificação?"
+                    )
+                    _us_corr = st.session_state.get('user_settings', {})
+                    chamar_ia(
+                        prompt_usuario=_prompt_corr,
+                        system=SYSTEM_PORTFOLIO,
+                        max_tokens=400,
+                        temperatura=0.3,
+                        stream=True,
+                        user_settings=_us_corr,
+                    )
+            else:
+                st.warning("dados insuficientes para calcular correlação.")
 
 # ==========================================
 # tab 3: stress test

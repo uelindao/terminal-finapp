@@ -265,6 +265,9 @@ if acao_obj is None or df_hist.empty:
 
 cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
 
+# Busca múltiplos históricos FMP (escopo global — usado no prompt IA e na tab_val)
+_medios = get_multiplos_medios(t_base, anos=5)
+
 # ── Fallback: busca fundamentos diretamente quando não está no cache ──────
 # Ativos externos (buscados manualmente) não passam pelo sync do screener.
 _qualidade_cache = cache_d.get('qualidade_dados', 0) if cache_d else 0
@@ -511,259 +514,8 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
         unsafe_allow_html=True,
     )
 
-_medios = get_multiplos_medios(t_base, anos=5)
-if _medios:
-    section_title("📊 valuation em contexto histórico (5 anos)")
-    _col_pe, _col_pb, _col_ev, _col_dy = st.columns(4)
-    with _col_pe:
-        _render_multiplo_card("P/L", cache_d.get('p/l'), _medios.get('pe'))
-    with _col_pb:
-        _render_multiplo_card("P/VP", cache_d.get('p/vp'), _medios.get('pb'))
-    with _col_ev:
-        _render_multiplo_card("EV/EBITDA", cache_d.get('ev/ebitda'), _medios.get('ev_ebitda'))
-    with _col_dy:
-        _render_multiplo_card("Div. Yield", cache_d.get('dy%'), _medios.get('dy'), sufixo="%")
+# (FMP valuation movido para tab_val)
 
-# ── SEÇÃO: COMPARAÇÃO COM PEERS (FMP) ───────────────────────────────────
-_peers_list = get_peers(t_base)
-if _peers_list:
-    section_title("👥 comparação com peers")
-
-    # linha de cabeçalho
-    _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
-    for _hcol, _htxt in zip([_h1, _h2, _h3, _h4, _h5, _h6], ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"]):
-        _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
-
-    st.markdown('<div style="border-top:1px solid #333;margin-bottom:6px;"></div>', unsafe_allow_html=True)
-
-    _tickers_peers = [t_base] + [p for p in _peers_list[:5] if p != t_base]
-    for _pt in _tickers_peers:
-        _pd = CACHE_FUNDAMENTOS.get(_pt, {})
-        _is_atual = (_pt == t_base)
-        _cor_t    = "#FF9900" if _is_atual else "#ccc"
-
-        _nome_peer = _pd.get('nome') or _pt
-        _pe_peer   = _pd.get('p/l')
-        _roe_peer  = _pd.get('roe%')
-        _dy_peer   = _pd.get('dy%')
-        _mrg_peer  = _pd.get('margem_liq%') or _pd.get('mrg_liq%')
-
-        def _fmt_num(v, dec=1):
-            try:    return f"{float(v):.{dec}f}" if v is not None else "—"
-            except: return "—"
-
-        _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
-        _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
-        _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
-        _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
-        _p4.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_roe_peer)}</span>', unsafe_allow_html=True)
-        _p5.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_dy_peer)}</span>', unsafe_allow_html=True)
-        _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
-        st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
-
-# ── SEÇÃO: RESULTADOS FINANCEIROS TRIMESTRAIS ────────────────────────────
-section_title("📊 resultados financeiros")
-
-with st.spinner("buscando resultados..."):
-    _earnings = buscar_resultados(t_base)
-
-if _earnings.get('is_fii'):
-    st.caption(
-        "FIIs publicam relatórios mensais de proventos, não resultados trimestrais. "
-        "consulte o histórico de dividendos na seção acima."
-    )
-
-elif _earnings.get('erro') and not _earnings.get('historico'):
-    status_card(
-        "resultados indisponíveis",
-        f"não foi possível carregar os resultados para {t_base}. "
-        "tente novamente em alguns minutos.",
-        tipo="amber",
-    )
-
-else:
-    # ── PRÓXIMA DATA ─────────────────────────────────────────────────────
-    _prox_data = _earnings.get('proxima_data')
-    if _prox_data:
-        _hoje = datetime.date.today()
-        try:
-            _dt_prox  = datetime.datetime.strptime(_prox_data, '%d/%m/%Y').date()
-            _dias_ate = (_dt_prox - _hoje).days
-            if _dias_ate < 0:
-                _cor_prox, _label_prox = "muted", f"último: {_prox_data}"
-            elif _dias_ate == 0:
-                _cor_prox, _label_prox = "bear", "HOJE"
-            elif _dias_ate <= 7:
-                _cor_prox, _label_prox = "bear", f"em {_dias_ate} dias ({_prox_data})"
-            elif _dias_ate <= 30:
-                _cor_prox, _label_prox = "amber", f"em {_dias_ate} dias ({_prox_data})"
-            else:
-                _cor_prox, _label_prox = "muted", _prox_data
-        except Exception:
-            _cor_prox, _label_prox = "muted", _prox_data
-
-        _col_prox1, _col_prox2, _col_prox3 = st.columns(3)
-        with _col_prox1:
-            metric_card(
-                "próximo resultado", _label_prox,
-                f"fonte: {_earnings.get('fonte', '—')}",
-                _cor_prox,
-            )
-        if _earnings.get('eps_estimado'):
-            with _col_prox2:
-                metric_card(
-                    "eps estimado (próximo)",
-                    f"$ {_earnings['eps_estimado']:.2f}",
-                    "consenso de analistas",
-                )
-        if _earnings.get('receita_est'):
-            with _col_prox3:
-                metric_card(
-                    "receita estimada",
-                    f"$ {_earnings['receita_est']:.1f}B",
-                    "consenso de analistas",
-                )
-
-    # ── HISTÓRICO DE RESULTADOS ──────────────────────────────────────────
-    _earn_hist = _earnings.get('historico', [])
-    _is_us     = not t_base.endswith('.SA')
-
-    if _earn_hist:
-        section_title(f"📈 histórico trimestral (últimos {len(_earn_hist)} trimestres)")
-
-        _div_style = (
-            '<div style="height:1px; background:#111; margin:4px 0;"></div>'
-        )
-        _lbl = (
-            '<div style="font-family:Courier New; '
-            'font-size:0.78rem; color:#888;">{label}<br>'
-            '<span style="color:{cor};">{valor}</span></div>'
-        )
-
-        for _entry in _earn_hist:
-            _c1, _c2, _c3, _c4, _c5 = st.columns(5)
-
-            with _c1:
-                st.markdown(
-                    f'<div style="font-family:Courier New; color:#FF9900; '
-                    f'font-size:0.82rem; font-weight:bold;">'
-                    f'{_entry.get("periodo", "—")}</div>',
-                    unsafe_allow_html=True,
-                )
-
-            with _c2:
-                _rec = _entry.get('receita')
-                if _rec is not None:
-                    _un = "B" if _is_us else "M"
-                    st.markdown(
-                        _lbl.format(
-                            label="receita",
-                            cor="#E0E0E0",
-                            valor=f"{_rec:.2f}{_un}",
-                        ),
-                        unsafe_allow_html=True,
-                    )
-
-            with _c3:
-                _luc = _entry.get('lucro')
-                if _luc is not None:
-                    _un = "B" if _is_us else "M"
-                    _cor_l = "#00C853" if _luc > 0 else "#FF1744"
-                    st.markdown(
-                        _lbl.format(
-                            label="lucro líq.",
-                            cor=_cor_l,
-                            valor=f"{_luc:+.2f}{_un}",
-                        ),
-                        unsafe_allow_html=True,
-                    )
-
-            with _c4:
-                if _is_us:
-                    _eps_r = _entry.get('eps_real')
-                    _eps_e = _entry.get('eps_est')
-                    if _eps_r is not None:
-                        _cor_e = "#00C853" if _eps_r >= (_eps_e or 0) else "#FF1744"
-                        _est   = f" (est: ${_eps_e:.2f})" if _eps_e else ""
-                        st.markdown(
-                            _lbl.format(
-                                label="eps",
-                                cor=_cor_e,
-                                valor=f"${_eps_r:.2f}{_est}",
-                            ),
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    _lpa = _entry.get('lpa')
-                    if _lpa is not None:
-                        st.markdown(
-                            _lbl.format(
-                                label="lpa",
-                                cor="#E0E0E0",
-                                valor=f"R${_lpa:.2f}",
-                            ),
-                            unsafe_allow_html=True,
-                        )
-
-            with _c5:
-                if _is_us:
-                    _surp = _entry.get('surpresa')
-                    if _surp is not None:
-                        _cor_s  = "#00C853" if _surp >= 0 else "#FF1744"
-                        _icon_s = "▲" if _surp >= 0 else "▼"
-                        st.markdown(
-                            _lbl.format(
-                                label="surpresa eps",
-                                cor=_cor_s,
-                                valor=f"{_icon_s} {abs(_surp):.1f}%",
-                            ),
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    _mrg = _entry.get('margem')
-                    if _mrg is not None:
-                        _cor_m = (
-                            "#00C853" if _mrg > 10
-                            else "#FF9900" if _mrg > 0
-                            else "#FF1744"
-                        )
-                        st.markdown(
-                            _lbl.format(
-                                label="margem",
-                                cor=_cor_m,
-                                valor=f"{_mrg:.1f}%",
-                            ),
-                            unsafe_allow_html=True,
-                        )
-
-            st.markdown(_div_style, unsafe_allow_html=True)
-
-        # ── Gráfico de evolução do lucro ─────────────────────────────────
-        _lucros_validos = [
-            (e['periodo'], e['lucro'])
-            for e in _earn_hist
-            if e.get('lucro') is not None
-        ]
-        if len(_lucros_validos) >= 3:
-            _peri_g  = [x[0] for x in reversed(_lucros_validos)]
-            _luc_g   = [x[1] for x in reversed(_lucros_validos)]
-            _cores_g = ["#00C853" if l > 0 else "#FF1744" for l in _luc_g]
-
-            _fig_earn = go.Figure(go.Bar(
-                x=_peri_g, y=_luc_g,
-                marker_color=_cores_g,
-                hovertemplate="%{x}<br>lucro: %{y:.2f}<extra></extra>",
-            ))
-            _un_g = "B (USD)" if _is_us else "M (BRL)"
-            _lay_earn = base_layout(
-                height=220,
-                title=f"lucro líquido trimestral ({_un_g})",
-            )
-            _fig_earn.update_layout(**_lay_earn)
-            _fig_earn.add_hline(y=0, line_color="#333", line_width=1)
-            st.plotly_chart(_fig_earn, use_container_width=True)
-
-# ── SEÇÃO: ANÁLISE IA — DEEPSEEK V4 PRO ──────────────────────────────────
 section_title("🧠 análise ia — deepseek v4 pro")
 
 
@@ -892,177 +644,72 @@ def montar_prompt_ativo(
     return b1 + b2 + b3 + b4 + b5 + b6 + instrucao
 
 
-_col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
-with _col_ia1:
-    st.markdown(
-        '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
-        'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
-        'não é recomendação.</div>',
-        unsafe_allow_html=True,
-    )
-with _col_ia2:
-    usar_thinking = st.checkbox(
-        "modo reasoning",
-        value=False,
-        key="ia_thinking",
-        help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
-    )
-with _col_ia3:
-    btn_analise_ia = st.button(
-        "🧠 analisar",
-        type="primary",
-        use_container_width=True,
-        key="btn_analise_ia",
-    )
-
-if btn_analise_ia:
-    macro_ctx = st.session_state.get("macro_context", {
-        "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
-    })
-
-    preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
-    var_ia   = 0.0
-    if len(df_hist) >= 2:
-        _p_hoje = float(df_hist['Close'].iloc[-1])
-        _p_ant  = float(df_hist['Close'].iloc[-2])
-        if _p_ant > 0:
-            var_ia = (_p_hoje - _p_ant) / _p_ant * 100
-
-    _prompt_ia = montar_prompt_ativo(
-        ticker        = t_base,
-        nome          = cache_d.get("nome", nome_exibicao),
-        setor         = setor,
-        tipo_mercado  = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
-        fundamentos   = cache_d,
-        health_result = health_result,
-        preco_atual   = preco_ia,
-        var_1d        = var_ia,
-        macro_context = macro_ctx,
-        multiplos_historicos = _medios,
-    )
-
-    chamar_ia(
-        prompt_usuario = _prompt_ia,
-        system         = SYSTEM_ANALISTA,
-        max_tokens     = 900,
-        temperatura    = 0.3,
-        stream         = True,
-        thinking       = usar_thinking,
-        user_settings  = _user_settings,
-    )
-    st.session_state[f"ia_analise_{t_base}"] = True
-
-elif st.session_state.get(f"ia_analise_{t_base}"):
-    st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
-
-# ── SEÇÃO: EXPORTAR TESE EM PDF ───────────────────────────────────────────
-section_title("📄 exportar tese em pdf")
-
-_col_pdf1, _col_pdf2 = st.columns([3, 1])
-with _col_pdf1:
-    st.markdown(
-        '<div style="font-family:Courier New; font-size:0.72rem; color:#333;">'
-        'gera um relatório profissional com fundamentos, análise ia e '
-        'health score em formato pdf. o deepseek redige a tese completa '
-        'antes da renderização — pode levar alguns segundos.</div>',
-        unsafe_allow_html=True,
-    )
-with _col_pdf2:
-    btn_gerar_pdf = st.button(
-        "📄 gerar pdf",
-        type             = "secondary",
-        use_container_width = True,
-        key              = "btn_gerar_pdf",
-    )
-
-if btn_gerar_pdf:
-    # Variáveis derivadas do contexto já carregado na página
-    _fund_pdf  = cache_d                  # fundamentos do cache
-    _alertas   = health_result.get("alertas", [])
-    _breakdown = health_result.get("breakdown", {})
-    _macro_ctx = st.session_state.get("macro_context", {
-        "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
-    })
-    _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
-
-    # 1. Gera texto da tese via DeepSeek (sem streaming — precisa do texto completo)
-    with st.spinner("deepseek v4 pro redigindo tese..."):
-        _prompt_pdf = (
-            f"ativo: {t_base.upper()}\n"
-            f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
-            f"setor: {setor}\n"
-            f"tipo: {'fii' if '11.SA' in t_base else 'acao br' if '.SA' in t_base else 'acao us'}\n\n"
-            f"fundamentos:\n"
-            f"p/l: {_fund_pdf.get('p/l', 'n/d')}\n"
-            f"p/vp: {_fund_pdf.get('p/vp', 'n/d')}\n"
-            f"roe: {_fund_pdf.get('roe%', 'n/d')}%\n"
-            f"dy: {_fund_pdf.get('dy%', 'n/d')}%\n"
-            f"margem: {_fund_pdf.get('margem%', 'n/d')}%\n\n"
-            f"health score: {health_result.get('score', 50)}/100\n"
-            f"status: {health_result.get('status', 'n/d')}\n\n"
-            f"alertas:\n"
-            + "\n".join([f"- {a}" for a in _alertas[:6]])
-            + f"\n\ncontexto macro:\n"
-            f"selic: {_macro_ctx.get('selic', 10.75):.2f}%\n"
-            f"vix: {_macro_ctx.get('vix', 15.0):.1f}\n"
-            f"ambiente: {_macro_ctx.get('label', 'neutro')}\n\n"
-            f"cotacao atual: r$ {_preco_pdf:,.2f}\n\n"
-            "redija uma tese de investimento completa com: "
-            "1. contexto do negocio, "
-            "2. drivers de valor, "
-            "3. riscos principais, "
-            "4. valuation e veredicto. "
-            "texto direto, sem asteriscos, letra minuscula."
-        )
-        _analise_pdf = chamar_ia(
-            prompt_usuario = _prompt_pdf,
-            system         = SYSTEM_TESE,
-            max_tokens     = 1200,
-            temperatura    = 0.3,
-            stream         = False,
-            thinking       = False,
-            user_settings  = _user_settings,
-        )
-
-    # 2. Monta e disponibiliza o PDF
-    with st.spinner("montando pdf..."):
-        try:
-            from utils.pdf_generator import gerar_tese_pdf
-            _pdf_bytes = gerar_tese_pdf(
-                ticker        = t_base,
-                nome          = _fund_pdf.get("nome", nome_exibicao),
-                setor         = setor,
-                health_score  = health_result.get("score", 50),
-                preco_atual   = _preco_pdf,
-                fundamentos   = _fund_pdf,
-                analise_ia    = _analise_pdf or "análise indisponível.",
-                alertas       = _alertas,
-                breakdown     = _breakdown,
-                macro_context = _macro_ctx,
-            )
-            _nome_arquivo = (
-                f"tese_{t_base.replace('.SA', '').lower()}_"
-                f"{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-            )
-            st.download_button(
-                label               = "⬇️ baixar tese em pdf",
-                data                = _pdf_bytes,
-                file_name           = _nome_arquivo,
-                mime                = "application/pdf",
-                type                = "primary",
-                use_container_width = True,
-                key                 = "btn_download_pdf",
-            )
-            st.success(f"✅ tese gerada: {_nome_arquivo}")
-        except Exception as _e_pdf:
-            st.error(f"erro ao gerar pdf: {_e_pdf}")
-
-st.markdown("---")
-
 # --- TABS ---
-tab_tec, tab_earn, tab_fund, tab_dcf, tab_sent, tab_macro = st.tabs([
-    "📈 análise técnica (10y)", "📊 demonstrações (dre)", "💎 fundamentos", "🧮 valuation lab (dcf reverso)", "📰 notícias & ia", "🌍 overlay macro (10y)"
+tab_val, tab_tec, tab_earn, tab_fund, tab_dcf, tab_ia, tab_sent, tab_macro = st.tabs([
+    "📊 valuation & peers",
+    "📈 técnico (10y)",
+    "📊 demonstrações (dre)",
+    "💎 fundamentos",
+    "🧮 dcf reverso",
+    "🧠 ia & pdf",
+    "📰 notícias",
+    "🌍 overlay macro (10y)",
 ])
+
+with tab_val:
+    # ── VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
+    if _medios:
+        section_title("📊 valuation em contexto histórico (5 anos)")
+        _col_pe, _col_pb, _col_ev, _col_dy = st.columns(4)
+        with _col_pe:
+            _render_multiplo_card("P/L", cache_d.get('p/l'), _medios.get('pe'))
+        with _col_pb:
+            _render_multiplo_card("P/VP", cache_d.get('p/vp'), _medios.get('pb'))
+        with _col_ev:
+            _render_multiplo_card("EV/EBITDA", cache_d.get('ev/ebitda'), _medios.get('ev_ebitda'))
+        with _col_dy:
+            _render_multiplo_card("Div. Yield", cache_d.get('dy%'), _medios.get('dy'), sufixo="%")
+    else:
+        st.info("dados históricos FMP não disponíveis para este ativo.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── COMPARAÇÃO COM PEERS (FMP) ────────────────────────────────────
+    _peers_list = get_peers(t_base)
+    if _peers_list:
+        section_title("👥 comparação com peers")
+
+        _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+        for _hcol, _htxt in zip([_h1, _h2, _h3, _h4, _h5, _h6], ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"]):
+            _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="border-top:1px solid #333;margin-bottom:6px;"></div>', unsafe_allow_html=True)
+
+        _tickers_peers = [t_base] + [p for p in _peers_list[:5] if p != t_base]
+        for _pt in _tickers_peers:
+            _pd = CACHE_FUNDAMENTOS.get(_pt, {})
+            _is_atual = (_pt == t_base)
+            _cor_t    = "#FF9900" if _is_atual else "#ccc"
+            _nome_peer = _pd.get('nome') or _pt
+            _pe_peer   = _pd.get('p/l')
+            _roe_peer  = _pd.get('roe%')
+            _dy_peer   = _pd.get('dy%')
+            _mrg_peer  = _pd.get('margem_liq%') or _pd.get('mrg_liq%')
+
+            def _fmt_num(v, dec=1):
+                try:    return f"{float(v):.{dec}f}" if v is not None else "—"
+                except: return "—"
+
+            _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+            _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
+            _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
+            _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
+            _p4.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_roe_peer)}</span>', unsafe_allow_html=True)
+            _p5.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_dy_peer)}</span>', unsafe_allow_html=True)
+            _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
+            st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
+    else:
+        st.info("peers não disponíveis para este ativo via FMP.")
 
 with tab_tec:
     try:
@@ -1096,6 +743,212 @@ with tab_earn:
                     fig_earn.update_layout(**base_layout(height=400), barmode='group')
                     st.plotly_chart(fig_earn, use_container_width=True)
         except: st.error("Erro earnings.")
+
+with tab_ia:
+    section_title("🧠 análise ia — deepseek v4 pro")
+
+    _col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
+    with _col_ia1:
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
+            'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
+            'não é recomendação.</div>',
+            unsafe_allow_html=True,
+        )
+    with _col_ia2:
+        usar_thinking = st.checkbox(
+            "modo reasoning",
+            value=False,
+            key="ia_thinking",
+            help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
+        )
+    with _col_ia3:
+        btn_analise_ia = st.button(
+            "🧠 analisar",
+            type="primary",
+            use_container_width=True,
+            key="btn_analise_ia",
+        )
+
+    if btn_analise_ia:
+        macro_ctx = st.session_state.get("macro_context", {
+            "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+        })
+
+        preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+        var_ia   = 0.0
+        if len(df_hist) >= 2:
+            _p_hoje = float(df_hist['Close'].iloc[-1])
+            _p_ant  = float(df_hist['Close'].iloc[-2])
+            if _p_ant > 0:
+                var_ia = (_p_hoje - _p_ant) / _p_ant * 100
+
+        _prompt_ia = montar_prompt_ativo(
+            ticker        = t_base,
+            nome          = cache_d.get("nome", nome_exibicao),
+            setor         = setor,
+            tipo_mercado  = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
+            fundamentos   = cache_d,
+            health_result = health_result,
+            preco_atual   = preco_ia,
+            var_1d        = var_ia,
+            macro_context = macro_ctx,
+            multiplos_historicos = _medios,
+        )
+
+        chamar_ia(
+            prompt_usuario = _prompt_ia,
+            system         = SYSTEM_ANALISTA,
+            max_tokens     = 900,
+            temperatura    = 0.3,
+            stream         = True,
+            thinking       = usar_thinking,
+            user_settings  = _user_settings,
+        )
+        st.session_state[f"ia_analise_{t_base}"] = True
+
+    elif st.session_state.get(f"ia_analise_{t_base}"):
+        st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
+
+    st.markdown("---")
+    section_title("📄 exportar tese em pdf")
+
+    _col_pdf1, _col_pdf2 = st.columns([3, 1])
+    with _col_pdf1:
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.72rem; color:#333;">'
+            'gera um relatório profissional com fundamentos, análise ia e '
+            'health score em formato pdf. o deepseek redige a tese completa '
+            'antes da renderização — pode levar alguns segundos.</div>',
+            unsafe_allow_html=True,
+        )
+    with _col_pdf2:
+        btn_gerar_pdf = st.button(
+            "📄 gerar pdf",
+            type             = "secondary",
+            use_container_width = True,
+            key              = "btn_gerar_pdf",
+        )
+
+    if btn_gerar_pdf:
+        _fund_pdf  = cache_d
+        _alertas   = health_result.get("alertas", [])
+        _breakdown = health_result.get("breakdown", {})
+        _macro_ctx = st.session_state.get("macro_context", {
+            "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+        })
+        _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+
+        with st.spinner("deepseek v4 pro redigindo tese..."):
+            _prompt_pdf = (
+                f"ativo: {t_base.upper()}\n"
+                f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
+                f"setor: {setor}\n"
+                f"tipo: {'fii' if '11.SA' in t_base else 'acao br' if '.SA' in t_base else 'acao us'}\n\n"
+                f"fundamentos:\n"
+                f"p/l: {_fund_pdf.get('p/l', 'n/d')}\n"
+                f"p/vp: {_fund_pdf.get('p/vp', 'n/d')}\n"
+                f"roe: {_fund_pdf.get('roe%', 'n/d')}%\n"
+                f"dy: {_fund_pdf.get('dy%', 'n/d')}%\n"
+                f"margem: {_fund_pdf.get('margem%', 'n/d')}%\n\n"
+                f"health score: {health_result.get('score', 50)}/100\n"
+                f"status: {health_result.get('status', 'n/d')}\n\n"
+                f"alertas:\n"
+                + "\n".join([f"- {a}" for a in _alertas[:6]])
+                + f"\n\ncontexto macro:\n"
+                f"selic: {_macro_ctx.get('selic', 10.75):.2f}%\n"
+                f"vix: {_macro_ctx.get('vix', 15.0):.1f}\n"
+                f"ambiente: {_macro_ctx.get('label', 'neutro')}\n\n"
+                f"cotacao atual: r$ {_preco_pdf:,.2f}\n\n"
+                "redija uma tese de investimento completa com: "
+                "1. contexto do negocio, "
+                "2. drivers de valor, "
+                "3. riscos principais, "
+                "4. valuation e veredicto. "
+                "texto direto, sem asteriscos, letra minuscula."
+            )
+            _analise_pdf = chamar_ia(
+                prompt_usuario = _prompt_pdf,
+                system         = SYSTEM_TESE,
+                max_tokens     = 1200,
+                temperatura    = 0.3,
+                stream         = False,
+                thinking       = False,
+                user_settings  = _user_settings,
+            )
+
+        with st.spinner("montando pdf..."):
+            try:
+                from utils.pdf_generator import gerar_tese_pdf
+                _pdf_bytes = gerar_tese_pdf(
+                    ticker        = t_base,
+                    nome          = _fund_pdf.get("nome", nome_exibicao),
+                    setor         = setor,
+                    health_score  = health_result.get("score", 50),
+                    preco_atual   = _preco_pdf,
+                    fundamentos   = _fund_pdf,
+                    analise_ia    = _analise_pdf or "análise indisponível.",
+                    alertas       = _alertas,
+                    breakdown     = _breakdown,
+                    macro_context = _macro_ctx,
+                )
+                _nome_arquivo = (
+                    f"tese_{t_base.replace('.SA', '').lower()}_"
+                    f"{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
+                )
+                st.download_button(
+                    label               = "⬇️ baixar tese em pdf",
+                    data                = _pdf_bytes,
+                    file_name           = _nome_arquivo,
+                    mime                = "application/pdf",
+                    type                = "primary",
+                    use_container_width = True,
+                    key                 = "btn_download_pdf",
+                )
+                st.success(f"✅ tese gerada: {_nome_arquivo}")
+            except Exception as _e_pdf:
+                st.error(f"erro ao gerar pdf: {_e_pdf}")
+
+    st.markdown("---")
+    section_title("📋 tese de investimento longo prazo")
+    try:
+        from utils.health_engine import safe_int as _si
+    except:
+        def _si(v, d=0):
+            try: return int(float(v)) if v is not None else d
+            except: return d
+    val_pl   = _si(cache_d.get('p/l'))
+    val_pvp  = _si(cache_d.get('p/vp'))
+    val_roe  = _si(cache_d.get('roe%'))
+    val_dy   = _si(cache_d.get('dy%'))
+    val_divida = _si(cache_d.get('divida_liquida'))
+    val_ativo  = _si(cache_d.get('ativos'))
+    ltv_f = (val_divida / val_ativo * 100) if val_ativo and val_ativo > 0 else 0
+
+    _prompt_tese = (
+        f"ativo: {ticker.upper()}\n"
+        f"setor: {setor}\n"
+        f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
+        f"fundamentos:\n"
+        f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
+        f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
+        f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
+        f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
+        f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
+        f"health score: {health_result.get('score', 50)}/100\n\n"
+        "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
+        "avalie se a alavancagem é adequada para o setor. "
+        "conclua com uma visão de risco/retorno. letra minúscula."
+    )
+    with st.spinner("deepseek elaborando tese..."):
+        chamar_ia(
+            prompt_usuario = _prompt_tese,
+            system         = SYSTEM_TESE,
+            max_tokens     = 700,
+            temperatura    = 0.3,
+            stream         = True,
+            user_settings  = _user_settings,
+        )
 
 with tab_fund:
     c_f1, c_f2 = st.columns(2)
@@ -1313,39 +1166,4 @@ with tab_macro:
             st.plotly_chart(fig_macro, use_container_width=True)
     except: st.warning("Erro overlay.")
 
-# --- TESE DE INVESTIMENTO (FOOTER) ---
-st.markdown("---")
-section_title("📋 tese de investimento — deepseek v4 pro")
-if st.button("📝 gerar tese de longo prazo", use_container_width=True, type="secondary", key="btn_tese_footer"):
-    val_pl  = safe_float(cache_d.get('p/l'))  or safe_float(info_dict.get('trailingPE'))
-    val_pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
-    val_roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
-    val_dy  = safe_float(cache_d.get('dy%'))  or (safe_float(info_dict.get('dividendYield', 0)) * 100)
-    debt_f  = safe_float(info_dict.get('totalDebt', 0))
-    assets_f = safe_float(info_dict.get('totalAssets', 1))
-    ltv_f   = (debt_f / assets_f * 100) if assets_f and assets_f > 0 else 0
-
-    _prompt_tese = (
-        f"ativo: {ticker.upper()}\n"
-        f"setor: {setor}\n"
-        f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
-        f"fundamentos:\n"
-        f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
-        f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
-        f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
-        f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
-        f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
-        f"health score: {health_result.get('score', 50)}/100\n\n"
-        "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
-        "avalie se a alavancagem é adequada para o setor. "
-        "conclua com uma visão de risco/retorno. letra minúscula."
-    )
-    with st.spinner("deepseek elaborando tese..."):
-        chamar_ia(
-            prompt_usuario = _prompt_tese,
-            system         = SYSTEM_TESE,
-            max_tokens     = 700,
-            temperatura    = 0.3,
-            stream         = True,
-            user_settings  = _user_settings,
-        )
+# Fim da página

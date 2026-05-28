@@ -1,0 +1,495 @@
+$ findstr /n "_medios = get_multiplos_medios" pages\1_Research.py
+[exit 0]
+25:from utils.fmp_client import get_multiplos_medios, get_peers
+45:_current_user = get_current_user()
+46:_user_settings = {}
+49:        _raw_settings = get_user_settings(_current_user['user_id'])
+51:            _user_settings = dict(_raw_settings)
+55:CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
+57:# ==========================================
+59:# ==========================================
+61:    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+62:    headers = {'user-agent': 'Mozilla/5.0'}
+64:        r = requests.get(url, headers=headers, timeout=5)
+69:# ==========================================
+71:# ==========================================
+73:    st.session_state['research_ticker'] = "PETR4.SA"
+76:    st.session_state['research_ticker'] = st.session_state.pop('research_ticker_externo')
+80:    modo_pesquisa = st.radio("selecione o escopo:", ["Deep Dive (Individual)", "Comparativo (Múltiplos)"], label_visibility="collapsed")
+84:    if modo_pesquisa == "Deep Dive (Individual)":
+88:        termo = st.text_input("buscar qualquer ativo global:", placeholder="nome ou ticker (ex: nubank, aapl)...")
+89:        if st.button("🔍 buscar ativo", use_container_width=True):
+92:                    resultados = buscar_ativo_yahoo(termo)
+94:                        melhor_match = resultados[0].get('symbol')
+96:                            st.session_state['research_ticker'] = melhor_match
+101:        st.markdown("<div style='text-align: center; color: #555; padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
+104:        opcoes = get_opcoes_selectbox()
+105:        ticker_atual = st.session_state['research_ticker']
+108:        ticker_presente = any(ticker_atual in opt for opt in opcoes)
+112:        idx_default = 0
+115:                idx_default = i
+118:        escolha = st.selectbox("lista de ativos:", opcoes, index=idx_default, label_visibility="collapsed")
+122:            ticker_limpo = escolha.split(" — ")[0].strip()
+124:            ticker_limpo = ticker_from_label(escolha)
+127:        if ticker_limpo and ticker_limpo != st.session_state['research_ticker']:
+128:            st.session_state['research_ticker'] = ticker_limpo
+133:        ativos_comp = st.multiselect("selecione os ativos:", 
+134:                                     options=BRASIL_TODOS + XSTOCKS_TODOS,
+135:                                     default=["PETR4.SA", "VALE3.SA", "ITUB4.SA"])
+149:        if eps is None or eps <= 0 or preco is None or preco <= 0:
+151:        if wacc <= g_terminal:
+155:            soma_fc = sum((eps * (1 + g)**t) / ((1 + wacc)**t) for t in range(1, n_anos + 1))
+156:            valor_term = (eps * (1 + g)**n_anos * (1 + g_terminal)) / (wacc - g_terminal)
+157:            valor_term_descontado = valor_term / ((1 + wacc)**n_anos)
+160:        lo = -0.5
+161:        hi = 3.0
+163:            mid = (lo + hi) / 2
+166:                    hi = mid
+168:                    lo = mid
+175:# ==========================================
+177:# ==========================================
+178:if modo_pesquisa == "Comparativo (Múltiplos)":
+185:            dados_comp = []
+187:                hist_all = yf.download(ativos_comp, period="10y", progress=False)['Close']
+188:                if isinstance(hist_all, pd.Series): hist_all = hist_all.to_frame(name=ativos_comp[0])
+189:                hist_all = hist_all.ffill().dropna(how='all')
+190:                if hist_all.index.tz is not None: hist_all.index = hist_all.index.tz_localize(None)
+191:            except: hist_all = pd.DataFrame()
+194:                t_base = mapear_ticker_base(t)
+196:                    info = yf.Ticker(t_base).info
+197:                    cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
+209:            df_comp = pd.DataFrame(dados_comp)
+210:            c1, c2 = st.columns([6, 4])
+214:                    st.dataframe(df_comp.style.format({"p/l": "{:.2f}", "p/vp": "{:.2f}", "roe%": "{:.1f}%", "dy%": "{:.1f}%", "mrg_liq%": "{:.1f}%", "mkt_cap": "${:,.0f}"}), use_container_width=True, hide_index=True)
+218:                    df_b100 = (hist_all / hist_all.iloc[0]) * 100
+219:                    fig_b100 = base100(df_b100, height=350)
+220:                    st.plotly_chart(fig_b100, use_container_width=True)
+223:# ==========================================
+225:# ==========================================
+226:ticker = st.session_state['research_ticker']
+227:t_base = mapear_ticker_base(ticker)
+228:is_fii = ticker in FII_TODOS or (ticker.endswith("11.SA") and ticker not in ['TAEE11.SA', 'KLBN11.SA', 'ENGI11.SA'])
+230:@st.cache_resource(ttl=3600)
+232:    acao = yf.Ticker(tk)
+235:    hist = pd.DataFrame()
+237:        hist = acao.history(period="10y", auto_adjust=True)
+238:        # yfinance >=0.2.x pode retornar MultiIndex; achata para índice simples
+240:            hist.columns = hist.columns.get_level_values(0)
+243:            hist.index = hist.index.tz_localize(None)
+248:    info = {}
+250:        raw_info = acao.info
+252:            info = raw_info
+261:acao_obj, df_hist, info_dict = carregar_dados_ativo(t_base)
+266:cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
+270:_qualidade_cache = cache_d.get('qualidade_dados', 0) if cache_d else 0
+274:            _fund_fresh = (
+279:                cache_d = _fund_fresh
+288:nome_exibicao = info_dict.get('longName') or info_dict.get('shortName') or cache_d.get('nome') or ticker
+289:moeda = "r$" if ticker.endswith(".SA") else "$"
+290:setor_raw = cache_d.get('setor') or info_dict.get('sector')
+291:setor = "logística (fii)" if "logística" in str(setor_raw).lower() else (setor_raw if setor_raw else ("fundo imobiliário" if is_fii else "mercado global"))
+295:c1, c2, c3, c4 = st.columns(4)
+297:    pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+298:    dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
+299:    mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
+300:    assets = safe_float(info_dict.get('totalAssets'))
+306:    pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE')) or safe_float(info_dict.get('forwardPE'))
+307:    roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
+308:    mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
+309:    dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
+315:st.markdown("<br>", unsafe_allow_html=True)
+318:historico = get_historico_score(t_base, dias=180)
+319:if len(historico) >= 3:
+321:    df_hist_score = pd.DataFrame(historico)
+322:    df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'])
+323:    df_hist_score = df_hist_score.set_index('calculado_em')
+324:    fig_score = linha(df_hist_score, x_col=None, y_col='score',
+325:                      titulo=f"health score — {ticker} (180 dias)",
+326:                      cor="#FF9900", height=220)
+327:    fig_score.add_hline(y=65, line_color="#00C853", line_dash="dash",
+328:                        line_width=1, annotation_text="acumulação")
+329:    fig_score.add_hline(y=40, line_color="#FF1744", line_dash="dash",
+330:                        line_width=1, annotation_text="reduzir")
+331:    fig_score.update_yaxes(range=[0, 100])
+332:    st.plotly_chart(fig_score, use_container_width=True)
+335:    _breakdown_vis = health_result.get('breakdown', {})
+340:        _label_map = {
+374:        _itens_bd = []
+377:                pontos = float(v)
+382:                        pontos = float(v.split('/')[0])
+384:                        pontos = 1.0 if v.lower() in ('sim', 'yes', 'true', '✅') else 0.0
+386:                    pontos = float(v)
+388:                    pontos = 0.0
+390:            label = _label_map.get(k, k.replace('_', ' '))
+395:            _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
+397:            _labels_bd = [i['label'] for i in _itens_bd]
+398:            _valores_bd = [i['pontos'] for i in _itens_bd]
+399:            _cores_bd = [
+404:            _fig_bd = go.Figure(go.Bar(
+405:                x=_valores_bd,
+406:                y=_labels_bd,
+407:                orientation='h',
+408:                marker_color=_cores_bd,
+409:                hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
+410:                text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
+411:                textposition='outside',
+412:                textfont=dict(size=10, color='#888'),
+414:            _lay_bd = base_layout(
+415:                height=max(200, len(_itens_bd) * 28),
+416:                title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
+419:                xaxis={**{'showgrid': True, 'gridcolor': '#2A2C3E',
+424:                yaxis={'showgrid': False, 'title': ''},
+425:                margin=dict(l=220, r=60, t=40, b=20),
+428:            st.plotly_chart(_fig_bd, use_container_width=True)
+431:            _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
+432:            _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
+434:                f'<div style="font-family:Courier New; font-size:0.72rem; '
+440:                unsafe_allow_html=True,
+444:_hs_all = get_health_scores()
+445:_hs_map = {r['ticker']: r for r in (_hs_all or [])}
+446:_hs_row = _hs_map.get(t_base, {})
+448:    _raw = _hs_row.get('alertas_venda', '{}')
+449:    _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+450:    health_result = {
+457:    health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+460:def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: str = "×"):
+464:            f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+465:            f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;">{label}</div>'
+466:            f'<div style="font-size:1.1rem;color:#555;">—</div>'
+467:            f'<div style="font-size:0.65rem;color:#555;margin-top:4px;">sem histórico FMP</div>'
+469:            unsafe_allow_html=True,
+473:    media = stats["media"]
+474:    minv  = stats["min"]
+475:    maxv  = stats["max"]
+476:    atual = float(valor_atual)
+479:    banda = maxv - minv if maxv != minv else 1.0
+480:    pos   = max(0.0, min(1.0, (atual - minv) / banda))
+484:        desvio = (atual - media) / media
+485:        if desvio <= -0.15:
+486:            cor, sinal = "#00C853", "▼ desconto"
+487:        elif desvio >= 0.20:
+488:            cor, sinal = "#FF1744", "▲ prêmio"
+490:            cor, sinal = "#FF9900", "≈ justo"
+492:        cor, sinal = "#888888", "—"
+494:    bar_fill  = f"width:{round(pos * 100)}%;"
+495:    bar_color = cor
+498:        f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+499:        f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
+500:        f'<div style="font-size:1.25rem;font-weight:600;color:{cor};">{atual:.1f}{sufixo}</div>'
+501:        f'<div style="font-size:0.65rem;color:#aaa;margin-top:2px;">'
+504:        f'<div style="background:#333;border-radius:2px;height:4px;margin-top:6px;">'
+505:        f'<div style="background:{bar_color};border-radius:2px;height:4px;{bar_fill}"></div>'
+507:        f'<div style="display:flex;justify-content:space-between;font-size:0.58rem;color:#555;margin-top:2px;">'
+511:        unsafe_allow_html=True,
+514:_medios = get_multiplos_medios(t_base, anos=5)
+515:if _medios:
+517:    _col_pe, _col_pb, _col_ev, _col_dy = st.columns(4)
+519:        _render_multiplo_card("P/L", cache_d.get('p/l'), _medios.get('pe'))
+521:        _render_multiplo_card("P/VP", cache_d.get('p/vp'), _medios.get('pb'))
+523:        _render_multiplo_card("EV/EBITDA", cache_d.get('ev/ebitda'), _medios.get('ev_ebitda'))
+525:        _render_multiplo_card("Div. Yield", cache_d.get('dy%'), _medios.get('dy'), sufixo="%")
+528:_peers_list = get_peers(t_base)
+533:    _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+535:        _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
+537:    st.markdown('<div style="border-top:1px solid #333;margin-bottom:6px;"></div>', unsafe_allow_html=True)
+539:    _tickers_peers = [t_base] + [p for p in _peers_list[:5] if p != t_base]
+541:        _pd = CACHE_FUNDAMENTOS.get(_pt, {})
+542:        _is_atual = (_pt == t_base)
+543:        _cor_t    = "#FF9900" if _is_atual else "#ccc"
+545:        _nome_peer = _pd.get('nome') or _pt
+546:        _pe_peer   = _pd.get('p/l')
+547:        _roe_peer  = _pd.get('roe%')
+548:        _dy_peer   = _pd.get('dy%')
+549:        _mrg_peer  = _pd.get('margem_liq%') or _pd.get('mrg_liq%')
+551:        def _fmt_num(v, dec=1):
+555:        _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1.5, 1.5, 1.5, 1.5])
+556:        _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
+557:        _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
+558:        _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
+559:        _p4.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_roe_peer)}</span>', unsafe_allow_html=True)
+560:        _p5.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_dy_peer)}</span>', unsafe_allow_html=True)
+561:        _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
+562:        st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
+568:    _earnings = buscar_resultados(t_base)
+581:        tipo="amber",
+586:    _prox_data = _earnings.get('proxima_data')
+588:        _hoje = datetime.date.today()
+590:            _dt_prox  = datetime.datetime.strptime(_prox_data, '%d/%m/%Y').date()
+591:            _dias_ate = (_dt_prox - _hoje).days
+593:                _cor_prox, _label_prox = "muted", f"último: {_prox_data}"
+594:            elif _dias_ate == 0:
+595:                _cor_prox, _label_prox = "bear", "HOJE"
+596:            elif _dias_ate <= 7:
+597:                _cor_prox, _label_prox = "bear", f"em {_dias_ate} dias ({_prox_data})"
+598:            elif _dias_ate <= 30:
+599:                _cor_prox, _label_prox = "amber", f"em {_dias_ate} dias ({_prox_data})"
+601:                _cor_prox, _label_prox = "muted", _prox_data
+603:            _cor_prox, _label_prox = "muted", _prox_data
+605:        _col_prox1, _col_prox2, _col_prox3 = st.columns(3)
+628:    _earn_hist = _earnings.get('historico', [])
+629:    _is_us     = not t_base.endswith('.SA')
+634:        _div_style = (
+635:            '<div style="height:1px; background:#111; margin:4px 0;"></div>'
+637:        _lbl = (
+638:            '<div style="font-family:Courier New; '
+640:            '<span style="color:{cor};">{valor}</span></div>'
+644:            _c1, _c2, _c3, _c4, _c5 = st.columns(5)
+648:                    f'<div style="font-family:Courier New; color:#FF9900; '
+651:                    unsafe_allow_html=True,
+655:                _rec = _entry.get('receita')
+657:                    _un = "B" if _is_us else "M"
+660:                            label="receita",
+661:                            cor="#E0E0E0",
+662:                            valor=f"{_rec:.2f}{_un}",
+664:                        unsafe_allow_html=True,
+668:                _luc = _entry.get('lucro')
+670:                    _un = "B" if _is_us else "M"
+671:                    _cor_l = "#00C853" if _luc > 0 else "#FF1744"
+674:                            label="lucro líq.",
+675:                            cor=_cor_l,
+676:                            valor=f"{_luc:+.2f}{_un}",
+678:                        unsafe_allow_html=True,
+683:                    _eps_r = _entry.get('eps_real')
+684:                    _eps_e = _entry.get('eps_est')
+686:                        _cor_e = "#00C853" if _eps_r >= (_eps_e or 0) else "#FF1744"
+687:                        _est   = f" (est: ${_eps_e:.2f})" if _eps_e else ""
+690:                                label="eps",
+691:                                cor=_cor_e,
+692:                                valor=f"${_eps_r:.2f}{_est}",
+694:                            unsafe_allow_html=True,
+697:                    _lpa = _entry.get('lpa')
+701:                                label="lpa",
+702:                                cor="#E0E0E0",
+703:                                valor=f"R${_lpa:.2f}",
+705:                            unsafe_allow_html=True,
+710:                    _surp = _entry.get('surpresa')
+712:                        _cor_s  = "#00C853" if _surp >= 0 else "#FF1744"
+713:                        _icon_s = "▲" if _surp >= 0 else "▼"
+716:                                label="surpresa eps",
+717:                                cor=_cor_s,
+718:                                valor=f"{_icon_s} {abs(_surp):.1f}%",
+720:                            unsafe_allow_html=True,
+723:                    _mrg = _entry.get('margem')
+725:                        _cor_m = (
+732:                                label="margem",
+733:                                cor=_cor_m,
+734:                                valor=f"{_mrg:.1f}%",
+736:                            unsafe_allow_html=True,
+739:            st.markdown(_div_style, unsafe_allow_html=True)
+742:        _lucros_validos = [
+747:        if len(_lucros_validos) >= 3:
+748:            _peri_g  = [x[0] for x in reversed(_lucros_validos)]
+749:            _luc_g   = [x[1] for x in reversed(_lucros_validos)]
+750:            _cores_g = ["#00C853" if l > 0 else "#FF1744" for l in _luc_g]
+752:            _fig_earn = go.Figure(go.Bar(
+753:                x=_peri_g, y=_luc_g,
+754:                marker_color=_cores_g,
+755:                hovertemplate="%{x}<br>lucro: %{y:.2f}<extra></extra>",
+757:            _un_g = "B (USD)" if _is_us else "M (BRL)"
+758:            _lay_earn = base_layout(
+759:                height=220,
+760:                title=f"lucro líquido trimestral ({_un_g})",
+763:            _fig_earn.add_hline(y=0, line_color="#333", line_width=1)
+764:            st.plotly_chart(_fig_earn, use_container_width=True)
+774:    multiplos_historicos: dict = None,   # ← novo parâmetro
+781:    fund = fundamentos or {}
+784:    b1 = (
+793:    b2 = (
+806:    b3 = ""
+808:        linhas_hist = []
+810:        def _fmt_stats(stats, sufixo="x"):
+813:            atual  = stats.get("atual")
+814:            media  = stats.get("media")
+815:            minv   = stats.get("min")
+816:            maxv   = stats.get("max")
+819:            banda  = (maxv - minv) if maxv and minv and maxv != minv else 1.0
+820:            pct    = int(max(0, min(100, (atual - minv) / banda * 100))) if banda else 50
+821:            desvio = (atual - media) / media * 100 if media != 0 else 0
+822:            sinal  = "caro" if desvio > 20 else ("barato" if desvio < -15 else "justo")
+837:            linhas_hist.append(f"dividend yield: {_fmt_stats(multiplos_historicos['dy'], sufixo='%')}")
+839:            linhas_hist.append(f"roe histórico: {_fmt_stats(multiplos_historicos['roe'], sufixo='%')}")
+842:            b3 = (
+849:    alertas   = health_result.get('alertas', [])
+850:    breakdown = health_result.get('breakdown', {})
+851:    alertas_txt = "\n".join([f"- {a}" for a in alertas[:8]])
+852:    bkdown_txt  = "\n".join([f"- {k}: {v}" for k, v in list(breakdown.items())[:10]])
+853:    b4 = (
+861:    b5 = (
+870:    b6 = (
+875:    instrucao = (
+895:_col_ia1, _col_ia2, _col_ia3 = st.columns([2, 1, 1])
+898:        '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
+901:        unsafe_allow_html=True,
+904:    usar_thinking = st.checkbox(
+906:        value=False,
+907:        key="ia_thinking",
+908:        help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
+911:    btn_analise_ia = st.button(
+913:        type="primary",
+914:        use_container_width=True,
+915:        key="btn_analise_ia",
+919:    macro_ctx = st.session_state.get("macro_context", {
+923:    preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+924:    var_ia   = 0.0
+925:    if len(df_hist) >= 2:
+926:        _p_hoje = float(df_hist['Close'].iloc[-1])
+927:        _p_ant  = float(df_hist['Close'].iloc[-2])
+929:            var_ia = (_p_hoje - _p_ant) / _p_ant * 100
+931:    _prompt_ia = montar_prompt_ativo(
+932:        ticker        = t_base,
+933:        nome          = cache_d.get("nome", nome_exibicao),
+934:        setor         = setor,
+935:        tipo_mercado  = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
+936:        fundamentos   = cache_d,
+937:        health_result = health_result,
+938:        preco_atual   = preco_ia,
+939:        var_1d        = var_ia,
+940:        macro_context = macro_ctx,
+941:        multiplos_historicos = _medios,
+945:        prompt_usuario = _prompt_ia,
+946:        system         = SYSTEM_ANALISTA,
+947:        max_tokens     = 900,
+948:        temperatura    = 0.3,
+949:        stream         = True,
+950:        thinking       = usar_thinking,
+951:        user_settings  = _user_settings,
+953:    st.session_state[f"ia_analise_{t_base}"] = True
+961:_col_pdf1, _col_pdf2 = st.columns([3, 1])
+964:        '<div style="font-family:Courier New; font-size:0.72rem; color:#333;">'
+968:        unsafe_allow_html=True,
+971:    btn_gerar_pdf = st.button(
+973:        type             = "secondary",
+974:        use_container_width = True,
+975:        key              = "btn_gerar_pdf",
+980:    _fund_pdf  = cache_d                  # fundamentos do cache
+981:    _alertas   = health_result.get("alertas", [])
+982:    _breakdown = health_result.get("breakdown", {})
+983:    _macro_ctx = st.session_state.get("macro_context", {
+986:    _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+990:        _prompt_pdf = (
+1017:        _analise_pdf = chamar_ia(
+1018:            prompt_usuario = _prompt_pdf,
+1019:            system         = SYSTEM_TESE,
+1020:            max_tokens     = 1200,
+1021:            temperatura    = 0.3,
+1022:            stream         = False,
+1023:            thinking       = False,
+1024:            user_settings  = _user_settings,
+1031:            _pdf_bytes = gerar_tese_pdf(
+1032:                ticker        = t_base,
+1033:                nome          = _fund_pdf.get("nome", nome_exibicao),
+1034:                setor         = setor,
+1035:                health_score  = health_result.get("score", 50),
+1036:                preco_atual   = _preco_pdf,
+1037:                fundamentos   = _fund_pdf,
+1038:                analise_ia    = _analise_pdf or "análise indisponível.",
+1039:                alertas       = _alertas,
+1040:                breakdown     = _breakdown,
+1041:                macro_context = _macro_ctx,
+1043:            _nome_arquivo = (
+1048:                label               = "⬇️ baixar tese em pdf",
+1049:                data                = _pdf_bytes,
+1050:                file_name           = _nome_arquivo,
+1051:                mime                = "application/pdf",
+1052:                type                = "primary",
+1053:                use_container_width = True,
+1054:                key                 = "btn_download_pdf",
+1063:tab_tec, tab_earn, tab_fund, tab_dcf, tab_sent, tab_macro = st.tabs([
+1069:        fig_tec = go.Figure()
+1070:        fig_tec.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="price"))
+1071:        if len(df_hist) >= 50: fig_tec.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'].rolling(50).mean(), name="mm50", line=dict(color=CORES_SERIES[1], width=1)))
+1072:        if len(df_hist) >= 200: fig_tec.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'].rolling(200).mean(), name="mm200", line=dict(color=CORES_SERIES[3], width=1.5)))
+1073:        fig_tec.update_layout(**base_layout(height=500, title=f"price action histórico (10 anos): {ticker.lower()}"))
+1074:        fig_tec.update_layout(xaxis_rangeslider_visible=False)
+1075:        st.plotly_chart(fig_tec, use_container_width=True)
+1083:            fin = acao_obj.quarterly_financials
+1084:            if fin is None or (isinstance(fin, pd.DataFrame) and fin.empty): fin = acao_obj.financials
+1086:                l_rev = ['Total Revenue', 'Total Operating Revenue', 'Operating Revenue']
+1087:                l_net = ['Net Income', 'Net Income Common Stockholders', 'Net Income From Continuing Operations']
+1088:                row_rev = fin.index[fin.index.isin(l_rev)].tolist()
+1089:                row_net = fin.index[fin.index.isin(l_net)].tolist()
+1091:                    df_earn = pd.DataFrame({'Receita': fin.loc[row_rev[0]], 'Lucro Líquido': fin.loc[row_net[0]]}).sort_index()
+1092:                    df_earn.index = df_earn.index.astype(str)
+1093:                    fig_earn = go.Figure()
+1094:                    fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'], name="receita", marker_color=CORES_SERIES[1]))
+1095:                    fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'], name="lucro", marker_color=CORES_SERIES[2]))
+1096:                    fig_earn.update_layout(**base_layout(height=400), barmode='group')
+1097:                    st.plotly_chart(fig_earn, use_container_width=True)
+1101:    c_f1, c_f2 = st.columns(2)
+1104:        vol = fmt_pct(df_hist['Close'].pct_change().std() * np.sqrt(252) * 100) if len(df_hist) > 10 else "N/D"
+1106:            debt = safe_float(info_dict.get('totalDebt', 0))
+1107:            assets_t = safe_float(info_dict.get('totalAssets', 1))
+1108:            ltv = (debt / assets_t * 100) if assets_t > 0 else 0
+1109:            f_d = {"métrica": ["P/VP", "Yield (12m)", "Volatilidade Anual", "Alavancagem (Dívida/Ativos)", "Setor/Segmento"], 
+1112:            ev_e = safe_float(cache_d.get('ev/ebitda')) or safe_float(info_dict.get('enterpriseToEbitda'))
+1113:            pvp_val = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+1114:            beta_val = safe_float(info_dict.get('beta'))
+1115:            debt_val = safe_float(info_dict.get('debtToEquity'))
+1117:            f_d = {
+1136:        eps_base = safe_float(info_dict.get('trailingEps')) or safe_float(info_dict.get('forwardEps'))
+1137:        preco_base = safe_float(df_hist['Close'].iloc[-1]) if not df_hist.empty else None
+1138:        is_us = not ticker.endswith('.SA')
+1142:        c_dcf1, c_dcf2, c_dcf3, c_dcf4 = st.columns(4)
+1144:            eps_input = st.number_input("eps (lucro/ação)", value=float(eps_base) if eps_base and eps_base > 0 else 5.0, min_value=-100.0, step=0.01, format="%.2f")
+1146:            preco_input = st.number_input("preço atual", value=float(preco_base) if preco_base else 100.0, min_value=0.01, step=0.01, format="%.2f")
+1148:            wacc_pct = st.slider("wacc (custo capital %)", min_value=4.0, max_value=20.0, value=9.0 if is_us else 12.0, step=0.5, format="%.1f%%")
+1150:            g_term_pct = st.slider("crescimento terminal %", min_value=1.0, max_value=5.0, value=3.0, step=0.5, format="%.1f%%")
+1152:        c_dcf5, c_dcf6 = st.columns(2)
+1154:            n_anos = st.slider("horizonte de projeção (anos)", min_value=5, max_value=15, value=10, step=1)
+1156:            margem_seg_pct = st.slider("margem de segurança (%)", min_value=0, max_value=40, value=15, step=5)
+1158:        wacc = wacc_pct / 100
+1159:        g_terminal = g_term_pct / 100
+1163:        g_implicito = calcular_crescimento_implicito(preco_input, eps_input, wacc, g_terminal, n_anos)
+1170:            g_implicito_pct = g_implicito * 100
+1171:            preco_com_ms = preco_input * (1 - (margem_seg_pct / 100))
+1173:            c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+1175:                metric_card("crescimento implícito (a.a.)", fmt_pct(g_implicito_pct), cor_delta="bull" if g_implicito_pct < 15 else "bear")
+1184:                interpretacao = "crescimento baixo precificado — assimetria favorável se a empresa crescer acima disso."
+1185:                cor_int = "bull"
+1186:            elif g_implicito_pct <= 20:
+1187:                interpretacao = "crescimento moderado a alto precificado — valuation justo se tese de crescimento se confirmar."
+1188:                cor_int = "amber"
+1190:                interpretacao = "crescimento muito alto precificado — risco elevado de decepção. exige execução perfeita."
+1191:                cor_int = "bear"
+1197:            cenarios_g = [-5, 0, 5, 8, 10, 12, 15, 20, 25]
+1198:            cenarios_wacc = [round(wacc_pct - 2, 1), wacc_pct, round(wacc_pct + 2, 1)]
+1200:            dados_sens = []
+1202:                linha = {}
+1203:                w_c_dec = wacc_c / 100
+1205:                    g_c_dec = g_c / 100
+1207:                        if w_c_dec <= g_terminal:
+1208:                            linha[f"g={g_c}%"] = "—"
+1210:                            vp_soma = sum(eps_input * (1 + g_c_dec)**t / (1 + w_c_dec)**t for t in range(1, n_anos + 1))
+1211:                            vp_term = (eps_input * (1 + g_c_dec)**n_anos * (1 + g_terminal)) / (w_c_dec - g_terminal) / ((1 + w_c_dec)**n_anos)
+1212:                            linha[f"g={g_c}%"] = round(vp_soma + vp_term, 2)
+1214:                        linha[f"g={g_c}%"] = "—"
+1217:            df_sens = pd.DataFrame(dados_sens, index=[f"wacc {w}%" for w in cenarios_wacc])
+1219:            st.dataframe(df_sens, use_container_width=True, hide_index=False)
+1220:            st.caption(f"valores em {moeda.upper()} | célula verde = subvalorizado vs preço atual de {preco_input} | linha destacada = wacc configurado acima.")
+1222:            fig = go.Figure()
+1224:                y_vals = []
+1226:                    val = df_sens.loc[f"wacc {wacc_c}%", f"g={g_c}%"]
+1227:                    y_vals.append(val if val != "—" else None)
+1229:                fig.add_trace(go.Scatter(x=cenarios_g, y=y_vals, name=f"wacc {wacc_c}%", line=dict(color=CORES_SERIES[i % len(CORES_SERIES)])))
+1231:            fig.add_hline(y=preco_input, line_color="#FF9900", line_dash="dash", annotation_text="preço atual")
+1232:            fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
+1233:            st.plotly_chart(fig, use_container_width=True)
+1236:            if st.button("🧠 ia: interpretar o valuation e gerar tese", type="primary"):
+1237:                _prompt_dcf = (
+1252:                        prompt_usuario = _prompt_dcf,
+1253:                        system         = SYSTEM_TESE,
+1254:                        max_tokens     = 600,
+1255:                        temperatura    = 0.3,
+1256:                        stream         = True,
+1257:                        user_settings  = _user_settings,
+1263:        news = acao_obj.news
+1267:                    cn1, cn2 = st.columns([4, 1])
+1270:                    if cn2.button("ia: analisar", key=item.get('uuid')):
+1272:                            _res_news = chamar_ia(
+1273:                                prompt_usuario=(
+1279:                                system      = SYSTEM_ANALISTA,
+1280:                                max_tokens  = 120,
+1281:                                temperatura = 0.2,
+1282:                                str
+
+[… truncated 2769 chars …]
