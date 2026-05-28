@@ -75,9 +75,20 @@ if 'research_ticker' not in st.session_state:
 if 'research_ticker_externo' in st.session_state:
     st.session_state['research_ticker'] = st.session_state.pop('research_ticker_externo')
 
+# Lê modo e ativos pré-selecionados vindos da Home
+if 'research_modo' in st.session_state:
+    _modo_presel = st.session_state.pop('research_modo')
+else:
+    _modo_presel = None
+
+if 'comp_ativos_presel' in st.session_state:
+    _ativos_presel = st.session_state.pop('comp_ativos_presel')
+else:
+    _ativos_presel = None
+
 with st.sidebar:
     section_title("🔬 modo de análise")
-    modo_pesquisa = st.radio("selecione o escopo:", ["Deep Dive (Individual)", "Comparativo (Múltiplos)"], label_visibility="collapsed")
+    modo_pesquisa = st.radio("selecione o escopo:", ["Deep Dive (Individual)", "Comparativo (Múltiplos)"], index=1 if _modo_presel == 'Comparativo (Múltiplos)' else 0, label_visibility="collapsed")
     
     st.markdown("---")
     
@@ -130,9 +141,17 @@ with st.sidebar:
             
     else:
         section_title("comparar ativos")
-        ativos_comp = st.multiselect("selecione os ativos:", 
+        _default_comp = (
+            _ativos_presel
+            if _ativos_presel
+            else ["PETR4.SA", "VALE3.SA", "ITUB4.SA"]
+        )
+        ativos_comp = st.multiselect("selecione os ativos:",
                                      options=BRASIL_TODOS + XSTOCKS_TODOS,
-                                     default=["PETR4.SA", "VALE3.SA", "ITUB4.SA"])
+                                     default=[
+                                         t for t in _default_comp
+                                         if t in BRASIL_TODOS + XSTOCKS_TODOS
+                                     ])
     
     st.markdown("---")
     st.caption("v2.4 — busca universal implementada")
@@ -377,6 +396,172 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                     df_b100 = (hist_all / hist_all.iloc[0]) * 100
                     fig_b100 = base100(df_b100, height=350)
                     st.plotly_chart(fig_b100, use_container_width=True)
+
+    # ── HEALTH SCORES LADO A LADO ─────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("⚡ health scores comparados")
+
+    _hs_comp_all = {
+        h['ticker']: h
+        for h in (get_health_scores() or [])
+    }
+
+    _cols_hs = st.columns(len(ativos_comp))
+    for _ci_hs, (_col_hs, _tk_hs) in enumerate(zip(_cols_hs, ativos_comp)):
+        _tb_hs   = mapear_ticker_base(_tk_hs)
+        _row_hs  = (
+            _hs_comp_all.get(_tb_hs)
+            or _hs_comp_all.get(_tk_hs)
+            or {}
+        )
+        _score_hs = _row_hs.get('score', 50) if _row_hs else None
+
+        _break_hs = {}
+        if _row_hs:
+            try:
+                import json as _json_hs
+                _raw_hs = _row_hs.get('alertas_venda', '{}')
+                _p_hs   = (
+                    _json_hs.loads(_raw_hs)
+                    if isinstance(_raw_hs, str)
+                    else (_raw_hs or {})
+                )
+                _break_hs = _p_hs.get('breakdown', {})
+            except Exception:
+                pass
+
+        with _col_hs:
+            if _score_hs is not None:
+                _cor_hs_c = (
+                    "#00C853" if _score_hs >= 65
+                    else "#FF9900" if _score_hs >= 40
+                    else "#FF1744"
+                )
+                _label_hs_c = (
+                    "acumulação" if _score_hs >= 65
+                    else "manutenção" if _score_hs >= 40
+                    else "reduzir"
+                )
+                st.markdown(
+                    f'<div style="background:#0d0d0d; '
+                    f'border:1px solid #1e1e1e; '
+                    f'border-top:3px solid {_cor_hs_c}; '
+                    f'border-radius:6px; padding:16px; '
+                    f'text-align:center;">'
+
+                    f'<div style="font-family:Courier New; '
+                    f'font-size:0.82rem; color:#FF9900; '
+                    f'font-weight:700; margin-bottom:8px;">'
+                    f'{_tk_hs.replace(".SA","")}</div>'
+
+                    f'<div style="font-family:Courier New; '
+                    f'font-size:2.2rem; font-weight:700; '
+                    f'color:{_cor_hs_c}; line-height:1;">'
+                    f'{_score_hs}'
+                    f'<span style="font-size:1rem;color:#555;">/100</span>'
+                    f'</div>'
+
+                    f'<div style="font-family:Courier New; '
+                    f'font-size:0.72rem; color:{_cor_hs_c}; '
+                    f'margin-top:4px;">{_label_hs_c}</div>'
+
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                if _break_hs:
+                    _items_bk = []
+                    for _k_bk, _v_bk in _break_hs.items():
+                        try:
+                            _items_bk.append((_k_bk, float(_v_bk)))
+                        except (TypeError, ValueError):
+                            pass
+                    _items_bk.sort(key=lambda x: x[1], reverse=True)
+                    _top_pos = _items_bk[:3]
+                    _top_neg = [i for i in _items_bk if i[1] < 0][-2:]
+
+                    for _kb, _vb in _top_pos:
+                        _label_bk = _kb.replace('_', ' ')[:22]
+                        st.markdown(
+                            f'<div style="font-family:Courier New; '
+                            f'font-size:0.65rem; color:#00C853; '
+                            f'padding:1px 0;">✓ {_label_bk}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    for _kb, _vb in _top_neg:
+                        _label_bk = _kb.replace('_', ' ')[:22]
+                        st.markdown(
+                            f'<div style="font-family:Courier New; '
+                            f'font-size:0.65rem; color:#FF1744; '
+                            f'padding:1px 0;">✗ {_label_bk}</div>',
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.markdown(
+                    f'<div style="background:#0d0d0d; '
+                    f'border:1px solid #1e1e1e; border-radius:6px; '
+                    f'padding:16px; text-align:center;">'
+                    f'<div style="color:#FF9900; font-weight:700;">'
+                    f'{_tk_hs.replace(".SA","")}</div>'
+                    f'<div style="color:#555; font-size:0.75rem; '
+                    f'margin-top:8px;">score não calculado</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── VEREDITO DA IA ─────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("🧠 veredito — deepseek v4 pro")
+
+    if st.button(
+        "🧠 comparar e gerar veredito",
+        type="primary",
+        use_container_width=True,
+        key="btn_veredito_comp",
+    ):
+        _linhas_comp_ia = []
+        for _row_c in dados_comp:
+            _tk_c    = _row_c.get('ticker', '')
+            _hs_c    = (
+                _hs_comp_all.get(mapear_ticker_base(_tk_c), {})
+                .get('score', '—')
+            )
+            _linhas_comp_ia.append(
+                f"{_tk_c}: "
+                f"p/l={_row_c.get('p/l') or '—'} | "
+                f"p/vp={_row_c.get('p/vp') or '—'} | "
+                f"roe={_row_c.get('roe%') or '—'}% | "
+                f"dy={_row_c.get('dy%') or '—'}% | "
+                f"margem={_row_c.get('mrg_liq%') or '—'}% | "
+                f"health={_hs_c}/100"
+            )
+
+        _macro_comp = st.session_state.get("macro_context", {})
+        _prompt_comp_ia = (
+            f"comparativo entre {len(ativos_comp)} ativos:\n\n"
+            + "\n".join(_linhas_comp_ia)
+            + f"\n\ncontexto macro: {_macro_comp.get('label','—')} | "
+            f"selic {_macro_comp.get('selic',10.75):.2f}% | "
+            f"vix {_macro_comp.get('vix',15.0):.1f}\n\n"
+            "responda em 4 tópicos curtos (letra minúscula):\n"
+            "1. qual tem melhor relação risco/retorno considerando "
+            "fundamentos e health score?\n"
+            "2. qual está mais barato pelo valuation atual?\n"
+            "3. qual tem maior risco no ambiente macro atual?\n"
+            "4. veredito final: se fosse escolher apenas um, qual "
+            "seria e por quê? seja direto."
+        )
+
+        _us_comp = st.session_state.get('user_settings', {})
+        chamar_ia(
+            prompt_usuario = _prompt_comp_ia,
+            system         = SYSTEM_ANALISTA,
+            max_tokens     = 600,
+            temperatura    = 0.3,
+            stream         = True,
+            user_settings  = _us_comp,
+        )
+
     st.stop()
 
 # ==========================================

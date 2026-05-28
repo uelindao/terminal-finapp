@@ -1596,6 +1596,20 @@ else:
                 lista_alertas = []
                 breakdown     = {}
 
+            # Checkbox de seleção para comparativo
+            _chk_key = f"chk_comp_{t}"
+            _selecionado = st.checkbox("", key=_chk_key, label_visibility="collapsed")
+            if _selecionado:
+                _sel_list = st.session_state.get('comp_selecionados', [])
+                if t not in _sel_list:
+                    _sel_list.append(t)
+                    st.session_state['comp_selecionados'] = _sel_list
+            else:
+                _sel_list = st.session_state.get('comp_selecionados', [])
+                if t in _sel_list:
+                    _sel_list.remove(t)
+                    st.session_state['comp_selecionados'] = _sel_list
+
             watchlist_row(
                 ticker        = t,
                 nome          = item.get('nome', t),
@@ -1630,6 +1644,26 @@ else:
                     st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Botão de comparar ativos selecionados ──────────────────────────────
+    _selecionados_comp = st.session_state.get('comp_selecionados', [])
+    if len(_selecionados_comp) >= 2:
+        if st.button(
+            f"⚖️ comparar selecionados "
+            f"({', '.join([t.replace('.SA','') for t in _selecionados_comp])})",
+            type="primary",
+            use_container_width=True,
+            key="btn_ir_comparativo",
+        ):
+            st.session_state['comp_ativos_presel'] = _selecionados_comp
+            st.session_state['research_modo'] = 'Comparativo (Múltiplos)'
+            st.session_state['comp_selecionados'] = []
+            st.switch_page("pages/1_Research.py")
+    elif len(_selecionados_comp) == 1:
+        st.caption(
+            f"selecione mais 1 ativo para comparar com "
+            f"{_selecionados_comp[0].replace('.SA','')}"
+        )
 
 # ==========================================
 # RELATÓRIO SEMANAL
