@@ -27,6 +27,7 @@ from utils.fmp_client import get_multiplos_medios, get_peers
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
 from utils.macro_context import garantir_macro_context
+from utils.macro_regime import classificar_regime, get_impacto_setor
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, CORES_SERIES, base100, linha
 
@@ -726,6 +727,27 @@ else:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── CARD DE IMPACTO MACRO DO SETOR ────────────────────────────────────
+_macro_regime = classificar_regime()
+_impacto_setor = get_impacto_setor(setor_nome=setor, regime_dict=_macro_regime)
+_icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
+_cor_regime = "#FF1744" if "stress" in _macro_regime["label"] else ("#FF9900" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "#00C853")
+st.markdown(
+    f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
+    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;letter-spacing:.08em;">regime</div>'
+    f'<div style="font-family:Courier New;font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
+    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">setor</div>'
+    f'<div style="font-family:Courier New;font-size:0.82rem;color:#ccc;">{setor[:25].lower()}</div>'
+    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">impacto</div>'
+    f'<div style="font-family:Courier New;font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
+    f'{_icone_impacto[_impacto_setor["impacto"]]} {_impacto_setor["impacto"].upper()}</div>'
+    f'<div style="font-family:Courier New;font-size:0.68rem;color:#666;margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
+# Persiste impacto_setor para uso no prompt da IA
+st.session_state['impacto_setor_ativo'] = _impacto_setor
+
 # ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
 _hs_all = get_health_scores()
 _hs_map = {r['ticker']: r for r in (_hs_all or [])}
@@ -933,6 +955,7 @@ def montar_prompt_ativo(
     fundamentos, health_result,
     preco_atual, var_1d, macro_context,
     multiplos_historicos: dict = None,   # ← novo parâmetro
+    impacto_setor: dict = None,
 ) -> str:
     """
     Monta prompt em ordem cache-friendly.
@@ -1027,7 +1050,15 @@ def montar_prompt_ativo(
         f"regime: {macro_context.get('label', 'neutro')}\n"
     )
 
-    # ── BLOCO 6: DADOS VOLÁTEIS — SEMPRE POR ÚLTIMO ──────────────────────
+    # ---- BLOCO 5B: IMPACTO SETORIAL (MACRO) ----
+    b5b = ""
+    if impacto_setor:
+        b5b = (
+            f"impacto do regime no setor: {impacto_setor.get('impacto', 'neutro')}\n"
+            f"justificativa: {impacto_setor.get('justificativa', 'n/d')}\n"
+        )
+
+    # ---- BLOCO 6: DADOS VOLÁTEIS — SEMPRE POR ÚLTIMO ──────────────────────
     b6 = (
         f"\ncotacao atual: r$ {preco_atual:,.2f}\n"
         f"variacao hoje: {var_1d:+.2f}%\n"
@@ -1050,7 +1081,7 @@ def montar_prompt_ativo(
         "seja objetivo. use os dados fornecidos. não invente números."
     )
 
-    return b1 + b2 + b3 + b4 + b5 + b6 + instrucao
+    return b1 + b2 + b3 + b4 + b5 + b5b + b6 + instrucao
 
 
 # --- TABS ---
@@ -1220,6 +1251,7 @@ with tab_ia:
             if _p_ant > 0:
                 var_ia = (_p_hoje - _p_ant) / _p_ant * 100
 
+        _impacto_setor_call = st.session_state.get("impacto_setor_ativo")
         _prompt_ia = montar_prompt_ativo(
             ticker        = t_base,
             nome          = cache_d.get("nome", nome_exibicao),
@@ -1231,6 +1263,7 @@ with tab_ia:
             var_1d        = var_ia,
             macro_context = macro_ctx,
             multiplos_historicos = _medios,
+            impacto_setor = _impacto_setor_call,
         )
 
         _resposta_ia = chamar_ia(

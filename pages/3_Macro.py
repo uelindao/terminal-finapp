@@ -23,6 +23,7 @@ from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout
 from utils.macro_context import garantir_macro_context
+from utils.macro_regime import classificar_regime, get_impacto_setor
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -826,6 +827,63 @@ with tab_ciclo:
         metric_card("fase atual do ciclo", fase_ciclo)
     with col_c2:
         st.markdown(f'<div class="card" style="padding:15px; border-left:4px solid {cor_ciclo};"><div style="font-family:Courier New; font-size:0.72rem; color:#555; margin-bottom:5px;">setores favorecidos neste ciclo:</div><div style="font-family:Courier New; font-size:0.9rem; color:#E0E0E0;">{setores_ciclo}</div></div>', unsafe_allow_html=True)
+
+    # --- REGIME MACRO EXPANDIDO (classificacao 6 regimes) ---
+    _regime_atual = classificar_regime(
+        selic=valor_atual_seguro(df_br_master, 'Selic'),
+        vix=valor_atual_seguro(df_global_master, 'VIXCLS'),
+        ipca=valor_atual_seguro(df_br_master, 'IPCA'),
+    )
+    _cor_regime_card = (
+        "#FF1744" if "stress" in _regime_atual['label']
+        else "#FF9900" if "altos" in _regime_atual['label'] or "muito" in _regime_atual['label']
+        else "#00C853"
+    )
+
+    st.markdown('<br>', unsafe_allow_html=True)
+    section_title("🏷️ regime macro — rotação setorial")
+
+    st.markdown(
+        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime_card};border-radius:6px;padding:16px;margin-bottom:16px;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">'
+        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">regime atual</span><br>'
+        f'<span style="font-family:Courier New;font-size:1rem;font-weight:700;color:{_cor_regime_card};">{_regime_atual["label"]}</span></div>'
+        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">score ambiente</span><br>'
+        f'<span style="font-family:Courier New;font-size:1rem;font-weight:700;color:{_cor_regime_card};">{_regime_atual["score_ambiente"]}/100</span></div>'
+        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">selic / vix</span><br>'
+        f'<span style="font-family:Courier New;font-size:0.9rem;color:#ccc;">{_regime_atual["selic"]:.2f}% / {_regime_atual["vix"]:.1f}</span></div>'
+        f'</div>'
+        f'<div style="margin-top:12px;font-family:Courier New;font-size:0.72rem;color:#888;line-height:1.5;">{_regime_atual["descricao"]}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Tabela de rotacao
+    _fav = _regime_atual['setores_favorecidos']
+    _prej = _regime_atual['setores_prejudicados']
+    _cfav, _cprej = st.columns(2)
+    with _cfav:
+        st.markdown(
+            f'<div style="background:#0a1a0a;border:1px solid #1a3a1a;border-radius:6px;padding:12px;">'
+            f'<div style="font-family:Courier New;font-size:0.62rem;color:#00C853;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">✔ setores favorecidos</div>'
+            + ''.join(f'<div style="font-family:Courier New;font-size:0.78rem;color:#aaa;padding:2px 0;">→ {s}</div>' for s in _fav)
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
+    with _cprej:
+        st.markdown(
+            f'<div style="background:#1a0a0a;border:1px solid #3a1a1a;border-radius:6px;padding:12px;">'
+            f'<div style="font-family:Courier New;font-size:0.62rem;color:#FF1744;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">✘ setores prejudicados</div>'
+            + ''.join(f'<div style="font-family:Courier New;font-size:0.78rem;color:#aaa;padding:2px 0;">→ {s}</div>' for s in _prej)
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;padding:10px 14px;margin-top:8px;font-family:Courier New;font-size:0.72rem;color:#FF9900;">'
+        f'🎯 {_regime_atual["posicionamento"]}</div>',
+        unsafe_allow_html=True,
+    )
 
     section_title("📊 performance setorial s&p 500 (etfs)")
     with st.spinner("carregando retornos setoriais..."):

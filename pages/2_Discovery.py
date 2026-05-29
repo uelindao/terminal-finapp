@@ -30,6 +30,7 @@ from utils.health_engine import calcular_health_score
 from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
+from utils.macro_regime import classificar_regime
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -983,7 +984,81 @@ with tab_setorial:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # ---- CONTEXTO DO REGIME MACRO ATUAL ----
+        _regime_disc = classificar_regime()
+        _regime_label = _regime_disc.get("label", "neutro")
+        _regime_desc = _regime_disc.get("descricao", "")
+        _score_amb = _regime_disc.get("score_ambiente", 50)
+        _fav_setores = _regime_disc.get("setores_favorecidos", [])
+        _prej_setores = _regime_disc.get("setores_prejudicados", [])
+        _posicionamento = _regime_disc.get("posicionamento", "")
+
+        _cor_regime = (
+            "#FF1744" if "stress" in _regime_label
+            else "#FF9900" if "altos" in _regime_label
+            else "#00C853"
+        )
+        _cor_score = "#00C853" if _score_amb >= 60 else ("#FF9900" if _score_amb >= 35 else "#FF1744")
+
+        st.markdown(
+            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};'
+            f'border-radius:6px;padding:10px 16px;margin-bottom:16px;">'
+            f'<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">'
+            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">regime atual</span>'
+            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>'
+            f'<span style="font-family:Courier New;font-size:0.72rem;color:#666;">{_regime_desc[:60]}</span>'
+            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">score amb.</span>'
+            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>'
+            f'</div>'
+
+            f'<div style="display:flex;gap:24px;margin-top:8px;flex-wrap:wrap;">'
+            f'<div style="flex:1;min-width:140px;">'
+            f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">🟢 favorecidos pelo regime</div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:3px;">'
+        )
+
+        for _s in _fav_setores:
+            # Check if this sector appears in _dados_set and show its score
+            _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
+            _score_val = _match[0]['score_medio'] if _match else None
+            _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
+            st.markdown(
+                f'<span style="background:#003300;color:#00C853;font-family:Courier New;'
+                f'font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f'</div></div>'
+
+            f'<div style="flex:1;min-width:140px;">'
+            f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">🔴 prejudicados pelo regime</div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:3px;">'
+        )
+
+        for _s in _prej_setores:
+            _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
+            _score_val = _match[0]["score_medio"] if _match else None
+            _extra = " ({:.0f})".format(_score_val) if _score_val is not None else ""
+            st.markdown(
+                f'<span style="background:#330000;color:#FF1744;font-family:Courier New;'
+                f'font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f'</div></div>'
+            f'</div>'
+
+            f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;'
+            f'margin-top:6px;border-top:1px solid #1e1e1e;padding-top:4px;">'
+            f'{_posicionamento}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
         import plotly.graph_objects as go
+
 
         _setores_nomes  = [d['setor'] for d in _dados_set]
         _scores_medios  = [d['score_medio'] for d in _dados_set]
