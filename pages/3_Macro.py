@@ -346,6 +346,112 @@ def calcular_fear_greed() -> dict:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def calcular_fear_greed_br() -> dict:
+    """
+    Fear & Greed brasileiro com 7 componentes adaptados ao mercado BR.
+    """
+    import numpy as np
+
+    scores: dict = {}
+    total = 0
+    n = 0
+
+    try:
+        _ibov = yf.Ticker('^BVSP').history(period='1y', auto_adjust=True)['Close'].dropna()
+    except Exception:
+        _ibov = None
+
+    # 1. Momentum IBOV vs MM125
+    if _ibov is not None and len(_ibov) >= 125:
+        _mm125 = float(_ibov.rolling(125).mean().iloc[-1])
+        _atual = float(_ibov.iloc[-1])
+        _mom   = (_atual / _mm125 - 1) * 100
+        _s = min(100, max(0, 50 + _mom * 3))
+        scores['momentum_ibov'] = round(_s)
+        total += _s; n += 1
+
+    # 2. VIX invertido
+    try:
+        _vix = yf.Ticker('^VIX').history(period='3mo', auto_adjust=True)['Close'].dropna()
+        if len(_vix) >= 20:
+            _vix_atual = float(_vix.iloc[-1])
+            _s = min(100, max(0, 100 - (_vix_atual - 10) * 3))
+            scores['vix_invertido'] = round(_s)
+            total += _s; n += 1
+    except Exception:
+        pass
+
+    # 3. Posição 52 semanas IBOV
+    if _ibov is not None and len(_ibov) >= 252:
+        _h52 = float(_ibov.rolling(252).max().iloc[-1])
+        _l52 = float(_ibov.rolling(252).min().iloc[-1])
+        _at  = float(_ibov.iloc[-1])
+        _pct = (_at - _l52) / (_h52 - _l52) * 100 if _h52 > _l52 else 50
+        scores['range_52s'] = round(_pct)
+        total += _pct; n += 1
+
+    # 4. Small caps vs IBOV (SMAL11 vs BOVA11)
+    try:
+        _smal = yf.Ticker('SMAL11.SA').history(period='1mo', auto_adjust=True)['Close'].dropna()
+        _bova = yf.Ticker('BOVA11.SA').history(period='1mo', auto_adjust=True)['Close'].dropna()
+        if len(_smal) >= 5 and len(_bova) >= 5:
+            _ret_smal = float(_smal.iloc[-1] / _smal.iloc[0] - 1)
+            _ret_bova = float(_bova.iloc[-1] / _bova.iloc[0] - 1)
+            _diff = (_ret_smal - _ret_bova) * 100
+            _s = min(100, max(0, 50 + _diff * 10))
+            scores['small_vs_ibov'] = round(_s)
+            total += _s; n += 1
+    except Exception:
+        pass
+
+    # 5. Dólar invertido (USD/BRL alto = medo)
+    try:
+        _usdbrl = yf.Ticker('BRL=X').history(period='3mo', auto_adjust=True)['Close'].dropna()
+        if len(_usdbrl) >= 20:
+            _d_atual = float(_usdbrl.iloc[-1])
+            _d_media = float(_usdbrl.rolling(60).mean().iloc[-1])
+            _desvio = (_d_atual / _d_media - 1) * 100
+            _s = min(100, max(0, 50 - _desvio * 5))
+            scores['dolar_invertido'] = round(_s)
+            total += _s; n += 1
+    except Exception:
+        pass
+
+    # 6. Volume IBOV
+    try:
+        _ibov_full = yf.Ticker('^BVSP').history(period='3mo', auto_adjust=True)
+        if 'Volume' in _ibov_full:
+            _vol = _ibov_full['Volume'].dropna()
+            if len(_vol) >= 30:
+                _v_at  = float(_vol.iloc[-5:].mean())
+                _v_med = float(_vol.rolling(30).mean().iloc[-1])
+                _ratio = _v_at / _v_med if _v_med > 0 else 1
+                _s = min(100, max(0, _ratio * 50))
+                scores['volume_ibov'] = round(_s)
+                total += _s; n += 1
+    except Exception:
+        pass
+
+    if n == 0:
+        return {'score': 50, 'label': 'neutro', 'scores': {}}
+
+    _score_final = round(total / n)
+
+    if _score_final >= 75:
+        _label = 'ganância extrema'
+    elif _score_final >= 60:
+        _label = 'ganância'
+    elif _score_final >= 45:
+        _label = 'neutro'
+    elif _score_final >= 30:
+        _label = 'medo'
+    else:
+        _label = 'medo extremo'
+
+    return {'score': _score_final, 'label': _label, 'scores': scores, 'n': n}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def calcular_correlacoes(tickers_tuple: tuple, janela: int = 60) -> dict:
     """
     Calcula matriz de correlação e séries de correlação rolante
@@ -882,9 +988,81 @@ with tab_global:
             st.plotly_chart(criar_grafico_macro(df_global, 'BAMLH0A0HYM2', "spread crédito high yield (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🛢️ commodities":
-            g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_comm, 'CL=F', "petróleo wti (us$ / barril)", "#E040FB"), use_container_width=True, config={'responsive': True})
-            with g2: st.plotly_chart(criar_grafico_macro(df_comm, 'GC=F', "ouro futuros (us$ / onça)", "#FFEB3B"), use_container_width=True, config={'responsive': True})
+            _commodities_config = [
+                ("CL=F",  "petróleo wti",    "#8B00FF", "us$/barril", "^GSPC",   "s&p500"),
+                ("GC=F",  "ouro",            "#FFD700", "us$/onça",   "^TNX",    "treasury 10y"),
+                ("SI=F",  "prata",           "#C0C0C0", "us$/onça",   "GC=F",    "ouro"),
+                ("HG=F",  "cobre",           "#B87333", "us$/libra",  "^GSPC",   "s&p500"),
+                ("NG=F",  "gás natural",     "#00BFFF", "us$/mmbtu",  "CL=F",    "petróleo"),
+                ("ZC=F",  "milho",           "#FFD700", "us$/bushel", "BOVA11.SA","ibov"),
+                ("ZS=F",  "soja",            "#90EE90", "us$/bushel", "BOVA11.SA","ibov"),
+                ("ZW=F",  "trigo",           "#DEB887", "us$/bushel", "ZC=F",    "milho"),
+                ("KC=F",  "café",            "#6F4E37", "us$/libra",  "BRL=X",   "usd/brl"),
+                ("SB=F",  "açúcar",          "#FF69B4", "us$/libra",  "BRL=X",   "usd/brl"),
+                ("CT=F",  "algodão",         "#F5F5DC", "us$/libra",  "^GSPC",   "s&p500"),
+                ("PL=F",  "platina",         "#E5E4E2", "us$/onça",   "GC=F",    "ouro"),
+            ]
+
+            _col_com_sel = st.columns(4)
+            _selected_comms = []
+            for _i, (_tk, _nm, _cor, _un, _bt, _bn) in enumerate(_commodities_config):
+                with _col_com_sel[_i % 4]:
+                    if st.checkbox(_nm, value=_i < 4, key=f"chk_comm_{_tk}"):
+                        _selected_comms.append((_tk, _nm, _cor, _un, _bt, _bn))
+
+            _mostrar_benchmark = st.toggle("mostrar benchmark comparativo", value=True, key="tog_comm_bench")
+            _periodo_comm = st.radio(
+                "período:",
+                ["6mo", "1y", "2y", "5y"],
+                format_func=lambda x: {"6mo": "6 meses", "1y": "1 ano", "2y": "2 anos", "5y": "5 anos"}[x],
+                horizontal=True,
+                key="radio_comm_periodo",
+            )
+
+            for _tk, _nm, _cor, _un, _bt, _bn in _selected_comms:
+                try:
+                    _hist_c = yf.Ticker(_tk).history(period=_periodo_comm, auto_adjust=True)['Close'].dropna()
+                    if _hist_c.empty:
+                        continue
+
+                    _preco_at = float(_hist_c.iloc[-1])
+                    _preco_in = float(_hist_c.iloc[0])
+                    _ret_c    = (_preco_at / _preco_in - 1) * 100
+
+                    st.markdown(
+                        f'<div style="font-family:Courier New;font-size:0.75rem;color:{_cor};'
+                        f'margin-top:12px;margin-bottom:4px;">'
+                        f'{_nm.upper()} — {_preco_at:,.2f} {_un} ({_ret_c:+.1f}% no período)'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    if _mostrar_benchmark:
+                        try:
+                            _hist_b = yf.Ticker(_bt).history(period=_periodo_comm, auto_adjust=True)['Close'].dropna()
+                        except Exception:
+                            _hist_b = None
+
+                        if _hist_b is not None and not _hist_b.empty:
+                            _b100_c = (_hist_c / _hist_c.iloc[0]) * 100
+                            _b100_b = (_hist_b / _hist_b.iloc[0]) * 100
+
+                            _fig_c = go.Figure()
+                            _fig_c.add_trace(go.Scatter(x=_b100_c.index, y=_b100_c.values, name=_nm, line=dict(color=_cor, width=2), hovertemplate=f'{_nm}: %{{y:.1f}}<extra></extra>'))
+                            _fig_c.add_trace(go.Scatter(x=_b100_b.index, y=_b100_b.values, name=_bn, line=dict(color='#555', width=1.5, dash='dot'), hovertemplate=f'{_bn}: %{{y:.1f}}<extra></extra>'))
+                            _fig_c.add_hline(y=100, line_color='#333', line_dash='dash', line_width=1)
+                            _fig_c.update_layout(**base_layout(height=220, title=f"{_nm} vs {_bn} (base 100)"))
+                            st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
+                            _ret_b = (float(_hist_b.iloc[-1]) / float(_hist_b.iloc[0]) - 1) * 100
+                            st.caption(f"{_nm}: {_ret_c:+.1f}% | {_bn}: {_ret_b:+.1f}% no período. correlação empírica no horizonte selecionado.")
+                            continue
+
+                    _fig_c = go.Figure(go.Scatter(x=_hist_c.index, y=_hist_c.values, line=dict(color=_cor, width=2), fill='tozeroy', fillcolor=f'{_cor}15', hovertemplate=f'%{{x}}<br>{_nm}: %{{y:,.2f}} {_un}<extra></extra>'))
+                    _fig_c.update_layout(**base_layout(height=200, title=f"{_nm} ({_un})"))
+                    st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
+
+                except Exception:
+                    st.caption(f"{_nm}: dados indisponíveis")
 
         elif aba_sel == "📰 macro news":
             col_news1, col_news2 = st.columns(2)
@@ -1223,186 +1401,70 @@ with tab_overlay:
                 except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
 
 with tab_sentimento:
-    section_title("🧠 fear & greed index proprietário")
+    section_title("😱 fear & greed — eua | brasil | global")
 
-    status_card(
-        "metodologia",
-        "índice construído com 7 componentes quantitativos: momentum s&p500, força do vix (invertido), "
-        "posição no range 52 semanas, diferencial nasdaq vs s&p500, ouro como safe haven, "
-        "ratio vix/volatilidade realizada e bitcoin como proxy de apetite a risco. "
-        "pontuação normalizada de 0 (medo extremo) a 100 (ganância extrema).",
-        tipo="info",
-    )
+    with st.spinner("calculando índices de sentimento..."):
+        _fg_eua = calcular_fear_greed()
+        _fg_br  = calcular_fear_greed_br()
 
-    with st.spinner("calculando fear & greed index..."):
-        fg = calcular_fear_greed()
-
-    col_gauge, col_comp = st.columns([1, 1])
-
-    with col_gauge:
-        fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=fg['score'],
-            number={
-                'font': {'family': 'Courier New', 'size': 56, 'color': fg['cor']},
-                'suffix': '',
-            },
-            gauge={
-                'axis': {
-                    'range': [0, 100],
-                    'tickfont': {'family': 'Courier New', 'size': 10, 'color': '#555'},
-                    'tickvals': [0, 25, 45, 55, 75, 100],
-                    'ticktext': ['0', '25', '45', '55', '75', '100'],
-                },
-                'bar': {'color': fg['cor'], 'thickness': 0.25},
-                'bgcolor': '#13141E',
-                'borderwidth': 0,
-                'steps': [
-                    {'range': [0,  25], 'color': '#2a0a0a'},
-                    {'range': [25, 45], 'color': '#2a1800'},
-                    {'range': [45, 55], 'color': '#1C1D2B'},
-                    {'range': [55, 75], 'color': '#082010'},
-                    {'range': [75, 100], 'color': '#0a2a12'},
-                ],
-                'threshold': {
-                    'line': {'color': fg['cor'], 'width': 3},
-                    'thickness': 0.8,
-                    'value': fg['score'],
-                },
-            },
-        ))
-
-        layout_gauge = base_layout(height=300)
-        layout_gauge.update({
-            'paper_bgcolor': '#13141E',
-            'plot_bgcolor': '#13141E',
-            'margin': {'t': 20, 'b': 10, 'l': 20, 'r': 20},
-        })
-        fig_gauge.update_layout(**layout_gauge)
-        st.plotly_chart(fig_gauge, use_container_width=True, config={'responsive': True})
-
-        st.markdown(
-            f'<div style="text-align:center; font-family:Courier New; font-size:1.4rem; '
-            f'font-weight:bold; color:{fg["cor"]}; letter-spacing:0.12em; margin-top:-16px;">'
-            f'{fg["label"]}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with col_comp:
-        section_title("📊 breakdown dos componentes")
-        componentes = fg.get('componentes', {})
-        if componentes:
-            for chave, comp in componentes.items():
-                sc    = comp['score']
-                lbl   = comp['label']
-                val   = comp['valor']
-                # cor por faixa
-                if sc <= 25:
-                    cor_c = "#FF1744"
-                elif sc <= 45:
-                    cor_c = "#FF9900"
-                elif sc <= 55:
-                    cor_c = "#888888"
-                elif sc <= 75:
-                    cor_c = "#00C853"
-                else:
-                    cor_c = "#00FF88"
-
-                barra_pct = sc  # 0-100 já está na escala correta
-                st.markdown(
-                    f'<div style="margin-bottom:10px;">'
-                    f'<div style="display:flex; justify-content:space-between; '
-                    f'font-family:Courier New; font-size:0.72rem; color:#888; margin-bottom:3px;">'
-                    f'<span>{lbl.lower()}</span>'
-                    f'<span style="color:{cor_c};">{sc} — {val}</span>'
-                    f'</div>'
-                    f'<div style="background:#1a1a1a; border-radius:2px; height:6px; width:100%;">'
-                    f'<div style="background:{cor_c}; width:{barra_pct}%; height:6px; border-radius:2px;"></div>'
-                    f'</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+        _score_global = round(_fg_eua.get('score', 50) * 0.50 + _fg_br.get('score', 50) * 0.50)
+        if _score_global >= 75:
+            _label_global = 'ganância extrema'
+        elif _score_global >= 60:
+            _label_global = 'ganância'
+        elif _score_global >= 45:
+            _label_global = 'neutro'
+        elif _score_global >= 30:
+            _label_global = 'medo'
         else:
-            empty_state("📊", "sem componentes", "não foi possível calcular os componentes do índice.")
+            _label_global = 'medo extremo'
 
-    st.markdown("---")
+    _col_fg1, _col_fg2, _col_fg3 = st.columns(3)
 
-    # ── interpretação estratégica ────────────────────────────────────────────
-    section_title("💡 interpretação estratégica")
+    def _renderizar_gauge(col, score, label, titulo):
+        with col:
+            st.markdown(
+                f'<div style="text-align:center;margin-bottom:8px;">'
+                f'<span style="font-family:Courier New;font-size:0.72rem;'
+                f'color:#555;text-transform:uppercase;">{titulo}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            _cor_fg = "#00C853" if score >= 60 else ("#FF9900" if score >= 40 else "#FF1744")
+            _fig_fg = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=score,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': label.upper(), 'font': {'size': 11, 'color': _cor_fg, 'family': 'Courier New'}},
+                gauge={
+                    'axis': {'range': [0, 100], 'tickfont': {'size': 9, 'color': '#555'}},
+                    'bar': {'color': _cor_fg, 'thickness': 0.25},
+                    'bgcolor': '#0d0d0d', 'bordercolor': '#1e1e1e',
+                    'steps': [
+                        {'range': [0, 25], 'color': '#2a0005'},
+                        {'range': [25, 45], 'color': '#1a0f00'},
+                        {'range': [45, 55], 'color': '#111111'},
+                        {'range': [55, 75], 'color': '#001a08'},
+                        {'range': [75, 100], 'color': '#002a10'},
+                    ],
+                    'threshold': {'line': {'color': _cor_fg, 'width': 2}, 'thickness': 0.75, 'value': score},
+                },
+                number={'font': {'size': 32, 'color': _cor_fg, 'family': 'Courier New'}},
+            ))
+            _fig_fg.update_layout(height=220, paper_bgcolor='#0d0d0d', plot_bgcolor='#0d0d0d', margin=dict(l=20, r=20, t=30, b=10))
+            st.plotly_chart(_fig_fg, use_container_width=True, config={'responsive': True})
 
-    interpretacoes = {
-        "bear": (
-            "medo extremo / medo",
-            "o mercado está vendendo de forma indiscriminada. "
-            "historicamente, níveis abaixo de 25 coincidem com fundos de mercado de curto prazo. "
-            "pode ser uma janela para acumulação em ativos de qualidade com desconto, "
-            "mas atenção: mercados podem ficar irracionais mais tempo do que o esperado.",
-            [
-                "monitorar suportes técnicos importantes no s&p500 e ibovespa.",
-                "considerar aumentar caixa ou hedge (puts/ouro) se o score continuar caindo.",
-                "atenção a fundamentos: quedas com medo extremo podem ser oportunidade se macro suportar.",
-                "evitar alavancagem em ativos de risco até estabilização do índice acima de 35.",
-            ],
-        ),
-        "amber": (
-            "medo / cautela",
-            "sentimento negativo, mas sem pânico. mercado em modo defensivo. "
-            "rotação para setores de valor e defensivos (utilities, saúde, consumo básico) "
-            "tende a funcionar melhor nesse cenário.",
-            [
-                "preferir posições em setores defensivos e ativos de qualidade.",
-                "reduzir exposição a small caps e growth de alto múltiplo.",
-                "acompanhar fluxo de capital para renda fixa e ouro.",
-                "não aumentar posições de risco até índice superar a zona neutra (45-55).",
-            ],
-        ),
-        "muted": (
-            "neutro — equilíbrio de forças",
-            "mercado sem direção definida. bulls e bears equilibrados. "
-            "tendências de curto prazo pouco confiáveis. "
-            "melhor momento para revisar alocação e esperar catalisador claro.",
-            [
-                "manter alocação atual sem grandes mudanças direcionais.",
-                "usar o momento para revisar o portfólio e cortar posições sem tese clara.",
-                "acompanhar próximos eventos macro (fed, copom, cpi) como catalisadores.",
-                "posição em caixa moderada (~15-20%) pode gerar opcionalidade.",
-            ],
-        ),
-        "bull": (
-            "ganância / ganância extrema",
-            "mercado eufórico. valuations pressionados e momentum forte. "
-            "historicamente, scores acima de 75 precedem correções de curto prazo. "
-            "não significa vender tudo, mas é hora de gerenciar risco ativamente.",
-            [
-                "realizar lucros parciais em posições com ganhos expressivos.",
-                "apertar stops e reduzir tamanho de posições mais especulativas.",
-                "atenção a sinais de reversão: queda de volume, divergência de momentum.",
-                "evitar entrar em novas posições de risco em ativos com alta recente expressiva.",
-            ],
-        ),
-    }
+    _renderizar_gauge(_col_fg1, _fg_eua.get('score', 50), _fg_eua.get('label', '—'), "🇺🇸 eua")
+    _renderizar_gauge(_col_fg2, _fg_br.get('score', 50), _fg_br.get('label', '—'), "🇧🇷 brasil")
+    _renderizar_gauge(_col_fg3, _score_global, _label_global, "🌍 global")
 
-    tipo_fg   = fg.get('tipo', 'muted')
-    interp    = interpretacoes.get(tipo_fg, interpretacoes['muted'])
-    titulo_i  = interp[0]
-    resumo_i  = interp[1]
-    bullets_i = interp[2]
-
-    status_card(titulo_i, resumo_i, tipo=tipo_fg)
-
-    st.markdown(
-        '<div style="font-family:Courier New; font-size:0.75rem; color:#555; '
-        'text-transform:uppercase; letter-spacing:0.08em; margin:16px 0 8px 0;">'
-        'ações táticas recomendadas:</div>',
-        unsafe_allow_html=True,
+    st.caption(
+        "eua: 7 componentes (momentum s&p500, vix, 52w, nasdaq/sp500, "
+        "ouro, vix/vol.realizada, bitcoin). "
+        "brasil: 7 componentes (momentum ibov, vix, 52w ibov, "
+        "small/ibov, dólar, volume ibov). "
+        "global: média ponderada 50% eua + 50% brasil."
     )
-    for bullet in bullets_i:
-        st.markdown(
-            f'<div style="font-family:Courier New; font-size:0.82rem; color:#B0B0B0; '
-            f'padding:6px 0 6px 12px; border-left:2px solid {fg["cor"]}; margin-bottom:6px;">'
-            f'→ {bullet}</div>',
-            unsafe_allow_html=True,
-        )
 
 with tab_correlacoes:
     section_title("🔗 correlação dinâmica entre ativos")
