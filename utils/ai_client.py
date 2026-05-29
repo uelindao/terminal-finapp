@@ -257,6 +257,11 @@ def chamar_ia(
     Se thinking=True, ativa o modo de raciocínio profundo (budget: 2 000 tokens).
     Use apenas quando a qualidade justificar o custo extra de output.
     """
+    # Respeita a preferência de modo salva pelo usuário
+    _ai_modo = st.session_state.get('ai_modo_atual', 'free')
+    if _ai_modo == 'free' or not (user_settings and user_settings.get('ai_api_key', '').strip()):
+        user_settings = None
+
     try:
         client, model_name, tier = get_tier_and_client(user_settings)
     except (ValueError, RuntimeError) as e:

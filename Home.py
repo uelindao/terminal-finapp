@@ -1518,6 +1518,61 @@ else:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── ORDENAÇÃO DA WATCHLIST ───────────────────────────────────────────────
+    _col_ord1, _col_ord2, _col_ord3 = st.columns([3, 2, 1])
+    with _col_ord1:
+        _ordem_campo = st.selectbox(
+            "ordenar por:",
+            ["health score", "ticker", "variação 1d", "variação 1m", "preço", "status"],
+            key="wl_ordem_campo",
+            label_visibility="collapsed",
+        )
+    with _col_ord2:
+        _ordem_dir = st.radio(
+            "direção:",
+            ["↓ maior primeiro", "↑ menor primeiro"],
+            horizontal=True,
+            key="wl_ordem_dir",
+            label_visibility="collapsed",
+        )
+    with _col_ord3:
+        if st.button("↺", key="btn_reset_ordem", help="resetar ordenação"):
+            st.session_state.pop('wl_ordem_campo', None)
+            st.session_state.pop('wl_ordem_dir', None)
+            st.rerun()
+
+    _ordem_reversa = "maior" in _ordem_dir
+
+    def _sort_key(item):
+        _t     = item.get('ticker', '')
+        _tbase = mapear_ticker_base(_t)
+        _cot   = live_data.get(_t, live_data.get(_tbase, {}))
+        _hs    = health_data.get(_t, health_data.get(_tbase, {})).get('score', 0) or 0
+        _var1d = _cot.get('var_1d', 0) or 0
+        _preco = _cot.get('preco', 0) or 0
+
+        if _ordem_campo == "health score":
+            return float(_hs)
+        elif _ordem_campo == "ticker":
+            return _t
+        elif _ordem_campo == "variação 1d":
+            return float(_var1d)
+        elif _ordem_campo == "variação 1m":
+            return float(_cot.get('var_1m', 0) or 0)
+        elif _ordem_campo == "preço":
+            return float(_preco)
+        elif _ordem_campo == "status":
+            _status_ord = {'acumulação': 4, 'manutenção': 3, 'aguardar': 2, 'reduzir': 1, '': 0}
+            _hs_row = health_data.get(_t, health_data.get(_tbase, {}))
+            _status_txt = str(_hs_row.get('status', '')).lower()
+            for k, v in _status_ord.items():
+                if k in _status_txt:
+                    return v
+            return 0
+        return 0
+
+    watchlist_filtrada = sorted(watchlist_filtrada, key=_sort_key, reverse=_ordem_reversa)
+
     # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
     mercados_dict = {}
     for item in watchlist_filtrada:

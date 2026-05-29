@@ -7,6 +7,8 @@ Schema: execute database/migrations/001_initial_schema.sql no Supabase Dashboard
 antes do primeiro uso.
 """
 import json
+import sqlite3 as _sqlite3
+import os as _os
 from datetime import datetime
 import hashlib
 from database.supabase_client import get_supabase
@@ -1055,3 +1057,104 @@ def get_earnings_dates(tickers: list[str]) -> dict:
     except Exception as e:
         logger.warning(f"[db] get_earnings_dates: {e}")
         return {}
+
+
+# ==========================================
+# LOCAL SQLITE STORE (chat portfolio + kv settings)
+# ==========================================
+
+_LOCAL_DB_PATH = _os.path.join(_os.path.dirname(__file__), 'local_store.db')
+
+
+def _get_local_conn():
+    conn = _sqlite3.connect(_LOCAL_DB_PATH)
+    conn.row_factory = _sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS chat_portfolio_historico (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            portfolio_id INTEGER NOT NULL,
+            role         TEXT NOT NULL,
+            conteudo     TEXT NOT NULL,
+            criado_em    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS user_kv (
+            user_id INTEGER NOT NULL,
+            chave   TEXT NOT NULL,
+            valor   TEXT NOT NULL,
+            PRIMARY KEY (user_id, chave)
+        );
+    """)
+    conn.commit()
+    return conn
+
+
+def salvar_mensagem_chat(user_id: int, portfolio_id: int, role: str, conteudo: str) -> None:
+    try:
+        conn = _get_local_conn()
+        conn.execute(
+            "INSERT INTO chat_portfolio_historico (user_id, portfolio_id, role, conteudo) VALUES (?, ?, ?, ?)",
+            (user_id, portfolio_id, role, conteudo),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[db] salvar_mensagem_chat: {e}")
+
+
+def get_historico_chat(user_id: int, portfolio_id: int, limite: int = 50) -> list[dict]:
+    try:
+        conn = _get_local_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT role, conteudo, criado_em FROM chat_portfolio_historico WHERE user_id = ? AND portfolio_id = ? ORDER BY criado_em DESC LIMIT ?",
+            (user_id, portfolio_id, limite),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [{'role': r[0], 'conteudo': r[1], 'criado_em': r[2]} for r in reversed(rows)]
+    except Exception as e:
+        logger.warning(f"[db] get_historico_chat: {e}")
+        return []
+
+
+def limpar_historico_chat(user_id: int, portfolio_id: int) -> None:
+    try:
+        conn = _get_local_conn()
+        conn.execute(
+            "DELETE FROM chat_portfolio_historico WHERE user_id = ? AND portfolio_id = ?",
+            (user_id, portfolio_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def salvar_user_setting(user_id: int, chave: str, valor: str) -> None:
+    try:
+        conn = _get_local_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO user_kv (user_id, chave, valor) VALUES (?, ?, ?)",
+            (user_id, chave, valor),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[db] salvar_user_setting: {e}")
+
+
+def get_user_setting(user_id: int, chave: str, default: str = '') -> str:
+    try:
+        conn = _get_local_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT valor FROM user_kv WHERE user_id = ? AND chave = ?",
+            (user_id, chave),
+        )
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else default
+    except Exception as e:
+        logger.warning(f"[db] get_user_setting: {e}")
+        return default

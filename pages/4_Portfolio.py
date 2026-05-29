@@ -15,7 +15,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
-from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache
+from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
 from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
@@ -2248,9 +2248,14 @@ with tab_chat:
     _sugestoes = [
         "qual meu ativo com pior health score?",
         "estou bem diversificado ou concentrado?",
-        "meu p&l está bom para o ambiente macro?",
+        "meu p&l está bom para o ambiente macro atual?",
         "quais posições devo revisar primeiro?",
         "como o vix atual afeta minha carteira?",
+        "qual meu ativo mais correlacionado com o ibov?",
+        "qual posição tem maior risco de queda?",
+        "devo rebalancear minha carteira agora?",
+        "quais ativos estão próximos do stop loss?",
+        "minha exposição a juros está adequada?",
     ]
 
     _cols_sug = st.columns(len(_sugestoes))
@@ -2261,10 +2266,23 @@ with tab_chat:
                          use_container_width=True, help=_sug):
                 st.session_state["chat_input_pendente"] = _sug
 
-    # ── inicializa histórico ──────────────────────────────────────────────
+    # ── carrega user da sessão ────────────────────────────────────────────
 
+    _user_id_chat = st.session_state.get('user_id', 0)
+
+    # ── inicializa histórico (banco local + session_state) ────────────────
+
+    _hist_key_db = f"chat_hist_loaded_{_portfolio_id_chat}"
     if "chat_portfolio_msgs" not in st.session_state:
         st.session_state["chat_portfolio_msgs"] = []
+        # Carrega mensagens do banco local SQLite na primeira inicialização
+        _hist_db = get_historico_chat(_user_id_chat, _portfolio_id_chat, limite=30)
+        if _hist_db:
+            st.session_state["chat_portfolio_msgs"] = [
+                {'role': h['role'], 'content': h['conteudo']}
+                for h in _hist_db
+            ]
+        st.session_state[_hist_key_db] = True
 
     # ── exibe histórico da conversa ───────────────────────────────────────
 
@@ -2294,6 +2312,7 @@ with tab_chat:
         st.session_state["chat_portfolio_msgs"].append(
             {"role": "user", "content": _pergunta}
         )
+        salvar_mensagem_chat(_user_id_chat, _portfolio_id_chat, 'user', _pergunta)
         with st.chat_message("user", avatar="👤"):
             st.markdown(
                 f'<div style="font-family:Courier New; font-size:0.83rem; '
@@ -2333,12 +2352,15 @@ with tab_chat:
         st.session_state["chat_portfolio_msgs"].append(
             {"role": "assistant", "content": _resposta}
         )
+        salvar_mensagem_chat(_user_id_chat, _portfolio_id_chat, 'assistant', _resposta)
 
     # ── botão limpar ──────────────────────────────────────────────────────
 
     if st.session_state.get("chat_portfolio_msgs"):
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🗑️ limpar conversa", key="btn_limpar_chat"):
+            limpar_historico_chat(_user_id_chat, _portfolio_id_chat)
             st.session_state["chat_portfolio_msgs"] = []
             st.session_state.pop(_ctx_key, None)
+            st.session_state.pop(_hist_key_db, None)
             st.rerun()

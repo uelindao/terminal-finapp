@@ -16,7 +16,7 @@ from database.db import (
     listar_relatorios_enviados,
     listar_watchlist,
     salvar_config_alerta, get_configs_alerta, deletar_config_alerta,
-    get_user_settings, salvar_user_settings,
+    get_user_settings, salvar_user_settings, salvar_user_setting,
 )
 
 if not require_auth():
@@ -484,72 +484,69 @@ with tab_alertas:
 # TAB 5 — MINHA IA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_ia:
-    section_title("inteligência artificial")
+    section_title("⚡ modo de análise ia")
 
     settings     = get_user_settings(user_id_atual) if user else {}
-    tem_key_pro  = bool(settings.get('ai_api_key', '').strip())
+    _modo_atual  = get_user_setting(user_id_atual, 'ai_modo', 'free')
 
-    # Status do tier
-    if tem_key_pro:
-        status_card(
-            "✅ tier pro ativo",
-            f"usando sua chave de {settings.get('ai_provider', 'deepseek')} — sem limites de uso.",
-            tipo="bull",
-        )
-    else:
-        status_card(
-            "ℹ️ tier gratuito ativo",
-            "usando gemini 2.5 flash (chave global). configure sua chave abaixo "
-            "para análises mais profundas e sem limite de requisições.",
-            tipo="info",
-        )
+    _col_t1, _col_t2 = st.columns(2)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Comparativo de tiers ──────────────────────────────────────────────────
-    col_free, col_pro = st.columns(2)
-
-    with col_free:
+    with _col_t1:
+        _borda_free = "#FF9900" if _modo_atual == 'free' else "#1e1e1e"
         st.markdown(
-            '<div style="background:var(--bg-surface);'
-            ' border:1px solid var(--border-subtle);'
-            ' border-radius:var(--radius-md); padding:18px;">'
-            '<div style="font-family:var(--font-ui); font-size:0.78rem;'
-            ' font-weight:700; color:var(--text-secondary);'
-            ' letter-spacing:0.06em; margin-bottom:12px;">🆓 TIER GRATUITO</div>'
-            '<div style="font-family:var(--font-ui); font-size:0.75rem;'
-            ' color:var(--text-muted); line-height:2.0;">'
-            '· Gemini 2.5 Flash<br>'
-            '· 1.500 análises/dia<br>'
-            '· Sem chave necessária<br>'
-            '· Disponível para todos<br>'
-            '· Respostas até 600 tokens'
-            '</div></div>',
+            f'<div style="background:#0d0d0d;border:2px solid '
+            f'{_borda_free};border-radius:6px;padding:16px;'
+            f'text-align:center;">'
+            f'<div style="font-size:1.2rem;">🆓</div>'
+            f'<div style="font-family:Courier New;color:#FF9900;'
+            f'font-weight:700;margin:4px 0;">tier gratuito</div>'
+            f'<div style="font-family:Courier New;font-size:0.7rem;'
+            f'color:#555;">gemini 2.0 flash · sem chave necessária</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
+        if st.button(
+            "✅ usar gratuito" if _modo_atual == 'free' else "usar gratuito",
+            key="btn_modo_free",
+            use_container_width=True,
+            type="primary" if _modo_atual == 'free' else "secondary",
+        ):
+            salvar_user_setting(user_id_atual, 'ai_modo', 'free')
+            st.session_state['ai_modo_atual'] = 'free'
+            st.success("modo gratuito ativado!")
+            st.rerun()
 
-    with col_pro:
+    with _col_t2:
+        _tem_chave_pro = bool(settings.get('ai_api_key', '').strip())
+        _borda_pro = "#FF9900" if _modo_atual == 'pro' else "#1e1e1e"
         st.markdown(
-            '<div style="background:var(--bg-surface);'
-            ' border:1px solid var(--accent-border);'
-            ' border-radius:var(--radius-md); padding:18px;">'
-            '<div style="font-family:var(--font-ui); font-size:0.78rem;'
-            ' font-weight:700; color:var(--accent);'
-            ' letter-spacing:0.06em; margin-bottom:12px;">⚡ TIER PRO</div>'
-            '<div style="font-family:var(--font-ui); font-size:0.75rem;'
-            ' color:var(--text-muted); line-height:2.0;">'
-            '· DeepSeek V4 Pro / OpenAI / Gemini Pro<br>'
-            '· Sem limites de requisições<br>'
-            '· Chave pessoal criptografada<br>'
-            '· Thinking mode disponível<br>'
-            '· Respostas até 1.200 tokens'
-            '</div></div>',
+            f'<div style="background:#0d0d0d;border:2px solid '
+            f'{_borda_pro};border-radius:6px;padding:16px;'
+            f'text-align:center;">'
+            f'<div style="font-size:1.2rem;">⚡</div>'
+            f'<div style="font-family:Courier New;color:#FF9900;'
+            f'font-weight:700;margin:4px 0;">tier pro</div>'
+            f'<div style="font-family:Courier New;font-size:0.7rem;'
+            f'color:#555;">deepseek v4 / openai · chave pessoal</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
+        if st.button(
+            "✅ usar pro" if _modo_atual == 'pro' else "usar pro",
+            key="btn_modo_pro",
+            use_container_width=True,
+            type="primary" if _modo_atual == 'pro' else "secondary",
+            disabled=not _tem_chave_pro,
+            help="configure sua chave api abaixo para ativar" if not _tem_chave_pro else "",
+        ):
+            salvar_user_setting(user_id_atual, 'ai_modo', 'pro')
+            st.session_state['ai_modo_atual'] = 'pro'
+            st.success("modo pro ativado!")
+            st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("configurar chave pro (opcional)")
-
+    
     _provider_labels = {
         'deepseek':         '⚡ DeepSeek V4 Pro',
         'openai':           '🟢 OpenAI GPT-4o',
