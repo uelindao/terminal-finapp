@@ -471,16 +471,23 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             acao_temp = yf.Ticker(ticker)
             hist = acao_temp.history(period="1y")
 
-        # pular acao.info para qualquer mercado com cache populado
-        if cache_disponivel and (is_br or is_fii or is_us):
+        # info (mercado) pode vir vazia se cache tem dados
+        if cache_disponivel:
             info = {}
-            acao = None
         else:
             if 'acao_temp' in locals():
-                acao = acao_temp
+                acao_info = acao_temp
             else:
-                acao = yf.Ticker(ticker)
-            info = acao.info
+                acao_info = yf.Ticker(ticker)
+            info = acao_info.info
+
+        # acao (balanço) sempre é buscada para ações (Piotroski, ROIC, Crescimento)
+        if is_fii:
+            acao = None  # FIIs não usam cálculos de balanço
+        elif 'acao_temp' in locals():
+            acao = acao_temp
+        else:
+            acao = yf.Ticker(ticker)
 
         qualidade = dados_base.get('qualidade_dados', 50)
         dados_confiaveis = qualidade >= 40

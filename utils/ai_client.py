@@ -298,6 +298,17 @@ def chamar_ia(
         return ""
 
 
+def _sanitizar_markdown(texto: str) -> str:
+    if texto.count('**') % 2 != 0:
+        texto += '**'
+    asteriscos_simples = texto.count('*') - texto.count('**') * 2
+    if asteriscos_simples % 2 != 0:
+        texto += '*'
+    if texto.count('`') % 2 != 0:
+        texto += '`'
+    return texto
+
+
 def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
     """
     Consome o stream de tokens e renderiza em tempo real na UI do Streamlit.
@@ -363,15 +374,16 @@ def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
                 # thinking chunks não têm .content; ignorar
                 if hasattr(delta, "content") and delta.content:
                     texto_completo += delta.content
+                    _texto_render = _sanitizar_markdown(texto_completo)
                     placeholder.markdown(
                         f'<div style="margin-top:4px;">{tier_badge}'
                         f'<div style="{_STYLE_TEXTO}">'
-                        f'{texto_completo}'
+                        f'{_texto_render}'
                         f'<span class="ft-cursor">▋</span></div></div>',
                         unsafe_allow_html=True,
                     )
 
-            # Render final sem cursor
+            # Render final sem cursor (texto completo, sem sanitização)
             placeholder.markdown(
                 f'<div style="margin-top:4px;">{tier_badge}'
                 f'<div style="{_STYLE_TEXTO}">'

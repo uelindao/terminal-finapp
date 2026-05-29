@@ -1110,7 +1110,26 @@ with tab_val:
         with _col_dy:
             _render_multiplo_card("Div. Yield", cache_d.get('dy%'), _medios.get('dy'), sufixo="%")
     else:
-        st.info("dados históricos FMP não disponíveis para este ativo.")
+        section_title("📊 múltiplos atuais")
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.68rem; '
+            'color:#444; margin-bottom:12px;">'
+            'histórico via FMP não disponível para este ativo. '
+            'exibindo múltiplos do cache local.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _cols_mult = st.columns(4)
+        _metricas_basicas = [
+            ("P/L",       cache_d.get('p/l'),    ""),
+            ("P/VP",      cache_d.get('p/vp'),   ""),
+            ("ROE %",     cache_d.get('roe%'),    "%"),
+            ("Div Yield", cache_d.get('dy%'),     "%"),
+        ]
+        for _cm, (_lbl, _val, _suf) in zip(_cols_mult, _metricas_basicas):
+            with _cm:
+                _val_str = f"{float(_val):.2f}{_suf}" if _val is not None else "n/d"
+                metric_card(_lbl.lower(), _val_str)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1150,7 +1169,14 @@ with tab_val:
             _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
             st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
     else:
-        st.info("peers não disponíveis para este ativo via FMP.")
+        st.markdown(
+            '<div style="font-family:Courier New; font-size:0.68rem; '
+            'color:#333; padding:8px 0;">'
+            'comparação com peers não disponível via FMP '
+            'para este ticker.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
 with tab_tec:
     try:
@@ -1438,6 +1464,41 @@ with tab_ia:
             )
 
 with tab_fund:
+    # Busca dados complementares ausentes no cache/info_dict
+    _beta_tab = None
+    _de_tab = None
+    _descr_tab = cache_d.get('descricao') or cache_d.get('description')
+    try:
+        from utils.fmp_client import get_profile
+        _profile_fmp = get_profile(t_base)
+        if _profile_fmp:
+            _beta_tab = _profile_fmp.get('beta')
+            _descr_tab = _descr_tab or _profile_fmp.get('descricao', '')
+    except Exception:
+        pass
+    if _beta_tab is None and df_hist is not None and len(df_hist) >= 60:
+        try:
+            _bench_t = "^BVSP" if t_base.endswith('.SA') else "^GSPC"
+            _h_bench = yf.Ticker(_bench_t).history(period="1y", auto_adjust=True)
+            if not _h_bench.empty:
+                _r_a = df_hist['Close'].pct_change().dropna()
+                _r_b = _h_bench['Close'].pct_change().dropna()
+                _df_b = pd.concat([_r_a, _r_b], axis=1).dropna()
+                if len(_df_b) >= 30:
+                    _cov_b = _df_b.cov().iloc[0, 1]
+                    _var_b = _df_b.iloc[:, 1].var()
+                    _beta_tab = round(_cov_b / _var_b, 2) if _var_b > 0 else None
+        except Exception:
+            pass
+    if _de_tab is None:
+        try:
+            _info_de = yf.Ticker(t_base).info
+            _de_raw = _info_de.get('debtToEquity')
+            if _de_raw is not None:
+                _de_tab = round(float(_de_raw), 2)
+        except Exception:
+            pass
+
     c_f1, c_f2 = st.columns(2)
     with c_f1:
         st.markdown("**múltiplos e risco**")
@@ -1451,8 +1512,8 @@ with tab_fund:
         else:
             ev_e = safe_float(cache_d.get('ev/ebitda')) or safe_float(info_dict.get('enterpriseToEbitda'))
             pvp_val = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
-            beta_val = safe_float(info_dict.get('beta'))
-            debt_val = safe_float(info_dict.get('debtToEquity'))
+            beta_val = _beta_tab or safe_float(info_dict.get('beta'))
+            debt_val = _de_tab or safe_float(info_dict.get('debtToEquity'))
             
             f_d = {
                 "métrica": ["EV/EBITDA", "P/VP", "Volatilidade Anual", "Beta", "Dívida/Patrimônio"], 
@@ -1590,7 +1651,12 @@ with tab_fund:
 
     with c_f2:
         st.markdown("**descrição**")
-        st.write(info_dict.get('longBusinessSummary', 'Sem descrição.')[:800] + "...")
+        _descricao_texto = _descr_tab or info_dict.get('longBusinessSummary', '')
+        st.markdown(
+            _descricao_texto[:800] + "..."
+            if _descricao_texto and len(str(_descricao_texto)) > 10
+            else '_descrição não disponível para este ativo._'
+        )
 
 with tab_dcf:
     if is_fii:

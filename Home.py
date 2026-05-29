@@ -223,112 +223,64 @@ with st.sidebar:
     _prej = _regime_dict.get("setores_prejudicados", [])
     _pos = _regime_dict.get("posicionamento", "")
 
-    # Cor do regime
     _cor_regime = (
         "#FF1744" if "stress" in _regime_label
         else "#FF9900" if "altos" in _regime_label
         else "#00C853"
     )
-
-    # Icone VIX
     _vix_val = _regime_dict.get("vix", 15.0)
     _icone_vix = "🔴" if _vix_val > 25 else ("🟡" if _vix_val > 18 else "🟢")
-
-    # Cor score ambiente
     _cor_score = "#00C853" if _score_amb >= 60 else ("#FF9900" if _score_amb >= 35 else "#FF1744")
 
-    st.markdown(
-        f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
-        f'border-left:3px solid {_cor_regime}; border-radius:6px; '
-        f'padding:12px 20px; margin-bottom:20px;">'
+    _html = [
+        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};border-radius:6px;padding:12px 20px;margin-bottom:20px;">',
+        f'<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">',
+        f'<div style="font-family:Courier New;font-size:0.68rem;color:#555;text-transform:uppercase;letter-spacing:.1em;min-width:80px;">regime macro</div>',
+        f'<div style="font-family:Courier New;font-size:0.82rem;color:{_cor_regime};font-weight:600;">{_regime_label}</div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">score amb.</div><div style="font-size:0.9rem;color:{_cor_score};font-family:Courier New;font-weight:600;">{_score_amb}</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">selic</div><div style="font-size:0.9rem;color:#FF9900;font-family:Courier New;font-weight:600;">{_regime_dict.get("selic", 10.75):.2f}%</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">ipca</div><div style="font-size:0.9rem;color:#ccc;font-family:Courier New;">{_regime_dict.get("ipca", 4.5):.1f}%</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">vix {_icone_vix}</div><div style="font-size:0.9rem;color:#ccc;font-family:Courier New;">{_regime_dict.get("vix", 15.0):.1f}</div></div>',
+        '</div>',
+    ]
 
-        # --- Primeira linha: label + indicadores ---
-        f'<div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap;">'
+    if _fav or _prej:
+        _html.append('<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">')
 
-        f'<div style="font-family:Courier New; font-size:0.68rem; '
-        f'color:#555; text-transform:uppercase; letter-spacing:.1em; '
-        f'min-width:80px;">regime macro</div>'
+        if _fav:
+            fav_spans = ''.join(
+                f'<span style="background:#003300;color:#00C853;font-family:Courier New;font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
+                for s in _fav
+            )
+            _html.append(
+                f'<div style="flex:1;min-width:120px;">'
+                f'<div style="font-size:0.62rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{fav_spans}</div>'
+                f'</div>'
+            )
 
-        f'<div style="font-family:Courier New; font-size:0.82rem; '
-        f'color:{_cor_regime}; font-weight:600;">{_regime_label}</div>'
+        if _prej:
+            prej_spans = ''.join(
+                f'<span style="background:#330000;color:#FF1744;font-family:Courier New;font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
+                for s in _prej
+            )
+            _html.append(
+                f'<div style="flex:1;min-width:120px;">'
+                f'<div style="font-size:0.62rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{prej_spans}</div>'
+                f'</div>'
+            )
 
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:0.65rem; color:#444; '
-        f'text-transform:uppercase;">score amb.</div>'
-        f'<div style="font-size:0.9rem; color:{_cor_score}; '
-        f'font-family:Courier New; font-weight:600;">{_score_amb}</div>'
-        f'</div>'
+        _html.append('</div>')
 
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:0.65rem; color:#444; '
-        f'text-transform:uppercase;">selic</div>'
-        f'<div style="font-size:0.9rem; color:#FF9900; '
-        f'font-family:Courier New; font-weight:600;">'
-        f'{_regime_dict.get("selic", 10.75):.2f}%</div>'
-        f'</div>'
-
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:0.65rem; color:#444; '
-        f'text-transform:uppercase;">ipca</div>'
-        f'<div style="font-size:0.9rem; color:#ccc; '
-        f'font-family:Courier New;">{_regime_dict.get("ipca", 4.5):.1f}%</div>'
-        f'</div>'
-
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:0.65rem; color:#444; '
-        f'text-transform:uppercase;">vix {_icone_vix}</div>'
-        f'<div style="font-size:0.9rem; color:#ccc; '
-        f'font-family:Courier New;">{_regime_dict.get("vix", 15.0):.1f}</div>'
-        f'</div>'
-
-        f'</div>'
-
-        # --- Segunda linha: setores favorecidos vs prejudicados ---
-        f'<div style="display:flex; gap:16px; margin-top:10px; flex-wrap:wrap;">'
-
-        f'<div style="flex:1; min-width:120px;">'
-        f'<div style="font-size:0.62rem; color:#555; '
-        f'text-transform:uppercase; margin-bottom:3px;">🟢 favorecidos</div>'
-        f'<div style="display:flex; flex-wrap:wrap; gap:4px;">'
-    )
-
-    for _s in _fav:
-        st.markdown(
-            f'<span style="background:#003300; color:#00C853; '
-            f'font-family:Courier New; font-size:0.62rem; '
-            f'padding:2px 6px; border-radius:3px;">{_s}</span>',
-            unsafe_allow_html=True,
+    if _pos:
+        _html.append(
+            f'<div style="font-family:Courier New;font-size:0.65rem;color:#666;margin-top:8px;border-top:1px solid #1e1e1e;padding-top:6px;">{_pos}</div>'
         )
 
-    st.markdown(
-        f'</div></div>'
+    _html.append('</div>')
 
-        f'<div style="flex:1; min-width:120px;">'
-        f'<div style="font-size:0.62rem; color:#555; '
-        f'text-transform:uppercase; margin-bottom:3px;">🔴 prejudicados</div>'
-        f'<div style="display:flex; flex-wrap:wrap; gap:4px;">'
-    )
-
-    for _s in _prej:
-        st.markdown(
-            f'<span style="background:#330000; color:#FF1744; '
-            f'font-family:Courier New; font-size:0.62rem; '
-            f'padding:2px 6px; border-radius:3px;">{_s}</span>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        f'</div></div>'
-        f'</div>'
-
-        # --- Terceira linha: posicionamento ---
-        f'<div style="font-family:Courier New; font-size:0.65rem; '
-        f'color:#666; margin-top:8px; border-top:1px solid #1e1e1e; '
-        f'padding-top:6px;">{_pos}</div>'
-
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(''.join(_html), unsafe_allow_html=True)
 
 # ── OPORTUNIDADES DO MOMENTO ─────────────────────────────────────────
 _wl_home = listar_watchlist()
