@@ -1187,11 +1187,7 @@ with tab_radar:
                     '5d %':        '{:+.1f}%',
                     '3m %':        '{:+.1f}%',
                     'topo %':      '{:.0f}%',
-                }).background_gradient(
-                    subset=['score total'],
-                    cmap='RdYlGn',
-                    vmin=30, vmax=85,
-                ),
+                }),
                 use_container_width=True,
                 hide_index=True,
             )
