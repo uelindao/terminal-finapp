@@ -364,7 +364,7 @@ def rodar_radar_universo(
 
     candidatos = candidatos[:60]
 
-    from Home import calcular_oportunidades_watchlist
+    from utils.radar import calcular_oportunidades_watchlist
     try:
         resultado = calcular_oportunidades_watchlist(
             tuple(candidatos),
@@ -1122,10 +1122,7 @@ with tab_radar:
                 "filtrando universo e calculando scores... "
                 "pode levar 20-40 segundos..."
             ):
-                from Home import calcular_oportunidades_watchlist
-                from utils.tickers import (
-                    SCREENER_B3, FII_TODOS, SCREENER_US
-                )
+                from utils.radar import calcular_oportunidades_watchlist
 
                 _todos_radar = (
                     SCREENER_B3 + FII_TODOS
