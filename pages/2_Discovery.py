@@ -326,6 +326,55 @@ def calcular_heatmap_setorial(universo: str = "BR") -> list[dict]:
     return sorted(resultado, key=lambda x: x['score_medio'], reverse=True)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def rodar_radar_universo(
+    universo: str = "BR",
+    modo:     str = "entrada",
+    top_n:    int = 10,
+) -> list[dict]:
+    """
+    Roda o radar em todo o universo de ativos (não só watchlist).
+    Usa health scores e fundamentos já cacheados.
+    Só baixa histórico de preços dos candidatos qualificados
+    (health score >= 55) para economizar chamadas à API.
+    """
+    import yfinance as yf
+    import numpy as np
+
+    if universo == "BR":
+        from utils.tickers import SCREENER_B3, FII_TODOS
+        todos = SCREENER_B3 + FII_TODOS
+    else:
+        from utils.tickers import SCREENER_US
+        todos = SCREENER_US
+
+    hs_all = {
+        h['ticker']: float(h.get('score', 0) or 0)
+        for h in (get_health_scores() or [])
+    }
+
+    candidatos = [
+        t for t in todos
+        if hs_all.get(t, 0) >= 55
+        or hs_all.get(mapear_ticker_base(t), 0) >= 55
+    ]
+
+    if not candidatos:
+        return []
+
+    candidatos = candidatos[:60]
+
+    from Home import calcular_oportunidades_watchlist
+    try:
+        resultado = calcular_oportunidades_watchlist(
+            tuple(candidatos),
+            modo=modo,
+        )
+        return resultado[:top_n]
+    except Exception:
+        return []
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def rodar_screener(
     universo:        str,
@@ -446,16 +495,18 @@ def rodar_screener(
 
 
 # 6. interface de separadores (tabs)
-tab_momentum, tab_screener, tab_setorial = st.tabs([
-    "📈 Momentum (Força Relativa)",
-    "🎯 Screener Quantitativo",
+tab_screen, tab_mom, tab_ia, tab_setorial, tab_radar = st.tabs([
+    "🔍 screener quantitativo",
+    "🚀 momentum (força relativa)",
+    "🧠 ia: oportunidades do dia",
     "🗺️ rotação setorial",
+    "⚡ radar de mercado",
 ])
 
 # ==========================================
-# tab 1 — momentum screener
+# tab 1 — momentum (força relativa)
 # ==========================================
-with tab_momentum:
+with tab_mom:
     section_title("🚀 momentum screener — força relativa")
 
     status_card(
@@ -584,7 +635,7 @@ with tab_momentum:
 # ==========================================
 # tab 2 — screener quantitativo
 # ==========================================
-with tab_screener:
+with tab_screen:
     section_title("🕵️ screener quantitativo — filtros paramétricos")
 
     # ── seleção de universo ──────────────────────────────────────────────────
@@ -863,6 +914,15 @@ with tab_screener:
                         st.success(f"✅ {adicionados} ativo(s) adicionados à watchlist!")
                         st.rerun()
 
+with tab_ia:
+    section_title("🧠 ia: oportunidades do dia")
+    empty_state(
+        "🧠",
+        "ia analytics — em breve",
+        "análise inteligente do universo completo com "
+        "recomendações de entrada e saída via deepseek.",
+    )
+
 with tab_setorial:
     section_title("🗺️ rotação setorial — health score médio por setor")
 
@@ -1004,3 +1064,190 @@ with tab_setorial:
                         t.replace('.SA', '') for t in _ds['tickers']
                     ]),
                 )
+
+# ==========================================
+# tab 5 — radar de mercado
+# ==========================================
+with tab_radar:
+    section_title("⚡ radar de mercado — oportunidades fora da sua watchlist")
+
+    st.markdown(
+        '<div style="font-family:Courier New;font-size:0.75rem;'
+        'color:#555;margin-bottom:16px;line-height:1.6;">'
+        'scan em todo o universo de ativos (não só sua watchlist). '
+        'filtra por qualidade mínima (health ≥ 55) antes de '
+        'calcular o score de assimetria — economiza tempo e foca '
+        'onde vale a pena olhar.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    _rc1, _rc2, _rc3 = st.columns([2, 2, 1])
+    with _rc1:
+        _univ_radar = st.radio(
+            "universo:",
+            ["BR", "US"],
+            format_func=lambda x: {
+                "BR": "🇧🇷 Brasil (B3 + FIIs)",
+                "US": "🇺🇸 EUA (S&P500)",
+            }[x],
+            horizontal=True,
+            key="radio_univ_radar",
+        )
+    with _rc2:
+        _modo_radar_disc = st.radio(
+            "modo:",
+            ["entrada", "realizacao", "dividendo"],
+            format_func=lambda x: {
+                "entrada":    "🎯 entrada",
+                "realizacao": "📤 realização",
+                "dividendo":  "💰 dividendos",
+            }[x],
+            horizontal=True,
+            key="radio_modo_radar_disc",
+        )
+    with _rc3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        _btn_radar = st.button(
+            "▶ rodar scan",
+            type="primary",
+            use_container_width=True,
+            key="btn_rodar_radar",
+        )
+
+    if _btn_radar or st.session_state.get('radar_resultado'):
+
+        if _btn_radar:
+            with st.spinner(
+                "filtrando universo e calculando scores... "
+                "pode levar 20-40 segundos..."
+            ):
+                from Home import calcular_oportunidades_watchlist
+                from utils.tickers import (
+                    SCREENER_B3, FII_TODOS, SCREENER_US
+                )
+
+                _todos_radar = (
+                    SCREENER_B3 + FII_TODOS
+                    if _univ_radar == "BR"
+                    else SCREENER_US
+                )
+
+                _hs_radar = {
+                    h['ticker']: float(h.get('score', 0) or 0)
+                    for h in (get_health_scores() or [])
+                }
+                _cands = [
+                    t for t in _todos_radar
+                    if _hs_radar.get(t, 0) >= 55
+                    or _hs_radar.get(mapear_ticker_base(t), 0) >= 55
+                ][:60]
+
+                _resultado_radar = calcular_oportunidades_watchlist(
+                    tuple(_cands),
+                    modo=_modo_radar_disc,
+                )
+                st.session_state['radar_resultado'] = _resultado_radar
+                st.session_state['radar_modo_last'] = _modo_radar_disc
+
+        _resultado_radar = st.session_state.get('radar_resultado', [])
+
+        if not _resultado_radar:
+            st.info(
+                "nenhum ativo passou pelos filtros de qualidade "
+                "e timing. tente rodar o sync de fundamentos "
+                "primeiro ou mude o modo."
+            )
+        else:
+            st.markdown(
+                f'<div style="font-family:Courier New;'
+                f'font-size:0.72rem;color:#555;margin-bottom:12px;">'
+                f'top {len(_resultado_radar)} ativos do universo '
+                f'{_univ_radar} no modo '
+                f'{st.session_state.get("radar_modo_last","—")}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            _df_radar = pd.DataFrame(_resultado_radar)[[
+                'ticker', 'nome', 'score_assim',
+                'score_hs', 'score_val', 'score_timing',
+                'rsi', 'ret_5d', 'ret_3m', 'dist_top',
+            ]]
+            _df_radar.columns = [
+                'ticker', 'nome', 'score total',
+                'qualidade', 'valuation', 'timing',
+                'rsi', '5d %', '3m %', 'topo %',
+            ]
+
+            st.dataframe(
+                _df_radar.style.format({
+                    'score total': '{:.0f}',
+                    'qualidade':   '{:.0f}',
+                    'valuation':   '{:.0f}',
+                    'timing':      '{:.0f}',
+                    'rsi':         '{:.0f}',
+                    '5d %':        '{:+.1f}%',
+                    '3m %':        '{:+.1f}%',
+                    'topo %':      '{:.0f}%',
+                }).background_gradient(
+                    subset=['score total'],
+                    cmap='RdYlGn',
+                    vmin=30, vmax=85,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            _top1 = _resultado_radar[0]
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button(
+                f"🔬 analisar {_top1['ticker'].replace('.SA','')} "
+                f"(score {_top1['score_assim']:.0f}) no research",
+                type="primary",
+                use_container_width=True,
+                key="btn_radar_research_top1",
+            ):
+                st.session_state['research_ticker_externo'] = (
+                    _top1['ticker']
+                )
+                st.switch_page("pages/1_Research.py")
+
+            if st.button(
+                f"+ adicionar top {len(_resultado_radar)} "
+                f"à watchlist para acompanhar",
+                type="secondary",
+                use_container_width=True,
+                key="btn_radar_add_wl",
+            ):
+                from database.db import (
+                    adicionar_ativo, get_watchlist_padrao
+                )
+                _wl_id_r = get_watchlist_padrao()
+                _adicionados = 0
+                for _r in _resultado_radar:
+                    try:
+                        _merc_r = (
+                            "Brasil (B3)"
+                            if _r['ticker'].endswith('.SA')
+                            else "EUA"
+                        )
+                        adicionar_ativo(
+                            ticker       = _r['ticker'],
+                            nome         = _r['nome'],
+                            mercado      = _merc_r,
+                            watchlist_id = _wl_id_r,
+                        )
+                        _adicionados += 1
+                    except Exception:
+                        pass
+                st.success(
+                    f"✅ {_adicionados} ativos adicionados "
+                    f"à watchlist padrão!"
+                )
+
+    else:
+        st.info(
+            "clique em '▶ rodar scan' para analisar o "
+            "universo completo de ativos."
+        )

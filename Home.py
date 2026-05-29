@@ -137,18 +137,34 @@ def buscar_earnings_proximos(tickers_tuple: tuple) -> dict:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
+def calcular_oportunidades_watchlist(
+    tickers_tuple: tuple,
+    modo: str = "entrada",
+) -> list[dict]:
     """
-    Identifica ativos da watchlist com maior assimetria positiva:
-    health score alto + momentum recente positivo + longe do topo 52w.
-    Retorna top 3 ordenados por score de assimetria composto.
+    Radar de oportunidades com score reformulado.
+
+    Pesos:
+      55% — health score (qualidade + momentum já embutido)
+      20% — valuation vs histórico próprio (FMP percentil)
+      25% — timing de entrada (RSI + micro-recuperação +
+             distância do topo com filtro de estabilização)
+
+    modo:
+      "entrada"    — qualidade + desconto + estabilização
+      "realizacao" — sobrecomprado, possível redução
+      "dividendo"  — yield real vs NTN-B atrativo
     """
+    import yfinance as yf
+    import numpy as np
+
     tickers = list(tickers_tuple)
     if not tickers:
         return []
 
     from database.db import get_health_scores, get_todos_fundamentos_cache
     from utils.tickers import mapear_ticker_base
+    from utils.fmp_client import get_multiplos_medios
 
     hs_all   = {h['ticker']: h for h in (get_health_scores() or [])}
     fund_all = get_todos_fundamentos_cache()
@@ -156,80 +172,202 @@ def calcular_oportunidades_watchlist(tickers_tuple: tuple) -> list[dict]:
     resultados = []
 
     for ticker in tickers:
-        t_base = mapear_ticker_base(ticker)
-        hs_row = hs_all.get(t_base) or hs_all.get(ticker)
+        t_base  = mapear_ticker_base(ticker)
+        hs_row  = hs_all.get(t_base) or hs_all.get(ticker)
         if not hs_row:
             continue
 
-        score_hs = hs_row.get('score', 50)
-        if score_hs < 55:   # só considera ativos com score razoável
+        score_hs = float(hs_row.get('score', 50) or 50)
+
+        # Filtro mínimo de qualidade por modo
+        score_min = 55 if modo in ("entrada", "dividendo") else 50
+        if score_hs < score_min:
             continue
 
         try:
-            hist = yf.Ticker(t_base).history(period="1y", auto_adjust=True)
+            hist = yf.Ticker(t_base).history(
+                period="1y", auto_adjust=True
+            )
             if hist.empty or len(hist) < 60:
                 continue
 
-            close       = hist['Close']
+            close = hist['Close'].dropna()
+            volume = hist['Volume'].dropna() if 'Volume' in hist else None
+
             preco_atual = float(close.iloc[-1])
-            preco_1m    = float(close.iloc[-21]) if len(close) >= 21 else preco_atual
-            preco_3m    = float(close.iloc[-63]) if len(close) >= 63 else preco_atual
             high_52w    = float(close.max())
+            low_52w     = float(close.min())
 
-            ret_1m   = (preco_atual / preco_1m - 1) * 100
-            ret_3m   = (preco_atual / preco_3m - 1) * 100
+            # ── Retornos base ──────────────────────────────────────
+            preco_1m  = float(close.iloc[-21])  if len(close) >= 21  else preco_atual
+            preco_3m  = float(close.iloc[-63])  if len(close) >= 63  else preco_atual
+            preco_6m  = float(close.iloc[-126]) if len(close) >= 126 else preco_atual
+            preco_5d  = float(close.iloc[-5])   if len(close) >= 5   else preco_atual
+            preco_10d = float(close.iloc[-10])  if len(close) >= 10  else preco_atual
+
+            ret_1m  = (preco_atual / preco_1m  - 1) * 100
+            ret_3m  = (preco_atual / preco_3m  - 1) * 100
+            ret_6m  = (preco_atual / preco_6m  - 1) * 100
+            ret_5d  = (preco_atual / preco_5d  - 1) * 100
+            ret_10d = (preco_atual / preco_10d - 1) * 100
+
             dist_top = (preco_atual / high_52w - 1) * 100
+            dist_bot = (preco_atual / low_52w  - 1) * 100
 
-            # Filtro obrigatório de momentum mínimo
-            if ret_1m < -15 and ret_3m < 0:
-                continue   # queda forte em ambos os períodos — tendência baixista
-            if ret_1m <= 0 and ret_3m <= 0:
-                continue   # sem momentum em nenhum período — não é oportunidade
+            # ── RSI 14 períodos ────────────────────────────────────
+            def _calc_rsi(series, period=14):
+                delta = series.diff().dropna()
+                gain  = delta.clip(lower=0).rolling(period).mean()
+                loss  = (-delta.clip(upper=0)).rolling(period).mean()
+                rs    = gain / loss.replace(0, float('nan'))
+                return float(100 - (100 / (1 + rs)).iloc[-1])
 
-            # Score de assimetria composto (0-100)
-            pts_hs = min(40, (score_hs / 100) * 40)
-            pts_mom = 0
-            if ret_1m > 0:  pts_mom += 15
-            if ret_3m > 0:  pts_mom += 15
+            try:
+                rsi = _calc_rsi(close)
+            except Exception:
+                rsi = 50.0
 
-            # Distância do topo (peso 30%) — penaliza quedas rápidas
-            if dist_top < -30:
-                preco_6m = float(close.iloc[-126]) if len(close) >= 126 else preco_atual
-                ret_6m   = (preco_atual / preco_6m - 1) * 100
-                if ret_6m < -25:
-                    pts_top = 10   # queda rápida nos últimos 6m — penaliza
+            # ── COMPONENTE 1: Health Score (55%) ──────────────────
+            pts_hs = round((score_hs / 100) * 55, 1)
+
+            # ── COMPONENTE 2: Valuation vs histórico FMP (20%) ────
+            pts_val = 0.0
+            try:
+                _medios = get_multiplos_medios(t_base, anos=5)
+                if _medios:
+                    _stats_pe = _medios.get('pe') or _medios.get('pb')
+                    if _stats_pe:
+                        _atual_v = _stats_pe.get('atual')
+                        _min_v   = _stats_pe.get('min')
+                        _max_v   = _stats_pe.get('max')
+                        if all(v is not None for v in [_atual_v, _min_v, _max_v]):
+                            _banda = _max_v - _min_v
+                            if _banda > 0:
+                                _pct = (_atual_v - _min_v) / _banda
+                                if _pct <= 0.20:
+                                    pts_val = 20.0
+                                elif _pct <= 0.35:
+                                    pts_val = 15.0
+                                elif _pct <= 0.50:
+                                    pts_val = 10.0
+                                elif _pct <= 0.70:
+                                    pts_val = 5.0
+                                else:
+                                    pts_val = 0.0
+            except Exception:
+                pts_val = 10.0
+
+            # ── COMPONENTE 3: Timing de entrada (25%) ─────────────
+            pts_timing = 0.0
+
+            if modo == "entrada":
+                queda_acelerada = ret_6m < -25 and ret_3m < -10
+                if not queda_acelerada:
+                    if dist_top < -30:
+                        pts_timing += 10.0
+                    elif dist_top < -15:
+                        pts_timing += 7.0
+                    elif dist_top < -5:
+                        pts_timing += 4.0
+                    else:
+                        pts_timing += 1.0
                 else:
-                    pts_top = 30   # queda acumulada de longo prazo — pode ser desconto real
-            elif dist_top < -15:
-                pts_top = 20
-            elif dist_top < -5:
-                pts_top = 10
-            else:
-                pts_top = 3
+                    pts_timing += 0.0
 
-            score_assim = round(pts_hs + pts_mom + pts_top, 1)
+                if 35 <= rsi <= 48:
+                    pts_timing += 10.0
+                elif 48 < rsi <= 55:
+                    pts_timing += 6.0
+                elif rsi < 35:
+                    pts_timing += 3.0
+                else:
+                    pts_timing += 0.0
+
+                if ret_3m < -5 and ret_10d > 0 and ret_5d > 0:
+                    pts_timing += 5.0
+                elif ret_3m < -5 and ret_10d > 0:
+                    pts_timing += 2.0
+
+                if ret_1m < -15 and ret_3m < -15 and ret_5d < 0:
+                    pts_timing = 0.0
+
+            elif modo == "realizacao":
+                if rsi > 70:
+                    pts_timing += 12.0
+                elif rsi > 65:
+                    pts_timing += 8.0
+
+                if dist_top > -5:
+                    pts_timing += 8.0
+                elif dist_top > -10:
+                    pts_timing += 4.0
+
+                if ret_3m > 30:
+                    pts_timing += 5.0
+
+            elif modo == "dividendo":
+                try:
+                    from utils.health_engine import (
+                        _buscar_yield_ntnb,
+                        _detectar_segmento_fii,
+                    )
+                    fund_d   = fund_all.get(t_base, {})
+                    dy       = float(fund_d.get('dy%') or 0)
+                    ntnb     = _buscar_yield_ntnb()
+                    ipca     = st.session_state.get(
+                        'macro_context', {}
+                    ).get('ipca', 4.5)
+                    dy_real  = ((1 + dy/100) / (1 + ipca/100) - 1) * 100
+                    spread   = dy_real - ntnb
+
+                    if spread >= 3.0:
+                        pts_timing += 15.0
+                    elif spread >= 1.5:
+                        pts_timing += 10.0
+                    elif spread >= 0:
+                        pts_timing += 5.0
+                    else:
+                        pts_timing = 0.0
+                except Exception:
+                    pts_timing = 8.0
+
+            # ── SCORE FINAL ────────────────────────────────────────
+            score_assim = round(pts_hs + pts_val + pts_timing, 1)
+
+            if score_assim < 30:
+                continue
 
             fund_d = fund_all.get(t_base, {})
             nome   = fund_d.get('nome') or ticker.replace('.SA', '')
             setor  = fund_d.get('setor') or '—'
 
             resultados.append({
-                'ticker':       ticker,
-                'nome':         nome[:28],
-                'setor':        setor,
-                'score_hs':     score_hs,
-                'score_assim':  score_assim,
-                'ret_1m':       round(ret_1m, 2),
-                'ret_3m':       round(ret_3m, 2),
-                'dist_top':     round(dist_top, 2),
-                'preco_atual':  round(preco_atual, 2),
-                'mercado':      'BR' if ticker.endswith('.SA') else 'EUA',
+                'ticker':      ticker,
+                't_base':      t_base,
+                'nome':        nome[:28],
+                'setor':       setor,
+                'mercado':     'BR' if ticker.endswith('.SA') else 'EUA',
+                'score_hs':    score_hs,
+                'score_val':   round(pts_val, 1),
+                'score_timing':round(pts_timing, 1),
+                'score_assim': score_assim,
+                'ret_1m':      round(ret_1m, 2),
+                'ret_3m':      round(ret_3m, 2),
+                'ret_5d':      round(ret_5d, 2),
+                'dist_top':    round(dist_top, 2),
+                'rsi':         round(rsi, 1),
+                'preco_atual': round(preco_atual, 2),
+                'modo':        modo,
             })
 
         except Exception:
             continue
 
-    return sorted(resultados, key=lambda x: x['score_assim'], reverse=True)[:5]
+    return sorted(
+        resultados,
+        key=lambda x: x['score_assim'],
+        reverse=True,
+    )[:5]
 
 
 # 1. configuração da página (tem de ser o primeiro comando)
@@ -376,38 +514,64 @@ _tickers_wl_home = tuple([
 ])
 
 if _tickers_wl_home:
-    with st.spinner("identificando oportunidades..."):
-        _opps = calcular_oportunidades_watchlist(_tickers_wl_home)
+    _col_opp_modo, _col_opp_info = st.columns([3, 5])
+    with _col_opp_modo:
+        _modo_radar = st.radio(
+            "modo:",
+            ["entrada", "realizacao", "dividendo"],
+            format_func=lambda x: {
+                "entrada":    "🎯 oportunidade de entrada",
+                "realizacao": "📤 alerta de realização",
+                "dividendo":  "💰 radar de dividendos",
+            }[x],
+            horizontal=False,
+            key="radio_modo_radar",
+            label_visibility="collapsed",
+        )
+    with _col_opp_info:
+        _descricoes_modo = {
+            "entrada": (
+                "ativos de alta qualidade com preço temporariamente "
+                "deprimido e sinais de estabilização. "
+                "score = qualidade (55%) + valuation histórico (20%) "
+                "+ timing de entrada (25%)."
+            ),
+            "realizacao": (
+                "ativos sobrecomprados onde pode fazer sentido "
+                "reduzir posição parcialmente. "
+                "útil para gestão de risco e rebalanceamento."
+            ),
+            "dividendo": (
+                "ativos com yield real acima da NTN-B + spread de risco. "
+                "foco em renda — independe de momentum de preço."
+            ),
+        }
+        st.markdown(
+            f'<div style="font-family:Courier New;font-size:0.72rem;'
+            f'color:#555;line-height:1.7;padding-top:4px;">'
+            f'{_descricoes_modo[_modo_radar]}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    with st.spinner("calculando radar..."):
+        _opps = calcular_oportunidades_watchlist(
+            _tickers_wl_home,
+            modo=_modo_radar,
+        )
 
     if _opps:
         section_title("⚡ oportunidades do momento — sua watchlist")
 
-        st.markdown(
-            '<div style="font-family:Courier New; font-size:0.72rem; '
-            'color:#555; margin-bottom:12px; line-height:1.6;">'
-            'ativos com health score ≥ 55, momentum positivo recente '
-            'e maior distância do topo de 52 semanas — '
-            'maior assimetria risco/retorno no momento.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
         def _render_opp_card(_opp, _rank):
-            _hs_opp = _opp['score_hs']
-            _cor_hs = (
-                "#00C853" if _hs_opp >= 65
-                else "#FF9900" if _hs_opp >= 45
-                else "#FF1744"
-            )
-            _cor_1m = "#00C853" if _opp['ret_1m'] >= 0 else "#FF1744"
-            _cor_3m = "#00C853" if _opp['ret_3m'] >= 0 else "#FF1744"
             _badges = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
             _badge  = _badges[_rank] if _rank < 5 else ""
 
             st.markdown(
                 f'<div style="background:#0d0d0d; '
                 f'border:1px solid #1e1e1e; '
-                f'border-top:2px solid {_cor_hs}; '
+                f'border-top:2px solid #FF9900; '
                 f'border-radius:6px; padding:16px; '
                 f'height:100%;">'
 
@@ -425,45 +589,43 @@ if _tickers_wl_home:
                 f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
                 f'</div>'
 
-                f'<div style="display:flex; justify-content:space-between; '
-                f'margin-bottom:6px;">'
-                f'<span style="font-size:0.65rem; color:#555; '
-                f'text-transform:uppercase;">health score</span>'
-                f'<span style="font-family:Courier New; color:{_cor_hs}; '
-                f'font-weight:700; font-size:0.9rem;">'
-                f'{_hs_opp}/100</span>'
+                # Breakdown do score
+                + ''.join(
+                    _render_breakdown_item(_opp)
+                ) +
+
+                # Métricas de timing
+                f'<div style="display:flex;gap:12px;margin-top:6px;'
+                f'flex-wrap:wrap;">'
+
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.58rem;color:#444;">RSI</div>'
+                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'color:{"#00C853" if 35 <= _opp["rsi"] <= 55 else "#FF9900"};">'
+                f'{_opp["rsi"]:.0f}</div>'
                 f'</div>'
 
-                f'<div style="display:flex; justify-content:space-between; '
-                f'margin-bottom:4px;">'
-                f'<span style="font-size:0.65rem; color:#555;">ret 1m</span>'
-                f'<span style="font-family:Courier New; color:{_cor_1m}; '
-                f'font-size:0.82rem;">{_opp["ret_1m"]:+.1f}%</span>'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.58rem;color:#444;">5d</div>'
+                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'color:{"#00C853" if _opp["ret_5d"] >= 0 else "#FF1744"};">'
+                f'{_opp["ret_5d"]:+.1f}%</div>'
                 f'</div>'
 
-                f'<div style="display:flex; justify-content:space-between; '
-                f'margin-bottom:4px;">'
-                f'<span style="font-size:0.65rem; color:#555;">ret 3m</span>'
-                f'<span style="font-family:Courier New; color:{_cor_3m}; '
-                f'font-size:0.82rem;">{_opp["ret_3m"]:+.1f}%</span>'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.58rem;color:#444;">3m</div>'
+                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'color:{"#00C853" if _opp["ret_3m"] >= 0 else "#FF1744"};">'
+                f'{_opp["ret_3m"]:+.1f}%</div>'
                 f'</div>'
 
-                f'<div style="display:flex; justify-content:space-between; '
-                f'margin-bottom:12px;">'
-                f'<span style="font-size:0.65rem; color:#555;">'
-                f'dist. topo 52w</span>'
-                f'<span style="font-family:Courier New; color:#888; '
-                f'font-size:0.82rem;">{_opp["dist_top"]:.1f}%</span>'
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.58rem;color:#444;">topo</div>'
+                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'color:#888;">'
+                f'{_opp["dist_top"]:.0f}%</div>'
                 f'</div>'
 
-                f'<div style="background:#111; border-radius:4px; '
-                f'padding:6px 10px; text-align:center;">'
-                f'<div style="font-size:0.6rem; color:#444; '
-                f'text-transform:uppercase; margin-bottom:2px;">'
-                f'score de assimetria</div>'
-                f'<div style="font-family:Courier New; font-size:1rem; '
-                f'color:#FF9900; font-weight:700;">'
-                f'{_opp["score_assim"]:.0f}/100</div>'
                 f'</div>'
 
                 f'</div>',
@@ -479,6 +641,36 @@ if _tickers_wl_home:
             ):
                 st.session_state['research_ticker_externo'] = _opp['ticker']
                 st.switch_page("pages/1_Research.py")
+
+        def _render_breakdown_item(_opp):
+            _items = [
+                ("qualidade (hs)",  _opp['score_hs'],         55,  f"{_opp['score_hs']:.0f}/100"),
+                ("valuation hist.", _opp['score_val'],        20,  f"{_opp['score_val']:.0f}/20"),
+                ("timing entrada",  _opp['score_timing'],     25,  f"{_opp['score_timing']:.0f}/25"),
+            ]
+            _html = ""
+            for _bl, _bv, _bmax, _bstr in _items:
+                _bpct = min(100, int(_bv / _bmax * 100)) if _bmax > 0 else 0
+                _bcor = (
+                    "#00C853" if _bpct >= 70
+                    else "#FF9900" if _bpct >= 40
+                    else "#555"
+                )
+                _html += (
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'margin-bottom:3px;">'
+                    f'<span style="font-size:0.62rem;color:#444;'
+                    f'font-family:Courier New;">{_bl}</span>'
+                    f'<span style="font-size:0.68rem;color:{_bcor};'
+                    f'font-family:Courier New;font-weight:600;">{_bstr}</span>'
+                    f'</div>'
+                    f'<div style="background:#111;border-radius:2px;'
+                    f'height:2px;margin-bottom:5px;">'
+                    f'<div style="background:{_bcor};border-radius:2px;'
+                    f'height:2px;width:{_bpct}%;"></div>'
+                    f'</div>'
+                )
+            return _html
 
         _opps_br  = [o for o in _opps if o.get('mercado') == 'BR']
         _opps_eua = [o for o in _opps if o.get('mercado') == 'EUA']
