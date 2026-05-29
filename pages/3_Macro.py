@@ -1005,7 +1005,7 @@ with tab_calendar:
 
         st.markdown("---")
 
-        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True, config={'responsive': True}):
+        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
             with st.spinner("analisando eventos e gerando briefing..."):
                 _eventos_txt = "\n".join([
                     f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | "
@@ -1044,7 +1044,7 @@ with tab_overlay:
     ticker_input = ticker_manual_ov if ticker_manual_ov else (ticker_from_label(selecao_ov) or "PETR4.SA")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("gerar overlay macro", type="primary", use_container_width=True, config={'responsive': True}):
+    if st.button("gerar overlay macro", type="primary", use_container_width=True):
         if not ticker_input or ticker_input.startswith("─"):
             st.warning("selecione um ativo válido para iniciar a análise.")
         else:

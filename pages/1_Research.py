@@ -97,7 +97,7 @@ with st.sidebar:
         
         # --- NOVA BUSCA GLOBAL (YAHOO FINANCE API) ---
         termo = st.text_input("buscar qualquer ativo global:", placeholder="nome ou ticker (ex: nubank, aapl)...")
-        if st.button("🔍 buscar ativo", use_container_width=True, config={'responsive': True}):
+        if st.button("🔍 buscar ativo", use_container_width=True):
             if termo:
                 with st.spinner("procurando na rede global..."):
                     resultados = buscar_ativo_yahoo(termo)

@@ -527,7 +527,7 @@ with tab_mom:
         mom_top_n = st.slider("top N ativos:", 5, 30, 15, 5, key="mom_top_n")
     with mc3:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True, config={'responsive': True})
+        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True)
 
     score_minimo = st.slider("score mínimo de momentum:", 0, 100, 50, 10, key="mom_score_min")
 
@@ -609,12 +609,12 @@ with tab_mom:
                 cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
                 barra = "█" * int(score // 10) + "░" * int(10 - score // 10)
                 c2.markdown(f'<span style="font-family:Courier New; font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
-                if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True, config={'responsive': True}):
+                if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True):
                     mercado = "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua"
                     modal_salvar_screener(row['ticker'], row['nome'], mercado)
 
         with col_a2:
-            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True, config={'responsive': True}):
+            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
                 with st.spinner("deepseek analisando momentum..."):
                     _dados_mom = df_m[cols_mostrar].head(10).to_csv(index=False)
                     chamar_ia(
@@ -689,7 +689,7 @@ with tab_screen:
             st.rerun()
     with col_p3:
         if st.button("↺ resetar filtros", key="btn_reset_filtros",
-                     use_container_width=True, config={'responsive': True}):
+                     use_container_width=True):
             for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w',
                        'disc_dy_w', 'disc_score_w', 'disc_pvp_w',
                        'disc_mm_w']:
@@ -952,7 +952,7 @@ with tab_setorial:
     with _col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 recalcular", key="btn_refresh_setorial",
-                     use_container_width=True, config={'responsive': True}):
+                     use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
