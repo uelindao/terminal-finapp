@@ -65,6 +65,13 @@ def puxar_historico_mestre():
             df_temp = sgs.get({nome: codigo}, start=inicio_10a)
             if not df_temp.empty: dfs_br_dict[nome] = df_temp[nome]
         except Exception: pass
+    # Fallback Selic: se série 432 falhou, tenta série 11 (Selic efetiva diária)
+    if 'Selic' not in dfs_br_dict:
+        try:
+            _selic_fb = sgs.get({'Selic': 11}, start=inicio_10a)
+            if not _selic_fb.empty:
+                dfs_br_dict['Selic'] = _selic_fb['Selic']
+        except Exception: pass
             
     df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
     
@@ -77,7 +84,8 @@ def puxar_historico_mestre():
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
                 'DGS10': 'DGS10', 'DGS2': 'DGS2', 'VIXCLS': 'VIXCLS',
                 'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N', 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
-                'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2'
+                'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2',
+                'GFDEGDQ188S': 'GFDEGDQ188S', 'MTSDS133FMS': 'MTSDS133FMS',
             }
             dfs_global_dict = {}
             for nome, serie_id in series_fred.items():
@@ -86,6 +94,7 @@ def puxar_historico_mestre():
             df_global = pd.DataFrame(dfs_global_dict)
             if 'CPIAUCSL' in df_global.columns:
                 df_global['CPI_MoM'] = df_global['CPIAUCSL'].pct_change() * 100
+                df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
         except Exception: pass 
     
     # 3. commodities
@@ -116,6 +125,11 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
     fig.update_layout(**layout)
     fig.update_traces(line_color=cor_linha, line_width=1.5)
     return fig
+
+def tooltip_info(texto):
+    """HTML snippet for a hover-info icon. Use with st.markdown(..., unsafe_allow_html=True)."""
+    _texto_escaped = texto.replace('"', '&quot;')
+    return f"""<span style="cursor:help; border-bottom:1px dashed #666; font-size:0.85em; color:#aaa;" title="{_texto_escaped}">&#9432;</span>"""
 
 def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
     """
@@ -653,20 +667,49 @@ with tab_global:
         if aba_sel == "🇧🇷 brasil":
             c1, c2, c3, c4 = st.columns(4)
             v_selic = valor_atual_seguro(df_br, 'Selic')
-            v_ipca = valor_atual_seguro(df_br, 'IPCA')
+            v_ipca_m = valor_atual_seguro(df_br, 'IPCA')
             v_dolar = valor_atual_seguro(df_br, 'Dolar')
             v_desemp = valor_atual_seguro(df_br, 'Desemprego')
+
+            # Calcula IPCA acumulado 12 meses
+            _ipca_12m = None
+            if 'IPCA' in df_br.columns:
+                _ipca_mensal = df_br['IPCA'].dropna() / 100
+                _ipca_roll = (1 + _ipca_mensal).rolling(12).apply(lambda x: x.prod() - 1, raw=True) * 100
+                df_br['IPCA_12M'] = _ipca_roll
+                _ipca_12m = valor_atual_seguro(df_br, 'IPCA_12M')
+
             with c1: metric_card("selic atual", fmt_pct(v_selic, sinal=False))
-            with c2: metric_card("ipca mensal", fmt_pct(v_ipca, sinal=False))
+            with c2: metric_card("ipca 12m", fmt_pct(_ipca_12m or v_ipca_m, sinal=False))
             with c3: metric_card("dólar (ptax)", fmt_preco(v_dolar, "r$"))
             with c4: metric_card("desemprego", fmt_pct(v_desemp, sinal=False))
             
+            st.markdown(tooltip_info("Selic — taxa básica de juros definida pelo Copom. Impacta diretamente renda fixa, crédito e atividade econômica."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
             with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", "#00C853"), use_container_width=True, config={'responsive': True})
-            with g2: st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            with g2:
+                if 'IPCA_12M' in df_br.columns and not df_br['IPCA_12M'].dropna().empty:
+                    _fig_ipca = go.Figure()
+                    _fig_ipca.add_trace(go.Scatter(
+                        x=df_br.index, y=df_br['IPCA_12M'].dropna(),
+                        name='IPCA acum. 12m',
+                        line=dict(color='#00B0FF', width=2),
+                        hovertemplate='%{x}<br>IPCA 12m: %{y:.2f}%<extra></extra>',
+                    ))
+                    _fig_ipca.add_hline(y=3.0, line_color='#00C853', line_dash='dash', line_width=1,
+                                        annotation_text='meta 3%', annotation_font_color='#00C853', annotation_font_size=9)
+                    _fig_ipca.add_hline(y=4.5, line_color='#FF9900', line_dash='dot', line_width=1,
+                                        annotation_text='teto 4.5%', annotation_font_color='#FF9900', annotation_font_size=9)
+                    _fig_ipca.update_layout(**base_layout(height=300, title='inflação acumulada 12 meses — ipca (%)'))
+                    st.plotly_chart(_fig_ipca, use_container_width=True, config={'responsive': True})
+                    st.caption("ipca acumulado dos últimos 12 meses (produto das taxas mensais). meta bcb: 3% ± 1.5pp. fonte: bcb sgs série 433.")
+                else:
+                    st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            st.markdown(tooltip_info("Dólar Ptax — taxa de câmbio oficial calculada pelo BCB. Referência para contratos de derivativos e ajuste de ativos dolarizados."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
             with g3: st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
             with g4: st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
+            st.markdown(tooltip_info("Desemprego PNAD Contínua — taxa de desemprego calculada pelo IBGE. Indicador defasado de atividade econômica."), unsafe_allow_html=True)
 
             # ── FISCAL BRASILEIRO ──────────────────────────────────────────────
             st.markdown("---")
@@ -747,20 +790,55 @@ with tab_global:
         elif aba_sel == "🇺🇸 estados unidos":
             c1, c2, c3, c4 = st.columns(4)
             v_fed = valor_atual_seguro(df_global, 'FEDFUNDS')
-            v_cpi = valor_atual_seguro(df_global, 'CPI_MoM')
+            v_cpi_yoy = valor_atual_seguro(df_global, 'CPI_YOY')
             v_dgs10 = valor_atual_seguro(df_global, 'DGS10')
             v_unrate = valor_atual_seguro(df_global, 'UNRATE')
             with c1: metric_card("fed funds rate", fmt_pct(v_fed, sinal=False))
-            with c2: metric_card("cpi mensal", fmt_pct(v_cpi, sinal=False))
+            with c2: metric_card("cpi yoy", fmt_pct(v_cpi_yoy, sinal=False))
             with c3: metric_card("treasury 10y", fmt_pct(v_dgs10, sinal=False))
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
             
+            st.markdown(tooltip_info("Fed Funds Rate — taxa de juros básica americana definida pelo FOMC. Referência global para custo do dinheiro."), unsafe_allow_html=True)
+            st.markdown(tooltip_info("CPI YoY — variação anual do índice de preços ao consumidor americano. Principal referência de inflação nos EUA, acompanhada de perto pelo Fed."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
             with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", "#00C853"), use_container_width=True, config={'responsive': True})
-            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'CPI_MoM', "inflação mensal cpi (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'CPI_YOY', "inflação anual cpi yoy (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            st.markdown(tooltip_info("Treasury 10y — rendimento do título público americano de 10 anos. Referência para taxas de juros globais e custo de financiamento de longo prazo."), unsafe_allow_html=True)
+            st.markdown(tooltip_info("UNRATE — taxa de desemprego americana (U-3). Indicador-chave de saúde do mercado de trabalho, monitorado pelo Fed."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
             with g3: st.plotly_chart(criar_grafico_macro(df_global, 'DGS10', "treasury yield 10y (%)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
             with g4: st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
+
+            # ── FISCAL EUA ──────────────────────────────────────────────────────
+            st.markdown("---")
+            section_title("🏛️ fiscal americano")
+
+            v_divida_eua_pib = valor_atual_seguro(df_global, 'GFDEGDQ188S')
+            v_deficit_eua = valor_atual_seguro(df_global, 'MTSDS133FMS')
+
+            f1, f2 = st.columns(2)
+            with f1:
+                if v_divida_eua_pib is not None:
+                    metric_card("dívida pública/pib (eua)", f"{v_divida_eua_pib:.1f}%")
+                else:
+                    metric_card("dívida pública/pib (eua)", "n/d", "fred indisponível")
+            with f2:
+                if v_deficit_eua is not None:
+                    metric_card("déficit/superávit federal", f"{v_deficit_eua:+.1f}% pib")
+                else:
+                    metric_card("déficit/superávit federal", "n/d", "fred indisponível")
+
+            gf1, gf2 = st.columns(2)
+            with gf1:
+                if 'GFDEGDQ188S' in df_global.columns and not df_global['GFDEGDQ188S'].dropna().empty:
+                    fig_debt = criar_grafico_macro(df_global, 'GFDEGDQ188S', "dívida pública federal (% pib)", "#FF1744")
+                    fig_debt.add_hline(y=78, line_color="#FF9900", line_dash="dash", line_width=1,
+                                      annotation_text="patamar 2019 (pré-covid)", annotation_font_color="#FF9900", annotation_font_size=9)
+                    st.plotly_chart(fig_debt, use_container_width=True, config={'responsive': True})
+            with gf2:
+                if 'MTSDS133FMS' in df_global.columns and not df_global['MTSDS133FMS'].dropna().empty:
+                    st.plotly_chart(criar_grafico_macro(df_global, 'MTSDS133FMS', "resultado federal mensal (% pib)", "#00B0FF"),
+                                    use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌍 europa/ásia":
             v_ecb = valor_atual_seguro(df_global, 'ECBDFR')
