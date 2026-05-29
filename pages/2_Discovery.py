@@ -1000,62 +1000,57 @@ with tab_setorial:
         )
         _cor_score = "#00C853" if _score_amb >= 60 else ("#FF9900" if _score_amb >= 35 else "#FF1744")
 
-        st.markdown(
-            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};'
-            f'border-radius:6px;padding:10px 16px;margin-bottom:16px;">'
-            f'<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">'
-            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">regime atual</span>'
-            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>'
-            f'<span style="font-family:Courier New;font-size:0.72rem;color:#666;">{_regime_desc[:60]}</span>'
-            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">score amb.</span>'
-            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>'
-            f'</div>'
+        _html_parts = [
+            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};border-radius:6px;padding:10px 16px;margin-bottom:16px;">',
+            f'<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">',
+            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">regime atual</span>',
+            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>',
+            f'<span style="font-family:Courier New;font-size:0.72rem;color:#666;">{_regime_desc[:60]}</span>',
+            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">score amb.</span>',
+            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>',
+            '</div>',
+        ]
 
-            f'<div style="display:flex;gap:24px;margin-top:8px;flex-wrap:wrap;">'
-            f'<div style="flex:1;min-width:140px;">'
-            f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">🟢 favorecidos pelo regime</div>'
-            f'<div style="display:flex;flex-wrap:wrap;gap:3px;">'
-        )
+        _html_parts.append('<div style="display:flex;gap:24px;margin-top:8px;flex-wrap:wrap;">')
 
-        for _s in _fav_setores:
-            # Check if this sector appears in _dados_set and show its score
-            _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
-            _score_val = _match[0]['score_medio'] if _match else None
-            _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
-            st.markdown(
-                f'<span style="background:#003300;color:#00C853;font-family:Courier New;'
-                f'font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>',
-                unsafe_allow_html=True,
+        if _fav_setores:
+            fav_spans = ''
+            for _s in _fav_setores:
+                _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
+                _score_val = _match[0]['score_medio'] if _match else None
+                _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
+                fav_spans += f'<span style="background:#003300;color:#00C853;font-family:Courier New;font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+            _html_parts.append(
+                f'<div style="flex:1;min-width:140px;">'
+                f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos pelo regime</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{fav_spans}</div>'
+                f'</div>'
             )
 
-        st.markdown(
-            f'</div></div>'
-
-            f'<div style="flex:1;min-width:140px;">'
-            f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">🔴 prejudicados pelo regime</div>'
-            f'<div style="display:flex;flex-wrap:wrap;gap:3px;">'
-        )
-
-        for _s in _prej_setores:
-            _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
-            _score_val = _match[0]["score_medio"] if _match else None
-            _extra = " ({:.0f})".format(_score_val) if _score_val is not None else ""
-            st.markdown(
-                f'<span style="background:#330000;color:#FF1744;font-family:Courier New;'
-                f'font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>',
-                unsafe_allow_html=True,
+        if _prej_setores:
+            prej_spans = ''
+            for _s in _prej_setores:
+                _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
+                _score_val = _match[0]['score_medio'] if _match else None
+                _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
+                prej_spans += f'<span style="background:#330000;color:#FF1744;font-family:Courier New;font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+            _html_parts.append(
+                f'<div style="flex:1;min-width:140px;">'
+                f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados pelo regime</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{prej_spans}</div>'
+                f'</div>'
             )
 
-        st.markdown(
-            f'</div></div>'
-            f'</div>'
+        _html_parts.append('</div>')
 
-            f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;'
-            f'margin-top:6px;border-top:1px solid #1e1e1e;padding-top:4px;">'
-            f'{_posicionamento}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+        if _posicionamento:
+            _html_parts.append(
+                f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;margin-top:6px;border-top:1px solid #1e1e1e;padding-top:4px;">{_posicionamento}</div>'
+            )
+
+        _html_parts.append('</div>')
+
+        st.markdown(''.join(_html_parts), unsafe_allow_html=True)
 
         import plotly.graph_objects as go
 

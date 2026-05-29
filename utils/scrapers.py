@@ -80,7 +80,7 @@ RANGES_VALIDOS = {
     'p/l':      (-50.0,  500.0),
     'p/vp':     (0.0,    50.0),
     'roe%':     (-100.0, 300.0),
-    'dy%':      (0.0,    50.0),
+    'dy%':      (0.0,    30.0),
     'ev/ebitda':(-10.0,  100.0),
     'margem%':  (-200.0, 100.0),
 }
@@ -135,7 +135,15 @@ def buscar_dados_us(ticker: str) -> dict:
         res['p/l']        = info.get('trailingPE') or info.get('forwardPE')
         res['p/vp']       = info.get('priceToBook')
         res['ev/ebitda']  = info.get('enterpriseToEbitda')
-        res['dy%']        = (info.get('dividendYield', 0) or 0) * 100
+        _dy_raw = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
+        if _dy_raw is not None:
+            _dy_raw = float(_dy_raw)
+            if _dy_raw > 0.30:
+                res['dy%'] = round(_dy_raw, 2)
+            else:
+                res['dy%'] = round(_dy_raw * 100, 2)
+        else:
+            res['dy%'] = None
         res['margem%']    = (info.get('profitMargins', 0) or 0) * 100
         res['market_cap'] = info.get('marketCap', 0) or 0
 

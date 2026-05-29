@@ -992,7 +992,7 @@ with tab_concentracao:
     # ── CARREGA DADOS INDEPENDENTE DA ABA POSIÇÕES ────────────────────────
     _pesos_conc = st.session_state.get("pesos_ativos_cache", [])
     if not _pesos_conc:
-        _pesos_conc = [p for p in get_pesos() if float(p.get('quantidade') or 0) > 0]
+        _pesos_conc = [p for p in get_pesos(portfolio_id=portfolio_id_ativo) if float(p.get('quantidade') or 0) > 0]
         st.session_state["pesos_ativos_cache"] = _pesos_conc
 
     _live_conc = st.session_state.get("live_data_cache", {})

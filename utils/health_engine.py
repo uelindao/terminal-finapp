@@ -494,6 +494,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
         pvp = safe_float(dados_base.get('p/vp')) or safe_float(info.get('priceToBook'))
         dy = safe_float(dados_base.get('dy%')) or (safe_float(info.get('dividendYield'), 0) * 100 if info.get('dividendYield') else 0)
+        if dy is not None:
+            try:
+                dy = float(dy)
+                if dy > 30 or dy < 0:
+                    dy = None
+            except (TypeError, ValueError):
+                dy = None
         
         score = 0
         alertas = []
