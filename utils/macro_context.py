@@ -42,6 +42,17 @@ def _fetch_macro_rapido() -> dict:
     except Exception as e:
         logger.warning(f"[macro_context] falha VIX: {e}")
 
+    # Treasury 10y via yfinance (^TNX = yield em percentual direto)
+    treasury_10y = 4.5
+    try:
+        hist_tnx = yf.Ticker("^TNX").history(period="2d")
+        if not hist_tnx.empty:
+            treasury_10y = float(hist_tnx['Close'].dropna().iloc[-1])
+            if treasury_10y > 20:
+                treasury_10y = treasury_10y / 100
+    except Exception as e:
+        logger.warning(f"[macro_context] falha TNX: {e}")
+
     # Classificação de regime
     juros_altos = selic > 10.0
     risco_alto = vix > 20.0
@@ -56,10 +67,11 @@ def _fetch_macro_rapido() -> dict:
         label = "juros baixos / risco controlado"
 
     return {
-        "selic": round(selic, 2),
-        "ipca": round(ipca, 2),
-        "vix": round(vix, 1),
-        "label": label,
+        "selic":        round(selic, 2),
+        "ipca":         round(ipca, 2),
+        "vix":          round(vix, 1),
+        "treasury_10y": round(treasury_10y, 2),
+        "label":        label,
     }
 
 

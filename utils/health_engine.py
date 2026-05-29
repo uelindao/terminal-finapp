@@ -50,7 +50,7 @@ def _is_fii(ticker: str) -> bool:
         return True
     return False
 
-def calcular_piotroski(acao):
+def calcular_piotroski(acao, setor: str = ""):
     try:
         financials = acao.financials
         balance_sheet = acao.balance_sheet
@@ -95,14 +95,26 @@ def calcular_piotroski(acao):
         f3 = 1 if roa_atual is not None and roa_anterior is not None and roa_atual > roa_anterior else 0
         
         f4 = 1 if operating_cashflow is not None and total_assets_atual is not None and total_assets_atual > 0 and net_income is not None and (operating_cashflow / total_assets_atual) > (net_income / total_assets_atual) else 0
-        
-        leverage_atual = (long_debt_atual / total_assets_atual) if long_debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        leverage_anterior = (long_debt_anterior / total_assets_anterior) if long_debt_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f5 = 1 if leverage_atual is not None and leverage_anterior is not None and leverage_atual < leverage_anterior else 0
-        
-        current_ratio_atual = (current_assets_atual / current_liab_atual) if current_assets_atual is not None and current_liab_atual is not None and current_liab_atual > 0 else None
-        current_ratio_anterior = (current_assets_anterior / current_liab_anterior) if current_assets_anterior is not None and current_liab_anterior is not None and current_liab_anterior > 0 else None
-        f6 = 1 if current_ratio_atual is not None and current_ratio_anterior is not None and current_ratio_atual > current_ratio_anterior else 0
+
+        # Empresas financeiras são estruturalmente alavancadas — F5 e F6 distorcem
+        _setor_lower  = setor.lower()
+        _is_financial = any(
+            x in _setor_lower
+            for x in ['financial', 'bank', 'insurance', 'financeiro',
+                      'bancário', 'seguro', 'crédito']
+        )
+
+        if _is_financial:
+            f5 = None
+            f6 = None
+        else:
+            leverage_atual = (long_debt_atual / total_assets_atual) if long_debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
+            leverage_anterior = (long_debt_anterior / total_assets_anterior) if long_debt_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
+            f5 = 1 if leverage_atual is not None and leverage_anterior is not None and leverage_atual < leverage_anterior else 0
+            
+            current_ratio_atual = (current_assets_atual / current_liab_atual) if current_assets_atual is not None and current_liab_atual is not None and current_liab_atual > 0 else None
+            current_ratio_anterior = (current_assets_anterior / current_liab_anterior) if current_assets_anterior is not None and current_liab_anterior is not None and current_liab_anterior > 0 else None
+            f6 = 1 if current_ratio_atual is not None and current_ratio_anterior is not None and current_ratio_atual > current_ratio_anterior else 0
         
         f7 = 1 if shares_atual is not None and shares_anterior is not None and shares_atual <= shares_anterior else 0
         
@@ -114,18 +126,23 @@ def calcular_piotroski(acao):
         asset_turnover_anterior = (revenue_anterior / total_assets_anterior) if revenue_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
         f9 = 1 if asset_turnover_atual is not None and asset_turnover_anterior is not None and asset_turnover_atual > asset_turnover_anterior else 0
 
-        f_score_total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9
+        _criterios = [f1, f2, f3, f4, f5, f6, f7, f8, f9]
+        _criterios_validos = [c for c in _criterios if c is not None]
+        f_score_total = sum(_criterios_validos)
+        _n_validos = len(_criterios_validos)
+        if _n_validos < 9 and _n_validos > 0:
+            f_score_total = round((f_score_total / _n_validos) * 9)
         
         detalhamento = {
-            "F1 ROA positivo": f1,
-            "F2 FCF positivo": f2,
-            "F3 ROA crescendo": f3,
-            "F4 qualidade lucro (FCF > ROA)": f4,
-            "F5 dívida reduzindo": f5,
-            "F6 liquidez melhorando": f6,
-            "F7 sem diluição": f7,
-            "F8 margem bruta crescendo": f8,
-            "F9 giro de ativos crescendo": f9
+            "F1 ROA positivo":               f1,
+            "F2 FCF positivo":               f2,
+            "F3 ROA crescendo":              f3,
+            "F4 qualidade lucro (FCF>ROA)":  f4,
+            "F5 dívida reduzindo":           f5 if f5 is not None else "n/a (financeiro)",
+            "F6 liquidez melhorando":        f6 if f6 is not None else "n/a (financeiro)",
+            "F7 sem diluição":               f7,
+            "F8 margem bruta crescendo":     f8,
+            "F9 giro de ativos crescendo":   f9,
         }
         
         return f_score_total, detalhamento
@@ -197,6 +214,24 @@ def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
             elif earnings_growth < 0 and rev_growth is not None and rev_growth < 0:
                 alertas_cresc.append("🚨 compressão de margem e queda de receita simultâneas.")
 
+        # Qualidade do crescimento: receita caindo mas margem expandindo
+        if rev_growth is not None and rev_growth < 0 \
+           and earnings_growth is not None and earnings_growth > 0.10:
+            score_cresc += 4
+            alertas_cresc.append(
+                "💡 receita em queda mas lucro crescendo — "
+                "possível reestruturação e expansão de margem."
+            )
+
+        # Penaliza compressão de margem mesmo com receita crescendo
+        if rev_growth is not None and rev_growth > 0.05 \
+           and earnings_growth is not None and earnings_growth < -0.10:
+            score_cresc -= 4
+            alertas_cresc.append(
+                "⚠️ receita crescendo mas lucro caindo — "
+                "compressão de margem. crescimento de baixa qualidade."
+            )
+
     except Exception as e:
         logger.warning(f"[health_engine] falha ao calcular crescimento: {e}")
 
@@ -245,15 +280,28 @@ def calcular_roic(
         current_liab = _get(bs,  ['Current Liabilities'])
 
         if ebit is not None and total_assets is not None and current_liab is not None:
-            tax_rate       = 0.25
+            # Brasil: IRPJ 15% + adicional IRPJ 10% + CSLL 9% = 34%
+            # EUA: federal corporate tax 21%
+            tax_rate       = 0.34 if is_br else 0.21
             nopat          = ebit * (1 - tax_rate)
             invested_cap   = total_assets - current_liab
 
             if invested_cap > 0:
                 roic_valor = (nopat / invested_cap) * 100
 
-                selic    = macro_context.get('selic', 10.5)
-                wacc_ref = (selic + 3.0) if is_br else 7.5
+                selic = macro_context.get('selic', 10.5)
+
+                if is_br:
+                    _ke_br   = selic + 7.5
+                    _kd_br   = selic * (1 - 0.34)
+                    wacc_ref = 0.60 * _ke_br + 0.40 * _kd_br
+                else:
+                    _rf_us   = macro_context.get('treasury_10y', 4.5)
+                    _ke_us   = _rf_us + 5.5
+                    _kd_us   = _rf_us * (1 - 0.21)
+                    wacc_ref = 0.60 * _ke_us + 0.40 * _kd_us
+
+                wacc_ref = max(6.0, min(25.0, wacc_ref))
 
                 if roic_valor > wacc_ref * 1.5:
                     score_roic = 12
@@ -460,14 +508,61 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         
         penalidade_tec = 0
         if preco_atual < mm200:
-            alertas.append("📉 tendência de baixa (preço abaixo da MM200).")
-            penalidade_tec = -15
+            dist_mm200 = ((preco_atual / float(mm200)) - 1) * 100
+            if dist_mm200 < -15:
+                penalidade_tec = -8
+                alertas.append(
+                    f"📉 tendência de baixa severa "
+                    f"({dist_mm200:.1f}% abaixo da MM200)."
+                )
+            else:
+                penalidade_tec = -4
+                alertas.append(
+                    f"⚠️ preço abaixo da MM200 "
+                    f"({dist_mm200:.1f}%). monitorar tendência."
+                )
             
         penalidade_vix = 0
-        beta_seguro = safe_float(info.get('beta'), default=1.0)
-        if vix_alto and (beta_seguro > 1.2):
-            alertas.append("⚠️ ativo volátil em cenário de stress (VIX alto).")
-            penalidade_vix = -10
+        if vix_alto:
+            beta_val = info.get('beta')
+
+            if beta_val is None and hist is not None and len(hist) >= 60:
+                try:
+                    bench_ticker = "^BVSP" if is_br or is_fii else "^GSPC"
+                    import yfinance as _yf
+                    bench_hist = _yf.Ticker(bench_ticker).history(
+                        period="1y", auto_adjust=True
+                    )
+                    if not bench_hist.empty:
+                        _ret_ativo = hist['Close'].pct_change().dropna()
+                        _ret_bench = bench_hist['Close'].pct_change().dropna()
+                        _df_beta   = pd.concat(
+                            [_ret_ativo, _ret_bench], axis=1
+                        ).dropna()
+                        if len(_df_beta) >= 30:
+                            _cov = _df_beta.cov().iloc[0, 1]
+                            _var = _df_beta.iloc[:, 1].var()
+                            beta_val = _cov / _var if _var > 0 else 1.0
+                except Exception:
+                    beta_val = 1.0
+
+            beta_val = float(beta_val) if beta_val is not None else 1.0
+
+            if beta_val > 1.5:
+                penalidade_vix = -10
+                alertas.append(
+                    f"⚠️ ativo de alto beta ({beta_val:.2f}) "
+                    f"em stress global (VIX alto). risco elevado."
+                )
+            elif beta_val > 1.2:
+                penalidade_vix = -6
+                alertas.append(
+                    f"⚠️ ativo volátil (beta {beta_val:.2f}) "
+                    f"em cenário de stress (VIX alto)."
+                )
+
+            if not is_fii:
+                breakdown['Beta calculado'] = f"{beta_val:.2f}"
 
         # ══ MOTOR 1: FUNDOS IMOBILIÁRIOS (FIIs) ════════════════════════════════
         # Benchmarks corrigidos: P/VP por segmento, yield vs NTN-B (IPCA+)
@@ -489,28 +584,55 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             }
             pvp_lim = pvp_thresholds.get(segmento, (0.88, 1.00, 1.12))
 
-            if pvp is not None:
+            score_pvp = 0
+            if pvp is not None and pvp > 0:
                 try:
                     pvp_f = float(pvp)
-                    if pvp_f <= pvp_lim[0]:
-                        score += 20
-                        breakdown[f'pvp_{segmento}'] = 20
-                        alertas.append(f"p/vp {pvp_f:.2f} — desconto atrativo para {segmento}")
-                    elif pvp_f <= pvp_lim[1]:
-                        score += 12
-                        breakdown[f'pvp_{segmento}'] = 12
-                    elif pvp_f <= pvp_lim[2]:
-                        score += 5
-                        breakdown[f'pvp_{segmento}'] = 5
+                    if 0.80 <= pvp_f <= 0.95:
+                        score_pvp = 40
+                        alertas.append(
+                            f"✅ p/vp {pvp_f:.2f} — desconto saudável, "
+                            f"melhor ponto de entrada."
+                        )
+                    elif 0.75 <= pvp_f < 0.80:
+                        score_pvp = 30
+                        alertas.append(
+                            f"✅ p/vp {pvp_f:.2f} — desconto relevante. "
+                            f"verificar fundamentos do fundo."
+                        )
+                    elif 0.95 < pvp_f <= 1.05:
+                        score_pvp = 28
+                    elif 1.05 < pvp_f <= 1.20:
+                        score_pvp = 15
+                        alertas.append(
+                            f"⚠️ p/vp {pvp_f:.2f} — ágio moderado vs patrimônio."
+                        )
+                    elif pvp_f > 1.20:
+                        score_pvp = 5
+                        alertas.append(
+                            f"🚨 p/vp {pvp_f:.2f} — ágio elevado. "
+                            f"exige crescimento forte dos proventos para justificar."
+                        )
+                    elif 0.65 <= pvp_f < 0.75:
+                        score_pvp = 12
+                        alertas.append(
+                            f"⚠️ p/vp {pvp_f:.2f} — desconto grande. "
+                            f"mercado pode estar precificando vacância ou má gestão."
+                        )
                     else:
-                        score -= 5
-                        breakdown[f'pvp_{segmento}'] = -5
-                        alertas.append(f"p/vp {pvp_f:.2f} — ágio elevado para {segmento}")
+                        score_pvp = 3
+                        alertas.append(
+                            f"🚨 p/vp {pvp_f:.2f} — desconto crítico. "
+                            f"alto risco de deterioração do patrimônio."
+                        )
                 except (TypeError, ValueError):
-                    pass
+                    score_pvp = 15
+            else:
+                score_pvp = 15
 
             # ── Yield vs NTN-B (benchmark correto para FII) ───────────────
-            if dy is not None:
+            score_y = 0
+            if dy is not None and dy > 0:
                 try:
                     dy_f = float(dy)
 
@@ -521,55 +643,63 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                         ).get("ipca", 4.5)
                     except Exception:
                         pass
-                    dy_real = ((1 + dy_f/100) / (1 + ipca_atual/100) - 1) * 100
 
+                    dy_real = ((1 + dy_f/100) / (1 + ipca_atual/100) - 1) * 100
                     spread = dy_real - yield_ntnb
 
-                    spread_min = {
-                        'papel':       1.0,
-                        'fof':         1.5,
-                        'logistica':   2.0,
-                        'shopping':    2.5,
-                        'lajes':       2.5,
-                        'residencial': 2.0,
-                        'hibrido':     2.0,
-                        'desconhecido':2.0,
-                    }.get(segmento, 2.0)
-
-                    if spread >= spread_min + 2.0:
-                        score += 25
-                        breakdown['yield_vs_ntnb'] = 25
+                    if spread >= 4.0:
+                        score_y = 40
                         alertas.append(
-                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
-                            f"vs NTN-B ({yield_ntnb:.1f}%) — muito atrativo"
+                            f"✅ yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B ({yield_ntnb:.1f}%). muito atrativo."
                         )
-                    elif spread >= spread_min:
-                        score += 15
-                        breakdown['yield_vs_ntnb'] = 15
+                    elif spread >= 2.0:
+                        score_y = 30
                         alertas.append(
-                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
-                            f"vs NTN-B adequado"
+                            f"✅ yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B adequado."
                         )
-                    elif spread >= 0:
-                        score += 5
-                        breakdown['yield_vs_ntnb'] = 5
+                    elif spread >= 0.5:
+                        score_y = 18
                         alertas.append(
-                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
-                            f"vs NTN-B — margem estreita"
+                            f"ℹ️ yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B estreito."
+                        )
+                    elif spread >= -1.0:
+                        score_y = 8
+                        alertas.append(
+                            f"⚠️ yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
+                            f"vs NTN-B ({yield_ntnb:.1f}%). margem insuficiente."
                         )
                     else:
-                        score -= 10
-                        breakdown['yield_vs_ntnb'] = -10
+                        score_y = 0
                         alertas.append(
-                            f"yield real {dy_real:.1f}% — spread {spread:+.1f}pp "
-                            f"vs NTN-B — FII perde do título público sem risco"
+                            f"🚨 yield real {dy_real:.1f}% perde do título público "
+                            f"sem risco (NTN-B {yield_ntnb:.1f}%). spread: {spread:+.1f}pp."
                         )
-                except (TypeError, ValueError):
-                    pass
 
-            # ── Segmento no breakdown para rastreabilidade ─────────────────
-            breakdown['segmento_fii'] = segmento
-            breakdown['ntnb_benchmark'] = f"{yield_ntnb:.2f}%"
+                    breakdown['NTN-B benchmark'] = f"{yield_ntnb:.2f}%"
+                    breakdown['DY real']         = f"{dy_real:.1f}%"
+                    breakdown['Spread vs NTN-B'] = f"{spread:+.2f}pp"
+
+                except (TypeError, ValueError):
+                    score_y = 20
+            else:
+                score_y = 0
+                alertas.append("⚠️ fii sem histórico de proventos recentes.")
+
+            # ── Score total FII e breakdown ───────────────────────────────
+            score += score_pvp + score_y
+            try:
+                from utils.health_engine import _detectar_segmento_fii
+                _seg_fii = _detectar_segmento_fii(ticker, dados_base)
+            except Exception:
+                _seg_fii = "fii"
+            breakdown = {
+                f"Valuation P/VP ({_seg_fii})":   score_pvp,
+                "Geração de Renda (Yield NTN-B)": score_y,
+                "Momento Técnico (MM200)":        0,
+            }
 
             # ── Penalidade técnica ─────────────────────────────────────────
             score += penalidade_tec
@@ -579,7 +709,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         # ==========================================
         else:
             if acao is not None:
-                f_score, f_detalhamento = calcular_piotroski(acao)
+                f_score, f_detalhamento = calcular_piotroski(acao, setor_yf)
             else:
                 f_score, f_detalhamento = 0, {}
             
@@ -629,6 +759,80 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif pvp <= limite_pvp_medio: score_v += 8
                 elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
+            # ── Net Debt / EBITDA — métrica complementar de alavancagem ──────
+            score_nd = 0
+            try:
+                if acao is not None:
+                    _bs_nd  = acao.balance_sheet
+                    _fin_nd = acao.financials
+
+                    _total_debt = None
+                    _cash       = None
+                    _ebitda     = None
+
+                    for _nome in ['Total Debt', 'Long Term Debt And Capital '
+                                  'Lease Obligation']:
+                        if _bs_nd is not None and _nome in _bs_nd.index:
+                            _v = _bs_nd.loc[_nome, _bs_nd.columns[0]]
+                            if isinstance(_v, pd.Series): _v = _v.iloc[0]
+                            if pd.notna(_v):
+                                _total_debt = float(_v)
+                            break
+
+                    for _nome in ['Cash And Cash Equivalents',
+                                  'Cash Cash Equivalents And Short Term Investments']:
+                        if _bs_nd is not None and _nome in _bs_nd.index:
+                            _v = _bs_nd.loc[_nome, _bs_nd.columns[0]]
+                            if isinstance(_v, pd.Series): _v = _v.iloc[0]
+                            if pd.notna(_v):
+                                _cash = float(_v)
+                            break
+
+                    for _nome in ['EBITDA', 'Normalized EBITDA']:
+                        if _fin_nd is not None and _nome in _fin_nd.index:
+                            _v = _fin_nd.loc[_nome, _fin_nd.columns[0]]
+                            if isinstance(_v, pd.Series): _v = _v.iloc[0]
+                            if pd.notna(_v):
+                                _ebitda = float(_v)
+                            break
+
+                    if _total_debt is not None and _cash is not None \
+                       and _ebitda is not None and _ebitda > 0:
+                        _net_debt = _total_debt - _cash
+                        nd_ebitda = _net_debt / _ebitda
+
+                        _lim_cons = 1.5 if is_br else 2.0
+                        _lim_mod  = 3.0 if is_br else 3.5
+                        _lim_ag   = 4.5 if is_br else 5.0
+
+                        if nd_ebitda < 0:
+                            score_nd = 8
+                            alertas.append(
+                                f"✅ caixa líquido positivo "
+                                f"(net debt/ebitda: {nd_ebitda:.1f}x)."
+                            )
+                        elif nd_ebitda <= _lim_cons:
+                            score_nd = 6
+                        elif nd_ebitda <= _lim_mod:
+                            score_nd = 3
+                        elif nd_ebitda <= _lim_ag:
+                            score_nd = 0
+                            alertas.append(
+                                f"⚠️ alavancagem elevada "
+                                f"(net debt/ebitda: {nd_ebitda:.1f}x)."
+                            )
+                        else:
+                            score_nd = -6
+                            alertas.append(
+                                f"🚨 alavancagem crítica "
+                                f"(net debt/ebitda: {nd_ebitda:.1f}x). "
+                                f"risco de refinanciamento em juros altos."
+                            )
+
+                        breakdown['Net Debt / EBITDA'] = f"{nd_ebitda:.1f}x"
+            except Exception:
+                pass
+
             # --- Solvência e Risco (máx 20pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
             penalizacao_divida = 2 if (is_br and juros_altos_br) else 1
@@ -654,6 +858,61 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             else: score_r += 10 
             
             score_r_final = max(0, score_r)
+
+            # ── Interest Coverage Ratio (EBIT / Despesas Financeiras) ────────
+            score_icr = 0
+            try:
+                if acao is not None:
+                    _fin_icr = acao.financials
+                    if _fin_icr is not None and not _fin_icr.empty:
+                        _ebit_icr = None
+                        _int_exp_icr = None
+
+                        for _nome in ['EBIT']:
+                            if _nome in _fin_icr.index:
+                                _v = _fin_icr.loc[_nome, _fin_icr.columns[0]]
+                                if isinstance(_v, pd.Series): _v = _v.iloc[0]
+                                if pd.notna(_v): _ebit_icr = float(_v)
+                                break
+
+                        for _nome in ['Interest Expense',
+                                      'Interest Expense Non Operating']:
+                            if _nome in _fin_icr.index:
+                                _v = _fin_icr.loc[_nome, _fin_icr.columns[0]]
+                                if isinstance(_v, pd.Series): _v = _v.iloc[0]
+                                if pd.notna(_v):
+                                    _int_exp_icr = abs(float(_v))
+                                break
+
+                        if _ebit_icr is not None and _int_exp_icr is not None \
+                           and _int_exp_icr > 0:
+                            icr = _ebit_icr / _int_exp_icr
+
+                            if icr >= 5.0:
+                                score_icr = 8
+                            elif icr >= 3.0:
+                                score_icr = 5
+                            elif icr >= 1.5:
+                                score_icr = 2
+                            elif icr >= 1.0:
+                                score_icr = 0
+                                alertas.append(
+                                    f"⚠️ cobertura de juros baixa "
+                                    f"(icr: {icr:.1f}x) — "
+                                    f"lucro mal cobre as despesas financeiras."
+                                )
+                            else:
+                                score_icr = -8
+                                alertas.append(
+                                    f"🚨 cobertura de juros crítica "
+                                    f"(icr: {icr:.1f}x) — "
+                                    f"ebit insuficiente para cobrir juros."
+                                )
+
+                            breakdown['Interest Coverage (EBIT/JurosExp)'] = \
+                                f"{icr:.1f}x"
+            except Exception:
+                pass
 
             # --- Geração de Caixa / Yield Adaptativo ---
             score_y = 0
@@ -705,7 +964,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             score = (
                 score_q + score_v + score_r_final + score_y
                 + score_piotroski + score_crescimento + score_roic
-                + score_momentum
+                + score_momentum + score_icr + score_nd
                 + penalidade_tec + penalidade_vix + penalidade_dados
             )
 
@@ -719,6 +978,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 "Crescimento (Receita/Lucro)": score_crescimento,
                 "ROIC vs WACC": score_roic,
                 "Momentum (12-1m)": score_momentum,
+                "Cobertura de Juros (ICR)": score_icr,
+                "Net Debt / EBITDA": score_nd,
                 "Penalidade Técnica (MM200)": penalidade_tec,
                 "Risco Volatilidade (VIX)": penalidade_vix,
                 "Penalidade Dados (Qualidade)": penalidade_dados,
