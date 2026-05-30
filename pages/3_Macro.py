@@ -1015,6 +1015,8 @@ with tab_global:
                         "meta fed: 2%. acima de 3.5% pressiona manutenção "
                         "de juros altos. fonte: fred — cpiaucsl."
                     )
+                else:
+                    st.caption("cpi yoy: aguardando dados da próxima leitura do fred.")
             st.markdown(tooltip_info("Treasury 10y — rendimento do título público americano de 10 anos. Referência para taxas de juros globais e custo de financiamento de longo prazo."), unsafe_allow_html=True)
             st.markdown(tooltip_info("UNRATE — taxa de desemprego americana (U-3). Indicador-chave de saúde do mercado de trabalho, monitorado pelo Fed."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
@@ -1141,6 +1143,11 @@ with tab_global:
                 _df_ecb = pdr.get_data_fred('ECBDFR', start='2019-01-01')
                 if not _df_ecb.empty:
                     _ecb_rate = round(float(_df_ecb.iloc[-1, 0]), 2)
+            except Exception as e:
+                logger.error(f"[macro] BCE deposit rate falhou: {e}")
+            time.sleep(1)
+            try:
+                import pandas_datareader as pdr
                 _df_eu_cpi = pdr.get_data_fred(
                     'CP0000EZ19M086NEST', start='2019-01-01'
                 )
@@ -1148,13 +1155,18 @@ with tab_global:
                     _eu_cpi_raw = _df_eu_cpi.iloc[:, 0]
                     _eu_cpi_yoy = _eu_cpi_raw.pct_change(12) * 100
                     _eu_cpi = round(float(_eu_cpi_yoy.dropna().iloc[-1]), 2)
+            except Exception as e:
+                logger.error(f"[macro] Euro CPI falhou: {e}")
+            time.sleep(1)
+            try:
+                import pandas_datareader as pdr
                 _df_eu_un = pdr.get_data_fred(
                     'LRHUTTTTEZM156S', start='2019-01-01'
                 )
                 if not _df_eu_un.empty:
                     _eu_unemp = round(float(_df_eu_un.dropna().iloc[-1, 0]), 1)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[macro] Euro desemprego falhou: {e}")
 
             with _col_eu1:
                 metric_card(
@@ -1183,6 +1195,7 @@ with tab_global:
             _eu_col1, _eu_col2 = st.columns(2)
 
             with _eu_col1:
+                time.sleep(1)
                 try:
                     import pandas_datareader as pdr
                     _df_ecb_hist = pdr.get_data_fred(
@@ -1223,6 +1236,7 @@ with tab_global:
                     st.info("bce: dados indisponíveis")
 
             with _eu_col2:
+                time.sleep(1)
                 try:
                     import pandas_datareader as pdr
                     _df_eu10y = pdr.get_data_fred(
@@ -1276,6 +1290,7 @@ with tab_global:
                 except Exception:
                     st.info("yields europa: dados indisponíveis")
 
+            time.sleep(1)
             try:
                 import pandas_datareader as pdr
                 _df_btp  = pdr.get_data_fred(
@@ -1290,7 +1305,7 @@ with tab_global:
                         .reindex(_df_bund2.index, method='ffill')
                         - _df_bund2.iloc[:, 0]
                     ).dropna()
-
+    
                     _spread_atual = round(float(_spread_btp.iloc[-1]), 2)
 
                     section_title("🔥 spread btp-bund — stress fiscal europeu")
@@ -1340,8 +1355,8 @@ with tab_global:
                         "indicador chave para risco sistêmico europeu. "
                         "fonte: fred — irltlt01itm156n / irltlt01dem156n."
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[macro] BTP-Bund spread falhou: {e}")
 
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1364,6 +1379,7 @@ with tab_global:
                     _df_boj = pdr.get_data_fred(
                         'IRSTCB01JPM156N', start='2019-01-01'
                     )
+                    time.sleep(1)
                     _df_jpy10y = pdr.get_data_fred(
                         'IRLTLT01JPM156N', start='2019-01-01'
                     )
@@ -1460,6 +1476,7 @@ with tab_global:
                     _cny = yf.Ticker('CNY=X').history(
                         period='2y', auto_adjust=True
                     )['Close'].dropna()
+                    time.sleep(1)
                     _df_cn_cpi = pdr.get_data_fred(
                         'CHNCPIALLMINMEI', start='2019-01-01'
                     )
