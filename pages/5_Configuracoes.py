@@ -487,7 +487,10 @@ with tab_ia:
     section_title("⚡ modo de análise ia")
 
     settings     = get_user_settings(user_id_atual) if user else {}
-    _modo_atual  = get_user_setting(user_id_atual, 'ai_modo', 'free')
+    _modo_atual  = st.session_state.get('ai_modo_atual')
+    if _modo_atual is None:
+        _modo_atual = 'pro' if settings.get('ai_api_key', '').strip() else 'free'
+        st.session_state['ai_modo_atual'] = _modo_atual
 
     _col_t1, _col_t2 = st.columns(2)
 
@@ -511,7 +514,6 @@ with tab_ia:
             use_container_width=True,
             type="primary" if _modo_atual == 'free' else "secondary",
         ):
-            salvar_user_setting(user_id_atual, 'ai_modo', 'free')
             st.session_state['ai_modo_atual'] = 'free'
             st.success("modo gratuito ativado!")
             st.rerun()
@@ -539,7 +541,6 @@ with tab_ia:
             disabled=not _tem_chave_pro,
             help="configure sua chave api abaixo para ativar" if not _tem_chave_pro else "",
         ):
-            salvar_user_setting(user_id_atual, 'ai_modo', 'pro')
             st.session_state['ai_modo_atual'] = 'pro'
             st.success("modo pro ativado!")
             st.rerun()
@@ -617,8 +618,9 @@ with tab_ia:
             }
             salvar_user_settings(user_id_atual, novas)
             if api_key_input.strip():
-                salvar_user_setting(user_id_atual, 'ai_modo', 'pro')
                 st.session_state['ai_modo_atual'] = 'pro'
+            elif not settings.get('ai_api_key', '').strip():
+                st.session_state['ai_modo_atual'] = 'free'
             st.success("✅ configurações de ia salvas!")
             st.rerun()
 
@@ -647,6 +649,7 @@ with tab_ia:
         if btn_remover:
             novas = {**settings, 'ai_api_key': ''}
             salvar_user_settings(user_id_atual, novas)
+            st.session_state['ai_modo_atual'] = 'free'
             st.success("chave removida — voltando ao free tier.")
             st.rerun()
 

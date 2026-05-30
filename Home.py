@@ -23,7 +23,7 @@ from database.db import (
     is_primeiro_acesso, marcar_onboarding_completo,
     get_earnings_dates, salvar_earnings_date,
     listar_tags_watchlist, atualizar_tag_ativo,
-    get_user_settings, get_user_setting,
+    get_user_settings,
 )
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score, _is_fii
@@ -166,8 +166,9 @@ if 'user_settings' not in st.session_state:
     if _user_ss:
         _uid_ss = _user_ss.get('user_id') or st.session_state.get('user_id')
         if _uid_ss:
-            st.session_state['user_settings'] = get_user_settings(_uid_ss) or {}
-            st.session_state['ai_modo_atual'] = get_user_setting(_uid_ss, 'ai_modo', 'free')
+            _settings = get_user_settings(_uid_ss) or {}
+            st.session_state['user_settings'] = _settings
+            st.session_state['ai_modo_atual'] = 'pro' if _settings.get('ai_api_key', '').strip() else 'free'
 
 # Solicita permissão de notificação browser (uma vez por sessão)
 if not st.session_state.get('notif_permission_asked'):
