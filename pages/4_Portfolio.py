@@ -1328,8 +1328,7 @@ with tab_concentracao:
                     ],
                     zmin=-1, zmax=1,
                     colorbar=dict(
-                        title="correlação",
-                        titlefont=dict(color="#888", size=10),
+                        title=dict(text="correlação", font=dict(color="#888", size=10)),
                         tickfont=dict(color="#888", size=9),
                         thickness=12,
                     ),
