@@ -1183,6 +1183,13 @@ with tab_concentracao:
         # ── GRÁFICOS DE PIZZA ────────────────────────────────────────────
         st.markdown("---")
 
+        _cores_pizza = [
+            "#FF9900", "#00C853", "#00B0FF", "#FF1744", "#E040FB",
+            "#FFD700", "#8B00FF", "#FF69B4", "#00BFFF", "#B87333",
+            "#C0C0C0", "#90EE90", "#DEB887", "#6F4E37", "#F5F5DC",
+            "#E5E4E2", "#FF8C00",
+        ]
+
         def _pizza_chart(labels, values, title, height=290):
             _fig = go.Figure(go.Pie(
                 labels=labels,
@@ -1191,7 +1198,7 @@ with tab_concentracao:
                 textinfo='label+percent',
                 textfont=dict(family='Courier New', size=10, color='#888'),
                 marker=dict(
-                    colors=CORES_SERIES[:len(labels)],
+                    colors=_cores_pizza[:len(labels)],
                     line=dict(color='#050505', width=2),
                 ),
                 hovertemplate='%{label}<br>%{value:.1f}%<extra></extra>',
