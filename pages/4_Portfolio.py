@@ -1513,6 +1513,7 @@ with tab_stress:
 
             st.markdown("---")
             section_title(f"📊 resultado — {resumo['cenario']}")
+            tooltip("beta")
 
             cor_impacto = "bull" if resumo['impacto_total'] >= 0 else "bear"
             rc1, rc2, rc3 = st.columns(3)

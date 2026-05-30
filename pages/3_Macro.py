@@ -984,12 +984,6 @@ with tab_global:
                         "meta fed: 2%. acima de 3.5% pressiona manutenção "
                         "de juros altos. fonte: fred — cpiaucsl."
                     )
-                else:
-                    st.info(
-                        "💡 para dados de CPI em tempo real, adicione "
-                        "'pandas-datareader>=0.10.0' ao requirements.txt "
-                        "e faça redeploy."
-                    )
             st.markdown(tooltip_info("Treasury 10y — rendimento do título público americano de 10 anos. Referência para taxas de juros globais e custo de financiamento de longo prazo."), unsafe_allow_html=True)
             st.markdown(tooltip_info("UNRATE — taxa de desemprego americana (U-3). Indicador-chave de saúde do mercado de trabalho, monitorado pelo Fed."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
@@ -1778,6 +1772,7 @@ with tab_ciclo:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+                tooltip(f"ciclo_{_fk.replace('score_', '')}")
 
     # ── Alertas dos indicadores ───────────────────────────────────────
     _alertas_todos = (
