@@ -97,6 +97,9 @@ def puxar_historico_mestre():
                 'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N', 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
                 'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2',
                 'GFDEGDQ188S': 'GFDEGDQ188S', 'MTSDS133FMS': 'MTSDS133FMS',
+                'CP0000EZ19M086NEST': 'CP0000EZ19M086NEST', 'LRHUTTTTEZM156S': 'LRHUTTTTEZM156S',
+                'IRLTLT01DEM156N': 'IRLTLT01DEM156N', 'IRLTLT01ITM156N': 'IRLTLT01ITM156N',
+                'IRSTCB01JPM156N': 'IRSTCB01JPM156N', 'CHNCPIALLMINMEI': 'CHNCPIALLMINMEI',
             }
             dfs_global_dict = {}
             for nome, serie_id in series_fred.items():
@@ -143,6 +146,10 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
     fig.update_layout(**layout)
     fig.update_traces(line_color=cor_linha, line_width=1.5)
     return fig
+
+def _hex_to_rgba(hex_color: str, alpha: float = 0.08) -> str:
+    h = hex_color.lstrip('#')
+    return f'rgba({int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}, {alpha})'
 
 def tooltip_info(texto):
     """HTML snippet for a hover-info icon. Use with st.markdown(..., unsafe_allow_html=True)."""
@@ -940,10 +947,9 @@ with tab_global:
             _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
             _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)
 
-            if _cpi_yoy_val is None:
+            if _cpi_yoy_val is None and 'CPIAUCSL' in df_global.columns:
                 try:
-                    _fred_local = Fred(api_key=st.secrets["FRED_API_KEY"])
-                    _cpi_raw = _fred_local.get_series('CPIAUCSL', observation_start='2019-01-01')
+                    _cpi_raw = df_global['CPIAUCSL'].dropna()
                     if not _cpi_raw.empty:
                         _cpi_yoy_fb = _cpi_raw.pct_change(12) * 100
                         _cpi_yoy_fb = _cpi_yoy_fb.dropna()
@@ -951,7 +957,7 @@ with tab_global:
                             _df_cpi_yoy = _cpi_yoy_fb
                             _cpi_yoy_val = round(float(_cpi_yoy_fb.iloc[-1]), 2)
                 except Exception as e:
-                    logger.error(f"[macro] CPI YoY fallback via fredapi falhou: {e}")
+                    logger.error(f"[macro] CPI YoY fallback via df_global falhou: {e}")
 
             with c2:
                 metric_card(
@@ -980,7 +986,7 @@ with tab_global:
                         name='cpi yoy',
                         line=dict(color='#00B0FF', width=2),
                         fill='tozeroy',
-                        fillcolor='#00B0FF15',
+                        fillcolor='rgba(0, 176, 255, 0.08)',
                         hovertemplate=(
                             '%{x|%b %Y}<br>'
                             'cpi yoy: %{y:.2f}%<extra></extra>'
@@ -1138,24 +1144,21 @@ with tab_global:
             _eu_unemp    = None
             _eu_gdp_grow = None
 
-            _fred_eu = Fred(api_key=st.secrets["FRED_API_KEY"])
             try:
-                _ecb_series = _fred_eu.get_series('ECBDFR', observation_start='2019-01-01')
+                _ecb_series = df_global['ECBDFR'].dropna()
                 if not _ecb_series.empty:
                     _ecb_rate = round(float(_ecb_series.iloc[-1]), 2)
             except Exception as e:
                 logger.error(f"[macro] BCE deposit rate falhou: {e}")
-            time.sleep(1)
             try:
-                _eu_cpi_raw = _fred_eu.get_series('CP0000EZ19M086NEST', observation_start='2019-01-01')
+                _eu_cpi_raw = df_global['CP0000EZ19M086NEST'].dropna()
                 if not _eu_cpi_raw.empty:
                     _eu_cpi_yoy = _eu_cpi_raw.pct_change(12) * 100
                     _eu_cpi = round(float(_eu_cpi_yoy.dropna().iloc[-1]), 2)
             except Exception as e:
                 logger.error(f"[macro] Euro CPI falhou: {e}")
-            time.sleep(1)
             try:
-                _eu_un_series = _fred_eu.get_series('LRHUTTTTEZM156S', observation_start='2019-01-01')
+                _eu_un_series = df_global['LRHUTTTTEZM156S'].dropna()
                 if not _eu_un_series.empty:
                     _eu_unemp = round(float(_eu_un_series.dropna().iloc[-1]), 1)
             except Exception as e:
@@ -1188,9 +1191,8 @@ with tab_global:
             _eu_col1, _eu_col2 = st.columns(2)
 
             with _eu_col1:
-                time.sleep(1)
                 try:
-                    _ecb_hist = _fred_eu.get_series('ECBDFR', observation_start='2019-01-01')
+                    _ecb_hist = df_global['ECBDFR'].dropna()
                     if not _ecb_hist.empty:
                         _fig_ecb = go.Figure(go.Scatter(
                             x=_ecb_hist.index,
@@ -1226,11 +1228,10 @@ with tab_global:
                     st.info("bce: dados indisponíveis")
 
             with _eu_col2:
-                time.sleep(1)
                 try:
-                    _eu10y_ser = _fred_eu.get_series('IRLTLT01EZM156N', observation_start='2019-01-01')
+                    _eu10y_ser = df_global['IRLTLT01EZM156N'].dropna()
                     if not _eu10y_ser.empty:
-                        _bund_ser = _fred_eu.get_series('IRLTLT01DEM156N', observation_start='2019-01-01')
+                        _bund_ser = df_global['IRLTLT01DEM156N'].dropna()
                         _fig_eu10y = go.Figure()
                         _fig_eu10y.add_trace(go.Scatter(
                             x=_eu10y_ser.index,
@@ -1275,10 +1276,9 @@ with tab_global:
                 except Exception:
                     st.info("yields europa: dados indisponíveis")
 
-            time.sleep(1)
             try:
-                _btp_ser = _fred_eu.get_series('IRLTLT01ITM156N', observation_start='2019-01-01')
-                _bund2_ser = _fred_eu.get_series('IRLTLT01DEM156N', observation_start='2019-01-01')
+                _btp_ser = df_global['IRLTLT01ITM156N'].dropna()
+                _bund2_ser = df_global['IRLTLT01DEM156N'].dropna()
                 if not _btp_ser.empty and not _bund2_ser.empty:
                     _spread_btp = (
                         _btp_ser.reindex(_bund2_ser.index, method='ffill')
@@ -1304,7 +1304,7 @@ with tab_global:
                         y=_spread_btp.values,
                         line=dict(color='#FF1744', width=2),
                         fill='tozeroy',
-                        fillcolor='#FF174415',
+                        fillcolor='rgba(255, 23, 68, 0.08)',
                         hovertemplate=(
                             '%{x|%b %Y}<br>'
                             'spread: %{y:.2f}pp<extra></extra>'
@@ -1354,10 +1354,8 @@ with tab_global:
                     _usdjpy = yf.Ticker('JPY=X').history(
                         period='2y', auto_adjust=True
                     )['Close'].dropna()
-                    _fred_asia = Fred(api_key=st.secrets["FRED_API_KEY"])
-                    _df_boj = _fred_asia.get_series('IRSTCB01JPM156N', observation_start='2019-01-01')
-                    time.sleep(1)
-                    _jpy10y_ser = _fred_asia.get_series('IRLTLT01JPM156N', observation_start='2019-01-01')
+                    _boj_ser = df_global['IRSTCB01JPM156N'].dropna()
+                    _jpy10y_ser = df_global['IRLTLT01JPM156N'].dropna()
                     _jcols = st.columns(2)
                     with _jcols[0]:
                         if not _nk.empty:
@@ -1384,7 +1382,7 @@ with tab_global:
                             x=_nk.index, y=_nk.values,
                             line=dict(color='#FF6B6B', width=2),
                             fill='tozeroy',
-                            fillcolor='#FF6B6B15',
+                            fillcolor='rgba(255, 107, 107, 0.08)',
                             hovertemplate=(
                                 '%{x}<br>nikkei: %{y:,.0f}<extra></extra>'
                             ),
@@ -1450,9 +1448,7 @@ with tab_global:
                     _cny = yf.Ticker('CNY=X').history(
                         period='2y', auto_adjust=True
                     )['Close'].dropna()
-                    time.sleep(1)
-                    _fred_cn = Fred(api_key=st.secrets["FRED_API_KEY"])
-                    _cn_cpi_ser = _fred_cn.get_series('CHNCPIALLMINMEI', observation_start='2019-01-01')
+                    _cn_cpi_ser = df_global['CHNCPIALLMINMEI'].dropna()
                     _cncols = st.columns(2)
                     with _cncols[0]:
                         if not _sse.empty:
@@ -1492,7 +1488,7 @@ with tab_global:
                             x=_sse.index, y=_sse.values,
                             line=dict(color='#FF4444', width=2),
                             fill='tozeroy',
-                            fillcolor='#FF444415',
+                            fillcolor='rgba(255, 68, 68, 0.08)',
                             hovertemplate=(
                                 '%{x}<br>shanghai: %{y:,.0f}<extra></extra>'
                             ),
@@ -1656,7 +1652,7 @@ with tab_global:
                             st.caption(f"{_nm}: {_ret_c:+.1f}% | {_bn}: {_ret_b:+.1f}% no período. correlação empírica no horizonte selecionado.")
                             continue
 
-                    _fig_c = go.Figure(go.Scatter(x=_hist_c.index, y=_hist_c.values, line=dict(color=_cor, width=2), fill='tozeroy', fillcolor=f'{_cor}15', hovertemplate=f'%{{x}}<br>{_nm}: %{{y:,.2f}} {_un}<extra></extra>'))
+                    _fig_c = go.Figure(go.Scatter(x=_hist_c.index, y=_hist_c.values, line=dict(color=_cor, width=2), fill='tozeroy', fillcolor=_hex_to_rgba(_cor), hovertemplate=f'%{{x}}<br>{_nm}: %{{y:,.2f}} {_un}<extra></extra>'))
                     _fig_c.update_layout(**base_layout(height=200, title=f"{_nm} ({_un})"))
                     st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
 
