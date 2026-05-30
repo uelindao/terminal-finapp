@@ -16,7 +16,7 @@ from database.db import (
     listar_relatorios_enviados,
     listar_watchlist,
     salvar_config_alerta, get_configs_alerta, deletar_config_alerta,
-    get_user_settings, salvar_user_settings, salvar_user_setting,
+    get_user_settings, get_user_setting, salvar_user_settings, salvar_user_setting,
 )
 
 if not require_auth():
