@@ -302,10 +302,9 @@ def chamar_ia(
         st.error(str(e))
         return ""
 
-    # Tier free: sem thinking, tokens reduzidos
+    # Tier free: sem thinking (Gemini não suporta)
     if tier == 'free':
         thinking   = False
-        max_tokens = min(max_tokens, 600)
 
     mensagens = [
         {"role": "system", "content": system},
