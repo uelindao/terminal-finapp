@@ -917,12 +917,285 @@ with tab_screen:
 
 with tab_ia:
     section_title("🧠 ia: oportunidades do dia")
-    empty_state(
-        "🧠",
-        "ia analytics — em breve",
-        "análise inteligente do universo completo com "
-        "recomendações de entrada e saída via deepseek.",
+
+    st.markdown(
+        '<div style="font-family:Courier New;font-size:0.75rem;'
+        'color:#555;margin-bottom:16px;line-height:1.7;">'
+        'análise de ia do universo completo de ativos. '
+        'identifica os top 5 com maior assimetria '
+        'risco/retorno no momento, considerando health score, '
+        'regime macro e timing técnico. '
+        'atualizado sob demanda — clique para rodar.'
+        '</div>',
+        unsafe_allow_html=True,
     )
+
+    _col_ia_u, _col_ia_m = st.columns(2)
+    with _col_ia_u:
+        _univ_ia = st.radio(
+            "universo:",
+            ["BR", "US", "AMBOS"],
+            format_func=lambda x: {
+                "BR":    "🇧🇷 brasil (b3 + fiis)",
+                "US":    "🇺🇸 eua (s&p500)",
+                "AMBOS": "🌍 todos",
+            }[x],
+            horizontal=True,
+            key="radio_univ_ia_disc",
+        )
+    with _col_ia_m:
+        _modo_ia = st.radio(
+            "foco:",
+            ["entrada", "dividendo", "realizacao"],
+            format_func=lambda x: {
+                "entrada":    "🎯 melhor entrada",
+                "dividendo":  "💰 renda / dividendos",
+                "realizacao": "📤 possível realização",
+            }[x],
+            horizontal=True,
+            key="radio_modo_ia_disc",
+        )
+
+    _btn_rodar_ia = st.button(
+        "🧠 analisar oportunidades agora",
+        type="primary",
+        use_container_width=True,
+        key="btn_ia_disc_rodar",
+    )
+
+    _cache_key_ia = f"ia_disc_{_univ_ia}_{_modo_ia}"
+
+    if _btn_rodar_ia:
+        st.session_state.pop(_cache_key_ia, None)
+        st.session_state.pop(f"{_cache_key_ia}_analise", None)
+
+    if _btn_rodar_ia or st.session_state.get(_cache_key_ia):
+
+        if not st.session_state.get(_cache_key_ia):
+            with st.spinner(
+                "filtrando universo por qualidade... "
+                "(pode levar 30-60 segundos)"
+            ):
+                from Home import calcular_oportunidades_watchlist
+
+                if _univ_ia == "BR":
+                    _tickers_ia = SCREENER_B3 + FII_TODOS
+                elif _univ_ia == "US":
+                    _tickers_ia = SCREENER_US
+                else:
+                    _tickers_ia = SCREENER_B3 + FII_TODOS + SCREENER_US
+
+                _hs_ia = {
+                    h['ticker']: float(h.get('score', 0) or 0)
+                    for h in (get_health_scores() or [])
+                }
+                _cands_ia = [
+                    t for t in _tickers_ia
+                    if _hs_ia.get(t, 0) >= 55
+                    or _hs_ia.get(mapear_ticker_base(t), 0) >= 55
+                ][:80]
+
+                _resultados_ia = calcular_oportunidades_watchlist(
+                    tuple(_cands_ia),
+                    modo=_modo_ia,
+                )
+                st.session_state[_cache_key_ia] = _resultados_ia
+
+        _resultados_ia = st.session_state.get(_cache_key_ia, [])
+
+        if not _resultados_ia:
+            st.warning(
+                "nenhum ativo passou pelos filtros de qualidade "
+                "e timing. tente rodar o sync de fundamentos "
+                "no topo da página ou mude o modo."
+            )
+        else:
+            st.markdown("<br>", unsafe_allow_html=True)
+            section_title(
+                f"📊 top {len(_resultados_ia)} ativos — "
+                f"score quantitativo"
+            )
+
+            import pandas as pd
+            _df_ia = pd.DataFrame(_resultados_ia)[[
+                'ticker', 'nome', 'mercado',
+                'score_assim', 'score_hs',
+                'score_val', 'score_timing',
+                'rsi', 'ret_5d', 'ret_3m', 'dist_top',
+            ]]
+            _df_ia.columns = [
+                'ticker', 'nome', 'mercado',
+                'score total', 'qualidade (hs)',
+                'valuation', 'timing',
+                'rsi', '5d %', '3m %', 'topo %',
+            ]
+
+            st.dataframe(
+                _df_ia.style.format({
+                    'score total':    '{:.0f}',
+                    'qualidade (hs)': '{:.0f}',
+                    'valuation':      '{:.0f}',
+                    'timing':         '{:.0f}',
+                    'rsi':            '{:.0f}',
+                    '5d %':           '{:+.1f}%',
+                    '3m %':           '{:+.1f}%',
+                    'topo %':         '{:.0f}%',
+                }).background_gradient(
+                    subset=['score total'],
+                    cmap='RdYlGn',
+                    vmin=30, vmax=85,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            section_title("🤖 análise qualitativa — ia")
+
+            _cache_key_analise = f"{_cache_key_ia}_analise"
+
+            if st.session_state.get(_cache_key_analise):
+                st.markdown(
+                    f'<div style="font-family:Courier New;'
+                    f'font-size:0.82rem;color:#C0C0C0;'
+                    f'line-height:1.8;background:#0a0a0a;'
+                    f'border:1px solid #1a1a1a;'
+                    f'border-radius:6px;padding:16px;">'
+                    f'{st.session_state[_cache_key_analise]}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "🔄 regenerar análise",
+                    key="btn_regen_ia_disc",
+                ):
+                    st.session_state.pop(_cache_key_analise, None)
+                    st.rerun()
+            else:
+                if st.button(
+                    "🧠 gerar análise qualitativa da ia",
+                    type="secondary",
+                    use_container_width=True,
+                    key="btn_gen_analise_ia_disc",
+                ):
+                    _top5 = _resultados_ia[:5]
+                    _macro_ia = st.session_state.get(
+                        "macro_context", {}
+                    )
+                    _linhas_top5 = []
+                    for _r in _top5:
+                        _linhas_top5.append(
+                            f"- {_r['ticker']} ({_r['nome'][:20]}) "
+                            f"| mercado: {_r['mercado']} "
+                            f"| score: {_r['score_assim']:.0f}/100 "
+                            f"| health: {_r['score_hs']:.0f} "
+                            f"| rsi: {_r['rsi']:.0f} "
+                            f"| ret 5d: {_r['ret_5d']:+.1f}% "
+                            f"| ret 3m: {_r['ret_3m']:+.1f}% "
+                            f"| dist topo: {_r['dist_top']:.0f}%"
+                        )
+
+                    _modo_desc = {
+                        "entrada":   "melhor ponto de entrada",
+                        "dividendo": "renda e dividendos",
+                        "realizacao":"possível realização parcial",
+                    }.get(_modo_ia, _modo_ia)
+
+                    _prompt_ia_disc = (
+                        f"análise de oportunidades — "
+                        f"modo: {_modo_desc}\n\n"
+                        f"universo analisado: {_univ_ia}\n"
+                        f"regime macro: "
+                        f"{_macro_ia.get('label', '—')}\n"
+                        f"selic: {_macro_ia.get('selic', 10.75):.2f}%"
+                        f" | vix: {_macro_ia.get('vix', 15.0):.1f}\n\n"
+                        f"top {len(_top5)} ativos por score "
+                        f"quantitativo:\n"
+                        + "\n".join(_linhas_top5) +
+                        f"\n\nem 5 tópicos diretos (minúsculas):\n"
+                        f"1. qual desses ativos tem a tese mais "
+                        f"sólida para o regime macro atual? por quê?\n"
+                        f"2. qual representa o melhor risco/retorno "
+                        f"no modo '{_modo_desc}'?\n"
+                        f"3. qual deles tem o maior risco oculto "
+                        f"que o score quantitativo pode não capturar?\n"
+                        f"4. como o regime macro atual "
+                        f"({_macro_ia.get('label', '—')}) "
+                        f"afeta especificamente esses ativos?\n"
+                        f"5. se tivesse que escolher apenas um "
+                        f"agora, qual seria e com qual tese de 12 meses?"
+                    )
+
+                    _system_ia_disc = (
+                        "você é um analista de investimentos "
+                        "especializado em mercados br e eua. "
+                        "use os dados quantitativos fornecidos. "
+                        "seja direto e específico. minúsculas. "
+                        "não repita os dados — interprete-os."
+                    )
+                    _us_ia_disc = st.session_state.get(
+                        'user_settings', {}
+                    )
+                    _resposta_ia_disc = chamar_ia(
+                        prompt_usuario = _prompt_ia_disc,
+                        system         = _system_ia_disc,
+                        max_tokens     = 700,
+                        temperatura    = 0.3,
+                        stream         = True,
+                        user_settings  = _us_ia_disc,
+                    )
+                    if _resposta_ia_disc:
+                        st.session_state[_cache_key_analise] = (
+                            _resposta_ia_disc
+                        )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            _ac1, _ac2 = st.columns(2)
+
+            with _ac1:
+                if _resultados_ia:
+                    _top1_ia = _resultados_ia[0]
+                    if st.button(
+                        f"🔬 analisar {_top1_ia['ticker'].replace('.SA','')} "
+                        f"no research",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_ia_disc_research",
+                    ):
+                        st.session_state[
+                            'research_ticker_externo'
+                        ] = _top1_ia['ticker']
+                        st.switch_page("pages/1_Research.py")
+
+            with _ac2:
+                if st.button(
+                    f"+ adicionar top {min(5,len(_resultados_ia))} "
+                    f"à watchlist",
+                    type="secondary",
+                    use_container_width=True,
+                    key="btn_ia_disc_add_wl",
+                ):
+                    try:
+                        _wl_id_ia = get_watchlist_padrao()
+                        _add_count = 0
+                        for _r in _resultados_ia[:5]:
+                            _merc_ia = (
+                                "Brasil (B3)"
+                                if _r['ticker'].endswith('.SA')
+                                else "EUA"
+                            )
+                            adicionar_ativo(
+                                ticker       = _r['ticker'],
+                                nome         = _r['nome'],
+                                mercado      = _merc_ia,
+                                watchlist_id = _wl_id_ia,
+                            )
+                            _add_count += 1
+                        st.success(
+                            f"✅ {_add_count} ativos adicionados!"
+                        )
+                    except Exception as _e_add:
+                        st.error(f"erro ao adicionar: {_e_add}")
 
 with tab_setorial:
     section_title("🗺️ rotação setorial — health score médio por setor")

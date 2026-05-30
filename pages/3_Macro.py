@@ -1098,11 +1098,439 @@ with tab_global:
                     st.plotly_chart(fig_debt, use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌍 europa/ásia":
-            v_ecb = valor_atual_seguro(df_global, 'ECBDFR')
-            if v_ecb is not None: st.plotly_chart(criar_grafico_macro(df_global, 'ECBDFR', "bce - taxa de juros europeia (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
-            g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01EZM156N', "euro area 10y yield (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
-            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'IRLTLT01JPM156N', "japan 10y yield (%)", "#FF1744"), use_container_width=True, config={'responsive': True})
+            # ── EUROPA ───────────────────────────────────────────────────────────
+            section_title("🇪🇺 europa — banco central europeu e economia")
+
+            _col_eu1, _col_eu2, _col_eu3, _col_eu4 = st.columns(4)
+
+            _ecb_rate    = None
+            _eu_cpi      = None
+            _eu_unemp    = None
+            _eu_gdp_grow = None
+
+            try:
+                import pandas_datareader as pdr
+                _df_ecb = pdr.get_data_fred('ECBDFR', start='2019-01-01')
+                if not _df_ecb.empty:
+                    _ecb_rate = round(float(_df_ecb.iloc[-1, 0]), 2)
+                _df_eu_cpi = pdr.get_data_fred(
+                    'CP0000EZ19M086NEST', start='2019-01-01'
+                )
+                if not _df_eu_cpi.empty:
+                    _eu_cpi_raw = _df_eu_cpi.iloc[:, 0]
+                    _eu_cpi_yoy = _eu_cpi_raw.pct_change(12) * 100
+                    _eu_cpi = round(float(_eu_cpi_yoy.dropna().iloc[-1]), 2)
+                _df_eu_un = pdr.get_data_fred(
+                    'LRHUTTTTEZM156S', start='2019-01-01'
+                )
+                if not _df_eu_un.empty:
+                    _eu_unemp = round(float(_df_eu_un.dropna().iloc[-1, 0]), 1)
+            except Exception:
+                pass
+
+            with _col_eu1:
+                metric_card(
+                    "bce deposit rate",
+                    f"{_ecb_rate:.2f}%" if _ecb_rate is not None else "N/D",
+                    "taxa de depósito do bce",
+                    "bear" if (_ecb_rate or 0) > 3 else "amber",
+                )
+            with _col_eu2:
+                metric_card(
+                    "cpi zona euro (yoy)",
+                    f"{_eu_cpi:.2f}%" if _eu_cpi is not None else "N/D",
+                    "variação anual hicp",
+                    "bear" if (_eu_cpi or 0) > 3 else "bull",
+                )
+            with _col_eu3:
+                metric_card(
+                    "desemprego zona euro",
+                    f"{_eu_unemp:.1f}%" if _eu_unemp is not None else "N/D",
+                    "taxa de desemprego",
+                    "bear" if (_eu_unemp or 0) > 7 else "bull",
+                )
+            with _col_eu4:
+                metric_card("euro/usd", "—", "par cambial")
+
+            _eu_col1, _eu_col2 = st.columns(2)
+
+            with _eu_col1:
+                try:
+                    import pandas_datareader as pdr
+                    _df_ecb_hist = pdr.get_data_fred(
+                        'ECBDFR', start='2019-01-01'
+                    )
+                    if not _df_ecb_hist.empty:
+                        _fig_ecb = go.Figure(go.Scatter(
+                            x=_df_ecb_hist.index,
+                            y=_df_ecb_hist.iloc[:, 0],
+                            line=dict(color='#FF9900', width=2),
+                            hovertemplate=(
+                                '%{x|%b %Y}<br>'
+                                'bce rate: %{y:.2f}%<extra></extra>'
+                            ),
+                        ))
+                        _fig_ecb.add_hline(
+                            y=0, line_color='#333',
+                            line_dash='dash', line_width=1,
+                        )
+                        _lay_ecb = base_layout(
+                            height=260,
+                            title='bce — taxa de depósito (%)'
+                        )
+                        _fig_ecb.update_layout(**_lay_ecb)
+                        st.plotly_chart(
+                            _fig_ecb, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "taxa de depósito do banco central europeu (bce). "
+                            "subidas rápidas de 2022-2023 foram as mais "
+                            "agressivas da história do euro. "
+                            "juros altos na europa encarecem crédito e "
+                            "pressionam países com alta dívida (itália, grécia). "
+                            "fonte: fred — ecbdfr."
+                        )
+                except Exception:
+                    st.info("bce: dados indisponíveis")
+
+            with _eu_col2:
+                try:
+                    import pandas_datareader as pdr
+                    _df_eu10y = pdr.get_data_fred(
+                        'IRLTLT01EZM156N', start='2019-01-01'
+                    )
+                    if not _df_eu10y.empty:
+                        _df_bund = pdr.get_data_fred(
+                            'IRLTLT01DEM156N', start='2019-01-01'
+                        )
+                        _fig_eu10y = go.Figure()
+                        _fig_eu10y.add_trace(go.Scatter(
+                            x=_df_eu10y.index,
+                            y=_df_eu10y.iloc[:, 0],
+                            name='zona euro 10y',
+                            line=dict(color='#00B0FF', width=2),
+                            hovertemplate=(
+                                '%{x|%b %Y}<br>'
+                                'eu 10y: %{y:.2f}%<extra></extra>'
+                            ),
+                        ))
+                        if not _df_bund.empty:
+                            _fig_eu10y.add_trace(go.Scatter(
+                                x=_df_bund.index,
+                                y=_df_bund.iloc[:, 0],
+                                name='bund alemão 10y',
+                                line=dict(
+                                    color='#FFD700', width=1.5,
+                                    dash='dot'
+                                ),
+                                hovertemplate=(
+                                    '%{x|%b %Y}<br>'
+                                    'bund: %{y:.2f}%<extra></extra>'
+                                ),
+                            ))
+                        _lay_eu10y = base_layout(
+                            height=260,
+                            title='yields soberanos europa 10 anos (%)'
+                        )
+                        _fig_eu10y.update_layout(**_lay_eu10y)
+                        st.plotly_chart(
+                            _fig_eu10y, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "yield do título soberano da zona euro vs bund alemão. "
+                            "o spread entre países periféricos (itália, espanha) "
+                            "e o bund é o principal indicador de stress fiscal europeu. "
+                            "spread alto = mercado exige prêmio de risco. "
+                            "fonte: fred — irltlt01ezm156n / irltlt01dem156n."
+                        )
+                except Exception:
+                    st.info("yields europa: dados indisponíveis")
+
+            try:
+                import pandas_datareader as pdr
+                _df_btp  = pdr.get_data_fred(
+                    'IRLTLT01ITM156N', start='2019-01-01'
+                )
+                _df_bund2 = pdr.get_data_fred(
+                    'IRLTLT01DEM156N', start='2019-01-01'
+                )
+                if not _df_btp.empty and not _df_bund2.empty:
+                    _spread_btp = (
+                        _df_btp.iloc[:, 0]
+                        .reindex(_df_bund2.index, method='ffill')
+                        - _df_bund2.iloc[:, 0]
+                    ).dropna()
+
+                    _spread_atual = round(float(_spread_btp.iloc[-1]), 2)
+
+                    section_title("🔥 spread btp-bund — stress fiscal europeu")
+                    metric_card(
+                        "spread btp-bund (itália vs alemanha)",
+                        f"{_spread_atual:.2f}pp",
+                        "acima de 2.5pp = stress fiscal elevado",
+                        "bear" if _spread_atual > 2.5
+                        else "amber" if _spread_atual > 1.5
+                        else "bull",
+                        destaque=True,
+                    )
+
+                    _fig_spread = go.Figure(go.Scatter(
+                        x=_spread_btp.index,
+                        y=_spread_btp.values,
+                        line=dict(color='#FF1744', width=2),
+                        fill='tozeroy',
+                        fillcolor='#FF174415',
+                        hovertemplate=(
+                            '%{x|%b %Y}<br>'
+                            'spread: %{y:.2f}pp<extra></extra>'
+                        ),
+                    ))
+                    _fig_spread.add_hline(
+                        y=2.5, line_color='#FF9900',
+                        line_dash='dash', line_width=1,
+                        annotation_text='alerta 2.5pp',
+                        annotation_font_color='#FF9900',
+                        annotation_font_size=9,
+                    )
+                    _lay_spread = base_layout(
+                        height=250,
+                        title='spread btp-bund (pp) — barómetro de stress europeu'
+                    )
+                    _fig_spread.update_layout(**_lay_spread)
+                    st.plotly_chart(
+                        _fig_spread, use_container_width=True,
+                        config={'responsive': True}
+                    )
+                    st.caption(
+                        "spread entre o título italiano de 10 anos (btp) e o "
+                        "alemão (bund). o bund é o ativo livre de risco europeu. "
+                        "spread > 2.5pp historicamente precede crises de dívida "
+                        "(2011-2012: spread chegou a 5pp, causando crise do euro). "
+                        "indicador chave para risco sistêmico europeu. "
+                        "fonte: fred — irltlt01itm156n / irltlt01dem156n."
+                    )
+            except Exception:
+                pass
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── ÁSIA ─────────────────────────────────────────────────────────────
+            section_title("🌏 ásia — japão e china")
+
+            _asia_c1, _asia_c2 = st.columns(2)
+
+            with _asia_c1:
+                section_title("🇯🇵 japão")
+                try:
+                    import yfinance as yf
+                    import pandas_datareader as pdr
+                    _nk = yf.Ticker('^N225').history(
+                        period='5y', auto_adjust=True
+                    )['Close'].dropna()
+                    _usdjpy = yf.Ticker('JPY=X').history(
+                        period='2y', auto_adjust=True
+                    )['Close'].dropna()
+                    _df_boj = pdr.get_data_fred(
+                        'IRSTCB01JPM156N', start='2019-01-01'
+                    )
+                    _df_jpy10y = pdr.get_data_fred(
+                        'IRLTLT01JPM156N', start='2019-01-01'
+                    )
+                    _jcols = st.columns(2)
+                    with _jcols[0]:
+                        if not _nk.empty:
+                            _nk_val = float(_nk.iloc[-1])
+                            _nk_1y  = float(_nk.iloc[-252]) if len(_nk) >= 252 else _nk_val
+                            _nk_ret = (_nk_val / _nk_1y - 1) * 100
+                            metric_card(
+                                "nikkei 225",
+                                f"{_nk_val:,.0f}",
+                                f"{_nk_ret:+.1f}% (12m)",
+                                "bull" if _nk_ret > 0 else "bear",
+                            )
+                    with _jcols[1]:
+                        if not _usdjpy.empty:
+                            _yen_val = float(_usdjpy.iloc[-1])
+                            metric_card(
+                                "usd/jpy",
+                                f"¥ {_yen_val:.1f}",
+                                "yen fraco = pressão inflacionária",
+                                "bear" if _yen_val > 150 else "amber",
+                            )
+                    if not _nk.empty:
+                        _fig_nk = go.Figure(go.Scatter(
+                            x=_nk.index, y=_nk.values,
+                            line=dict(color='#FF6B6B', width=2),
+                            fill='tozeroy',
+                            fillcolor='#FF6B6B15',
+                            hovertemplate=(
+                                '%{x}<br>nikkei: %{y:,.0f}<extra></extra>'
+                            ),
+                        ))
+                        _lay_nk = base_layout(
+                            height=220, title='nikkei 225 (5 anos)'
+                        )
+                        _fig_nk.update_layout(**_lay_nk)
+                        st.plotly_chart(
+                            _fig_nk, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "nikkei 225: principal índice de ações japonês. "
+                            "japão é exportador — yen fraco (usd/jpy alto) "
+                            "beneficia exportadores mas pressiona poder de compra. "
+                            "boj manteve política ultrafrouxa por décadas; "
+                            "mudança de stance é evento macro global relevante."
+                        )
+                    if not _df_jpy10y.empty:
+                        _fig_jpy10y = go.Figure(go.Scatter(
+                            x=_df_jpy10y.index,
+                            y=_df_jpy10y.iloc[:, 0],
+                            line=dict(color='#FF9900', width=2),
+                            hovertemplate=(
+                                '%{x|%b %Y}<br>'
+                                'jp 10y: %{y:.2f}%<extra></extra>'
+                            ),
+                        ))
+                        _fig_jpy10y.add_hline(
+                            y=1.0, line_color='#555',
+                            line_dash='dot', line_width=1,
+                            annotation_text='teto ytc histórico 1%',
+                            annotation_font_color='#555',
+                            annotation_font_size=8,
+                        )
+                        _lay_jpy10y = base_layout(
+                            height=200,
+                            title='japão — yield título 10 anos (%)'
+                        )
+                        _fig_jpy10y.update_layout(**_lay_jpy10y)
+                        st.plotly_chart(
+                            _fig_jpy10y, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "yield soberano japonês de 10 anos. "
+                            "o boj controlou o yield via ycc (yield curve control) "
+                            "por anos — abandono do ycc em 2024 foi evento macro "
+                            "histórico, causando apreciação do yen e volatilidade global. "
+                            "fonte: fred — irltlt01jpm156n."
+                        )
+                except Exception as _e_jp:
+                    st.info(f"dados japão indisponíveis: {_e_jp}")
+
+            with _asia_c2:
+                section_title("🇨🇳 china")
+                try:
+                    import yfinance as yf
+                    import pandas_datareader as pdr
+                    _sse = yf.Ticker('000001.SS').history(
+                        period='5y', auto_adjust=True
+                    )['Close'].dropna()
+                    _cny = yf.Ticker('CNY=X').history(
+                        period='2y', auto_adjust=True
+                    )['Close'].dropna()
+                    _df_cn_cpi = pdr.get_data_fred(
+                        'CHNCPIALLMINMEI', start='2019-01-01'
+                    )
+                    _cncols = st.columns(2)
+                    with _cncols[0]:
+                        if not _sse.empty:
+                            _sse_val = float(_sse.iloc[-1])
+                            _sse_1y  = float(_sse.iloc[-252]) if len(_sse) >= 252 else _sse_val
+                            _sse_ret = (_sse_val / _sse_1y - 1) * 100
+                            metric_card(
+                                "shanghai composite",
+                                f"{_sse_val:,.0f}",
+                                f"{_sse_ret:+.1f}% (12m)",
+                                "bull" if _sse_ret > 0 else "bear",
+                            )
+                    with _cncols[1]:
+                        if not _cny.empty:
+                            _cny_val = float(_cny.iloc[-1])
+                            metric_card(
+                                "usd/cny",
+                                f"¥ {_cny_val:.3f}",
+                                "yuan vs dólar",
+                                "bear" if _cny_val > 7.2 else "bull",
+                            )
+                    if not _df_cn_cpi.empty:
+                        _cn_cpi_yoy = _df_cn_cpi.iloc[:, 0].pct_change(12) * 100
+                        _cn_cpi_val = round(
+                            float(_cn_cpi_yoy.dropna().iloc[-1]), 2
+                        )
+                        metric_card(
+                            "cpi china (yoy)",
+                            f"{_cn_cpi_val:.2f}%",
+                            "deflação = risco de armadilha japonesa",
+                            "bear" if _cn_cpi_val < 0
+                            else "amber" if _cn_cpi_val < 1
+                            else "bull",
+                        )
+                    if not _sse.empty:
+                        _fig_sse = go.Figure(go.Scatter(
+                            x=_sse.index, y=_sse.values,
+                            line=dict(color='#FF4444', width=2),
+                            fill='tozeroy',
+                            fillcolor='#FF444415',
+                            hovertemplate=(
+                                '%{x}<br>shanghai: %{y:,.0f}<extra></extra>'
+                            ),
+                        ))
+                        _lay_sse = base_layout(
+                            height=220, title='shanghai composite (5 anos)'
+                        )
+                        _fig_sse.update_layout(**_lay_sse)
+                        st.plotly_chart(
+                            _fig_sse, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "shanghai composite: principal índice de ações chinês. "
+                            "china é a segunda maior economia do mundo e "
+                            "principal parceiro comercial do brasil. "
+                            "desaceleração chinesa impacta diretamente "
+                            "commodities (minério, soja, petróleo) e o ibov. "
+                            "risco deflacionário e crise imobiliária (evergrande) "
+                            "são preocupações estruturais."
+                        )
+                    if not _df_cn_cpi.empty:
+                        _cn_cpi_yoy_serie = _df_cn_cpi.iloc[:, 0].pct_change(12) * 100
+                        _fig_cn_cpi = go.Figure(go.Scatter(
+                            x=_cn_cpi_yoy_serie.dropna().index,
+                            y=_cn_cpi_yoy_serie.dropna().values,
+                            line=dict(color='#FFD700', width=2),
+                            hovertemplate=(
+                                '%{x|%b %Y}<br>'
+                                'cpi china yoy: %{y:.2f}%<extra></extra>'
+                            ),
+                        ))
+                        _fig_cn_cpi.add_hline(
+                            y=0, line_color='#FF1744',
+                            line_dash='dash', line_width=1,
+                            annotation_text='deflação',
+                            annotation_font_color='#FF1744',
+                            annotation_font_size=9,
+                        )
+                        _lay_cn_cpi = base_layout(
+                            height=200,
+                            title='china — inflação cpi yoy (%)'
+                        )
+                        _fig_cn_cpi.update_layout(**_lay_cn_cpi)
+                        st.plotly_chart(
+                            _fig_cn_cpi, use_container_width=True,
+                            config={'responsive': True}
+                        )
+                        st.caption(
+                            "inflação anual chinesa. cpi abaixo de 0% = deflação. "
+                            "deflação persistente indica demanda fraca e "
+                            "excesso de capacidade — armadilha japonesa. "
+                            "impacta exportações brasileiras via preços de commodities. "
+                            "fonte: fred — chncpiallminmei."
+                        )
+                except Exception as _e_cn:
+                    st.info(f"dados china indisponíveis: {_e_cn}")
 
         elif aba_sel == "🌐 risco":
             section_title("curva de juros eua & spreads de crédito")
