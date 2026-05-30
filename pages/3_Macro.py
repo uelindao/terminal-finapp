@@ -2319,7 +2319,7 @@ with tab_sentimento:
                 number={'font': {'size': 32, 'color': _cor_fg, 'family': 'Courier New'}},
             ))
             _fig_fg.update_layout(height=220, paper_bgcolor='#0d0d0d', plot_bgcolor='#0d0d0d', margin=dict(l=20, r=20, t=30, b=10))
-            st.plotly_chart(_fig_fg, use_container_width=True, config={'responsive': True})
+            st.plotly_chart(_fig_fg, use_container_width=True, config={'responsive': True}, key=f"fg_gauge_{titulo}")
 
     _renderizar_gauge(_col_fg1, _fg_eua.get('score', 50), _fg_eua.get('label', '—'), "🇺🇸 eua")
     _renderizar_gauge(_col_fg2, _fg_br.get('score', 50), _fg_br.get('label', '—'), "🇧🇷 brasil")
