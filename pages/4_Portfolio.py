@@ -2269,13 +2269,20 @@ with tab_chat:
         "minha exposição a juros está adequada?",
     ]
 
-    _cols_sug = st.columns(len(_sugestoes))
-    for _i, _sug in enumerate(_sugestoes):
-        with _cols_sug[_i]:
-            _label = (_sug[:30] + "...") if len(_sug) > 30 else _sug
-            if st.button(_label, key=f"chat_sug_{_i}",
-                         use_container_width=True, help=_sug):
-                st.session_state["chat_input_pendente"] = _sug
+    # Renderiza em grid 2 colunas para não overflow
+    _sug_rows = [_sugestoes[i:i+2] for i in range(0, len(_sugestoes), 2)]
+
+    for _row in _sug_rows:
+        _scols = st.columns(len(_row))
+        for _sci, _sug in enumerate(_row):
+            with _scols[_sci]:
+                if st.button(
+                    _sug,
+                    key=f"sug_{_sug[:20]}",
+                    use_container_width=True,
+                ):
+                    st.session_state["chat_input_pendente"] = _sug
+                    st.rerun()
 
     # ── carrega user da sessão ────────────────────────────────────────────
 

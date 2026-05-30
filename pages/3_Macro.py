@@ -895,20 +895,98 @@ with tab_global:
 
         elif aba_sel == "🇺🇸 estados unidos":
             c1, c2, c3, c4 = st.columns(4)
-            v_fed = valor_atual_seguro(df_global, 'FEDFUNDS')
-            v_cpi_yoy = valor_atual_seguro(df_global, 'CPI_YOY')
-            v_dgs10 = valor_atual_seguro(df_global, 'DGS10')
+            v_fed    = valor_atual_seguro(df_global, 'FEDFUNDS')
+            v_dgs10  = valor_atual_seguro(df_global, 'DGS10')
             v_unrate = valor_atual_seguro(df_global, 'UNRATE')
             with c1: metric_card("fed funds rate", fmt_pct(v_fed, sinal=False))
-            with c2: metric_card("cpi yoy", fmt_pct(v_cpi_yoy, sinal=False))
             with c3: metric_card("treasury 10y", fmt_pct(v_dgs10, sinal=False))
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
-            
+
+            # CPI YoY — tenta df_global (fredapi), fallback pandas-datareader
+            _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
+            _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)
+
+            if _cpi_yoy_val is None:
+                try:
+                    import pandas_datareader as pdr
+                    _df_cpi_raw = pdr.get_data_fred('CPIAUCSL', start='2019-01-01')
+                    if not _df_cpi_raw.empty:
+                        _cpi_serie = _df_cpi_raw.iloc[:, 0]
+                        _df_cpi_yoy = _cpi_serie.pct_change(12) * 100
+                        _df_cpi_yoy = _df_cpi_yoy.dropna()
+                        if not _df_cpi_yoy.empty:
+                            _cpi_yoy_val = round(float(_df_cpi_yoy.iloc[-1]), 2)
+                except Exception:
+                    pass
+
+            with c2:
+                metric_card(
+                    "cpi yoy (eua)",
+                    f"{_cpi_yoy_val:.2f}%" if _cpi_yoy_val else "N/D",
+                    "variação anual do índice de preços ao consumidor",
+                    (
+                        "bear" if (_cpi_yoy_val or 0) > 3.5
+                        else "bull" if (_cpi_yoy_val or 0) < 2.5
+                        else "amber"
+                    ),
+                )
+
             st.markdown(tooltip_info("Fed Funds Rate — taxa de juros básica americana definida pelo FOMC. Referência global para custo do dinheiro."), unsafe_allow_html=True)
             st.markdown(tooltip_info("CPI YoY — variação anual do índice de preços ao consumidor americano. Principal referência de inflação nos EUA, acompanhada de perto pelo Fed."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
             with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", "#00C853"), use_container_width=True, config={'responsive': True})
-            with g2: st.plotly_chart(criar_grafico_macro(df_global, 'CPI_YOY', "inflação anual cpi yoy (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+
+            # Gráfico CPI YoY
+            with g2:
+                if not _df_cpi_yoy.empty:
+                    _fig_cpi = go.Figure()
+                    _fig_cpi.add_trace(go.Scatter(
+                        x=_df_cpi_yoy.index,
+                        y=_df_cpi_yoy.values,
+                        name='cpi yoy',
+                        line=dict(color='#00B0FF', width=2),
+                        fill='tozeroy',
+                        fillcolor='#00B0FF15',
+                        hovertemplate=(
+                            '%{x|%b %Y}<br>'
+                            'cpi yoy: %{y:.2f}%<extra></extra>'
+                        ),
+                    ))
+                    _fig_cpi.add_hline(
+                        y=2.0, line_color='#00C853',
+                        line_dash='dash', line_width=1,
+                        annotation_text='meta 2%',
+                        annotation_font_color='#00C853',
+                        annotation_font_size=9,
+                    )
+                    _fig_cpi.add_hline(
+                        y=3.5, line_color='#FF9900',
+                        line_dash='dot', line_width=1,
+                        annotation_text='alerta 3.5%',
+                        annotation_font_color='#FF9900',
+                        annotation_font_size=9,
+                    )
+                    _lay_cpi = base_layout(
+                        height=280,
+                        title='inflação anual eua — cpi yoy (%)'
+                    )
+                    _fig_cpi.update_layout(**_lay_cpi)
+                    st.plotly_chart(
+                        _fig_cpi, use_container_width=True,
+                        config={'responsive': True}
+                    )
+                    st.caption(
+                        "cpi yoy = variação percentual do índice de preços "
+                        "ao consumidor vs mesmo mês do ano anterior. "
+                        "meta fed: 2%. acima de 3.5% pressiona manutenção "
+                        "de juros altos. fonte: fred — cpiaucsl."
+                    )
+                else:
+                    st.info(
+                        "💡 para dados de CPI em tempo real, adicione "
+                        "'pandas-datareader>=0.10.0' ao requirements.txt "
+                        "e faça redeploy."
+                    )
             st.markdown(tooltip_info("Treasury 10y — rendimento do título público americano de 10 anos. Referência para taxas de juros globais e custo de financiamento de longo prazo."), unsafe_allow_html=True)
             st.markdown(tooltip_info("UNRATE — taxa de desemprego americana (U-3). Indicador-chave de saúde do mercado de trabalho, monitorado pelo Fed."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
@@ -920,7 +998,6 @@ with tab_global:
             section_title("🏛️ fiscal americano")
 
             v_divida_eua_pib = valor_atual_seguro(df_global, 'GFDEGDQ188S')
-            v_deficit_eua = valor_atual_seguro(df_global, 'MTSDS133FMS')
 
             f1, f2 = st.columns(2)
             with f1:
@@ -928,11 +1005,89 @@ with tab_global:
                     metric_card("dívida pública/pib (eua)", f"{v_divida_eua_pib:.1f}%")
                 else:
                     metric_card("dívida pública/pib (eua)", "n/d", "fred indisponível")
-            with f2:
-                if v_deficit_eua is not None:
-                    metric_card("déficit/superávit federal", f"{v_deficit_eua:+.1f}% pib")
-                else:
-                    metric_card("déficit/superávit federal", "n/d", "fred indisponível")
+
+            # Déficit federal EUA — valor absoluto em bilhões
+            _deficit = df_global.get('MTSDS133FMS', pd.Series(dtype=float)).dropna()
+            if not _deficit.empty:
+                _def_close = (
+                    _deficit
+                    if isinstance(_deficit, pd.Series)
+                    else pd.Series(dtype=float)
+                )
+
+                # MTSDS133FMS está em milhões USD → converte para bilhões
+                _def_bi = _def_close / 1000
+
+                # Acumulado 12 meses (rolling sum)
+                _def_12m = _def_bi.rolling(12).sum()
+
+                _def_mensal_atual = float(_def_bi.dropna().iloc[-1])
+                _def_12m_atual    = float(_def_12m.dropna().iloc[-1])
+                _sinal_def        = "superávit" if _def_mensal_atual >= 0 else "déficit"
+                _cor_def          = "#00C853" if _def_mensal_atual >= 0 else "#FF1744"
+
+                with f2:
+                    metric_card(
+                        "resultado fiscal (12m acum.)",
+                        f"us$ {_def_12m_atual:,.0f}bi",
+                        f"{'superávit' if _def_12m_atual >= 0 else 'déficit'} "
+                        f"acumulado últimos 12 meses",
+                        "bull" if _def_12m_atual >= 0 else "bear",
+                    )
+
+                # Gráfico de barras mensais + linha de acumulado 12m
+                _fig_def = go.Figure()
+
+                # Barras mensais
+                _fig_def.add_trace(go.Bar(
+                    x=_def_bi.index,
+                    y=_def_bi.values,
+                    name="mensal (us$ bi)",
+                    marker_color=[
+                        '#00C853' if v >= 0 else '#FF1744'
+                        for v in _def_bi.values
+                    ],
+                    opacity=0.7,
+                    hovertemplate=(
+                        '%{x|%b %Y}<br>'
+                        'resultado: us$ %{y:,.0f}bi<extra></extra>'
+                    ),
+                ))
+
+                # Linha de acumulado 12m
+                _fig_def.add_trace(go.Scatter(
+                    x=_def_12m.index,
+                    y=_def_12m.values,
+                    name="acum. 12m (us$ bi)",
+                    line=dict(color='#FF9900', width=2),
+                    hovertemplate=(
+                        '%{x|%b %Y}<br>'
+                        'acum 12m: us$ %{y:,.0f}bi<extra></extra>'
+                    ),
+                ))
+
+                _fig_def.add_hline(
+                    y=0, line_color='#555',
+                    line_dash='dash', line_width=1,
+                )
+
+                _lay_def = base_layout(
+                    height=280,
+                    title='resultado fiscal federal eua (us$ bilhões)'
+                )
+                _fig_def.update_layout(**_lay_def)
+                st.plotly_chart(
+                    _fig_def, use_container_width=True,
+                    config={'responsive': True}
+                )
+                st.caption(
+                    "barras = resultado mensal. linha laranja = acumulado 12 meses. "
+                    "déficits persistentes pressionam emissão de títulos e "
+                    "juros longos. fonte: fred — mtsds133fms (us$ milhões)."
+                )
+            else:
+                with f2:
+                    metric_card("resultado fiscal", "n/d", "fred indisponível")
 
             gf1, gf2 = st.columns(2)
             with gf1:
@@ -941,10 +1096,6 @@ with tab_global:
                     fig_debt.add_hline(y=78, line_color="#FF9900", line_dash="dash", line_width=1,
                                       annotation_text="patamar 2019 (pré-covid)", annotation_font_color="#FF9900", annotation_font_size=9)
                     st.plotly_chart(fig_debt, use_container_width=True, config={'responsive': True})
-            with gf2:
-                if 'MTSDS133FMS' in df_global.columns and not df_global['MTSDS133FMS'].dropna().empty:
-                    st.plotly_chart(criar_grafico_macro(df_global, 'MTSDS133FMS', "resultado federal mensal (% pib)", "#00B0FF"),
-                                    use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌍 europa/ásia":
             v_ecb = valor_atual_seguro(df_global, 'ECBDFR')
