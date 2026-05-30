@@ -976,7 +976,7 @@ with tab_ia:
                 "filtrando universo por qualidade... "
                 "(pode levar 30-60 segundos)"
             ):
-                from Home import calcular_oportunidades_watchlist
+                from utils.radar import calcular_oportunidades_watchlist
 
                 if _univ_ia == "BR":
                     _tickers_ia = SCREENER_B3 + FII_TODOS
