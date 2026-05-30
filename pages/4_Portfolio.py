@@ -989,6 +989,16 @@ with tab_posicoes:
 # tab 2: concentração de risco
 # ==========================================
 with tab_concentracao:
+    # DEBUG TEMPORÁRIO
+    st.write("DEBUG pesos_atuais:", pesos_atuais if 'pesos_atuais' in dir() else "VARIÁVEL NÃO EXISTE")
+    try:
+        from database.db import get_pesos
+        _test_pos = get_pesos(portfolio_id=portfolio_id_ativo)
+        st.write("DEBUG get_pesos retornou:", len(_test_pos) if _test_pos else 0, "posições")
+        st.write("DEBUG portfolio_id_ativo:", portfolio_id_ativo)
+    except Exception as _e_debug:
+        st.write("DEBUG erro:", _e_debug)
+
     # ── CARREGA DADOS INDEPENDENTE DA ABA POSIÇÕES ────────────────────────
     _pesos_conc = st.session_state.get("pesos_ativos_cache", [])
     if not _pesos_conc:
