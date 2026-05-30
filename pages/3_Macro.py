@@ -697,7 +697,11 @@ with tab_global:
     with st.spinner("sincronizando feed de bancos centrais e mídia global via apis oficiais..."):
         df_br_master, df_global_master, df_comm_master = puxar_historico_mestre()
         
-        col_espaco, col_filtro = st.columns([7, 3])
+        col_espaco, col_btn, col_filtro = st.columns([5, 2, 3])
+        with col_btn:
+            if st.button("🔄 recarregar dados", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
         with col_filtro:
             janela = st.radio("horizonte de tempo:", ["3 anos", "5 anos", "10 anos"], index=1, horizontal=True, label_visibility="collapsed")
             
