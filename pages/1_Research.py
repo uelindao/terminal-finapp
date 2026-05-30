@@ -557,14 +557,13 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             "seria e por quê? seja direto."
         )
 
-        _us_comp = st.session_state.get('user_settings', {})
         chamar_ia(
             prompt_usuario = _prompt_comp_ia,
             system         = SYSTEM_ANALISTA,
             max_tokens     = 600,
             temperatura    = 0.3,
             stream         = True,
-            user_settings  = _us_comp,
+            user_settings  = _user_settings,
         )
 
     st.stop()
@@ -1950,14 +1949,13 @@ with tab_dcf:
                 "3. cenário bull e bear para os proventos nos próximos 12 meses.\n"
                 "4. recomendação: acumular / manter / reduzir — com justificativa."
             )
-            _us_fii = st.session_state.get('user_settings', {})
             chamar_ia(
                 prompt_usuario = _prompt_fii_val,
                 system         = SYSTEM_TESE,
                 max_tokens     = 800,
                 temperatura    = 0.3,
                 stream         = True,
-                user_settings  = _us_fii,
+                user_settings  = _user_settings,
             )
     else:
         eps_base = safe_float(info_dict.get('trailingEps')) or safe_float(info_dict.get('forwardEps'))
