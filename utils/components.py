@@ -583,3 +583,311 @@ def inject_keyboard_shortcuts():
         "</script>",
         unsafe_allow_html=True,
     )
+
+
+# ── DICIONÁRIO CENTRAL DE TOOLTIPS ────────────────────────────────────
+TOOLTIPS: dict[str, str] = {
+
+    # ── Health Score ──────────────────────────────────────────────────
+    "health_score": (
+        "score composto de 0-100 calculado pelo motor quantitativo. "
+        "combina: piotroski f-score (qualidade de balanço), "
+        "roic vs wacc (geração de valor), momentum 12-1m, "
+        "valuation setorial, solvência e dados macro. "
+        "≥65: acumulação | 40-64: manutenção | <40: reduzir."
+    ),
+    "piotroski": (
+        "f-score de joseph piotroski (2000): 9 critérios binários "
+        "de qualidade fundamentalista. avalia rentabilidade (roa, fcf), "
+        "alavancagem (dívida, liquidez) e eficiência operacional "
+        "(margem bruta, giro de ativos). "
+        "7-9: balanço de alta qualidade | 3-6: médio | 0-2: fraco."
+    ),
+    "roic": (
+        "return on invested capital: nopat / capital investido. "
+        "mede se a empresa gera retorno acima do custo de capital (wacc). "
+        "roic > wacc = empresa cria valor. "
+        "roic < wacc = empresa destrói valor mesmo com lucro contábil. "
+        "br: wacc ≈ selic + 7.5% | eua: wacc ≈ treasury 10y + 5.5%."
+    ),
+    "wacc": (
+        "weighted average cost of capital: custo médio ponderado de capital. "
+        "representa o retorno mínimo que a empresa precisa gerar para "
+        "remunerar acionistas e credores. "
+        "br: 60% equity (selic+7.5%) + 40% dívida (selic×0.66). "
+        "eua: 60% equity (treasury10y+5.5%) + 40% dívida (treasury10y×0.79)."
+    ),
+    "momentum_12_1": (
+        "retorno do ativo de 12 meses atrás até 1 mês atrás "
+        "(exclui o último mês para evitar reversão de curto prazo). "
+        "fator acadêmico robusto: jegadeesh & titman (1993). "
+        "momentum forte historicamente prediz continuação de alta. "
+        "momentum negativo severo indica tendência baixista estrutural."
+    ),
+    "icr": (
+        "interest coverage ratio: ebit / despesas financeiras. "
+        "mede quantas vezes o lucro operacional cobre os juros da dívida. "
+        "≥5x: confortável | 3-5x: adequado | 1.5-3x: atenção | "
+        "<1.5x: risco de insolvência. crítico em ambientes de juro alto."
+    ),
+    "net_debt_ebitda": (
+        "dívida líquida (dívida bruta - caixa) dividida pelo ebitda. "
+        "indica quantos anos de geração de caixa operacional "
+        "são necessários para pagar a dívida. "
+        "br conservador: <1.5x | moderado: 1.5-3x | agressivo: >4x. "
+        "mais preciso que d/e bruto pois desconta o caixa disponível."
+    ),
+
+    # ── Valuation ─────────────────────────────────────────────────────
+    "pl": (
+        "preço / lucro: quanto o mercado paga por cada real de lucro. "
+        "p/l baixo pode indicar desconto ou baixas expectativas de crescimento. "
+        "p/l alto pode indicar crescimento esperado ou sobrevalorização. "
+        "sempre compare com o setor e o histórico da própria empresa."
+    ),
+    "pvp": (
+        "preço / valor patrimonial: quanto o mercado paga "
+        "por cada real de patrimônio líquido contábil. "
+        "p/vp < 1: ativo cotado abaixo do valor contábil (desconto). "
+        "p/vp > 1: mercado precifica crescimento acima do patrimônio. "
+        "para fiis: p/vp próximo de 0.85-0.95 = zona de oportunidade."
+    ),
+    "ev_ebitda": (
+        "enterprise value / ebitda: valor da empresa (incluindo dívida) "
+        "dividido pelo lucro operacional antes de juros, impostos e depreciação. "
+        "permite comparar empresas com estruturas de capital diferentes. "
+        "setores industriais: <8x barato | 8-14x justo | >20x caro. "
+        "tech pode justificar múltiplos mais altos pelo crescimento."
+    ),
+    "dy": (
+        "dividend yield: dividendo por ação / preço da ação × 100. "
+        "indica a rentabilidade do dividendo em relação ao preço pago. "
+        "para ações br: compare com selic (prêmio mínimo de 2-3pp). "
+        "para fiis: compare com ntn-b real (prêmio mínimo de 1.5-2.5pp). "
+        "dy muito alto (>15%) pode indicar yield trap — verifique sustentabilidade."
+    ),
+    "roe": (
+        "return on equity: lucro líquido / patrimônio líquido × 100. "
+        "mede a rentabilidade sobre o capital dos acionistas. "
+        ">20%: excelente | 10-20%: bom | <10%: medíocre | negativo: destruindo valor. "
+        "atenção: roe alto com alavancagem excessiva pode ser enganoso."
+    ),
+    "margem_liquida": (
+        "lucro líquido / receita líquida × 100. "
+        "mede quanto da receita se converte em lucro após todos os custos. "
+        ">15%: alta eficiência | 5-15%: adequado | <5%: baixa margem. "
+        "varia muito por setor: varejo tem margens baixas por design, "
+        "enquanto software e farmacêutico têm margens estruturalmente altas."
+    ),
+
+    # ── FII específico ─────────────────────────────────────────────────
+    "ntnb_spread": (
+        "spread do dividend yield real do fii sobre a ntn-b (ipca+). "
+        "a ntn-b é o benchmark correto para fiis — não a selic. "
+        "spread positivo: fii remunera acima do título público sem risco. "
+        "spread negativo: fii perde do título público — sem prêmio de risco. "
+        "mínimo aceitável: +1.5pp (papel) a +2.5pp (tijolo/shopping)."
+    ),
+    "pvp_fii": (
+        "para fiis, o p/vp tem interpretação diferente das ações. "
+        "0.80-0.95: zona de oportunidade — desconto saudável ao nav. "
+        "0.95-1.05: negociando próximo ao valor patrimonial — justo. "
+        ">1.20: ágio elevado — exige crescimento forte dos proventos. "
+        "<0.70: desconto crítico — mercado precifica problemas graves."
+    ),
+    "segmento_fii": (
+        "segmento do fii determina os múltiplos justos e o risco. "
+        "papel (cri/cra): menor volatilidade, sensível a juros. "
+        "logística: demanda crescente, contratos longos, estável. "
+        "lajes corporativas: dependente de vacância e ciclo econômico. "
+        "shopping: recuperação pós-covid, sensível ao consumo. "
+        "fof: diversificado, taxa dupla (gestão + fiis investidos)."
+    ),
+
+    # ── Macro indicadores ──────────────────────────────────────────────
+    "selic": (
+        "taxa básica de juros brasileira definida pelo copom (bacen). "
+        "referência para toda a curva de juros e para o custo de capital. "
+        "selic alta: penaliza ações de crescimento e fiis (duration longa), "
+        "favorece renda fixa e exportadores. "
+        "selic >10%: regime de juros altos — exige prêmio de risco maior."
+    ),
+    "vix": (
+        "cboe volatility index: volatilidade implícita do s&p500. "
+        "mede o 'medo' do mercado americano nos próximos 30 dias. "
+        "<15: complacência / ganância. 15-25: neutro. "
+        ">25: stress. >35: pânico / crise. "
+        "historicamente, vix >30 é oportunidade de compra em 6-12 meses. "
+        "vix alto + beta alto = penalidade dupla no health score."
+    ),
+    "ipca": (
+        "índice de preços ao consumidor amplo: inflação oficial brasileira. "
+        "meta bcb: 3% ± 1.5pp (teto: 4.5%). "
+        "ipca acima do teto pressiona o copom a manter/elevar a selic. "
+        "impacto direto no yield real de fiis e na correção de contratos. "
+        "ipca acumulado 12m é mais relevante que a leitura mensal."
+    ),
+    "yield_curve": (
+        "spread entre o treasury americano de 10 anos e o de 2 anos. "
+        "curva normal (positiva): 10y > 2y — economia saudável. "
+        "curva invertida (negativa): 10y < 2y — sinal recessivo. "
+        "100% das recessões americanas desde 1955 foram precedidas "
+        "por inversão da curva com antecedência de 6-18 meses (nber). "
+        "inversão não garante recessão — mas é o melhor predictor existente."
+    ),
+    "treasury_10y": (
+        "yield do título soberano americano de 10 anos. "
+        "benchmark global de 'risk-free rate'. "
+        "alta do treasury pressiona p/l de ações de crescimento "
+        "(efeito duration: fluxos futuros valem menos). "
+        "spread treasury vs juro local indica fluxo de capital emergente. "
+        "treasury alto + dólar forte = saída de capital de emergentes."
+    ),
+    "fear_greed": (
+        "índice proprietário de sentimento de mercado (0-100). "
+        "componentes: momentum do índice, força do vix (invertida), "
+        "posição no range 52 semanas, nasdaq vs s&p500, "
+        "ouro como safe haven, ratio vix/volatilidade realizada. "
+        "0-25: medo extremo (oportunidade histórica). "
+        "75-100: ganância extrema (risco de correção). "
+        "extremos de medo historicamente precedem altas."
+    ),
+    "spread_btp_bund": (
+        "spread entre o btp italiano e o bund alemão de 10 anos. "
+        "o bund é o ativo livre de risco europeu. "
+        "spread mede o prêmio de risco exigido para financiar a itália. "
+        "<1.5pp: calmo. 1.5-2.5pp: atenção. >2.5pp: stress. "
+        "crise do euro 2011-2012: spread chegou a 5pp. "
+        "bce pode ativar omt (outright monetary transactions) se necessário."
+    ),
+
+    # ── Portfolio ─────────────────────────────────────────────────────
+    "correlacao": (
+        "correlação de pearson entre retornos diários dos ativos (-1 a +1). "
+        "+1: movem-se identicamente (sem diversificação). "
+        "0: independentes (diversificação máxima). "
+        "-1: movem-se inversamente (hedge perfeito). "
+        "acima de 0.70: alta correlação — risco de concentração oculta. "
+        "portfólio bem diversificado tem correlação média próxima de 0.2-0.4."
+    ),
+    "beta": (
+        "sensibilidade do ativo às variações do benchmark (ibov ou s&p500). "
+        "beta=1: move igual ao mercado. beta>1: mais volátil que o mercado. "
+        "beta<1: menos volátil (defensivo). beta negativo: move inversamente. "
+        "beta >1.5 em cenário de vix alto gera penalidade no health score. "
+        "calculado empiricamente via regressão dos retornos diários (252d)."
+    ),
+    "sharpe": (
+        "retorno excedente (acima do risk-free) por unidade de risco (desvio padrão). "
+        "sharpe = (retorno - selic/cdi) / volatilidade anualizada. "
+        ">1.0: bom. >2.0: excelente. <0: retorno abaixo do risk-free. "
+        "permite comparar ativos com volatilidades diferentes. "
+        "usa selic como risk-free para ativos br."
+    ),
+    "drawdown": (
+        "queda máxima percentual do pico ao vale em um período. "
+        "ex: drawdown de -35% significa que o ativo caiu 35% "
+        "do seu ponto mais alto antes de se recuperar. "
+        "mede o risco real que o investidor enfrentou. "
+        "drawdown alto + recovery longo = ativo de alto risco real."
+    ),
+    "score_assimetria": (
+        "score composto 0-100 do radar de oportunidades. "
+        "componentes: health score (55%) + valuation histórico fmp (20%) "
+        "+ timing de entrada — rsi, micro-recuperação e distância do topo (25%). "
+        "identifica ativos de qualidade com preço temporariamente deprimido "
+        "e sinais de estabilização — não trend following."
+    ),
+
+    # ── Ciclo econômico ────────────────────────────────────────────────
+    "ciclo_expansao": (
+        "fase de expansão: pib crescendo acima do potencial, "
+        "mercado de trabalho aquecido, lucros corporativos em alta. "
+        "historicamente dura 4-7 anos (nber). "
+        "setores favorecidos: tecnologia, consumo discricionário, "
+        "indústria, financeiro. "
+        "estratégia: sobrepeso em cíclicos de qualidade."
+    ),
+    "ciclo_pico": (
+        "fase de pico: crescimento máximo mas desacelerando. "
+        "inflação no teto, banco central aperta política monetária. "
+        "margens de lucro começam a ser comprimidas. "
+        "historicamente dura 6-18 meses. "
+        "setores favorecidos: energia, materiais, saúde. "
+        "estratégia: rotação para defensivos e commodities."
+    ),
+    "ciclo_contracao": (
+        "fase de contração/recessão: pib crescendo abaixo do potencial "
+        "ou em queda. desemprego subindo, lucros caindo. "
+        "banco central inicia ciclo de corte. "
+        "historicamente dura 8-16 meses (nber: média 11m). "
+        "setores favorecidos: consumo básico, saúde, utilities. "
+        "estratégia: máximo defensivo, renda fixa, caixa."
+    ),
+    "ciclo_vale": (
+        "fase de vale: crescimento no mínimo, banco central estimulando. "
+        "ativos de risco extremamente descontados. "
+        "historicamente o melhor momento para acumular cíclicos de qualidade. "
+        "fase mais curta do ciclo — janela de entrada estreita. "
+        "setores favorecidos: tecnologia, construção, consumo discricionário. "
+        "estratégia: agressiva — máximo peso em risco."
+    ),
+}
+
+
+def tooltip(chave: str = "", texto_custom: str = "") -> None:
+    _texto = TOOLTIPS.get(chave, texto_custom)
+    if not _texto:
+        return
+    _texto_esc = (
+        _texto
+        .replace('"', '&quot;')
+        .replace("'", "&#39;")
+    )
+    st.markdown(
+        f'<span title="{_texto_esc}" style="'
+        f'cursor:help;'
+        f'color:#444;'
+        f'font-size:0.65rem;'
+        f'border:1px solid #2a2a2a;'
+        f'border-radius:50%;'
+        f'padding:0 5px;'
+        f'margin-left:4px;'
+        f'font-family:Courier New;'
+        f'user-select:none;'
+        f'vertical-align:middle;'
+        f'">?</span>',
+        unsafe_allow_html=True,
+    )
+
+
+def label_com_tooltip(
+    texto: str,
+    chave: str = "",
+    texto_custom: str = "",
+    cor: str = "#555",
+    tamanho: str = "0.72rem",
+) -> None:
+    _texto_tt = TOOLTIPS.get(chave, texto_custom)
+    _tt_esc = (
+        _texto_tt
+        .replace('"', '&quot;')
+        .replace("'", "&#39;")
+    ) if _texto_tt else ""
+
+    _tt_html = (
+        f' <span title="{_tt_esc}" style="'
+        f'cursor:help;color:#333;font-size:0.6rem;'
+        f'border:1px solid #2a2a2a;border-radius:50%;'
+        f'padding:0 4px;margin-left:2px;'
+        f'font-family:Courier New;user-select:none;">?</span>'
+    ) if _tt_esc else ""
+
+    st.markdown(
+        f'<div style="font-family:Courier New;'
+        f'font-size:{tamanho};color:{cor};'
+        f'margin-bottom:4px;">'
+        f'{texto}{_tt_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )

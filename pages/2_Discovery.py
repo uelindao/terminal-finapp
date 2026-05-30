@@ -27,7 +27,7 @@ from utils.tickers import (
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card
+from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
@@ -1198,7 +1198,12 @@ with tab_ia:
                         st.error(f"erro ao adicionar: {_e_add}")
 
 with tab_setorial:
-    section_title("🗺️ rotação setorial — health score médio por setor")
+    label_com_tooltip(
+        "🗺️ ROTAÇÃO SETORIAL — HEALTH SCORE MÉDIO POR SETOR",
+        chave="health_score",
+        cor="#FF9900",
+        tamanho="0.72rem",
+    )
 
     st.markdown(
         '<div style="font-family:Courier New; font-size:0.75rem; '
@@ -1413,6 +1418,7 @@ with tab_setorial:
 # ==========================================
 with tab_radar:
     section_title("⚡ radar de mercado — oportunidades fora da sua watchlist")
+    tooltip("score_assimetria")
 
     st.markdown(
         '<div style="font-family:Courier New;font-size:0.75rem;'

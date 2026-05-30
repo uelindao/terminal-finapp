@@ -25,7 +25,11 @@ from utils.scrapers import buscar_dados_b3, buscar_dados_us
 from utils.fmp_client import get_multiplos_medios, get_peers
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
+from utils.components import (
+    page_header, section_title, metric_card, status_card,
+    empty_state, inject_keyboard_shortcuts,
+    tooltip, label_com_tooltip, TOOLTIPS,
+)
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -666,7 +670,9 @@ if is_fii:
     mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
     assets = safe_float(info_dict.get('totalAssets'))
     with c1: metric_card("preço / vp", f"{pvp:.2f}" if pvp is not None else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear", destaque=True)
+    tooltip("pvp")
     with c2: metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted", icone="💵")
+    tooltip("dy")
     with c3: metric_card("mkt cap", fmt_numero(mcap, moeda))
     with c4: metric_card("patrimônio líq.", fmt_numero(assets, moeda))
 
@@ -714,6 +720,7 @@ if is_fii:
         f'</div>',
         unsafe_allow_html=True,
     )
+    tooltip("ntnb_spread")
 
 else:
     pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE')) or safe_float(info_dict.get('forwardPE'))
@@ -721,9 +728,13 @@ else:
     mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
     dy = safe_float(cache_d.get('dy%')) or (safe_float(info_dict.get('dividendYield', 0)) * 100)
     with c1: metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️", destaque=True)
+    tooltip("pl")
     with c2: metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted", icone="📈")
+    tooltip("roe")
     with c3: metric_card("margem líq.", fmt_pct(mrg), "eficiência", "bull" if mrg and mrg > 10 else "bear", icone="💰")
+    tooltip("margem_liquida")
     with c4: metric_card("div yield", fmt_pct(dy), "12m", icone="💵")
+    tooltip("dy")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -747,6 +758,16 @@ st.markdown(
 )
 # Persiste impacto_setor para uso no prompt da IA
 st.session_state['impacto_setor_ativo'] = _impacto_setor
+tooltip(
+    "",
+    texto_custom=(
+        "indica como o regime macro atual afeta o setor deste ativo. "
+        "baseado no framework de rotação setorial "
+        "(fama-french 1989, msci sector rotation). "
+        "favorecido: regime beneficia historicamente este setor. "
+        "penalizado: regime desfavorece. neutro: sem impacto claro."
+    )
+)
 
 # ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
 _hs_all = get_health_scores()
@@ -767,7 +788,12 @@ else:
 # --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
 historico = get_historico_score(t_base, dias=180)
 if len(historico) >= 3:
-    section_title("📈 evolução do health score")
+    label_com_tooltip(
+        "📈 EVOLUÇÃO DO HEALTH SCORE",
+        chave="health_score",
+        cor="#FF9900",
+        tamanho="0.72rem",
+    )
     df_hist_score = pd.DataFrame(historico)
     df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'])
     df_hist_score = df_hist_score.set_index('calculado_em')
@@ -784,7 +810,18 @@ if len(historico) >= 3:
     # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
     _breakdown_vis = health_result.get('breakdown', {})
     if _breakdown_vis:
-        section_title("🔬 breakdown do health score")
+        label_com_tooltip(
+            "🔬 BREAKDOWN DO HEALTH SCORE",
+            texto_custom=(
+                "decomposição do health score em seus pilares. "
+                "barras verdes = pontos positivos. "
+                "barras vermelhas = penalidades. "
+                "pilares: piotroski, roic vs wacc, valuation, "
+                "solvência, crescimento, momentum e dados macro."
+            ),
+            cor="#FF9900",
+            tamanho="0.72rem",
+        )
 
         # Mapeamento de nomes internos para labels amigáveis
         _label_map = {

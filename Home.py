@@ -33,7 +33,8 @@ from utils.components import (
     page_header, section_title, metric_card,
     watchlist_card, watchlist_row, watchlist_header_row,
     empty_state, progress_steps,
-    status_card, inject_keyboard_shortcuts, auto_refresh_indicator
+    status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
+    tooltip, label_com_tooltip,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -281,6 +282,7 @@ with st.sidebar:
     _html.append('</div>')
 
     st.markdown(''.join(_html), unsafe_allow_html=True)
+    tooltip("vix")
 
 # ── OPORTUNIDADES DO MOMENTO ─────────────────────────────────────────
 _wl_home = listar_watchlist()
@@ -338,7 +340,12 @@ if _tickers_wl_home:
         )
 
     if _opps:
-        section_title("⚡ oportunidades do momento — sua watchlist")
+        label_com_tooltip(
+            "⚡ OPORTUNIDADES DO MOMENTO — SUA WATCHLIST",
+            chave="score_assimetria",
+            cor="#FF9900",
+            tamanho="0.72rem",
+        )
 
         def _render_opp_card(_opp, _rank):
             _badges = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]

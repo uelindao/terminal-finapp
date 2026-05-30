@@ -18,7 +18,7 @@ from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_se
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -1239,7 +1239,12 @@ with tab_concentracao:
 
         # ── MATRIZ DE CORRELAÇÃO ─────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        section_title("🔗 matriz de correlação entre ativos")
+        label_com_tooltip(
+            "🔗 MATRIZ DE CORRELAÇÃO ENTRE ATIVOS",
+            chave="correlacao",
+            cor="#FF9900",
+            tamanho="0.72rem",
+        )
 
         _tickers_corr = tuple([
             p['ticker'] for p in _pesos_conc
@@ -1285,6 +1290,7 @@ with tab_concentracao:
                         _label_div,
                         "bull" if _score_div >= 60 else ("amber" if _score_div >= 35 else "bear"),
                     )
+                    tooltip("correlacao")
                 with _cc2:
                     metric_card(
                         "pares de alta correlação",

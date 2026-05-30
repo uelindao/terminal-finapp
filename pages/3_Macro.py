@@ -17,7 +17,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator, tooltip, label_com_tooltip
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -786,7 +786,9 @@ with tab_global:
                 _ipca_12m = valor_atual_seguro(df_br, 'IPCA_12M')
 
             with c1: metric_card("selic atual", fmt_pct(v_selic, sinal=False))
+            tooltip("selic")
             with c2: metric_card("ipca 12m", fmt_pct(_ipca_12m or v_ipca_m, sinal=False))
+            tooltip("ipca")
             with c3: metric_card("dólar (ptax)", fmt_preco(v_dolar, "r$"))
             with c4: metric_card("desemprego", fmt_pct(v_desemp, sinal=False))
             
@@ -900,6 +902,7 @@ with tab_global:
             v_unrate = valor_atual_seguro(df_global, 'UNRATE')
             with c1: metric_card("fed funds rate", fmt_pct(v_fed, sinal=False))
             with c3: metric_card("treasury 10y", fmt_pct(v_dgs10, sinal=False))
+            tooltip("treasury_10y")
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
 
             # CPI YoY — tenta df_global (fredapi), fallback pandas-datareader
@@ -1275,6 +1278,7 @@ with tab_global:
                         else "bull",
                         destaque=True,
                     )
+                    tooltip("spread_btp_bund")
 
                     _fig_spread = go.Figure(go.Scatter(
                         x=_spread_btp.index,
@@ -1545,6 +1549,7 @@ with tab_global:
             with c2:
                 cor_t10 = "bull" if (v_t10y2y is not None and v_t10y2y > 0) else ("bear" if (v_t10y2y is not None and v_t10y2y < 0) else "")
                 metric_card("spread 10y-2y", fmt_pct(v_t10y2y, sinal=False) if v_t10y2y is not None else "n/d", cor_delta=cor_t10)
+                tooltip("yield_curve")
             with c3:
                 metric_card("spread hy crédito", fmt_pct(v_hy, sinal=False) if v_hy is not None else "n/d")
                 
@@ -1731,6 +1736,8 @@ with tab_ciclo:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+            _fase_atual = _ciclo.get('fase_provavel', 'expansao')
+            tooltip(f"ciclo_{_fase_atual}")
 
             # Scores das 4 fases como mini barras
             section_title("probabilidade por fase")
@@ -2237,6 +2244,7 @@ with tab_overlay:
 
 with tab_sentimento:
     section_title("😱 fear & greed — eua | brasil | global")
+    tooltip("fear_greed")
 
     with st.spinner("calculando índices de sentimento..."):
         _fg_eua = calcular_fear_greed()
