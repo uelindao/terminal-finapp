@@ -616,6 +616,9 @@ with tab_ia:
                 'alert_threshold': settings.get('alert_threshold', 40),
             }
             salvar_user_settings(user_id_atual, novas)
+            if api_key_input.strip():
+                salvar_user_setting(user_id_atual, 'ai_modo', 'pro')
+                st.session_state['ai_modo_atual'] = 'pro'
             st.success("✅ configurações de ia salvas!")
             st.rerun()
 

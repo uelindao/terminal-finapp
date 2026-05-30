@@ -257,9 +257,40 @@ def chamar_ia(
     Se thinking=True, ativa o modo de raciocínio profundo (budget: 2 000 tokens).
     Use apenas quando a qualidade justificar o custo extra de output.
     """
-    # Respeita a preferência de modo salva pelo usuário
-    _ai_modo = st.session_state.get('ai_modo_atual', 'free')
-    if _ai_modo == 'free' or not (user_settings and user_settings.get('ai_api_key', '').strip()):
+    # Garante que ai_modo_atual esteja em session_state (carrega do DB se necessário)
+    _ai_modo = st.session_state.get('ai_modo_atual')
+    if _ai_modo is None:
+        try:
+            from utils.auth import get_current_user
+            from database.db import get_user_setting
+            _u = get_current_user()
+            if _u:
+                _uid = _u.get('user_id') or st.session_state.get('user_id')
+                if _uid:
+                    _ai_modo = get_user_setting(_uid, 'ai_modo', 'free')
+                    st.session_state['ai_modo_atual'] = _ai_modo
+        except Exception:
+            pass
+    if _ai_modo is None:
+        _ai_modo = 'free'
+
+    # Modo pro: se user_settings não tem a chave, carrega do DB
+    if _ai_modo == 'pro':
+        if not (user_settings and user_settings.get('ai_api_key', '').strip()):
+            try:
+                from utils.auth import get_current_user
+                from database.db import get_user_settings
+                _u = get_current_user()
+                if _u:
+                    _uid = _u.get('user_id') or st.session_state.get('user_id')
+                    if _uid:
+                        user_settings = get_user_settings(_uid)
+            except Exception:
+                pass
+            if not (user_settings and user_settings.get('ai_api_key', '').strip()):
+                st.warning("modo pro ativo, mas nenhuma chave api encontrada. configure em configurações › minha ia.")
+                user_settings = None
+    else:
         user_settings = None
 
     try:
