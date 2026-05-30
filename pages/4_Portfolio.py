@@ -989,32 +989,22 @@ with tab_posicoes:
 # tab 2: concentração de risco
 # ==========================================
 with tab_concentracao:
-    # DEBUG TEMPORÁRIO
-    st.write("DEBUG pesos_atuais:", pesos_atuais if 'pesos_atuais' in dir() else "VARIÁVEL NÃO EXISTE")
-    try:
-        from database.db import get_pesos
-        _test_pos = get_pesos(portfolio_id=portfolio_id_ativo)
-        st.write("DEBUG get_pesos retornou:", len(_test_pos) if _test_pos else 0, "posições")
-        st.write("DEBUG portfolio_id_ativo:", portfolio_id_ativo)
-    except Exception as _e_debug:
-        st.write("DEBUG erro:", _e_debug)
-
     # ── CARREGA DADOS INDEPENDENTE DA ABA POSIÇÕES ────────────────────────
     _pesos_conc = st.session_state.get("pesos_ativos_cache", [])
     if not _pesos_conc:
         _pesos_conc = [p for p in get_pesos(portfolio_id=portfolio_id_ativo) if float(p.get('quantidade') or 0) > 0]
         st.session_state["pesos_ativos_cache"] = _pesos_conc
 
+    # ── TENTA CARREGAR COTAÇÕES VIA CACHE OU YFINANCE ─────────────────────
     _live_conc = st.session_state.get("live_data_cache", {})
     if not _live_conc and _pesos_conc:
         _tickers_conc = list(set([
-            mapear_ticker_base(p['ticker']) for p in _pesos_conc
+            _p['ticker'] for _p in _pesos_conc
         ]))
         try:
             _hist_c = yf.download(
                 _tickers_conc, period="2d",
                 auto_adjust=True, progress=False,
-                multi_level_index=False,
             )
             if isinstance(_hist_c.columns, pd.MultiIndex):
                 _hist_c.columns = _hist_c.columns.get_level_values(0)
@@ -1042,8 +1032,11 @@ with tab_concentracao:
     _total_cart = 0.0
     for _p in _pesos_conc:
         _qtd = float(_p.get('quantidade') or 0)
-        _tb  = mapear_ticker_base(_p['ticker'])
+        _tb  = _p['ticker']
         _pr  = _live_conc.get(_tb, {}).get('preco', 0.0)
+        # Fallback: usa preco_medio do banco se cotação live falhou
+        if _pr <= 0:
+            _pr = float(_p.get('preco_medio') or 0)
         _total_cart += _pr * _qtd
 
     if _total_cart <= 0:
@@ -1060,17 +1053,19 @@ with tab_concentracao:
             if _qtd <= 0:
                 continue
 
-            _t_base = mapear_ticker_base(_t)
-            _preco  = _live_conc.get(_t_base, {}).get('preco', 0.0)
+            _preco  = _live_conc.get(_t, {}).get('preco', 0.0)
+            if _preco <= 0:
+                _preco = float(_p.get('preco_medio') or 0)
             _valor  = _preco * _qtd
             _peso   = (_valor / _total_cart * 100) if _total_cart > 0 else 0.0
 
-            _eh_br = _t_base.endswith('.SA')
+            _eh_br = _t.endswith('.SA')
             _moeda = 'BRL' if _eh_br else 'USD'
             _pais  = 'Brasil' if _eh_br else 'EUA'
 
             # setor — prioriza cache de fundamentos local
-            _fund_p = _cache_fund.get(_t_base, {})
+            _t_base = _t.replace('.SA', '')
+            _fund_p = _cache_fund.get(_t, _cache_fund.get(_t_base, {}))
             _setor  = _fund_p.get('setor') or '—'
             if _setor in ('—', '', None):
                 _setor = 'outros'
