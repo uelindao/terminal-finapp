@@ -942,16 +942,16 @@ with tab_global:
 
             if _cpi_yoy_val is None:
                 try:
-                    import pandas_datareader as pdr
-                    _df_cpi_raw = pdr.get_data_fred('CPIAUCSL', start='2019-01-01')
-                    if not _df_cpi_raw.empty:
-                        _cpi_serie = _df_cpi_raw.iloc[:, 0]
-                        _df_cpi_yoy = _cpi_serie.pct_change(12) * 100
-                        _df_cpi_yoy = _df_cpi_yoy.dropna()
-                        if not _df_cpi_yoy.empty:
-                            _cpi_yoy_val = round(float(_df_cpi_yoy.iloc[-1]), 2)
-                except Exception:
-                    pass
+                    _fred_local = Fred(api_key=st.secrets["FRED_API_KEY"])
+                    _cpi_raw = _fred_local.get_series('CPIAUCSL', observation_start='2019-01-01')
+                    if not _cpi_raw.empty:
+                        _cpi_yoy_fb = _cpi_raw.pct_change(12) * 100
+                        _cpi_yoy_fb = _cpi_yoy_fb.dropna()
+                        if not _cpi_yoy_fb.empty:
+                            _df_cpi_yoy = _cpi_yoy_fb
+                            _cpi_yoy_val = round(float(_cpi_yoy_fb.iloc[-1]), 2)
+                except Exception as e:
+                    logger.error(f"[macro] CPI YoY fallback via fredapi falhou: {e}")
 
             with c2:
                 metric_card(
@@ -1138,33 +1138,26 @@ with tab_global:
             _eu_unemp    = None
             _eu_gdp_grow = None
 
+            _fred_eu = Fred(api_key=st.secrets["FRED_API_KEY"])
             try:
-                import pandas_datareader as pdr
-                _df_ecb = pdr.get_data_fred('ECBDFR', start='2019-01-01')
-                if not _df_ecb.empty:
-                    _ecb_rate = round(float(_df_ecb.iloc[-1, 0]), 2)
+                _ecb_series = _fred_eu.get_series('ECBDFR', observation_start='2019-01-01')
+                if not _ecb_series.empty:
+                    _ecb_rate = round(float(_ecb_series.iloc[-1]), 2)
             except Exception as e:
                 logger.error(f"[macro] BCE deposit rate falhou: {e}")
             time.sleep(1)
             try:
-                import pandas_datareader as pdr
-                _df_eu_cpi = pdr.get_data_fred(
-                    'CP0000EZ19M086NEST', start='2019-01-01'
-                )
-                if not _df_eu_cpi.empty:
-                    _eu_cpi_raw = _df_eu_cpi.iloc[:, 0]
+                _eu_cpi_raw = _fred_eu.get_series('CP0000EZ19M086NEST', observation_start='2019-01-01')
+                if not _eu_cpi_raw.empty:
                     _eu_cpi_yoy = _eu_cpi_raw.pct_change(12) * 100
                     _eu_cpi = round(float(_eu_cpi_yoy.dropna().iloc[-1]), 2)
             except Exception as e:
                 logger.error(f"[macro] Euro CPI falhou: {e}")
             time.sleep(1)
             try:
-                import pandas_datareader as pdr
-                _df_eu_un = pdr.get_data_fred(
-                    'LRHUTTTTEZM156S', start='2019-01-01'
-                )
-                if not _df_eu_un.empty:
-                    _eu_unemp = round(float(_df_eu_un.dropna().iloc[-1, 0]), 1)
+                _eu_un_series = _fred_eu.get_series('LRHUTTTTEZM156S', observation_start='2019-01-01')
+                if not _eu_un_series.empty:
+                    _eu_unemp = round(float(_eu_un_series.dropna().iloc[-1]), 1)
             except Exception as e:
                 logger.error(f"[macro] Euro desemprego falhou: {e}")
 
@@ -1197,14 +1190,11 @@ with tab_global:
             with _eu_col1:
                 time.sleep(1)
                 try:
-                    import pandas_datareader as pdr
-                    _df_ecb_hist = pdr.get_data_fred(
-                        'ECBDFR', start='2019-01-01'
-                    )
-                    if not _df_ecb_hist.empty:
+                    _ecb_hist = _fred_eu.get_series('ECBDFR', observation_start='2019-01-01')
+                    if not _ecb_hist.empty:
                         _fig_ecb = go.Figure(go.Scatter(
-                            x=_df_ecb_hist.index,
-                            y=_df_ecb_hist.iloc[:, 0],
+                            x=_ecb_hist.index,
+                            y=_ecb_hist.values,
                             line=dict(color='#FF9900', width=2),
                             hovertemplate=(
                                 '%{x|%b %Y}<br>'
@@ -1238,18 +1228,13 @@ with tab_global:
             with _eu_col2:
                 time.sleep(1)
                 try:
-                    import pandas_datareader as pdr
-                    _df_eu10y = pdr.get_data_fred(
-                        'IRLTLT01EZM156N', start='2019-01-01'
-                    )
-                    if not _df_eu10y.empty:
-                        _df_bund = pdr.get_data_fred(
-                            'IRLTLT01DEM156N', start='2019-01-01'
-                        )
+                    _eu10y_ser = _fred_eu.get_series('IRLTLT01EZM156N', observation_start='2019-01-01')
+                    if not _eu10y_ser.empty:
+                        _bund_ser = _fred_eu.get_series('IRLTLT01DEM156N', observation_start='2019-01-01')
                         _fig_eu10y = go.Figure()
                         _fig_eu10y.add_trace(go.Scatter(
-                            x=_df_eu10y.index,
-                            y=_df_eu10y.iloc[:, 0],
+                            x=_eu10y_ser.index,
+                            y=_eu10y_ser.values,
                             name='zona euro 10y',
                             line=dict(color='#00B0FF', width=2),
                             hovertemplate=(
@@ -1257,10 +1242,10 @@ with tab_global:
                                 'eu 10y: %{y:.2f}%<extra></extra>'
                             ),
                         ))
-                        if not _df_bund.empty:
+                        if not _bund_ser.empty:
                             _fig_eu10y.add_trace(go.Scatter(
-                                x=_df_bund.index,
-                                y=_df_bund.iloc[:, 0],
+                                x=_bund_ser.index,
+                                y=_bund_ser.values,
                                 name='bund alemão 10y',
                                 line=dict(
                                     color='#FFD700', width=1.5,
@@ -1292,18 +1277,12 @@ with tab_global:
 
             time.sleep(1)
             try:
-                import pandas_datareader as pdr
-                _df_btp  = pdr.get_data_fred(
-                    'IRLTLT01ITM156N', start='2019-01-01'
-                )
-                _df_bund2 = pdr.get_data_fred(
-                    'IRLTLT01DEM156N', start='2019-01-01'
-                )
-                if not _df_btp.empty and not _df_bund2.empty:
+                _btp_ser = _fred_eu.get_series('IRLTLT01ITM156N', observation_start='2019-01-01')
+                _bund2_ser = _fred_eu.get_series('IRLTLT01DEM156N', observation_start='2019-01-01')
+                if not _btp_ser.empty and not _bund2_ser.empty:
                     _spread_btp = (
-                        _df_btp.iloc[:, 0]
-                        .reindex(_df_bund2.index, method='ffill')
-                        - _df_bund2.iloc[:, 0]
+                        _btp_ser.reindex(_bund2_ser.index, method='ffill')
+                        - _bund2_ser
                     ).dropna()
     
                     _spread_atual = round(float(_spread_btp.iloc[-1]), 2)
@@ -1369,20 +1348,16 @@ with tab_global:
                 section_title("🇯🇵 japão")
                 try:
                     import yfinance as yf
-                    import pandas_datareader as pdr
                     _nk = yf.Ticker('^N225').history(
                         period='5y', auto_adjust=True
                     )['Close'].dropna()
                     _usdjpy = yf.Ticker('JPY=X').history(
                         period='2y', auto_adjust=True
                     )['Close'].dropna()
-                    _df_boj = pdr.get_data_fred(
-                        'IRSTCB01JPM156N', start='2019-01-01'
-                    )
+                    _fred_asia = Fred(api_key=st.secrets["FRED_API_KEY"])
+                    _df_boj = _fred_asia.get_series('IRSTCB01JPM156N', observation_start='2019-01-01')
                     time.sleep(1)
-                    _df_jpy10y = pdr.get_data_fred(
-                        'IRLTLT01JPM156N', start='2019-01-01'
-                    )
+                    _jpy10y_ser = _fred_asia.get_series('IRLTLT01JPM156N', observation_start='2019-01-01')
                     _jcols = st.columns(2)
                     with _jcols[0]:
                         if not _nk.empty:
@@ -1429,10 +1404,10 @@ with tab_global:
                             "boj manteve política ultrafrouxa por décadas; "
                             "mudança de stance é evento macro global relevante."
                         )
-                    if not _df_jpy10y.empty:
+                    if not _jpy10y_ser.empty:
                         _fig_jpy10y = go.Figure(go.Scatter(
-                            x=_df_jpy10y.index,
-                            y=_df_jpy10y.iloc[:, 0],
+                            x=_jpy10y_ser.index,
+                            y=_jpy10y_ser.values,
                             line=dict(color='#FF9900', width=2),
                             hovertemplate=(
                                 '%{x|%b %Y}<br>'
@@ -1469,7 +1444,6 @@ with tab_global:
                 section_title("🇨🇳 china")
                 try:
                     import yfinance as yf
-                    import pandas_datareader as pdr
                     _sse = yf.Ticker('000001.SS').history(
                         period='5y', auto_adjust=True
                     )['Close'].dropna()
@@ -1477,9 +1451,8 @@ with tab_global:
                         period='2y', auto_adjust=True
                     )['Close'].dropna()
                     time.sleep(1)
-                    _df_cn_cpi = pdr.get_data_fred(
-                        'CHNCPIALLMINMEI', start='2019-01-01'
-                    )
+                    _fred_cn = Fred(api_key=st.secrets["FRED_API_KEY"])
+                    _cn_cpi_ser = _fred_cn.get_series('CHNCPIALLMINMEI', observation_start='2019-01-01')
                     _cncols = st.columns(2)
                     with _cncols[0]:
                         if not _sse.empty:
@@ -1501,8 +1474,8 @@ with tab_global:
                                 "yuan vs dólar",
                                 "bear" if _cny_val > 7.2 else "bull",
                             )
-                    if not _df_cn_cpi.empty:
-                        _cn_cpi_yoy = _df_cn_cpi.iloc[:, 0].pct_change(12) * 100
+                    if not _cn_cpi_ser.empty:
+                        _cn_cpi_yoy = _cn_cpi_ser.pct_change(12) * 100
                         _cn_cpi_val = round(
                             float(_cn_cpi_yoy.dropna().iloc[-1]), 2
                         )
@@ -1541,8 +1514,8 @@ with tab_global:
                             "risco deflacionário e crise imobiliária (evergrande) "
                             "são preocupações estruturais."
                         )
-                    if not _df_cn_cpi.empty:
-                        _cn_cpi_yoy_serie = _df_cn_cpi.iloc[:, 0].pct_change(12) * 100
+                    if not _cn_cpi_ser.empty:
+                        _cn_cpi_yoy_serie = _cn_cpi_ser.pct_change(12) * 100
                         _fig_cn_cpi = go.Figure(go.Scatter(
                             x=_cn_cpi_yoy_serie.dropna().index,
                             y=_cn_cpi_yoy_serie.dropna().values,
