@@ -7,6 +7,7 @@ from bcb import sgs
 from fredapi import Fred
 import yfinance as yf
 import datetime
+import time
 
 # importações do ecossistema finapp
 from utils.auth import require_auth, render_user_badge, get_current_user
@@ -103,6 +104,7 @@ def puxar_historico_mestre():
                     dfs_global_dict[nome] = fred.get_series(serie_id, observation_start=inicio_10a)
                 except Exception as e:
                     logger.error(f"[macro] FRED série '{serie_id}' ({nome}) falhou: {e}")
+                time.sleep(1)
             df_global = pd.DataFrame(dfs_global_dict)
             if 'CPIAUCSL' in df_global.columns:
                 df_global['CPI_MoM'] = df_global['CPIAUCSL'].pct_change() * 100
