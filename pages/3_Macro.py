@@ -64,22 +64,32 @@ def puxar_historico_mestre():
         try:
             df_temp = sgs.get({nome: codigo}, start=inicio_10a)
             if not df_temp.empty: dfs_br_dict[nome] = df_temp[nome]
-        except Exception: pass
+        except Exception as e:
+            logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
     # Fallback Selic: se série 432 falhou, tenta série 11 (Selic efetiva diária)
     if 'Selic' not in dfs_br_dict:
         try:
             _selic_fb = sgs.get({'Selic': 11}, start=inicio_10a)
             if not _selic_fb.empty:
                 dfs_br_dict['Selic'] = _selic_fb['Selic']
-        except Exception: pass
+        except Exception as e:
+            logger.error(f"[macro] BCB Selic fallback (série 11) falhou: {e}")
             
     df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
+    if df_br.empty:
+        logger.warning("[macro] Nenhum dado do BCB foi carregado.")
     
     # 2. global (fred)
     df_global = pd.DataFrame()
     if "FRED_API_KEY" in st.secrets:
         try:
             fred = Fred(api_key=st.secrets["FRED_API_KEY"])
+            # Validação rápida da chave antes do loop
+            try:
+                fred.get_series_info('FEDFUNDS')
+            except Exception as e:
+                logger.error(f"[macro] Chave FRED API parece inválida: {e}")
+                return df_br, df_global, pd.DataFrame()
             series_fred = {
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
                 'DGS10': 'DGS10', 'DGS2': 'DGS2', 'VIXCLS': 'VIXCLS',
@@ -89,20 +99,26 @@ def puxar_historico_mestre():
             }
             dfs_global_dict = {}
             for nome, serie_id in series_fred.items():
-                try: dfs_global_dict[nome] = fred.get_series(serie_id, observation_start=inicio_10a)
-                except Exception: pass
+                try:
+                    dfs_global_dict[nome] = fred.get_series(serie_id, observation_start=inicio_10a)
+                except Exception as e:
+                    logger.error(f"[macro] FRED série '{serie_id}' ({nome}) falhou: {e}")
             df_global = pd.DataFrame(dfs_global_dict)
             if 'CPIAUCSL' in df_global.columns:
                 df_global['CPI_MoM'] = df_global['CPIAUCSL'].pct_change() * 100
                 df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
-        except Exception: pass 
+            if df_global.empty:
+                logger.warning("[macro] Nenhuma série FRED foi carregada.")
+        except Exception as e:
+            logger.exception(f"[macro] Bloco FRED inteiro falhou: {e}") 
     
     # 3. commodities
     df_commodities = pd.DataFrame()
     try:
         df_commodities = yf.download(['CL=F', 'GC=F'], start=inicio_10a, progress=False)['Close']
         if isinstance(df_commodities, pd.Series): df_commodities = df_commodities.to_frame()
-    except Exception: pass 
+    except Exception as e:
+        logger.error(f"[macro] Download de commodities falhou: {e}") 
         
     return df_br, df_global, df_commodities
 
@@ -710,7 +726,16 @@ with tab_global:
         
         df_br = df_br_master[df_br_master.index >= data_corte] if not df_br_master.empty else df_br_master
         df_global = df_global_master[df_global_master.index >= data_corte] if not df_global_master.empty else df_global_master
-        
+
+        if df_global_master.empty:
+            st.warning(
+                "⚠️ **dados globais (fred) indisponíveis.** "
+                "os indicadores dos eua, europa/ásia e risco não serão exibidos. "
+                "causas possíveis: chave de api inválida/expirada, "
+                "limite de requisições excedido ou falha de rede. "
+                "tente clicar em \"recarregar dados\" acima."
+            )
+
         if not df_comm_master.empty:
             df_comm = df_comm_master[df_comm_master.index >= data_corte]
             if isinstance(df_comm.columns, pd.MultiIndex): df_comm.columns = df_comm.columns.get_level_values(1)
