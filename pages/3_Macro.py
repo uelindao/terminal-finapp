@@ -1070,119 +1070,375 @@ with tab_global:
             with col_news2: renderizar_noticias("EWZ", "🇧🇷 radar brasil (ewz etf)")
 
 with tab_ciclo:
-    v_t10y2y = valor_atual_seguro(df_global_master, 'T10Y2Y')
-    v_vix = valor_atual_seguro(df_global_master, 'VIXCLS')
-    v_hy = valor_atual_seguro(df_global_master, 'BAMLH0A0HYM2')
-    
-    fase_ciclo, cor_ciclo, setores_ciclo = diagnosticar_ciclo(v_t10y2y, v_vix, v_hy)
-    
+
+    from utils.ciclo_economico import (
+        calcular_indicadores_ciclo_br,
+        calcular_indicadores_ciclo_us,
+        get_alocacao_sugerida,
+        FASES_CICLO,
+    )
+
     section_title("🔄 posicionamento no ciclo econômico")
-    
-    col_c1, col_c2 = st.columns([1, 2])
-    with col_c1:
-        metric_card("fase atual do ciclo", fase_ciclo)
-    with col_c2:
-        st.markdown(f'<div class="card" style="padding:15px; border-left:4px solid {cor_ciclo};"><div style="font-family:Courier New; font-size:0.72rem; color:#555; margin-bottom:5px;">setores favorecidos neste ciclo:</div><div style="font-family:Courier New; font-size:0.9rem; color:#E0E0E0;">{setores_ciclo}</div></div>', unsafe_allow_html=True)
 
-    # --- REGIME MACRO EXPANDIDO (classificacao 6 regimes) ---
-    _regime_atual = classificar_regime(
-        selic=valor_atual_seguro(df_br_master, 'Selic'),
-        vix=valor_atual_seguro(df_global_master, 'VIXCLS'),
-        ipca=valor_atual_seguro(df_br_master, 'IPCA'),
+    # Calcula ciclos
+    with st.spinner("calculando indicadores do ciclo..."):
+        _ciclo_br = calcular_indicadores_ciclo_br()
+        _ciclo_us = calcular_indicadores_ciclo_us()
+
+    _fase_br = _ciclo_br.get('fase_provavel', 'expansao')
+    _fase_us = _ciclo_us.get('fase_provavel', 'expansao')
+    _dados_fase_br = FASES_CICLO.get(_fase_br, FASES_CICLO['expansao'])
+    _dados_fase_us = FASES_CICLO.get(_fase_us, FASES_CICLO['expansao'])
+
+    # ── Cards de fase BR e EUA ────────────────────────────────────────
+    _cc1, _cc2 = st.columns(2)
+
+    for _col_c, _dados_f, _ciclo, _pais in [
+        (_cc1, _dados_fase_br, _ciclo_br, "🇧🇷 brasil"),
+        (_cc2, _dados_fase_us, _ciclo_us, "🇺🇸 eua"),
+    ]:
+        with _col_c:
+            _cor_f    = _dados_f['cor']
+            _conf     = _ciclo.get('confianca', 0)
+            _n_ind    = _ciclo.get('n_indicadores', 0)
+
+            st.markdown(
+                f'<div style="background:#0d0d0d;'
+                f'border:1px solid #1e1e1e;'
+                f'border-top:3px solid {_cor_f};'
+                f'border-radius:6px;padding:16px;'
+                f'margin-bottom:12px;">'
+
+                f'<div style="font-family:Courier New;'
+                f'font-size:0.65rem;color:#555;'
+                f'text-transform:uppercase;'
+                f'margin-bottom:4px;">'
+                f'{_pais} — fase do ciclo</div>'
+
+                f'<div style="font-size:1.5rem;'
+                f'margin-bottom:4px;">'
+                f'{_dados_f["icone"]}</div>'
+
+                f'<div style="font-family:Courier New;'
+                f'font-size:1rem;font-weight:700;'
+                f'color:{_cor_f};margin-bottom:6px;">'
+                f'{_dados_f["label"].upper()}</div>'
+
+                f'<div style="font-family:Courier New;'
+                f'font-size:0.7rem;color:#888;'
+                f'line-height:1.6;margin-bottom:10px;">'
+                f'{_dados_f["descricao"]}</div>'
+
+                f'<div style="display:flex;gap:16px;'
+                f'border-top:1px solid #1a1a1a;'
+                f'padding-top:8px;">'
+
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.6rem;color:#444;'
+                f'text-transform:uppercase;">confiança</div>'
+                f'<div style="font-family:Courier New;'
+                f'color:{_cor_f};font-weight:600;">'
+                f'{_conf:.0f}pp</div>'
+                f'</div>'
+
+                f'<div style="text-align:center;">'
+                f'<div style="font-size:0.6rem;color:#444;'
+                f'text-transform:uppercase;">indicadores</div>'
+                f'<div style="font-family:Courier New;'
+                f'color:#ccc;">{_n_ind} usados</div>'
+                f'</div>'
+
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            # Scores das 4 fases como mini barras
+            section_title("probabilidade por fase")
+            for _fn, _fk in [
+                ("expansão",  "score_expansao"),
+                ("pico",      "score_pico"),
+                ("contração", "score_contracao"),
+                ("vale",      "score_vale"),
+            ]:
+                _sv = _ciclo.get(_fk, 0)
+                _fc = FASES_CICLO.get(
+                    _fk.replace('score_', ''), {}
+                ).get('cor', '#555')
+                _destaque = (
+                    _fn.replace('ã', 'a').replace('ç', 'c')
+                    in _fase_br if _pais == "🇧🇷 brasil"
+                    else _fn.replace('ã', 'a').replace('ç', 'c')
+                    in _fase_us
+                )
+                st.markdown(
+                    f'<div style="display:flex;'
+                    f'align-items:center;gap:8px;'
+                    f'margin-bottom:4px;">'
+                    f'<div style="font-family:Courier New;'
+                    f'font-size:0.65rem;color:#555;'
+                    f'min-width:70px;">{_fn}</div>'
+                    f'<div style="flex:1;background:#111;'
+                    f'border-radius:2px;height:6px;">'
+                    f'<div style="background:{_fc};'
+                    f'border-radius:2px;height:6px;'
+                    f'width:{_sv}%;"></div>'
+                    f'</div>'
+                    f'<div style="font-family:Courier New;'
+                    f'font-size:0.65rem;'
+                    f'color:{"#FF9900" if _destaque else "#555"};'
+                    f'min-width:30px;text-align:right;">'
+                    f'{_sv}%</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Alertas dos indicadores ───────────────────────────────────────
+    _alertas_todos = (
+        _ciclo_br.get('alertas', [])
+        + _ciclo_us.get('alertas', [])
     )
-    _cor_regime_card = (
-        "#FF1744" if "stress" in _regime_atual['label']
-        else "#FF9900" if "altos" in _regime_atual['label'] or "muito" in _regime_atual['label']
-        else "#00C853"
-    )
+    if _alertas_todos:
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("🚨 sinais dos indicadores")
+        for _al in _alertas_todos:
+            st.markdown(
+                f'<div style="font-family:Courier New;'
+                f'font-size:0.75rem;color:#888;'
+                f'padding:4px 0;border-bottom:1px solid #111;">'
+                f'{_al}</div>',
+                unsafe_allow_html=True,
+            )
 
-    st.markdown('<br>', unsafe_allow_html=True)
-    section_title("🏷️ regime macro — rotação setorial")
+    # ── Indicadores detalhados ────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("📊 indicadores utilizados")
 
-    st.markdown(
-        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime_card};border-radius:6px;padding:16px;margin-bottom:16px;">'
-        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">'
-        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">regime atual</span><br>'
-        f'<span style="font-family:Courier New;font-size:1rem;font-weight:700;color:{_cor_regime_card};">{_regime_atual["label"]}</span></div>'
-        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">score ambiente</span><br>'
-        f'<span style="font-family:Courier New;font-size:1rem;font-weight:700;color:{_cor_regime_card};">{_regime_atual["score_ambiente"]}/100</span></div>'
-        f'<div><span style="font-family:Courier New;font-size:0.65rem;color:#555;text-transform:uppercase;">selic / vix</span><br>'
-        f'<span style="font-family:Courier New;font-size:0.9rem;color:#ccc;">{_regime_atual["selic"]:.2f}% / {_regime_atual["vix"]:.1f}</span></div>'
-        f'</div>'
-        f'<div style="margin-top:12px;font-family:Courier New;font-size:0.72rem;color:#888;line-height:1.5;">{_regime_atual["descricao"]}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    _ind_br = _ciclo_br.get('indicadores', {})
+    _ind_us = _ciclo_us.get('indicadores', {})
 
-    # Tabela de rotacao
-    _fav = _regime_atual['setores_favorecidos']
-    _prej = _regime_atual['setores_prejudicados']
-    _cfav, _cprej = st.columns(2)
-    with _cfav:
+    _ind_cols = st.columns(2)
+
+    _map_labels_br = {
+        'selic_real':           ('Selic Real (Selic - IPCA 12m)', '%'),
+        'spread_curva_br':      ('Spread Curva BR (IMA-B 5+ vs 5)', 'pp'),
+        'ibov_ret_6m':          ('Retorno IBOV 6 meses', '%'),
+        'ibov_acima_mm200':     ('IBOV acima da MM200', ''),
+        'usd_brl':              ('USD/BRL atual', 'R$'),
+        'usd_brl_vs_media':     ('USD/BRL vs Média 60d', '%'),
+    }
+    _map_labels_us = {
+        'yield_curve_spread':   ('Yield Curve 10y-2y', 'pp'),
+        'sp500_ret_6m':         ('Retorno S&P500 6 meses', '%'),
+        'sp500_acima_mm200':    ('S&P500 acima da MM200', ''),
+        'credit_spread_trend':  ('Credit Spreads HYG/IEF (3m)', '%'),
+        'fed_funds_gap':        ('Fed Funds vs Neutro (r*)', 'pp'),
+        'vix':                  ('VIX', 'pts'),
+    }
+
+    with _ind_cols[0]:
         st.markdown(
-            f'<div style="background:#0a1a0a;border:1px solid #1a3a1a;border-radius:6px;padding:12px;">'
-            f'<div style="font-family:Courier New;font-size:0.62rem;color:#00C853;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">✔ setores favorecidos</div>'
-            + ''.join(f'<div style="font-family:Courier New;font-size:0.78rem;color:#aaa;padding:2px 0;">→ {s}</div>' for s in _fav)
-            + f'</div>',
+            '<div style="font-family:Courier New;'
+            'font-size:0.68rem;color:#FF9900;'
+            'margin-bottom:8px;">🇧🇷 indicadores br</div>',
             unsafe_allow_html=True,
         )
-    with _cprej:
+        for _k, (_lbl, _un) in _map_labels_br.items():
+            _v = _ind_br.get(_k)
+            if _v is None:
+                continue
+            _v_str = (
+                ("✅" if _v else "❌")
+                if isinstance(_v, bool)
+                else f"{_v}{_un}"
+            )
+            st.markdown(
+                f'<div style="display:flex;'
+                f'justify-content:space-between;'
+                f'padding:3px 0;border-bottom:1px solid #111;">'
+                f'<span style="font-family:Courier New;'
+                f'font-size:0.68rem;color:#555;">{_lbl}</span>'
+                f'<span style="font-family:Courier New;'
+                f'font-size:0.72rem;color:#ccc;">{_v_str}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    with _ind_cols[1]:
         st.markdown(
-            f'<div style="background:#1a0a0a;border:1px solid #3a1a1a;border-radius:6px;padding:12px;">'
-            f'<div style="font-family:Courier New;font-size:0.62rem;color:#FF1744;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">✘ setores prejudicados</div>'
-            + ''.join(f'<div style="font-family:Courier New;font-size:0.78rem;color:#aaa;padding:2px 0;">→ {s}</div>' for s in _prej)
-            + f'</div>',
+            '<div style="font-family:Courier New;'
+            'font-size:0.68rem;color:#FF9900;'
+            'margin-bottom:8px;">🇺🇸 indicadores eua</div>',
             unsafe_allow_html=True,
         )
+        for _k, (_lbl, _un) in _map_labels_us.items():
+            _v = _ind_us.get(_k)
+            if _v is None:
+                continue
+            _v_str = (
+                ("✅" if _v else "❌")
+                if isinstance(_v, bool)
+                else f"{_v}{_un}"
+            )
+            st.markdown(
+                f'<div style="display:flex;'
+                f'justify-content:space-between;'
+                f'padding:3px 0;border-bottom:1px solid #111;">'
+                f'<span style="font-family:Courier New;'
+                f'font-size:0.68rem;color:#555;">{_lbl}</span>'
+                f'<span style="font-family:Courier New;'
+                f'font-size:0.72rem;color:#ccc;">{_v_str}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    st.markdown(
-        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;padding:10px 14px;margin-top:8px;font-family:Courier New;font-size:0.72rem;color:#FF9900;">'
-        f'🎯 {_regime_atual["posicionamento"]}</div>',
-        unsafe_allow_html=True,
+    # ── Recomendações setoriais por fase ─────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("🎯 setores favorecidos nesta fase")
+
+    _rec_cols = st.columns(2)
+
+    for _col_r, _dados_f, _pais in [
+        (_rec_cols[0], _dados_fase_br, "🇧🇷 br"),
+        (_rec_cols[1], _dados_fase_us, "🇺🇸 eua"),
+    ]:
+        with _col_r:
+            st.markdown(
+                f'<div style="font-family:Courier New;'
+                f'font-size:0.68rem;color:{_dados_f["cor"]};'
+                f'margin-bottom:6px;font-weight:600;">'
+                f'{_pais} — {_dados_f["label"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+            _key_set = (
+                'setores_br' if _pais == "🇧🇷 br"
+                else 'setores_us'
+            )
+
+            st.markdown(
+                '<div style="font-size:0.6rem;color:#00C853;'
+                'text-transform:uppercase;margin-bottom:3px;">'
+                '✅ favorecidos</div>',
+                unsafe_allow_html=True,
+            )
+            for _sf in _dados_f[_key_set]['favorecidos']:
+                st.markdown(
+                    f'<div style="font-family:Courier New;'
+                    f'font-size:0.72rem;color:#00C853;'
+                    f'padding:2px 0;">→ {_sf}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                '<div style="font-size:0.6rem;color:#FF1744;'
+                'text-transform:uppercase;margin:8px 0 3px;">'
+                '✗ evitar</div>',
+                unsafe_allow_html=True,
+            )
+            for _se in _dados_f[_key_set]['evitar']:
+                st.markdown(
+                    f'<div style="font-family:Courier New;'
+                    f'font-size:0.72rem;color:#FF1744;'
+                    f'padding:2px 0;">→ {_se}</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Alocação sugerida ─────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("💼 alocação sugerida para o ciclo atual")
+
+    _alloc = get_alocacao_sugerida(_fase_br, _fase_us)
+
+    _alloc_cols = st.columns(len(_alloc))
+    _alloc_cores = {
+        'ações br':   '#FF9900',
+        'ações eua':  '#00B0FF',
+        'fiis':       '#00C853',
+        'renda fixa': '#555555',
+    }
+
+    for _col_a, (_classe, _pct) in zip(
+        _alloc_cols, _alloc.items()
+    ):
+        with _col_a:
+            metric_card(
+                _classe,
+                f"{_pct}%",
+                "sugestão pelo ciclo",
+                cor_delta="amber",
+            )
+
+    st.caption(
+        "alocação derivada mecanicamente das fases identificadas. "
+        "br: 60% do peso | eua: 40% do peso. "
+        "não constitui recomendação de investimento. "
+        "ajuste conforme seu perfil e horizonte."
     )
 
-    section_title("📊 performance setorial s&p 500 (etfs)")
-    with st.spinner("carregando retornos setoriais..."):
-        df_setores = buscar_retornos_setoriais()
-        
-    if not df_setores.empty:
-        fig_heat = px.imshow(df_setores, color_continuous_scale=[[0, "#FF1744"], [0.5, "#111111"], [1, "#00C853"]], zmin=-15, zmax=15, text_auto=".1f", aspect="auto")
-        layout_heat = base_layout(height=420, title="retorno por setor e janela temporal (%)")
-        fig_heat.update_layout(**layout_heat)
-        fig_heat.update_traces(textfont=dict(family="Courier New", size=11, color="#FFFFFF"))
-        fig_heat.update_coloraxes(showscale=False)
-        st.plotly_chart(fig_heat, use_container_width=True, config={'responsive': True})
-        st.caption("verde = retorno positivo no período | vermelho = retorno negativo | dados: etfs setoriais s&p 500 via yahoo finance")
-    else:
-        empty_state("📊", "sem dados setoriais", "não foi possível carregar os retornos dos etfs setoriais.")
+    # ── Análise IA do ciclo ───────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button(
+        "🧠 ia: análise profunda do ciclo econômico",
+        type="primary",
+        use_container_width=True,
+        key="btn_ia_ciclo",
+    ):
+        _ind_br_txt = "\n".join([
+            f"- {k}: {v}"
+            for k, v in _ind_br.items()
+        ])
+        _ind_us_txt = "\n".join([
+            f"- {k}: {v}"
+            for k, v in _ind_us.items()
+        ])
+        _alertas_txt = "\n".join(
+            _alertas_todos[:8]
+        ) or "nenhum alerta crítico"
 
-    section_title("🧠 síntese de rotação (ia)")
-    if st.button("gerar análise de rotação setorial >>", type="primary"):
-        with st.spinner("o agente está analisando o ciclo e os dados setoriais..."):
-            _ctx_setores = ""
-            for _idx, _row in df_setores.iterrows():
-                _v1m  = f"{_row['1 mês']:.1f}%"    if pd.notna(_row['1 mês'])    else "n/d"
-                _v3m  = f"{_row['3 meses']:.1f}%"  if pd.notna(_row['3 meses'])  else "n/d"
-                _v6m  = f"{_row['6 meses']:.1f}%"  if pd.notna(_row['6 meses'])  else "n/d"
-                _v12m = f"{_row['12 meses']:.1f}%"  if pd.notna(_row['12 meses']) else "n/d"
-                _ctx_setores += f"{_idx}: 1m={_v1m}, 3m={_v3m}, 6m={_v6m}, 12m={_v12m}. "
-            _prompt_rotacao = (
-                f"ciclo econômico atual: {fase_ciclo}\n"
-                f"yield curve 10y-2y: {v_t10y2y}% | vix: {v_vix} | spread hy: {v_hy}%\n\n"
-                f"retorno dos etfs setoriais:\n{_ctx_setores}\n\n"
-                "escreva 4 bullet points curtos em português, letra minúscula:\n"
-                "1. fase do ciclo e o que ela implica para alocação.\n"
-                "2. setor com melhor momentum (maior retorno consistente nas janelas).\n"
-                "3. setor para evitar ou reduzir.\n"
-                "4. recomendação de posicionamento para os próximos 3 meses."
-            )
-            chamar_ia(
-                prompt_usuario = _prompt_rotacao,
-                system         = SYSTEM_MACRO,
-                max_tokens     = 500,
-                temperatura    = 0.3,
-                stream         = True,
-            )
+        _prompt_ciclo = (
+            f"análise do ciclo econômico atual:\n\n"
+            f"brasil — fase: {_fase_br} "
+            f"(confiança: {_ciclo_br.get('confianca',0):.0f}pp)\n"
+            f"indicadores br:\n{_ind_br_txt}\n\n"
+            f"eua — fase: {_fase_us} "
+            f"(confiança: {_ciclo_us.get('confianca',0):.0f}pp)\n"
+            f"indicadores eua:\n{_ind_us_txt}\n\n"
+            f"alertas dos indicadores:\n{_alertas_txt}\n\n"
+            f"alocação sugerida pelo modelo: "
+            + ", ".join([
+                f"{k}: {v}%"
+                for k, v in _alloc.items()
+            ]) +
+            "\n\nem 5 tópicos diretos (letra minúscula):\n"
+            "1. em qual fase do ciclo estamos e qual a "
+            "principal evidência?\n"
+            "2. qual o risco de virada de fase nos próximos "
+            "3-6 meses e qual indicador monitorar?\n"
+            "3. historicamente quanto tempo dura esta fase "
+            "e como termina?\n"
+            "4. para o investidor br: qual a principal "
+            "oportunidade e o principal risco agora?\n"
+            "5. a alocação sugerida pelo modelo faz sentido "
+            "para este momento? ajuste se necessário."
+        )
+
+        from utils.ai_client import chamar_ia
+        _system_ciclo = (
+            "você é um economista especializado em ciclos "
+            "econômicos e alocação de ativos. use fama-french, "
+            "nber methodology e exemplos históricos. "
+            "seja preciso, use dados fornecidos. minúsculas."
+        )
+        _us_ciclo = st.session_state.get('user_settings', {})
+        chamar_ia(
+            prompt_usuario = _prompt_ciclo,
+            system         = _system_ciclo,
+            max_tokens     = 900,
+            temperatura    = 0.3,
+            stream         = True,
+            user_settings  = _us_ciclo,
+        )
 
 with tab_calendar:
     section_title("📅 calendário de eventos de mercado")
