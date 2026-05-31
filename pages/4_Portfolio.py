@@ -2944,8 +2944,8 @@ with tab_backtest:
                     )
 
                     def _ajustar_threshold(val, lo, hi, step=5):
-                        clamped = max(lo, min(hi, int(round(val / step) * step)))
-                        return clamped
+                        clamped = max(lo, min(hi, round(float(val) / step) * step))
+                        return int(str(clamped))
 
                     _dq1, _dq2 = st.columns(2)
                     with _dq1:
