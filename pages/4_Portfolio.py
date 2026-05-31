@@ -179,6 +179,176 @@ def get_cambio_usd_brl() -> float:
         logger.warning(f"[portfolio] câmbio: {e}")
     return 5.80  # fallback
 
+
+# ── Performance vs benchmarks ──────────────────────────────────────────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_performance_vs_benchmarks(
+    posicoes_tuple: tuple,
+    periodo: str = "1y",
+) -> dict:
+    """
+    Calcula performance consolidada da carteira vs benchmarks.
+
+    Metodologia:
+    - Carteira: retorno ponderado pelo valor de mercado atual
+      de cada posição (TWR simplificado)
+    - Benchmarks: BOVA11 (ibov), CDI via BCB, IVVB11 (s&p500 br),
+      XFIX11 (ifix - fiis)
+
+    Retorna dict com séries temporais e métricas comparativas.
+    """
+    import numpy as np
+
+    posicoes = list(posicoes_tuple)
+    if not posicoes:
+        return {}
+
+    resultado = {
+        'series':   {},
+        'metricas': {},
+        'erros':    [],
+    }
+
+    try:
+        from utils.tickers import mapear_ticker_base
+
+        # Baixa histórico de todos os ativos + benchmarks
+        _todos_tickers = [
+            mapear_ticker_base(p[0]) for p in posicoes
+        ]
+        _benchmarks = {
+            'ibovespa':    'BOVA11.SA',
+            's&p500 (br)': 'IVVB11.SA',
+            'ifix (fiis)': 'XFIX11.SA',
+        }
+
+        _todos = _todos_tickers + list(_benchmarks.values())
+
+        _hist = yf.download(
+            _todos,
+            period=periodo,
+            auto_adjust=True,
+            progress=False,
+        )['Close']
+
+        if isinstance(_hist, pd.Series):
+            _hist = _hist.to_frame(name=_todos[0])
+
+        if getattr(_hist.index, 'tz', None) is not None:
+            _hist.index = _hist.index.tz_localize(None)
+
+        _hist = _hist.dropna(how='all')
+
+        if _hist.empty:
+            return resultado
+
+        # Retornos diários
+        _rets = _hist.pct_change().dropna()
+
+        # Série da carteira (ponderada por valor)
+        _pesos = {}
+        _valor_total = 0.0
+
+        for _p in posicoes:
+            _tk_base = mapear_ticker_base(_p[0])
+            _qtd     = float(_p[1] or 0)
+            _pm      = float(_p[2] or 0)
+            _valor   = _qtd * _pm
+            if _valor > 0 and _tk_base in _hist.columns:
+                _pesos[_tk_base] = _valor
+                _valor_total    += _valor
+
+        if _valor_total == 0:
+            return resultado
+
+        for k in _pesos:
+            _pesos[k] = _pesos[k] / _valor_total
+
+        _ret_carteira = pd.Series(0.0, index=_rets.index)
+        for _tk, _peso in _pesos.items():
+            if _tk in _rets.columns:
+                _ret_carteira += _rets[_tk].fillna(0) * _peso
+
+        def _to_base100(serie: pd.Series) -> pd.Series:
+            serie = serie.dropna()
+            if serie.empty:
+                return serie
+            return (1 + serie).cumprod() * 100
+
+        resultado['series']['minha carteira'] = _to_base100(_ret_carteira)
+
+        for _nome, _ticker in _benchmarks.items():
+            _tk_col = _ticker.replace('.SA', '')
+            if _tk_col in _rets.columns:
+                resultado['series'][_nome] = _to_base100(_rets[_tk_col].dropna())
+            elif _ticker in _rets.columns:
+                resultado['series'][_nome] = _to_base100(_rets[_ticker].dropna())
+
+        # CDI via BCB
+        try:
+            from bcb import sgs
+            import datetime
+            _dias_periodo = {
+                '3mo': 90, '6mo': 180, '1y': 365,
+                '2y': 730, '3y': 1095,
+            }.get(periodo, 365)
+            _inicio_cdi = (
+                datetime.datetime.today()
+                - datetime.timedelta(days=_dias_periodo + 10)
+            ).strftime('%Y-%m-%d')
+            _df_cdi = sgs.get({'cdi': 12}, start=_inicio_cdi)
+            if not _df_cdi.empty:
+                _cdi_diario = _df_cdi['cdi'] / 100 / 252
+                _cdi_diario = _cdi_diario.reindex(
+                    _ret_carteira.index, method='ffill'
+                ).fillna(_cdi_diario.mean())
+                resultado['series']['cdi'] = _to_base100(_cdi_diario)
+        except Exception:
+            _selic = st.session_state.get(
+                'macro_context', {}
+            ).get('selic', 10.75)
+            _cdi_aprox = pd.Series(
+                (_selic / 100 / 252), index=_ret_carteira.index,
+            )
+            resultado['series']['cdi (aprox)'] = _to_base100(_cdi_aprox)
+
+        # Métricas por série
+        _selic_anual = st.session_state.get(
+            'macro_context', {}
+        ).get('selic', 10.75) / 100
+        _rf_diario = _selic_anual / 252
+
+        for _nome, _serie in resultado['series'].items():
+            if _serie.empty:
+                continue
+            try:
+                _ret_total = float(_serie.iloc[-1]) / 100 - 1
+                _rets_d    = _serie.pct_change().dropna()
+                _vol_anual = float(_rets_d.std() * np.sqrt(252) * 100)
+                _sharpe = (
+                    (_rets_d.mean() - _rf_diario) / _rets_d.std() * np.sqrt(252)
+                ) if _rets_d.std() > 0 else 0.0
+
+                _peak = _serie.cummax()
+                _dd   = ((_serie - _peak) / _peak * 100)
+                _max_dd = float(_dd.min())
+
+                resultado['metricas'][_nome] = {
+                    'retorno':  round(_ret_total * 100, 2),
+                    'vol':      round(_vol_anual, 2),
+                    'sharpe':   round(float(_sharpe), 2),
+                    'drawdown': round(_max_dd, 2),
+                }
+            except Exception:
+                pass
+
+    except Exception as e:
+        resultado['erros'].append(str(e))
+
+    return resultado
+
+
 # 4. criação das tabs
 tab_posicoes, tab_concentracao, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
@@ -568,6 +738,231 @@ with tab_posicoes:
 
         pnl_global_valor = valor_atual_carteira - custo_total_carteira
         pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
+
+        # ── PERFORMANCE VS BENCHMARKS ─────────────────────────────────
+        st.markdown("---")
+        section_title("📈 performance da carteira vs benchmarks")
+
+        label_com_tooltip(
+            "retorno ponderado pelo valor de mercado de cada posição "
+            "vs ibovespa, s&p500 (via ivvb11), ifix e cdi.",
+            texto_custom=(
+                "metodologia: retorno diário ponderado pelo valor "
+                "de mercado de cada posição (twr simplificado). "
+                "cdi via bcb série 12 (taxa overnight acumulada). "
+                "base 100 = início do período selecionado."
+            ),
+            cor="#555",
+            tamanho="0.72rem",
+        )
+
+        _periodo_perf = st.radio(
+            "período:",
+            ["3mo", "6mo", "1y", "2y"],
+            format_func=lambda x: {
+                "3mo": "3 meses",
+                "6mo": "6 meses",
+                "1y":  "1 ano",
+                "2y":  "2 anos",
+            }[x],
+            horizontal=True,
+            key="radio_periodo_perf",
+        )
+
+        # Monta tuple de posições para cache
+        _pos_dict_perf = [
+            {
+                'ticker': t,
+                'quantidade': float(d.get('quantidade', 0) or 0),
+                'preco_medio': float(d.get('preco_medio', 0) or 0),
+            }
+            for t, d in ativos_alocados.items()
+            if float(d.get('quantidade', 0) or 0) > 0
+        ]
+
+        if not _pos_dict_perf:
+            st.info(
+                "adicione posições com quantidade e preço médio "
+                "para calcular a performance."
+            )
+        else:
+            with st.spinner("calculando performance vs benchmarks..."):
+                _perf = calcular_performance_vs_benchmarks(
+                    tuple(
+                        (p['ticker'], p['quantidade'], p['preco_medio'])
+                        for p in _pos_dict_perf
+                    ),
+                    periodo=_periodo_perf,
+                )
+
+            if not _perf or not _perf.get('series'):
+                st.warning(
+                    "não foi possível calcular a performance. "
+                    "verifique se os tickers estão corretos."
+                )
+            else:
+                _met = _perf.get('metricas', {})
+                if _met:
+                    _met_rows = []
+                    for _nm, _mv in _met.items():
+                        _cor_ret = "🟢" if _mv['retorno'] > 0 else "🔴"
+                        _met_rows.append({
+                            'ativo / índice': _nm,
+                            'retorno':   f"{_cor_ret} {_mv['retorno']:+.2f}%",
+                            'vol. anual':f"{_mv['vol']:.2f}%",
+                            'sharpe':    f"{_mv['sharpe']:.2f}",
+                            'max drawdown': f"{_mv['drawdown']:.2f}%",
+                        })
+                    _df_met = pd.DataFrame(_met_rows)
+                    st.dataframe(_df_met, use_container_width=True, hide_index=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                _series = _perf.get('series', {})
+                if _series:
+                    _fig_perf = go.Figure()
+                    _cores_perf = {
+                        'minha carteira': '#FF9900',
+                        'ibovespa':       '#00C853',
+                        's&p500 (br)':    '#00B0FF',
+                        'ifix (fiis)':    '#8B5CF6',
+                        'cdi':            '#555555',
+                        'cdi (aprox)':    '#444444',
+                    }
+
+                    if 'minha carteira' in _series:
+                        _s = _series['minha carteira']
+                        _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
+                        _fig_perf.add_trace(go.Scatter(
+                            x=_s.index, y=_s.values,
+                            name=f"minha carteira ({_ret_f:+.1f}%)",
+                            line=dict(color='#FF9900', width=3),
+                            hovertemplate=(
+                                '%{x}<br>carteira: %{y:.1f}<extra></extra>'
+                            ),
+                        ))
+
+                    for _nm, _s in _series.items():
+                        if _nm == 'minha carteira' or _s.empty:
+                            continue
+                        _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
+                        _cor   = _cores_perf.get(_nm, '#555')
+                        _fig_perf.add_trace(go.Scatter(
+                            x=_s.index, y=_s.values,
+                            name=f"{_nm} ({_ret_f:+.1f}%)",
+                            line=dict(color=_cor, width=1.5, dash='dot'),
+                            hovertemplate=(
+                                f'%{{x}}<br>{_nm}: %{{y:.1f}}<extra></extra>'
+                            ),
+                        ))
+
+                    _fig_perf.add_hline(
+                        y=100, line_color='#333',
+                        line_dash='dash', line_width=1,
+                    )
+
+                    _lay_perf = base_layout(
+                        height=420,
+                        title=f"performance comparada — base 100 ({_periodo_perf})",
+                    )
+                    _lay_perf.update(
+                        yaxis=dict(title='base 100', showgrid=True, gridcolor='#2A2C3E'),
+                        xaxis=dict(showgrid=False),
+                    )
+                    _fig_perf.update_layout(**_lay_perf)
+                    st.plotly_chart(
+                        _fig_perf, use_container_width=True,
+                        config={'responsive': True},
+                    )
+
+                    st.caption(
+                        "base 100 = início do período. "
+                        "carteira: retorno ponderado pelo valor de mercado. "
+                        "cdi: taxa overnight acumulada (bcb série 12). "
+                        "s&p500: via ivvb11 (em r$, sem hedge cambial)."
+                    )
+
+                # Alpha vs CDI e Ibov
+                _ret_cart = _met.get('minha carteira', {}).get('retorno', 0)
+                _ret_cdi  = (
+                    _met.get('cdi', _met.get('cdi (aprox)', {}))
+                    .get('retorno', 0)
+                )
+                _ret_ibov = _met.get('ibovespa', {}).get('retorno', 0)
+                _alpha_cdi  = _ret_cart - _ret_cdi
+                _alpha_ibov = _ret_cart - _ret_ibov
+
+                _ac1, _ac2, _ac3 = st.columns(3)
+                with _ac1:
+                    metric_card(
+                        "retorno da carteira",
+                        f"{_ret_cart:+.2f}%",
+                        f"no período de {_periodo_perf}",
+                        "bull" if _ret_cart > 0 else "bear",
+                        destaque=True,
+                    )
+                with _ac2:
+                    metric_card(
+                        "alpha vs cdi",
+                        f"{_alpha_cdi:+.2f}pp",
+                        "acima ou abaixo do cdi",
+                        "bull" if _alpha_cdi > 0 else "bear",
+                    )
+                with _ac3:
+                    metric_card(
+                        "alpha vs ibovespa",
+                        f"{_alpha_ibov:+.2f}pp",
+                        "acima ou abaixo do ibov",
+                        "bull" if _alpha_ibov > 0 else "bear",
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button(
+                    "🧠 ia: analisar performance e sugerir ajustes",
+                    key="btn_ia_perf",
+                    type="secondary",
+                    use_container_width=True,
+                ):
+                    _met_txt = "\n".join([
+                        f"- {nm}: retorno {mv['retorno']:+.2f}% | "
+                        f"vol {mv['vol']:.2f}% | "
+                        f"sharpe {mv['sharpe']:.2f} | "
+                        f"drawdown {mv['drawdown']:.2f}%"
+                        for nm, mv in _met.items()
+                    ])
+                    _macro_perf = st.session_state.get('macro_context', {})
+                    _prompt_perf = (
+                        f"análise de performance da carteira:\n\n"
+                        f"período: {_periodo_perf}\n"
+                        f"regime macro: {_macro_perf.get('label','—')}\n\n"
+                        f"métricas comparativas:\n{_met_txt}\n\n"
+                        f"alpha vs cdi: {_alpha_cdi:+.2f}pp\n"
+                        f"alpha vs ibovespa: {_alpha_ibov:+.2f}pp\n\n"
+                        "em 4 tópicos diretos (minúsculas):\n"
+                        "1. a carteira está gerando alpha real ou "
+                        "perdendo para o benchmark passivo?\n"
+                        "2. o sharpe da carteira vs benchmarks indica "
+                        "risco bem remunerado?\n"
+                        "3. o drawdown máximo está adequado para o "
+                        "perfil de risco implícito?\n"
+                        "4. considerando o regime macro atual, "
+                        "que ajuste de alocação poderia melhorar "
+                        "o risco/retorno?"
+                    )
+                    from utils.ai_client import chamar_ia
+                    _us_perf = st.session_state.get('user_settings', {})
+                    chamar_ia(
+                        prompt_usuario=_prompt_perf,
+                        system=(
+                            "você é um gestor de portfólio quantitativo. "
+                            "analise os dados fornecidos. seja direto. "
+                            "minúsculas."
+                        ),
+                        max_tokens=600,
+                        temperatura=0.3,
+                        stream=True,
+                        user_settings=_us_perf,
+                    )
 
         # ── persiste dados para o chat IA (tab_chat usa estes) ──
         st.session_state['pesos_ativos_cache'] = [
