@@ -349,6 +349,231 @@ def calcular_performance_vs_benchmarks(
     return resultado
 
 
+# ── Backtesting do health score ──────────────────────────────────────
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def rodar_backtesting_score(
+    ticker:            str,
+    threshold_entrada: int   = 65,
+    threshold_saida:   int   = 40,
+    periodo:           str   = "2y",
+    capital_inicial:   float = 10000.0,
+) -> dict:
+    """
+    Simula estratégia baseada no health score histórico.
+
+    Lógica:
+    - Compra quando score >= threshold_entrada
+    - Vende quando score < threshold_saida
+    - Compara com buy & hold e CDI no mesmo período
+
+    Limitação honesta: o health score histórico no banco
+    reflete scores calculados nos dias em que o usuário
+    atualizou. Dias sem atualização são interpolados.
+    """
+    import numpy as np
+    import datetime
+    from utils.tickers import mapear_ticker_base
+    from database.db import get_historico_score
+
+    resultado = {
+        'trades':   [],
+        'series':   {},
+        'metricas': {},
+        'n_trades': 0,
+        'erro':     None,
+    }
+
+    try:
+        t_base = mapear_ticker_base(ticker)
+
+        # Histórico de preços
+        _hist = yf.Ticker(t_base).history(
+            period=periodo, auto_adjust=True
+        )['Close'].dropna()
+
+        if len(_hist) < 30:
+            resultado['erro'] = "histórico de preços insuficiente"
+            return resultado
+
+        if getattr(_hist.index, 'tz', None) is not None:
+            _hist.index = _hist.index.tz_localize(None)
+
+        # Histórico de scores do banco
+        _scores_raw = get_historico_score(ticker)
+
+        if not _scores_raw or len(_scores_raw) < 5:
+            resultado['aviso'] = (
+                "histórico de health scores insuficiente no banco. "
+                "usando proxy baseado em momentum de preço + "
+                "indicadores técnicos para simular."
+            )
+            _rets    = _hist.pct_change().dropna()
+            _mm200   = _hist.rolling(200).mean()
+            _mom_3m  = _hist.pct_change(63) * 100
+
+            _delta = _hist.diff()
+            _gain  = _delta.clip(lower=0).rolling(14).mean()
+            _loss  = (-_delta.clip(upper=0)).rolling(14).mean()
+            _rsi   = 100 - (100 / (1 + _gain / _loss.replace(0, 1)))
+
+            _score_proxy = (
+                _rsi * 0.4
+                + (_hist > _mm200).astype(float) * 30
+                + (_mom_3m.clip(-30, 30) + 30) / 60 * 30
+            ).fillna(50).clip(0, 100)
+
+            _scores_serie = _score_proxy.rename('score')
+
+        else:
+            _scores_dict = {}
+            for _row in _scores_raw:
+                try:
+                    _dt_s = pd.Timestamp(_row['data_hora'])
+                    if getattr(_dt_s, 'tz', None) is not None:
+                        _dt_s = _dt_s.tz_localize(None)
+                    _scores_dict[_dt_s.date()] = int(_row['score'])
+                except Exception:
+                    continue
+
+            _score_vals = []
+            _ultimo_score = 50
+            for _dt in _hist.index:
+                _d = _dt.date() if hasattr(_dt, 'date') else _dt
+                if _d in _scores_dict:
+                    _ultimo_score = _scores_dict[_d]
+                _score_vals.append(_ultimo_score)
+
+            _scores_serie = pd.Series(
+                _score_vals, index=_hist.index, name='score'
+            )
+
+        # Simulação da estratégia
+        _capital       = capital_inicial
+        _capital_bh    = capital_inicial
+        _posicao       = False
+        _trades        = []
+        _capital_serie = [capital_inicial]
+        _bh_serie      = [capital_inicial]
+        _preco_compra  = None
+        _preco_ant     = float(_hist.iloc[0])
+
+        for _i in range(1, len(_hist)):
+            _dt      = _hist.index[_i]
+            _preco   = float(_hist.iloc[_i])
+            _score   = float(_scores_serie.iloc[_i])
+            _ret_dia = _preco / _preco_ant - 1
+
+            _capital_bh *= (1 + _ret_dia)
+
+            if not _posicao and _score >= threshold_entrada:
+                _posicao      = True
+                _preco_compra = _preco
+                _trades.append({
+                    'tipo': 'compra',
+                    'data': str(_dt)[:10],
+                    'preco': round(_preco, 2),
+                    'score': round(_score, 0),
+                })
+            elif _posicao and _score < threshold_saida:
+                _posicao = False
+                _ret_trade = _preco / _preco_compra - 1 if _preco_compra else 0
+                _trades.append({
+                    'tipo': 'venda',
+                    'data': str(_dt)[:10],
+                    'preco': round(_preco, 2),
+                    'score': round(_score, 0),
+                    'retorno_trade': round(_ret_trade * 100, 2),
+                })
+                _preco_compra = None
+
+            if _posicao:
+                _capital *= (1 + _ret_dia)
+
+            _capital_serie.append(_capital)
+            _bh_serie.append(_capital_bh)
+            _preco_ant = _preco
+
+        # CDI acumulado
+        try:
+            from bcb import sgs
+            _inicio_bt = _hist.index[0].strftime('%Y-%m-%d')
+            _df_cdi_bt = sgs.get({'cdi': 12}, start=_inicio_bt)
+            _cdi_diario = _df_cdi_bt['cdi'] / 100 / 252
+            _cdi_diario = _cdi_diario.reindex(
+                _hist.index, method='ffill'
+            ).fillna(_cdi_diario.mean())
+            _cdi_acum = (1 + _cdi_diario).cumprod() * capital_inicial
+            resultado['series']['cdi'] = _cdi_acum
+        except Exception:
+            _selic = st.session_state.get(
+                'macro_context', {}
+            ).get('selic', 10.75)
+            _cdi_diario_aprox = _selic / 100 / 252
+            _n_dias = len(_hist)
+            _cdi_serie = pd.Series(
+                [
+                    capital_inicial * ((1 + _cdi_diario_aprox) ** i)
+                    for i in range(_n_dias)
+                ],
+                index=_hist.index,
+            )
+            resultado['series']['cdi (aprox)'] = _cdi_serie
+
+        # Séries base 100
+        _cap_serie_pd = pd.Series(_capital_serie, index=_hist.index)
+        _bh_serie_pd  = pd.Series(_bh_serie, index=_hist.index)
+
+        resultado['series']['estratégia (score)'] = (
+            _cap_serie_pd / capital_inicial * 100
+        )
+        resultado['series'][f'buy & hold ({ticker.replace(".SA","")})'] = (
+            _bh_serie_pd / capital_inicial * 100
+        )
+        if 'cdi' in resultado['series']:
+            resultado['series']['cdi'] = (
+                resultado['series']['cdi'] / capital_inicial * 100
+            )
+        if 'cdi (aprox)' in resultado['series']:
+            resultado['series']['cdi (aprox)'] = (
+                resultado['series']['cdi (aprox)'] / capital_inicial * 100
+            )
+
+        # Métricas finais
+        def _calc_metricas(serie_b100: pd.Series, nome: str) -> dict:
+            _rets_d  = serie_b100.pct_change().dropna()
+            _ret_tot = float(serie_b100.iloc[-1]) / 100 - 1
+            _vol     = float(_rets_d.std() * np.sqrt(252) * 100)
+            _selic_d = st.session_state.get(
+                'macro_context', {}
+            ).get('selic', 10.75) / 100 / 252
+            _sharpe  = (
+                (_rets_d.mean() - _selic_d) / _rets_d.std() * np.sqrt(252)
+            ) if _rets_d.std() > 0 else 0.0
+            _peak  = serie_b100.cummax()
+            _dd    = (serie_b100 - _peak) / _peak * 100
+            _max_dd = float(_dd.min())
+            return {
+                'retorno':  round(_ret_tot * 100, 2),
+                'vol':      round(_vol, 2),
+                'sharpe':   round(float(_sharpe), 2),
+                'drawdown': round(_max_dd, 2),
+            }
+
+        for _nm, _sr in resultado['series'].items():
+            resultado['metricas'][_nm] = _calc_metricas(_sr, _nm)
+
+        resultado['trades']   = _trades
+        resultado['n_trades'] = len(
+            [t for t in _trades if t['tipo'] == 'compra']
+        )
+
+    except Exception as e:
+        resultado['erro'] = str(e)
+
+    return resultado
+
+
 # 4. criação das tabs
 tab_posicoes, tab_concentracao, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
@@ -1977,141 +2202,211 @@ with tab_stress:
 # tab 3: backtesting
 # ==========================================
 with tab_backtest:
-    
-    if "bt_selecionados" not in st.session_state:
-        st.session_state.bt_selecionados = ["ITUB4.SA", "VALE3.SA", "^BVSP", "^GSPC"]
-        
-    def carregar_portfolio():
-        pesos = get_pesos()
-        tkrs = [p['ticker'] for p in pesos if float(p.get('peso') or 0) > 0]
-        if tkrs:
-            st.session_state.bt_selecionados = list(dict.fromkeys(st.session_state.bt_selecionados + tkrs))
-            
-    def limpar_selecao():
-        st.session_state.bt_selecionados = ["^BVSP", "^GSPC"]
+    from utils.components import label_com_tooltip
+    section_title("🔬 backtesting — estratégia baseada no health score")
 
-    @st.dialog("👁️ importar de watchlists")
-    def modal_importar_watchlists():
-        wls = listar_watchlists()
-        if not wls:
-            st.info("nenhuma watchlist encontrada.")
-            return
+    st.markdown(
+        '<div style="font-family:Courier New;font-size:0.75rem;'
+        'color:#555;margin-bottom:16px;line-height:1.7;">'
+        'simula a estratégia de <b>comprar</b> quando o health score '
+        'supera o threshold de entrada e <b>vender</b> quando cai '
+        'abaixo do threshold de saída. compara com buy & hold e cdi. '
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        opcoes = {f"{w['icone']} {w['nome']}": w['id'] for w in wls}
-        selecionadas = st.multiselect("selecione as watchlists:", list(opcoes.keys()))
+    _bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns(4)
 
-        if st.button("📥 confirmar importação", type="primary", use_container_width=True):
-            if selecionadas:
-                tkrs_importar = []
-                for sel in selecionadas:
-                    wl_id = opcoes[sel]
-                    ativos_wl = listar_watchlist(watchlist_id=wl_id)
-                    tkrs_importar.extend([a['ticker'] for a in ativos_wl])
-
-                if tkrs_importar:
-                    st.session_state.bt_selecionados = list(dict.fromkeys(st.session_state.get('bt_selecionados', []) + tkrs_importar))
-                    st.success(f"✅ {len(tkrs_importar)} ativos importados com sucesso!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.warning("as watchlists selecionadas estão vazias.")
-            else:
-                st.warning("selecione pelo menos uma watchlist para importar.")
-
-    st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
-    cb1, cb2, cb3, cb4 = st.columns([2, 2, 2, 4])
-    with cb1: 
-        st.button("💼 importar portfólio", on_click=carregar_portfolio, use_container_width=True)
-    with cb2: 
-        if st.button("👁️ importar watchlist", use_container_width=True):
-            modal_importar_watchlists()
-    with cb3: 
-        st.button("🧹 limpar ativos", on_click=limpar_selecao, use_container_width=True)
-
-    c1, c2, c3 = st.columns([5, 2, 2])
-    with c1:
-        opcoes_base = BRASIL_TODOS + XSTOCKS_TODOS + BR_INDICES + ["^GSPC", "^IXIC", "^BVSP"]
-        opcoes_bt = sorted(list(dict.fromkeys(opcoes_base + st.session_state.bt_selecionados)))
-        
-        selecionados = st.multiselect(
-            "selecione os ativos e benchmarks:", 
-            options=opcoes_bt, 
-            key="bt_selecionados",
-            format_func=lambda x: x.lower() 
+    with _bt_c1:
+        _bt_ticker = st.selectbox(
+            "ativo:",
+            options=[
+                p['ticker']
+                for p in listar_watchlist()
+                if p.get('ticker')
+            ] or ["WEGE3.SA"],
+            key="sel_bt_ticker",
         )
-        ticker_extra = st.text_input("adicionar ticker não listado (opcional):", "").strip().upper()
-        
-        if ticker_extra and ticker_extra not in selecionados:
-            selecionados = selecionados + [ticker_extra]
 
-    with c2:
-        periodo_opcoes = {"1 ano": "1y", "2 anos": "2y", "3 anos": "3y", "5 anos": "5y", "ytd": "ytd"}
-        periodo_sel = st.selectbox("período:", list(periodo_opcoes.keys()), index=0)
+    with _bt_c2:
+        _bt_entrada = st.slider(
+            "threshold entrada (score ≥):",
+            min_value=40, max_value=90,
+            value=65, step=5,
+            key="sl_bt_entrada",
+        )
 
-    with c3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        btn_calcular = st.button("calcular backtest", type="primary", use_container_width=True)
+    with _bt_c3:
+        _bt_saida = st.slider(
+            "threshold saída (score <):",
+            min_value=20, max_value=70,
+            value=40, step=5,
+            key="sl_bt_saida",
+        )
 
-    if btn_calcular or selecionados:
-        if not selecionados:
-            st.warning("selecione pelo menos um ativo para iniciar a comparação.")
-        else:
-            with st.spinner("sincronizando séries históricas e ajustando proventos..."):
-                try:
-                    df_precos = pd.DataFrame()
-                    for t in selecionados:
-                        t_base = mapear_ticker_base(t)
-                        try:
-                            hist = yf.Ticker(t_base).history(period=periodo_opcoes[periodo_sel])['Close'].dropna()
-                            if not hist.empty:
-                                if hasattr(hist.index, 'tz') and hist.index.tz is not None:
-                                    hist.index = hist.index.tz_localize(None)
-                                df_precos[t] = hist
-                        except: pass
-                        
-                    df_precos_exibicao = df_precos.dropna(how='all').ffill()
+    with _bt_c4:
+        _bt_periodo = st.radio(
+            "período:",
+            ["1y", "2y", "3y"],
+            format_func=lambda x: {"1y": "1 ano", "2y": "2 anos", "3y": "3 anos"}[x],
+            key="radio_bt_periodo",
+        )
 
-                    primeiro_preco = df_precos_exibicao.bfill().iloc[0]
-                    df_norm = (df_precos_exibicao / primeiro_preco) * 100
+    if _bt_entrada <= _bt_saida:
+        st.warning("threshold de entrada deve ser maior que o de saída.")
+    else:
+        if st.button("▶ rodar backtesting", type="primary", use_container_width=True, key="btn_rodar_bt"):
+            with st.spinner(f"simulando estratégia para {_bt_ticker}..."):
+                _bt_result = rodar_backtesting_score(
+                    ticker=_bt_ticker,
+                    threshold_entrada=_bt_entrada,
+                    threshold_saida=_bt_saida,
+                    periodo=_bt_periodo,
+                )
+            st.session_state['bt_resultado'] = _bt_result
+            st.session_state['bt_ticker']    = _bt_ticker
 
-                    fig = go.Figure()
-                    cores_backtest = ["#FF9900", "#00B0FF", "#00C853", "#FF1744", "#E040FB", "#00BCD4", "#FFEB3B"]
-                    
-                    for i, coluna in enumerate(df_norm.columns):
-                        retorno_total = df_norm[coluna].iloc[-1] - 100
-                        cor_linha = cores_backtest[i % len(cores_backtest)]
-                        fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm[coluna], name=f"{coluna.lower()} ({retorno_total:+.2f}%)", mode='lines', line=dict(width=2, color=cor_linha), hovertemplate="<b>%{x}</b><br>base 100: %{y:.2f}<br>retorno: %{customdata:+.2f}%<extra></extra>", customdata=df_norm[coluna] - 100))
+        _bt_res = st.session_state.get('bt_resultado')
 
-                    layout_bt = base_layout(height=550, title="performance acumulada (base 100)")
-                    fig.update_layout(**layout_bt)
-                    fig.add_hline(y=100, line_dash="dash", line_color="#333", opacity=0.8)
+        if _bt_res:
+            if _bt_res.get('erro'):
+                st.error(f"erro: {_bt_res['erro']}")
+            else:
+                if _bt_res.get('aviso'):
+                    st.info(f"⚠️ {_bt_res['aviso']}")
 
-                    st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
+                _bt_ticker_label = st.session_state.get('bt_ticker', _bt_ticker).replace('.SA', '')
 
-                    section_title("resumo de performance no período")
-                    cols_metrics = st.columns(len(selecionados))
-                    for idx, col in enumerate(df_norm.columns):
-                        retorno_final = df_norm[col].iloc[-1] - 100
-                        cor_d = "bull" if retorno_final >= 0 else "bear"
-                        with cols_metrics[idx % len(cols_metrics)]:
-                            metric_card(col.lower(), fmt_pct(retorno_final), f"base 100: {df_norm[col].iloc[-1]:.2f}", cor_delta=cor_d)
-                        
-                    retornos = df_norm.pct_change().dropna()
-                    metricas = {}
-                    for col in retornos.columns:
-                        total = (df_norm[col].iloc[-1] / 100) - 1
-                        vol = retornos[col].std() * (252 ** 0.5) 
-                        sharpe = (retornos[col].mean() * 252) / (retornos[col].std() * (252**0.5)) if vol > 0 else 0
-                        max_dd_serie = (df_norm[col] / df_norm[col].cummax() - 1)
-                        max_dd = max_dd_serie.min()
-                        metricas[col.lower()] = {'retorno total %': f"{total*100:.2f}%", 'volatilidade anual %': f"{vol*100:.2f}%", 'sharpe ratio': f"{sharpe:.2f}", 'max drawdown %': f"{max_dd*100:.2f}%"}
-                    
-                    df_metricas = pd.DataFrame(metricas).T
-                    st.markdown("---")
-                    section_title("🧮 métricas de risco")
-                    st.dataframe(df_metricas, use_container_width=True)
-                except Exception as e:
-                    st.error(f"erro ao calcular backtest: {str(e)}")
+                # Métricas comparativas
+                _bt_met = _bt_res.get('metricas', {})
+                if _bt_met:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    section_title("📊 métricas comparativas")
+
+                    _bt_rows = []
+                    for _nm, _mv in _bt_met.items():
+                        _bt_rows.append({
+                            'estratégia': _nm,
+                            'retorno total': f"{_mv['retorno']:+.2f}%",
+                            'vol. anual': f"{_mv['vol']:.2f}%",
+                            'sharpe': f"{_mv['sharpe']:.2f}",
+                            'max drawdown': f"{_mv['drawdown']:.2f}%",
+                        })
+                    st.dataframe(pd.DataFrame(_bt_rows), use_container_width=True, hide_index=True)
+
+                    _ret_est = _bt_met.get('estratégia (score)', {}).get('retorno', 0)
+                    _bh_key  = [k for k in _bt_met if 'buy & hold' in k]
+                    _ret_bh  = _bt_met[_bh_key[0]].get('retorno', 0) if _bh_key else 0
+                    _cdi_key = [k for k in _bt_met if 'cdi' in k]
+                    _ret_cdi = _bt_met[_cdi_key[0]].get('retorno', 0) if _cdi_key else 0
+
+                    _alpha_bh  = _ret_est - _ret_bh
+                    _alpha_cdi = _ret_est - _ret_cdi
+
+                    _am1, _am2, _am3, _am4 = st.columns(4)
+                    with _am1:
+                        metric_card("retorno estratégia", f"{_ret_est:+.2f}%", f"período {_bt_periodo}", "bull" if _ret_est > 0 else "bear", destaque=True)
+                    with _am2:
+                        metric_card("alpha vs b&h", f"{_alpha_bh:+.2f}pp", "estratégia vs comprar e segurar", "bull" if _alpha_bh > 0 else "bear")
+                    with _am3:
+                        metric_card("alpha vs cdi", f"{_alpha_cdi:+.2f}pp", "estratégia vs renda fixa", "bull" if _alpha_cdi > 0 else "bear")
+                    with _am4:
+                        metric_card("nº de operações", str(_bt_res.get('n_trades', 0)), "entradas realizadas no período")
+
+                # Gráfico de performance
+                _bt_series = _bt_res.get('series', {})
+                if _bt_series:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    section_title("📈 curva de capital — base 100")
+
+                    _fig_bt = go.Figure()
+                    _cores_bt = {
+                        'estratégia (score)': '#FF9900',
+                        'cdi': '#555',
+                        'cdi (aprox)': '#444',
+                    }
+
+                    for _nm, _sr in _bt_series.items():
+                        if _sr.empty:
+                            continue
+                        _cor_bt = _cores_bt.get(_nm, '#00C853')
+                        _lw     = 2.5 if 'estratégia' in _nm else 1.5
+                        _dash   = 'solid' if 'estratégia' in _nm else 'dot'
+                        _ret_f  = float(_sr.iloc[-1]) - 100
+                        _fig_bt.add_trace(go.Scatter(
+                            x=_sr.index, y=_sr.values,
+                            name=f"{_nm} ({_ret_f:+.1f}%)",
+                            line=dict(color=_cor_bt, width=_lw, dash=_dash),
+                            hovertemplate=f'%{{x}}<br>{_nm}: %{{y:.1f}}<extra></extra>',
+                        ))
+
+                    # Marca trades no gráfico
+                    _trades = _bt_res.get('trades', [])
+                    _comp   = [t for t in _trades if t['tipo'] == 'compra']
+                    _vend   = [t for t in _trades if t['tipo'] == 'venda']
+
+                    if _comp:
+                        _fig_bt.add_trace(go.Scatter(
+                            x=[t['data'] for t in _comp],
+                            y=[100] * len(_comp),
+                            mode='markers',
+                            marker=dict(symbol='triangle-up', size=10, color='#00C853'),
+                            name='compra',
+                            hovertemplate='compra: %{x}<br>score: %{text}<extra></extra>',
+                            text=[str(t['score']) for t in _comp],
+                        ))
+
+                    if _vend:
+                        _fig_bt.add_trace(go.Scatter(
+                            x=[t['data'] for t in _vend],
+                            y=[100] * len(_vend),
+                            mode='markers',
+                            marker=dict(symbol='triangle-down', size=10, color='#FF1744'),
+                            name='venda',
+                            hovertemplate='venda: %{x}<br>score: %{text}<br>ret: %{customdata:.1f}%<extra></extra>',
+                            text=[str(t['score']) for t in _vend],
+                            customdata=[t.get('retorno_trade', 0) for t in _vend],
+                        ))
+
+                    _fig_bt.add_hline(y=100, line_color='#333', line_dash='dash', line_width=1)
+
+                    _lay_bt = base_layout(
+                        height=420,
+                        title=f"backtesting — {_bt_ticker_label} | entrada ≥{_bt_entrada} | saída <{_bt_saida}",
+                    )
+                    _lay_bt.update(yaxis=dict(title='base 100', showgrid=True, gridcolor='#2A2C3E'))
+                    _fig_bt.update_layout(**_lay_bt)
+                    st.plotly_chart(_fig_bt, use_container_width=True, config={'responsive': True})
+                    st.caption(
+                        "▲ triângulo verde = sinal de compra (score atingiu threshold). "
+                        "▼ triângulo vermelho = sinal de venda. "
+                        "quando fora do mercado o capital fica em caixa (sem rendimento). "
+                        "backtesting não garante performance futura."
+                    )
+
+                # Log de trades
+                if _bt_res.get('trades'):
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    section_title("📋 log de operações")
+                    _df_trades = pd.DataFrame(_bt_res['trades'])
+                    if 'retorno_trade' in _df_trades.columns:
+                        _df_trades['retorno_trade'] = _df_trades['retorno_trade'].apply(
+                            lambda x: f"{x:+.2f}%" if pd.notna(x) else "—"
+                        )
+                    st.dataframe(_df_trades, use_container_width=True, hide_index=True)
+
+                # Aviso importante
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.info(
+                    "⚠️ **limitações do backtesting:** "
+                    "os health scores históricos refletem apenas "
+                    "os dias em que foram calculados. "
+                    "dias sem atualização usam o último score disponível. "
+                    "para resultados mais precisos, atualize os scores "
+                    "regularmente pela watchlist. "
+                    "backtesting não é garantia de performance futura — "
+                    "use como referência analítica, não como sistema de trade."
+                )
 
 # ==========================================
 # tab 3: diário de decisões
