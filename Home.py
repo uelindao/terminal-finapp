@@ -139,6 +139,90 @@ def buscar_earnings_proximos(tickers_tuple: tuple) -> dict:
     return resultado
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_earnings_watchlist(tickers_tuple: tuple) -> dict:
+    """
+    Busca próximos earnings para ativos da watchlist.
+    Retorna dict com proximos (≤14 dias) e recentes (≤30 dias atrás).
+    """
+    import datetime
+
+    tickers  = list(tickers_tuple)
+    hoje     = datetime.date.today()
+    proximos = []
+    recentes = []
+
+    for ticker in tickers:
+        t_base = mapear_ticker_base(ticker)
+        try:
+            from database.db import get_earnings_dates
+            _data_str = get_earnings_dates(ticker)
+
+            if not _data_str:
+                _acao = yf.Ticker(t_base)
+                _cal  = _acao.calendar
+                if _cal is not None:
+                    if hasattr(_cal, 'columns'):
+                        if 'Earnings Date' in _cal.columns:
+                            _dt = _cal['Earnings Date'].iloc[0]
+                            if hasattr(_dt, 'date'):
+                                _data_str = _dt.date().strftime('%Y-%m-%d')
+                    elif isinstance(_cal, dict):
+                        _ed = _cal.get('Earnings Date', [])
+                        if _ed:
+                            _dt = _ed[0] if hasattr(_ed[0], 'date') else None
+                            if _dt:
+                                _data_str = str(_dt)[:10]
+
+            if not _data_str:
+                continue
+
+            _dt_earn = None
+            for _fmt in ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y']:
+                try:
+                    _dt_earn = datetime.datetime.strptime(
+                        str(_data_str)[:10], _fmt
+                    ).date()
+                    break
+                except ValueError:
+                    continue
+
+            if _dt_earn is None:
+                continue
+
+            _dias = (_dt_earn - hoje).days
+
+            from database.db import get_health_scores
+            _hs_all = {
+                h['ticker']: h.get('score', 50)
+                for h in (get_health_scores() or [])
+            }
+            _score = _hs_all.get(ticker) or _hs_all.get(t_base) or 50
+
+            _item = {
+                'ticker':   ticker,
+                't_base':   t_base,
+                'data':     _dt_earn,
+                'data_str': _dt_earn.strftime('%d/%m/%Y'),
+                'dias':     _dias,
+                'score_hs': _score,
+            }
+
+            if 0 <= _dias <= 14:
+                proximos.append(_item)
+            elif -30 <= _dias < 0:
+                _item['dias_atras'] = abs(_dias)
+                recentes.append(_item)
+
+        except Exception:
+            continue
+
+    return {
+        'proximos': sorted(proximos, key=lambda x: x['dias']),
+        'recentes': sorted(recentes, key=lambda x: x['dias_atras']),
+    }
+
+
 from utils.radar import calcular_oportunidades_watchlist
 
 # 1. configuração da página (tem de ser o primeiro comando)
@@ -294,6 +378,162 @@ with st.sidebar:
 
     st.markdown(''.join(_html), unsafe_allow_html=True)
     tooltip("vix")
+
+# ── PAINEL DE EARNINGS ────────────────────────────────────────────────
+_wl_earn = listar_watchlist()
+_tickers_earn = tuple([
+    item['ticker']
+    for item in _wl_earn
+    if item.get('ticker')
+])
+
+if _tickers_earn:
+    with st.spinner("verificando calendário de resultados..."):
+        _earn_data = buscar_earnings_watchlist(_tickers_earn)
+
+    _earn_prox = _earn_data.get('proximos', [])
+    _earn_rec  = _earn_data.get('recentes', [])
+
+    if _earn_prox or _earn_rec:
+        section_title("📅 calendário de resultados — sua watchlist")
+
+        _earn_cols = st.columns(2)
+
+        with _earn_cols[0]:
+            st.markdown(
+                '<div style="font-family:Courier New;'
+                'font-size:0.68rem;color:#FF9900;'
+                'margin-bottom:8px;font-weight:600;">'
+                '📅 próximos 14 dias</div>',
+                unsafe_allow_html=True,
+            )
+
+            if _earn_prox:
+                for _ep in _earn_prox:
+                    _dias_ep = _ep['dias']
+                    _cor_ep  = (
+                        "#FF1744" if _dias_ep <= 2
+                        else "#FF9900" if _dias_ep <= 7
+                        else "#888"
+                    )
+                    _urgencia = (
+                        "HOJE" if _dias_ep == 0
+                        else "AMANHÃ" if _dias_ep == 1
+                        else f"em {_dias_ep} dias"
+                    )
+                    _hs_ep  = _ep['score_hs']
+                    _cor_hs = (
+                        "#00C853" if _hs_ep >= 65
+                        else "#FF9900" if _hs_ep >= 40
+                        else "#FF1744"
+                    )
+
+                    st.markdown(
+                        f'<div style="background:#0d0d0d;'
+                        f'border:1px solid #1e1e1e;'
+                        f'border-left:3px solid {_cor_ep};'
+                        f'border-radius:4px;padding:8px 12px;'
+                        f'margin-bottom:6px;display:flex;'
+                        f'justify-content:space-between;'
+                        f'align-items:center;">'
+
+                        f'<div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.82rem;font-weight:700;'
+                        f'color:#FF9900;">'
+                        f'{_ep["ticker"].replace(".SA","")}</div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.65rem;color:#555;">'
+                        f'{_ep["data_str"]}</div>'
+                        f'</div>'
+
+                        f'<div style="text-align:right;">'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.72rem;color:{_cor_ep};'
+                        f'font-weight:600;">{_urgencia}</div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.65rem;color:{_cor_hs};">'
+                        f'hs: {_hs_ep}/100</div>'
+                        f'</div>'
+
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    if st.button(
+                        f"🔬 {_ep['ticker'].replace('.SA','')}",
+                        key=f"earn_research_{_ep['ticker']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state['research_ticker_externo'] = _ep['ticker']
+                        st.switch_page("pages/1_Research.py")
+            else:
+                st.markdown(
+                    '<div style="font-family:Courier New;'
+                    'font-size:0.72rem;color:#333;padding:8px 0;">'
+                    'nenhum resultado nos próximos 14 dias.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with _earn_cols[1]:
+            st.markdown(
+                '<div style="font-family:Courier New;'
+                'font-size:0.68rem;color:#555;'
+                'margin-bottom:8px;font-weight:600;">'
+                '📋 reportaram recentemente (30 dias)</div>',
+                unsafe_allow_html=True,
+            )
+
+            if _earn_rec:
+                for _er in _earn_rec[:5]:
+                    _hs_er  = _er['score_hs']
+                    _cor_hs = (
+                        "#00C853" if _hs_er >= 65
+                        else "#FF9900" if _hs_er >= 40
+                        else "#FF1744"
+                    )
+                    st.markdown(
+                        f'<div style="background:#0d0d0d;'
+                        f'border:1px solid #1e1e1e;'
+                        f'border-left:3px solid #333;'
+                        f'border-radius:4px;padding:8px 12px;'
+                        f'margin-bottom:6px;display:flex;'
+                        f'justify-content:space-between;'
+                        f'align-items:center;">'
+
+                        f'<div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.82rem;font-weight:700;'
+                        f'color:#ccc;">'
+                        f'{_er["ticker"].replace(".SA","")}</div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.65rem;color:#555;">'
+                        f'{_er["data_str"]}</div>'
+                        f'</div>'
+
+                        f'<div style="text-align:right;">'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.65rem;color:#555;">'
+                        f'há {_er["dias_atras"]} dias</div>'
+                        f'<div style="font-family:Courier New;'
+                        f'font-size:0.65rem;color:{_cor_hs};">'
+                        f'hs: {_hs_er}/100</div>'
+                        f'</div>'
+
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(
+                    '<div style="font-family:Courier New;'
+                    'font-size:0.72rem;color:#333;padding:8px 0;">'
+                    'nenhum resultado recente.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
 # ── OPORTUNIDADES DO MOMENTO ─────────────────────────────────────────
 _wl_home = listar_watchlist()
