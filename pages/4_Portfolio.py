@@ -2943,6 +2943,10 @@ with tab_backtest:
                         unsafe_allow_html=True,
                     )
 
+                    def _ajustar_threshold(val, lo, hi, step=5):
+                        clamped = max(lo, min(hi, int(round(val / step) * step)))
+                        return clamped
+
                     _dq1, _dq2 = st.columns(2)
                     with _dq1:
                         if st.button(
@@ -2950,8 +2954,8 @@ with tab_backtest:
                             key="btn_aplicar_sugestao", type="primary",
                             use_container_width=True,
                         ):
-                            st.session_state['sl_bt_entrada'] = int(_p75)
-                            st.session_state['sl_bt_saida']   = int(_p25)
+                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
+                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
                             st.session_state.pop('bt_resultado', None)
                             st.rerun()
                     with _dq2:
@@ -2960,8 +2964,8 @@ with tab_backtest:
                             key="btn_aplicar_conservador", type="secondary",
                             use_container_width=True,
                         ):
-                            st.session_state['sl_bt_entrada'] = int(_med)
-                            st.session_state['sl_bt_saida']   = int(_p25)
+                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_med, 40, 90)
+                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
                             st.session_state.pop('bt_resultado', None)
                             st.rerun()
 
