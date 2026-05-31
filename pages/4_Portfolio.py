@@ -353,23 +353,30 @@ def calcular_performance_vs_benchmarks(
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def rodar_backtesting_score(
-    ticker:            str,
-    threshold_entrada: int   = 65,
-    threshold_saida:   int   = 40,
-    periodo:           str   = "2y",
-    capital_inicial:   float = 10000.0,
+    ticker:              str,
+    threshold_entrada:   int   = 55,
+    threshold_saida:     int   = 35,
+    periodo:             str   = "5y",
+    capital_inicial:     float = 10000.0,
+    custo_transacao_pct: float = 0.3,
 ) -> dict:
     """
     Simula estratégia baseada no health score histórico.
 
-    Lógica:
-    - Compra quando score >= threshold_entrada
-    - Vende quando score < threshold_saida
-    - Compara com buy & hold e CDI no mesmo período
+    Parâmetros:
+        custo_transacao_pct: custo de ida+volta por operação (%)
+            B3: ~0.3% (corretagem + emolumentos + ISS)
+            EUA: ~0.1% (corretagem low cost)
 
-    Limitação honesta: o health score histórico no banco
-    reflete scores calculados nos dias em que o usuário
-    atualizou. Dias sem atualização são interpolados.
+    Períodos suportados:
+        '1y', '2y', '3y', '5y', '10y', 'max'
+
+    Limitações honestas (exibidas ao usuário):
+        - Score proxy é técnico, não fundamentalista
+        - Survivorship bias: só analisa ativos que sobreviveram
+        - Look-ahead bias em períodos > 4 anos de fundamentals
+        - Custos de transação simulados mas não incluem spread
+          bid/ask, slippage de liquidez nem impostos (IR)
     """
     import numpy as np
     import datetime
@@ -387,58 +394,125 @@ def rodar_backtesting_score(
     try:
         t_base = mapear_ticker_base(ticker)
 
-        # Histórico de preços
-        _hist = yf.Ticker(t_base).history(
-            period=periodo, auto_adjust=True
+        # Download de histórico com suporte a períodos longos
+        _periodo_yf = periodo
+        _corte_dias = None
+        if periodo == '3y':
+            _periodo_yf = '5y'
+            _corte_dias = 3 * 365
+        elif periodo == '10y':
+            _periodo_yf = '10y'
+        elif periodo == 'max':
+            _periodo_yf = 'max'
+
+        _hist_raw = yf.Ticker(t_base).history(
+            period=_periodo_yf, auto_adjust=True
         )['Close'].dropna()
 
-        if len(_hist) < 30:
-            resultado['erro'] = "histórico de preços insuficiente"
-            return resultado
+        if _corte_dias and len(_hist_raw) > _corte_dias:
+            _hist = _hist_raw.iloc[-_corte_dias:]
+        else:
+            _hist = _hist_raw
 
         if getattr(_hist.index, 'tz', None) is not None:
             _hist.index = _hist.index.tz_localize(None)
+
+        if len(_hist) < 60:
+            resultado['erro'] = (
+                "histórico de preços insuficiente para este ativo "
+                "no período solicitado."
+            )
+            return resultado
 
         # Histórico de scores do banco
         _scores_raw = get_historico_score(ticker)
 
         if not _scores_raw or len(_scores_raw) < 5:
-            # Score proxy com múltiplas médias móveis
+            # ── PROXY DE SCORE TÉCNICO-QUANTITATIVO ──────────────────
+            # Fatores baseados em literatura acadêmica:
+            # - Momentum: Jegadeesh & Titman (1993)
+            # - Low volatility: Ang et al. (2006)
+            # - Mean reversion de curto prazo: Jegadeesh (1990)
+            # - Trend following: MM200 — Faber (2007)
+
+            # Fator 1: RSI 14 (0-100)
+            _delta   = _hist.diff()
+            _gain    = _delta.clip(lower=0).rolling(14).mean()
+            _loss    = (-_delta.clip(upper=0)).rolling(14).mean()
+            _rsi     = (
+                100 - (100 / (1 + _gain / _loss.replace(0, np.nan)))
+            ).fillna(50)
+
+            # Fator 2: Momentum 12-1m (Jegadeesh & Titman)
+            _mom_12_1 = pd.Series(np.nan, index=_hist.index)
+            if len(_hist) >= 252:
+                _preco_12m = _hist.shift(252)
+                _preco_1m  = _hist.shift(21)
+                _mom_12_1  = ((_preco_1m / _preco_12m) - 1) * 100
+            _mom_12_1_norm = (
+                (_mom_12_1.clip(-50, 50) + 50) / 100 * 100
+            ).fillna(50)
+
+            # Fator 3: Trend (preço vs MM200) — Faber (2007)
             _mm50  = _hist.rolling(50).mean()
             _mm200 = _hist.rolling(200).mean()
             _mm_ref = _mm200.where(_mm200.notna(), _mm50)
+            _trend  = (_hist > _mm_ref).astype(float) * 100
 
-            _delta = _hist.diff()
-            _gain  = _delta.clip(lower=0).rolling(14).mean()
-            _loss  = (-_delta.clip(upper=0)).rolling(14).mean()
-            _rsi_raw = 100 - (100 / (1 + _gain / _loss.replace(0, 1)))
-            _rsi_norm = _rsi_raw.fillna(50)
+            # Fator 4: Volatilidade (low vol = melhor — invertida)
+            _vol_20d = _hist.pct_change().rolling(20).std() * np.sqrt(252)
+            _vol_pct  = _vol_20d.rank(pct=True) * 100
+            _low_vol  = (100 - _vol_pct).fillna(50)
 
-            _mom_3m = _hist.pct_change(63) * 100
-            _mom_norm = ((_mom_3m.clip(-40, 40) + 40) / 80 * 100).fillna(50)
+            # Fator 5: Posição no range 52 semanas
+            if len(_hist) >= 252:
+                _high_52w = _hist.rolling(252).max()
+                _low_52w  = _hist.rolling(252).min()
+                _range_52w = (
+                    (_hist - _low_52w) / (_high_52w - _low_52w + 1e-10) * 100
+                ).fillna(50)
+            else:
+                _range_52w = pd.Series(50.0, index=_hist.index)
 
-            _acima_mm = (_hist > _mm_ref).astype(float) * 100
-
+            # Fator 6: Aceleração do momentum
             _mom_1m = _hist.pct_change(21) * 100
-            _mom_1m_norm = ((_mom_1m.clip(-20, 20) + 20) / 40 * 100).fillna(50)
+            _mom_3m = _hist.pct_change(63) * 100
+            _aceleracao = (
+                (_mom_1m > _mom_3m / 3).astype(float) * 100
+            ).fillna(50)
 
+            # ── SCORE COMPOSTO ──
             _score_proxy = (
-                _rsi_norm    * 0.25 +
-                _acima_mm    * 0.25 +
-                _mom_norm    * 0.30 +
-                _mom_1m_norm * 0.20
+                _mom_12_1_norm * 0.30 +
+                _trend         * 0.25 +
+                _rsi           * 0.15 +
+                _low_vol       * 0.10 +
+                _range_52w     * 0.15 +
+                _aceleracao    * 0.05
             ).fillna(50).clip(0, 100)
 
             _scores_serie = _score_proxy.rename('score')
 
+            n_anos = len(_hist) / 252
+            resultado['score_distribution'] = {
+                'mediana':   round(float(_scores_serie.median()), 1),
+                'p25':       round(float(_scores_serie.quantile(0.25)), 1),
+                'p75':       round(float(_scores_serie.quantile(0.75)), 1),
+                'p10':       round(float(_scores_serie.quantile(0.10)), 1),
+                'p90':       round(float(_scores_serie.quantile(0.90)), 1),
+                'min':       round(float(_scores_serie.min()), 1),
+                'max':       round(float(_scores_serie.max()), 1),
+                'n_pregoes': len(_scores_serie),
+                'n_anos':    round(n_anos, 1),
+            }
             resultado['aviso'] = (
-                "histórico de health scores não encontrado no banco. "
-                "usando score proxy baseado em indicadores técnicos "
-                "(rsi 14, momentum 3m/1m, posição vs mm50/200). "
-                "o proxy é uma aproximação — os thresholds ideais para "
-                "o proxy são menores: tente entrada ≥55, saída <40. "
-                "para backtesting preciso, atualize os scores regularmente "
-                "pela watchlist para acumular histórico real."
+                f"score proxy ativo ({n_anos:.1f} anos de histórico). "
+                "o proxy usa 6 fatores técnicos acadêmicos (momentum 12-1m, "
+                "trend mm200, rsi, low volatility, range 52w, aceleração). "
+                "não representa fundamentos históricos reais. "
+                "⚠️ survivorship bias: análise apenas de ativos que sobreviveram. "
+                "⚠️ look-ahead bias em períodos > 4 anos. "
+                "use como referência direcional, não como sistema de trade."
             )
 
         else:
@@ -464,14 +538,18 @@ def rodar_backtesting_score(
                 _score_vals, index=_hist.index, name='score'
             )
 
-        # Salva distribuição do score para calibração do usuário
-        resultado['score_distribution'] = {
-            'mediana': round(float(_scores_serie.median()), 1),
-            'p25':     round(float(_scores_serie.quantile(0.25)), 1),
-            'p75':     round(float(_scores_serie.quantile(0.75)), 1),
-            'min':     round(float(_scores_serie.min()), 1),
-            'max':     round(float(_scores_serie.max()), 1),
-        }
+            n_anos = len(_hist) / 252
+            resultado['score_distribution'] = {
+                'mediana':   round(float(_scores_serie.median()), 1),
+                'p25':       round(float(_scores_serie.quantile(0.25)), 1),
+                'p75':       round(float(_scores_serie.quantile(0.75)), 1),
+                'p10':       round(float(_scores_serie.quantile(0.10)), 1),
+                'p90':       round(float(_scores_serie.quantile(0.90)), 1),
+                'min':       round(float(_scores_serie.min()), 1),
+                'max':       round(float(_scores_serie.max()), 1),
+                'n_pregoes': len(_scores_serie),
+                'n_anos':    round(n_anos, 1),
+            }
 
         # CDI diário para remunerar capital fora do mercado
         _cdi_dict_loop  = {}
@@ -490,7 +568,8 @@ def rodar_backtesting_score(
             _selic_loop = st.session_state.get('macro_context', {}).get('selic', 10.75)
             _cdi_diario_loop = _selic_loop / 100 / 252
 
-        # Simulação da estratégia
+        # Simulação da estratégia com custos de transação
+        _custo_meio    = (custo_transacao_pct / 100) / 2  # metade na compra, metade na venda
         _capital       = capital_inicial
         _capital_bh    = capital_inicial
         _posicao       = False
@@ -499,6 +578,7 @@ def rodar_backtesting_score(
         _bh_serie      = [capital_inicial]
         _preco_compra  = None
         _preco_ant     = float(_hist.iloc[0])
+        _fora_mercado  = 0
 
         for _i in range(1, len(_hist)):
             _dt      = _hist.index[_i]
@@ -510,29 +590,32 @@ def rodar_backtesting_score(
 
             if not _posicao and _score >= threshold_entrada:
                 _posicao      = True
-                _preco_compra = _preco
+                _preco_compra = _preco * (1 + _custo_meio)
                 _trades.append({
-                    'tipo': 'compra',
-                    'data': str(_dt)[:10],
-                    'preco': round(_preco, 2),
-                    'score': round(_score, 0),
+                    'tipo':     'compra',
+                    'data':     str(_dt)[:10],
+                    'preco':    round(_preco, 2),
+                    'score':    round(_score, 0),
+                    'custo':    round(_custo_meio * 100, 2),
                 })
             elif _posicao and _score < threshold_saida:
                 _posicao = False
-                _ret_trade = _preco / _preco_compra - 1 if _preco_compra else 0
+                _preco_venda = _preco * (1 - _custo_meio)
+                _ret_trade   = _preco_venda / _preco_compra - 1 if _preco_compra else 0
                 _trades.append({
-                    'tipo': 'venda',
-                    'data': str(_dt)[:10],
-                    'preco': round(_preco, 2),
-                    'score': round(_score, 0),
-                    'retorno_trade': round(_ret_trade * 100, 2),
+                    'tipo':           'venda',
+                    'data':           str(_dt)[:10],
+                    'preco':          round(_preco, 2),
+                    'score':          round(_score, 0),
+                    'retorno_trade':  round(_ret_trade * 100, 2),
+                    'custo':          round(_custo_meio * 100, 2),
                 })
                 _preco_compra = None
 
             if _posicao:
                 _capital *= (1 + _ret_dia)
             else:
-                # Capital fora do mercado rende CDI (realista)
+                _fora_mercado += 1
                 _dt_atual = _hist.index[_i]
                 _dt_key = _dt_atual.date() if hasattr(_dt_atual, 'date') else _dt_atual
                 _taxa_cdi_dia = _cdi_dict_loop.get(_dt_key, _cdi_diario_loop)
@@ -541,6 +624,23 @@ def rodar_backtesting_score(
             _capital_serie.append(_capital)
             _bh_serie.append(_capital_bh)
             _preco_ant = _preco
+
+        # Fecha posição ao fim do período
+        if _posicao:
+            _preco_final = float(_hist.iloc[-1]) * (1 - _custo_meio)
+            _capital     = _capital * (1 + (_preco_final / _preco_compra - 1)) if _preco_compra else _capital
+            _trades.append({
+                'tipo':    'venda (final)',
+                'data':    str(_hist.index[-1])[:10],
+                'preco':   round(float(_hist.iloc[-1]), 2),
+                'score':   round(float(_scores_serie.iloc[-1]), 0),
+                'custo':   round(_custo_meio * 100, 2),
+            })
+            _capital_serie[-1] = _capital
+
+        resultado['pct_tempo_investido'] = round(
+            (1 - _fora_mercado / max(len(_hist) - 1, 1)) * 100, 1
+        )
 
         # CDI acumulado
         try:
@@ -587,11 +687,21 @@ def rodar_backtesting_score(
                 resultado['series']['cdi (aprox)'] / capital_inicial * 100
             )
 
-        # Métricas finais
+        # Métricas finais com CAGR, Calmar, % dias positivos
         def _calc_metricas(serie_b100: pd.Series, nome: str, is_renda_fixa: bool = False) -> dict:
             _rets_d  = serie_b100.pct_change().dropna()
             _ret_tot = float(serie_b100.iloc[-1]) / 100 - 1
             _vol     = float(_rets_d.std() * np.sqrt(252) * 100)
+
+            # CAGR (taxa composta anual)
+            _n_anos = len(serie_b100) / 252
+            if _n_anos > 0 and float(serie_b100.iloc[-1]) > 0:
+                if float(serie_b100.iloc[0]) > 0:
+                    _cagr = (float(serie_b100.iloc[-1]) / float(serie_b100.iloc[0])) ** (1 / _n_anos) - 1
+                else:
+                    _cagr = 0.0
+            else:
+                _cagr = 0.0
 
             if is_renda_fixa or _vol < 0.01:
                 _sharpe = None
@@ -605,11 +715,20 @@ def rodar_backtesting_score(
             _dd    = (serie_b100 - _peak) / _peak * 100
             _max_dd = float(_dd.min())
 
+            # Calmar = CAGR / |max drawdown|
+            _calmar = round(_cagr * 100 / abs(_max_dd), 2) if _max_dd < -0.01 and _cagr != 0 else 0.0
+
+            # % dias positivos
+            _pct_pos = round(float((_rets_d > 0).mean()) * 100, 1)
+
             return {
-                'retorno':  round(_ret_tot * 100, 2),
-                'vol':      round(_vol, 2) if _vol > 0.01 else 0.0,
-                'sharpe':   round(float(_sharpe), 2) if _sharpe is not None else None,
-                'drawdown': round(_max_dd, 2),
+                'retorno':   round(_ret_tot * 100, 2),
+                'cagr':      round(_cagr * 100, 2),
+                'vol':       round(_vol, 2) if _vol > 0.01 else 0.0,
+                'sharpe':    round(float(_sharpe), 2) if _sharpe is not None else None,
+                'drawdown':  round(_max_dd, 2),
+                'calmar':    _calmar,
+                'pct_pos':   _pct_pos,
             }
 
         for _nm, _sr in resultado['series'].items():
@@ -2258,6 +2377,18 @@ with tab_backtest:
     from utils.components import label_com_tooltip
     section_title("🔬 backtesting — estratégia baseada no health score")
 
+    # Bias warnings banner
+    st.warning(
+        "⚠️ **limitações importantes** — "
+        "score proxy (quando sem histórico real) é puramente técnico, "
+        "não fundamentalista. "
+        "⚠️ **survivorship bias:** analisamos apenas ativos que existem hoje. "
+        "⚠️ **look-ahead bias** em períodos > 4 anos. "
+        "⚠️ custos de transação não incluem spread bid/ask, slippage ou IR. "
+        "⚠️ backtesting intraday com preço de fechamento — "
+        "sinais reais podem não ser executados ao preço simulado."
+    )
+
     st.markdown(
         '<div style="font-family:Courier New;font-size:0.75rem;'
         'color:#555;margin-bottom:16px;line-height:1.7;">'
@@ -2311,9 +2442,27 @@ with tab_backtest:
     with _bt_c4:
         _bt_periodo = st.radio(
             "período:",
-            ["1y", "2y", "3y"],
-            format_func=lambda x: {"1y": "1 ano", "2y": "2 anos", "3y": "3 anos"}[x],
+            ["1y", "2y", "3y", "5y", "10y", "max"],
+            format_func=lambda x: {
+                "1y": "1 ano", "2y": "2 anos", "3y": "3 anos",
+                "5y": "5 anos", "10y": "10 anos", "max": "máx",
+            }[x],
             key="radio_bt_periodo",
+        )
+
+    _bt_custo = st.columns(1)[0]
+    with _bt_custo:
+        _bt_custo_pct = st.slider(
+            "custo transação (ida+volta):",
+            min_value=0.0, max_value=2.0,
+            value=0.3, step=0.05,
+            key="sl_bt_custo",
+            help=(
+                "B3 ≈ 0,3% (corretagem + emolumentos + ISS). "
+                "EUA ≈ 0,1% (corretagem low cost). "
+                "inclui corretagem, emolumentos, ISS; "
+                "não inclui spread bid/ask, slippage nem IR."
+            ),
         )
 
     if _bt_entrada <= _bt_saida:
@@ -2328,6 +2477,7 @@ with tab_backtest:
                     threshold_entrada=_bt_entrada,
                     threshold_saida=_bt_saida,
                     periodo=_bt_periodo,
+                    custo_transacao_pct=_bt_custo_pct,
                 )
             st.session_state['bt_resultado'] = _bt_result
             st.session_state['bt_ticker']    = _bt_ticker
@@ -2370,9 +2520,11 @@ with tab_backtest:
                         _bt_rows.append({
                             'estratégia': _nm,
                             'retorno total': f"{_mv['retorno']:+.2f}%",
+                            'cagr': f"{_mv['cagr']:+.2f}%" if _mv.get('cagr') is not None else "n/a",
                             'vol. anual': f"{_mv['vol']:.2f}%",
                             'sharpe': f"{_mv['sharpe']:.2f}" if _mv.get('sharpe') is not None else "n/a",
                             'max drawdown': f"{_mv['drawdown']:.2f}%",
+                            'calmar': f"{_mv['calmar']:.2f}" if _mv.get('calmar') is not None else "n/a",
                         })
                     st.dataframe(pd.DataFrame(_bt_rows), use_container_width=True, hide_index=True)
 
@@ -2385,15 +2537,25 @@ with tab_backtest:
                     _alpha_bh  = _ret_est - _ret_bh
                     _alpha_cdi = _ret_est - _ret_cdi
 
-                    _am1, _am2, _am3, _am4 = st.columns(4)
+                    _bt_est_met = _bt_met.get('estratégia (score)', {})
+                    _bt_cagr     = _bt_est_met.get('cagr', 0)
+                    _bt_calmar   = _bt_est_met.get('calmar', 0)
+                    _bt_pct_pos  = _bt_est_met.get('pct_pos', 0)
+                    _bt_pct_tempo = _bt_res.get('pct_tempo_investido', 0)
+
+                    _am1, _am2, _am3, _am4, _am5, _am6 = st.columns(6)
                     with _am1:
-                        metric_card("retorno estratégia", f"{_ret_est:+.2f}%", f"período {_bt_periodo}", "bull" if _ret_est > 0 else "bear", destaque=True)
+                        metric_card("cagr", f"{_bt_cagr:+.2f}%", f"período {_bt_periodo}", "bull" if _bt_cagr > 0 else "bear", destaque=True)
                     with _am2:
                         metric_card("alpha vs b&h", f"{_alpha_bh:+.2f}pp", "estratégia vs comprar e segurar", "bull" if _alpha_bh > 0 else "bear")
                     with _am3:
                         metric_card("alpha vs cdi", f"{_alpha_cdi:+.2f}pp", "estratégia vs renda fixa", "bull" if _alpha_cdi > 0 else "bear")
                     with _am4:
                         metric_card("nº de operações", str(_bt_res.get('n_trades', 0)), "entradas realizadas no período")
+                    with _am5:
+                        metric_card("% tempo investido", f"{_bt_pct_tempo:.0f}%", "pregões com posição ativa", "bull" if _bt_pct_tempo > 50 else "amber")
+                    with _am6:
+                        metric_card("calmar", f"{_bt_calmar:.2f}", "cagr / |max drawdown|", "bull" if _bt_calmar > 0.5 else "amber")
 
                 # Gráfico de performance
                 _bt_series = _bt_res.get('series', {})
@@ -2466,6 +2628,68 @@ with tab_backtest:
                         "backtesting não garante performance futura."
                     )
 
+                    # ── Gráfico de underwater (ocean chart) ──
+                    _sr_est = _bt_series.get('estratégia (score)')
+                    if _sr_est is not None and not _sr_est.empty:
+                        _peak_est  = _sr_est.cummax()
+                        _dd_est    = (_sr_est - _peak_est) / _peak_est * 100
+
+                        _fig_ocean = go.Figure()
+                        _fig_ocean.add_trace(go.Scatter(
+                            x=_dd_est.index, y=_dd_est.values,
+                            fill='tozeroy',
+                            line=dict(color='#FF1744', width=1),
+                            name='drawdown',
+                            hovertemplate='%{x}<br>drawdown: %{y:.1f}%<extra></extra>',
+                        ))
+                        _fig_ocean.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
+                        _lay_ocean = base_layout(
+                            height=180,
+                            title="⛰️ underwater — drawdown da estratégia",
+                        )
+                        _lay_ocean.update(
+                            yaxis=dict(title='drawdown %', showgrid=True, gridcolor='#2A2C3E'),
+                            margin=dict(t=40, b=20),
+                        )
+                        _fig_ocean.update_layout(**_lay_ocean)
+                        st.plotly_chart(_fig_ocean, use_container_width=True, config={'responsive': True})
+
+                    # ── Rolling Sharpe 252d ──
+                    if _sr_est is not None and not _sr_est.empty:
+                        _rets_est_d = _sr_est.pct_change().dropna()
+                        _selic_anual = st.session_state.get('macro_context', {}).get('selic', 10.75) / 100
+                        _selic_dia   = _selic_anual / 252
+                        _excesso     = _rets_est_d - _selic_dia
+                        _vol_rolante = _rets_est_d.rolling(252).std() * np.sqrt(252)
+                        _sharpe_rolante = (
+                            _excesso.rolling(252).mean() * 252 / _vol_rolante
+                        ).replace([np.inf, -np.inf], np.nan)
+
+                        _fig_roll_sharpe = go.Figure()
+                        _fig_roll_sharpe.add_trace(go.Scatter(
+                            x=_sharpe_rolante.index, y=_sharpe_rolante.values,
+                            line=dict(color='#00B0FF', width=1.5),
+                            name='rolling sharpe (252d)',
+                            hovertemplate='%{x}<br>sharpe: %{y:.2f}<extra></extra>',
+                        ))
+                        _fig_roll_sharpe.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
+                        _fig_roll_sharpe.add_hline(y=1, line_color='#00C853', line_dash='dot', line_width=1)
+                        _lay_roll = base_layout(
+                            height=180,
+                            title="📉 rolling sharpe — janela 252 pregões",
+                        )
+                        _lay_roll.update(
+                            yaxis=dict(title='sharpe', showgrid=True, gridcolor='#2A2C3E'),
+                            margin=dict(t=40, b=20),
+                        )
+                        _fig_roll_sharpe.update_layout(**_lay_roll)
+                        st.plotly_chart(_fig_roll_sharpe, use_container_width=True, config={'responsive': True})
+                        st.caption(
+                            "rolling sharpe = (retorno médio diário - selic) / vol diária × √252. "
+                            "linha verde = sharpe 1,0 (referência). "
+                            "valores > 1 indicam boa relação risco-retorno."
+                        )
+
                 # Log de trades
                 if _bt_res.get('trades'):
                     st.markdown("<br>", unsafe_allow_html=True)
@@ -2476,19 +2700,6 @@ with tab_backtest:
                             lambda x: f"{x:+.2f}%" if pd.notna(x) else "—"
                         )
                     st.dataframe(_df_trades, use_container_width=True, hide_index=True)
-
-                # Aviso importante
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.info(
-                    "⚠️ **limitações do backtesting:** "
-                    "os health scores históricos refletem apenas "
-                    "os dias em que foram calculados. "
-                    "dias sem atualização usam o último score disponível. "
-                    "para resultados mais precisos, atualize os scores "
-                    "regularmente pela watchlist. "
-                    "backtesting não é garantia de performance futura — "
-                    "use como referência analítica, não como sistema de trade."
-                )
 
 # ==========================================
 # tab 3: diário de decisões
