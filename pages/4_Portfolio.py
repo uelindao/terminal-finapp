@@ -349,6 +349,113 @@ def calcular_performance_vs_benchmarks(
     return resultado
 
 
+# ── Score histórico via FMP (fundamentais reais) ─────────────────────
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def buscar_score_historico_fmp(ticker: str) -> pd.Series | None:
+    try:
+        from utils.fmp_client import _get, _safe_float, _safe_pct
+
+        t_clean = ticker.replace('.SA', '').upper()
+
+        _ratios  = _get(f"ratios/{t_clean}", {"limit": 40})
+        _income  = _get(f"income-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+        _balance = _get(f"balance-sheet-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+        _cashflow = _get(f"cash-flow-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+
+        if not _ratios or len(_ratios) < 4 or not _income or len(_income) < 4:
+            return None
+
+        _income_map   = {it.get('date', ''): it for it in _income}
+        _balance_map  = {it.get('date', ''): it for it in _balance}
+        _cashflow_map = {it.get('date', ''): it for it in _cashflow}
+
+        _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
+
+        scores_historicos = {}
+
+        for _data in _datas_ratio:
+            try:
+                _r  = next((x for x in _ratios if x.get('date') == _data), {})
+                _inc = _income_map.get(_data, {})
+                _bal = _balance_map.get(_data, {})
+                _cf  = _cashflow_map.get(_data, {})
+
+                _score_q = 0.0
+
+                _roe = _safe_pct(_r.get('returnOnEquity'))
+                if _roe is not None:
+                    if _roe > 20:   _score_q += 15
+                    elif _roe > 10: _score_q += 10
+                    elif _roe > 0:  _score_q += 5
+
+                _mrg = _safe_pct(_r.get('netProfitMargin'))
+                if _mrg is not None:
+                    if _mrg > 15:   _score_q += 15
+                    elif _mrg > 5:  _score_q += 10
+                    elif _mrg >= 0: _score_q += 5
+                    else:           _score_q -= 5
+
+                _pl = _safe_float(_r.get('priceEarningsRatio'))
+                if _pl is not None and _pl > 0:
+                    if _pl <= 12:   _score_q += 15
+                    elif _pl <= 20: _score_q += 10
+                    elif _pl <= 35: _score_q += 5
+
+                _pvp = _safe_float(_r.get('priceToBookRatio'))
+                if _pvp is not None and _pvp > 0:
+                    if _pvp <= 1.5: _score_q += 10
+                    elif _pvp <= 3: _score_q += 6
+                    elif _pvp <= 6: _score_q += 3
+
+                _de = _safe_float(_r.get('debtEquityRatio'))
+                if _de is not None:
+                    if _de < 30:    _score_q += 15
+                    elif _de < 80:  _score_q += 10
+                    elif _de < 150: _score_q += 5
+                    else:           _score_q -= 5
+
+                _fcf = _safe_float(_cf.get('freeCashFlow') or _cf.get('operatingCashFlow'))
+                if _fcf is not None:
+                    if _fcf > 0: _score_q += 10
+                    else:        _score_q -= 5
+
+                _rev_growth = _safe_float(_r.get('revenueGrowth'))
+                if _rev_growth is not None:
+                    if _rev_growth > 0.10:   _score_q += 10
+                    elif _rev_growth > 0.02: _score_q += 6
+                    elif _rev_growth < -0.05: _score_q -= 5
+
+                _earn_growth = _safe_float(_r.get('epsgrowth')) or _safe_float(_r.get('earningsGrowth'))
+                if _earn_growth is not None:
+                    if _earn_growth > 0.15:   _score_q += 10
+                    elif _earn_growth > 0.03: _score_q += 6
+                    elif _earn_growth < -0.10: _score_q -= 5
+
+                scores_historicos[_data] = max(0, min(100, _score_q))
+
+            except Exception:
+                continue
+
+        if len(scores_historicos) < 4:
+            return None
+
+        _serie_q = pd.Series(scores_historicos)
+        _serie_q.index = pd.to_datetime(_serie_q.index)
+        _serie_q = _serie_q.sort_index()
+
+        _datas_diarias = pd.date_range(start=_serie_q.index[0], end=pd.Timestamp.today(), freq='B')
+        _serie_diaria = _serie_q.reindex(_datas_diarias, method='ffill')
+        _serie_diaria = _serie_diaria.rolling(5, min_periods=1).mean()
+
+        return _serie_diaria.round(1)
+
+    except Exception as e:
+        from utils.logger import get_logger
+        get_logger(__name__).warning(f"[backtesting] FMP histórico falhou para {ticker}: {e}")
+        return None
+
+
 # ── Backtesting do health score ──────────────────────────────────────
 
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -424,149 +531,150 @@ def rodar_backtesting_score(
             )
             return resultado
 
-        # Histórico de scores do banco
+        # ── PRIORIDADE DE FONTE DE SCORES ────────────────────────────────
+        # 1ª opção: histórico real do banco (calculado pelo app)
+        # 2ª opção: dados históricos do FMP (fundamentais reais)
+        # 3ª opção: proxy técnico (fallback)
+
         _scores_raw = get_historico_score(ticker)
+        _fonte_score = None
+        _scores_serie = None
 
-        if not _scores_raw or len(_scores_raw) < 5:
+        # Opção 1: banco local
+        if _scores_raw and len(_scores_raw) >= 10:
+            try:
+                _scores_dict = {}
+                for _row in _scores_raw:
+                    try:
+                        _dt_s = pd.Timestamp(_row['data_hora'])
+                        if getattr(_dt_s, 'tz', None) is not None:
+                            _dt_s = _dt_s.tz_localize(None)
+                        _scores_dict[_dt_s.date()] = int(_row['score'])
+                    except Exception:
+                        continue
+
+                _score_vals = []
+                _ultimo_score = 50
+                for _dt in _hist.index:
+                    _d = _dt.date() if hasattr(_dt, 'date') else _dt
+                    if _d in _scores_dict:
+                        _ultimo_score = _scores_dict[_d]
+                    _score_vals.append(_ultimo_score)
+
+                _scores_serie = pd.Series(_score_vals, index=_hist.index, name='score')
+                _fonte_score = 'banco_local'
+            except Exception:
+                _scores_serie = None
+
+        # Opção 2: FMP histórico (fundamentais reais)
+        if _scores_serie is None:
+            with st.spinner(f"buscando dados históricos fundamentalistas (fmp) para {ticker}..."):
+                _fmp_serie = buscar_score_historico_fmp(ticker)
+
+            if _fmp_serie is not None and len(_fmp_serie) >= 60:
+                try:
+                    _hist_index_clean = _hist.index
+                    if getattr(_hist_index_clean, 'tz', None) is not None:
+                        _hist_index_clean = _hist_index_clean.tz_localize(None)
+
+                    _fmp_aligned = _fmp_serie.reindex(_hist_index_clean, method='ffill').fillna(50)
+                    _scores_serie = _fmp_aligned.rename('score')
+                    _fonte_score  = 'fmp_fundamentais'
+                except Exception:
+                    _scores_serie = None
+
+        # Opção 3: proxy técnico (fallback)
+        if _scores_serie is None:
+            _fonte_score = 'proxy_tecnico'
+
             # ── PROXY DE SCORE TÉCNICO-QUANTITATIVO ──────────────────
-            # Fatores baseados em literatura acadêmica:
-            # - Momentum: Jegadeesh & Titman (1993)
-            # - Low volatility: Ang et al. (2006)
-            # - Mean reversion de curto prazo: Jegadeesh (1990)
-            # - Trend following: MM200 — Faber (2007)
-
-            # Fator 1: RSI 14 (0-100)
             _delta   = _hist.diff()
             _gain    = _delta.clip(lower=0).rolling(14).mean()
             _loss    = (-_delta.clip(upper=0)).rolling(14).mean()
-            _rsi     = (
-                100 - (100 / (1 + _gain / _loss.replace(0, np.nan)))
-            ).fillna(50)
+            _rsi     = (100 - (100 / (1 + _gain / _loss.replace(0, np.nan)))).fillna(50)
 
-            # Fator 2: Momentum 12-1m (Jegadeesh & Titman)
             _mom_12_1 = pd.Series(np.nan, index=_hist.index)
             if len(_hist) >= 252:
                 _preco_12m = _hist.shift(252)
                 _preco_1m  = _hist.shift(21)
                 _mom_12_1  = ((_preco_1m / _preco_12m) - 1) * 100
-            _mom_12_1_norm = (
-                (_mom_12_1.clip(-50, 50) + 50) / 100 * 100
-            ).fillna(50)
+            _mom_12_1_norm = ((_mom_12_1.clip(-50, 50) + 50) / 100 * 100).fillna(50)
 
-            # Fator 3: Trend (preço vs MM200) — Faber (2007)
-            _mm50  = _hist.rolling(50).mean()
-            _mm200 = _hist.rolling(200).mean()
+            _mm50   = _hist.rolling(50).mean()
+            _mm200  = _hist.rolling(200).mean()
             _mm_ref = _mm200.where(_mm200.notna(), _mm50)
             _trend  = (_hist > _mm_ref).astype(float) * 100
 
-            # Fator 4: Volatilidade (low vol = melhor — invertida)
-            _vol_20d = _hist.pct_change().rolling(20).std() * np.sqrt(252)
+            _vol_20d  = _hist.pct_change().rolling(20).std() * np.sqrt(252)
             _vol_pct  = _vol_20d.rank(pct=True) * 100
             _low_vol  = (100 - _vol_pct).fillna(50)
 
-            # Fator 5: Posição no range 52 semanas
             if len(_hist) >= 252:
                 _high_52w = _hist.rolling(252).max()
                 _low_52w  = _hist.rolling(252).min()
-                _range_52w = (
-                    (_hist - _low_52w) / (_high_52w - _low_52w + 1e-10) * 100
-                ).fillna(50)
+                _range_52w = ((_hist - _low_52w) / (_high_52w - _low_52w + 1e-10) * 100).fillna(50)
             else:
                 _range_52w = pd.Series(50.0, index=_hist.index)
 
-            # Fator 6: Aceleração do momentum
             _mom_1m = _hist.pct_change(21) * 100
             _mom_3m = _hist.pct_change(63) * 100
-            _aceleracao = (
-                (_mom_1m > _mom_3m / 3).astype(float) * 100
-            ).fillna(50)
+            _aceleracao = (_mom_1m > _mom_3m / 3).astype(float) * 100
 
-            # ── SCORE COMPOSTO ──
             _score_proxy = (
-                _mom_12_1_norm * 0.30 +
-                _trend         * 0.25 +
-                _rsi           * 0.15 +
-                _low_vol       * 0.10 +
-                _range_52w     * 0.15 +
-                _aceleracao    * 0.05
+                _mom_12_1_norm * 0.30 + _trend * 0.25 + _rsi * 0.15
+                + _low_vol * 0.10 + _range_52w * 0.15 + _aceleracao * 0.05
             ).fillna(50).clip(0, 100)
 
             _scores_serie = _score_proxy.rename('score')
 
-            n_anos = len(_hist) / 252
-            resultado['score_distribution'] = {
-                'mediana':   round(float(_scores_serie.median()), 1),
-                'p25':       round(float(_scores_serie.quantile(0.25)), 1),
-                'p75':       round(float(_scores_serie.quantile(0.75)), 1),
-                'p10':       round(float(_scores_serie.quantile(0.10)), 1),
-                'p90':       round(float(_scores_serie.quantile(0.90)), 1),
-                'min':       round(float(_scores_serie.min()), 1),
-                'max':       round(float(_scores_serie.max()), 1),
-                'n_pregoes': len(_scores_serie),
-                'n_anos':    round(n_anos, 1),
-            }
             resultado['aviso'] = (
-                f"score proxy ativo ({n_anos:.1f} anos de histórico). "
-                "o proxy usa 6 fatores técnicos acadêmicos (momentum 12-1m, "
-                "trend mm200, rsi, low volatility, range 52w, aceleração). "
-                "não representa fundamentos históricos reais. "
-                "⚠️ survivorship bias: análise apenas de ativos que sobreviveram. "
-                "⚠️ look-ahead bias em períodos > 4 anos. "
-                "use como referência direcional, não como sistema de trade."
+                "score proxy técnico ativo — FMP sem cobertura fundamentalista "
+                "para este ativo. usando indicadores técnicos (momentum 12-1m, "
+                "trend mm200, rsi). não representa fundamentos reais."
             )
 
-        else:
-            _scores_dict = {}
-            for _row in _scores_raw:
-                try:
-                    _dt_s = pd.Timestamp(_row['data_hora'])
-                    if getattr(_dt_s, 'tz', None) is not None:
-                        _dt_s = _dt_s.tz_localize(None)
-                    _scores_dict[_dt_s.date()] = int(_row['score'])
-                except Exception:
-                    continue
+        resultado['fonte_score'] = _fonte_score
+        n_anos = len(_hist) / 252
+        resultado['score_distribution'] = {
+            'mediana':   round(float(_scores_serie.median()), 1),
+            'p25':       round(float(_scores_serie.quantile(0.25)), 1),
+            'p75':       round(float(_scores_serie.quantile(0.75)), 1),
+            'p10':       round(float(_scores_serie.quantile(0.10)), 1),
+            'p90':       round(float(_scores_serie.quantile(0.90)), 1),
+            'min':       round(float(_scores_serie.min()), 1),
+            'max':       round(float(_scores_serie.max()), 1),
+            'n_pregoes': len(_scores_serie),
+            'n_anos':    round(n_anos, 1),
+        }
 
-            _score_vals = []
-            _ultimo_score = 50
-            for _dt in _hist.index:
-                _d = _dt.date() if hasattr(_dt, 'date') else _dt
-                if _d in _scores_dict:
-                    _ultimo_score = _scores_dict[_d]
-                _score_vals.append(_ultimo_score)
-
-            _scores_serie = pd.Series(
-                _score_vals, index=_hist.index, name='score'
-            )
-
-            n_anos = len(_hist) / 252
-            resultado['score_distribution'] = {
-                'mediana':   round(float(_scores_serie.median()), 1),
-                'p25':       round(float(_scores_serie.quantile(0.25)), 1),
-                'p75':       round(float(_scores_serie.quantile(0.75)), 1),
-                'p10':       round(float(_scores_serie.quantile(0.10)), 1),
-                'p90':       round(float(_scores_serie.quantile(0.90)), 1),
-                'min':       round(float(_scores_serie.min()), 1),
-                'max':       round(float(_scores_serie.max()), 1),
-                'n_pregoes': len(_scores_serie),
-                'n_anos':    round(n_anos, 1),
-            }
-
-        # CDI diário para remunerar capital fora do mercado
+        # ── CDI diário para remunerar capital fora do mercado ────────────
+        # BCB série 12 = CDI Over taxa anual em % (ex: 13.65 = 13.65% a.a.)
+        # Converte para diária: (1 + taxa_anual/100)^(1/252) - 1
         _cdi_dict_loop  = {}
         _cdi_diario_loop = 0.0
+        _cdi_alinhado   = None
         try:
             from bcb import sgs as _sgs_bt
             import datetime as _dt_bt
             _inicio_bt_str = _hist.index[0].strftime('%Y-%m-%d')
             _df_cdi_loop = _sgs_bt.get({'cdi': 12}, start=_inicio_bt_str)
-            if not _df_cdi_loop.empty:
-                _cdi_serie_loop = _df_cdi_loop['cdi'] / 100 / 252
-                for _idx, _val in _cdi_serie_loop.items():
+            if not _df_cdi_loop.empty and 'cdi' in _df_cdi_loop.columns:
+                _cdi_anual_loop = _df_cdi_loop['cdi'].dropna()
+                if getattr(_cdi_anual_loop.index, 'tz', None) is not None:
+                    _cdi_anual_loop.index = _cdi_anual_loop.index.tz_localize(None)
+                _cdi_diario_loop_serie = (1 + _cdi_anual_loop / 100) ** (1 / 252) - 1
+                _cdi_alinhado = _cdi_diario_loop_serie.reindex(_hist.index, method='ffill')
+                _cdi_alinhado = _cdi_alinhado.fillna(float(_cdi_alinhado.mean()))
+
+                for _idx, _val in _cdi_alinhado.items():
                     _dt_key = _idx.date() if hasattr(_idx, 'date') else _idx
                     _cdi_dict_loop[_dt_key] = float(_val)
         except Exception:
+            pass
+
+        if not _cdi_dict_loop:
             _selic_loop = st.session_state.get('macro_context', {}).get('selic', 10.75)
-            _cdi_diario_loop = _selic_loop / 100 / 252
+            _cdi_diario_loop = (1 + _selic_loop / 100) ** (1 / 252) - 1
 
         # Simulação da estratégia com custos de transação
         _custo_meio    = (custo_transacao_pct / 100) / 2  # metade na compra, metade na venda
@@ -642,31 +750,50 @@ def rodar_backtesting_score(
             (1 - _fora_mercado / max(len(_hist) - 1, 1)) * 100, 1
         )
 
-        # CDI acumulado
+        # ── CDI acumulado no período ──────────────────────────────────
+        # BCB série 12 = CDI Over taxa anual em % (ex: 13.65 = 13.65% a.a.)
+        # Converte para diária: (1 + taxa_anual/100)^(1/252) - 1
+        _cdi_acum_serie = None
+
         try:
-            from bcb import sgs
-            _inicio_bt = _hist.index[0].strftime('%Y-%m-%d')
-            _df_cdi_bt = sgs.get({'cdi': 12}, start=_inicio_bt)
-            _cdi_diario = _df_cdi_bt['cdi'] / 100 / 252
-            _cdi_diario = _cdi_diario.reindex(
-                _hist.index, method='ffill'
-            ).fillna(_cdi_diario.mean())
-            _cdi_acum = (1 + _cdi_diario).cumprod() * capital_inicial
-            resultado['series']['cdi'] = _cdi_acum
+            from bcb import sgs as _sgs_bt_cdi
+
+            _inicio_bt2 = _hist.index[0]
+            _inicio_str2 = (
+                _inicio_bt2.strftime('%Y-%m-%d')
+                if hasattr(_inicio_bt2, 'strftime')
+                else str(_inicio_bt2)[:10]
+            )
+
+            _df_cdi_bt2 = _sgs_bt_cdi.get({'cdi': 12}, start=_inicio_str2)
+
+            if not _df_cdi_bt2.empty and 'cdi' in _df_cdi_bt2.columns:
+                _cdi_anual2 = _df_cdi_bt2['cdi'].dropna()
+
+                if getattr(_cdi_anual2.index, 'tz', None) is not None:
+                    _cdi_anual2.index = _cdi_anual2.index.tz_localize(None)
+
+                _cdi_diario2 = (1 + _cdi_anual2 / 100) ** (1 / 252) - 1
+
+                _cdi_alinhado2 = _cdi_diario2.reindex(_hist.index, method='ffill')
+                _media_cdi2 = float(_cdi_alinhado2.mean())
+                _cdi_alinhado2 = _cdi_alinhado2.fillna(_media_cdi2)
+
+                _cdi_acum_serie = (1 + _cdi_alinhado2).cumprod() * capital_inicial
+
         except Exception:
-            _selic = st.session_state.get(
-                'macro_context', {}
-            ).get('selic', 10.75)
-            _cdi_diario_aprox = _selic / 100 / 252
-            _n_dias = len(_hist)
-            _cdi_serie = pd.Series(
-                [
-                    capital_inicial * ((1 + _cdi_diario_aprox) ** i)
-                    for i in range(_n_dias)
-                ],
+            pass
+
+        # Fallback robusto se BCB falhou
+        if _cdi_acum_serie is None or _cdi_acum_serie.empty:
+            _selic_anual = st.session_state.get('macro_context', {}).get('selic', 10.75)
+            _cdi_dia_fallback = (1 + _selic_anual / 100) ** (1 / 252) - 1
+            _cdi_acum_serie = pd.Series(
+                [capital_inicial * ((1 + _cdi_dia_fallback) ** i) for i in range(len(_hist))],
                 index=_hist.index,
             )
-            resultado['series']['cdi (aprox)'] = _cdi_serie
+
+        resultado['series']['cdi'] = _cdi_acum_serie / capital_inicial * 100
 
         # Séries base 100
         _cap_serie_pd = pd.Series(_capital_serie, index=_hist.index)
@@ -678,14 +805,7 @@ def rodar_backtesting_score(
         resultado['series'][f'buy & hold ({ticker.replace(".SA","")})'] = (
             _bh_serie_pd / capital_inicial * 100
         )
-        if 'cdi' in resultado['series']:
-            resultado['series']['cdi'] = (
-                resultado['series']['cdi'] / capital_inicial * 100
-            )
-        if 'cdi (aprox)' in resultado['series']:
-            resultado['series']['cdi (aprox)'] = (
-                resultado['series']['cdi (aprox)'] / capital_inicial * 100
-            )
+        # CDI já está base 100 em resultado['series']['cdi']
 
         # Métricas finais com CAGR, Calmar, % dias positivos
         def _calc_metricas(serie_b100: pd.Series, nome: str, is_renda_fixa: bool = False) -> dict:
@@ -2488,6 +2608,46 @@ with tab_backtest:
             if _bt_res.get('erro'):
                 st.error(f"erro: {_bt_res['erro']}")
             else:
+                # Badge indicando fonte dos dados de score
+                _fonte = _bt_res.get('fonte_score', 'proxy_tecnico')
+                _fonte_configs = {
+                    'banco_local': (
+                        '#00C853', '✅',
+                        'scores reais do banco local',
+                        'melhor qualidade — dados calculados pelo motor do app'
+                    ),
+                    'fmp_fundamentais': (
+                        '#00B0FF', '📊',
+                        'fundamentais históricos (fmp)',
+                        'dados fundamentalistas reais trimestrais via financial modeling prep'
+                    ),
+                    'proxy_tecnico': (
+                        '#FF9900', '⚠️',
+                        'proxy técnico (sem dados reais)',
+                        'fmp sem cobertura para este ativo — usando indicadores técnicos como proxy'
+                    ),
+                }
+                _f_cor, _f_icon, _f_label, _f_desc = _fonte_configs.get(
+                    _fonte, _fonte_configs['proxy_tecnico']
+                )
+
+                st.markdown(
+                    f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                    f'border-left:3px solid {_f_cor};border-radius:4px;'
+                    f'padding:8px 14px;margin-bottom:12px;display:flex;'
+                    f'gap:12px;align-items:center;">'
+                    f'<span style="font-size:1rem;">{_f_icon}</span>'
+                    f'<div>'
+                    f'<div style="font-family:Courier New;font-size:0.72rem;'
+                    f'color:{_f_cor};font-weight:600;">'
+                    f'fonte dos dados: {_f_label}</div>'
+                    f'<div style="font-family:Courier New;font-size:0.65rem;'
+                    f'color:#555;">{_f_desc}</div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
                 if _bt_res.get('aviso'):
                     st.info(f"⚠️ {_bt_res['aviso']}")
 
@@ -2654,24 +2814,49 @@ with tab_backtest:
                         _fig_ocean.update_layout(**_lay_ocean)
                         st.plotly_chart(_fig_ocean, use_container_width=True, config={'responsive': True})
 
-                    # ── Rolling Sharpe 252d ──
-                    if _sr_est is not None and not _sr_est.empty:
-                        _rets_est_d = _sr_est.pct_change().dropna()
-                        _selic_anual = st.session_state.get('macro_context', {}).get('selic', 10.75) / 100
-                        _selic_dia   = _selic_anual / 252
-                        _excesso     = _rets_est_d - _selic_dia
-                        _vol_rolante = _rets_est_d.rolling(252).std() * np.sqrt(252)
-                        _sharpe_rolante = (
-                            _excesso.rolling(252).mean() * 252 / _vol_rolante
-                        ).replace([np.inf, -np.inf], np.nan)
+                    # ── Rolling Sharpe 252d (com proteção contra vol zero) ──
+                    _series_rolling = {}
+                    for _nm_rs, _sr_rs in _bt_series.items():
+                        if _sr_rs.empty or 'cdi' in _nm_rs.lower():
+                            continue
+                        _r_d_rs = _sr_rs.pct_change().dropna()
+                        if len(_r_d_rs) < 252:
+                            continue
 
+                        _roll_std_rs = _r_d_rs.rolling(252).std()
+                        _vol_minima_rs = 0.001 / np.sqrt(252)
+
+                        _roll_mean_rs = _r_d_rs.rolling(252).mean()
+                        _selic_d_rs = st.session_state.get('macro_context', {}).get('selic', 10.75) / 100 / 252
+
+                        _roll_sh_rs = pd.Series(np.nan, index=_r_d_rs.index)
+                        _mask_valido_rs = _roll_std_rs > _vol_minima_rs
+                        _roll_sh_rs[_mask_valido_rs] = (
+                            (_roll_mean_rs[_mask_valido_rs] - _selic_d_rs)
+                            / _roll_std_rs[_mask_valido_rs]
+                            * np.sqrt(252)
+                        )
+                        _roll_sh_rs = _roll_sh_rs.clip(-5, 5).dropna()
+
+                        if not _roll_sh_rs.empty and _roll_sh_rs.notna().sum() > 20:
+                            _series_rolling[_nm_rs] = _roll_sh_rs
+
+                    if not _series_rolling:
+                        st.info(
+                            "rolling sharpe não disponível: a estratégia não "
+                            "realizou operações suficientes no período. "
+                            "ajuste os thresholds de entrada/saída "
+                            "ou use um período diferente."
+                        )
+                    else:
                         _fig_roll_sharpe = go.Figure()
-                        _fig_roll_sharpe.add_trace(go.Scatter(
-                            x=_sharpe_rolante.index, y=_sharpe_rolante.values,
-                            line=dict(color='#00B0FF', width=1.5),
-                            name='rolling sharpe (252d)',
-                            hovertemplate='%{x}<br>sharpe: %{y:.2f}<extra></extra>',
-                        ))
+                        for _nm_rs, _sr_rs in _series_rolling.items():
+                            _fig_roll_sharpe.add_trace(go.Scatter(
+                                x=_sr_rs.index, y=_sr_rs.values,
+                                line=dict(color='#00B0FF', width=1.5),
+                                name='rolling sharpe (252d)',
+                                hovertemplate='%{x}<br>sharpe: %{y:.2f}<extra></extra>',
+                            ))
                         _fig_roll_sharpe.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
                         _fig_roll_sharpe.add_hline(y=1, line_color='#00C853', line_dash='dot', line_width=1)
                         _lay_roll = base_layout(
@@ -2687,6 +2872,7 @@ with tab_backtest:
                         st.caption(
                             "rolling sharpe = (retorno médio diário - selic) / vol diária × √252. "
                             "linha verde = sharpe 1,0 (referência). "
+                            "valores entre -5 e +5 por legibilidade. "
                             "valores > 1 indicam boa relação risco-retorno."
                         )
 
@@ -2700,6 +2886,84 @@ with tab_backtest:
                             lambda x: f"{x:+.2f}%" if pd.notna(x) else "—"
                         )
                     st.dataframe(_df_trades, use_container_width=True, hide_index=True)
+
+            # Diagnóstico: zero operações
+            if _bt_res.get('n_trades', 0) == 0:
+                _dist = _bt_res.get('score_distribution', {})
+                _p75  = _dist.get('p75', 60)
+                _p25  = _dist.get('p25', 40)
+                _med  = _dist.get('mediana', 50)
+                _max  = _dist.get('max', 100)
+                _min  = _dist.get('min', 0)
+                _fonte_diag = _bt_res.get('fonte_score', 'proxy_tecnico')
+
+                st.warning(
+                    f"**nenhuma operação realizada** com os thresholds atuais. "
+                    f"o score nunca atingiu {_bt_entrada} (entrada) no período."
+                )
+
+                if _dist:
+                    st.markdown(
+                        f'<div style="background:#1a0f00;border:1px solid #FF990033;'
+                        f'border-radius:6px;padding:14px 18px;margin:8px 0;">'
+                        f'<div style="font-family:Courier New;font-size:0.72rem;'
+                        f'color:#FF9900;font-weight:600;margin-bottom:8px;">'
+                        f'📊 distribuição do score — {_fonte_diag.replace("_"," ")}'
+                        f'</div>'
+                        f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
+                        f'gap:8px;margin-bottom:12px;">'
+                        + ''.join([
+                            f'<div style="text-align:center;">'
+                            f'<div style="font-size:0.6rem;color:#555;'
+                            f'text-transform:uppercase;">{lbl}</div>'
+                            f'<div style="font-family:Courier New;font-size:0.85rem;'
+                            f'color:#ccc;font-weight:600;">{val:.0f}</div>'
+                            f'</div>'
+                            for lbl, val in [
+                                ('mínimo', _min), ('p25', _p25),
+                                ('mediana', _med), ('p75', _p75),
+                                ('máximo', _max),
+                            ]
+                        ]) +
+                        f'</div>'
+                        f'<div style="font-family:Courier New;font-size:0.72rem;'
+                        f'color:#FF9900;margin-bottom:6px;">'
+                        f'💡 thresholds sugeridos para este ativo:</div>'
+                        f'<div style="font-family:Courier New;font-size:0.72rem;'
+                        f'color:#888;">'
+                        f'entrada ≥ <b style="color:#FF9900">{_p75:.0f}</b> '
+                        f'(percentil 75) | '
+                        f'saída < <b style="color:#FF9900">{_p25:.0f}</b> '
+                        f'(percentil 25)<br>'
+                        f'<span style="color:#555;">garante que a estratégia '
+                        f'fique investida ~25% do tempo '
+                        f'nos melhores momentos do ativo.</span>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    _dq1, _dq2 = st.columns(2)
+                    with _dq1:
+                        if st.button(
+                            f"aplicar sugestão: entrada {_p75:.0f} / saída {_p25:.0f}",
+                            key="btn_aplicar_sugestao", type="primary",
+                            use_container_width=True,
+                        ):
+                            st.session_state['sl_bt_entrada'] = int(_p75)
+                            st.session_state['sl_bt_saida']   = int(_p25)
+                            st.session_state.pop('bt_resultado', None)
+                            st.rerun()
+                    with _dq2:
+                        if st.button(
+                            f"tentar conservador: entrada {_med:.0f} / saída {_p25:.0f}",
+                            key="btn_aplicar_conservador", type="secondary",
+                            use_container_width=True,
+                        ):
+                            st.session_state['sl_bt_entrada'] = int(_med)
+                            st.session_state['sl_bt_saida']   = int(_p25)
+                            st.session_state.pop('bt_resultado', None)
+                            st.rerun()
 
 # ==========================================
 # tab 3: diário de decisões
