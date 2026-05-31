@@ -403,27 +403,43 @@ def rodar_backtesting_score(
         _scores_raw = get_historico_score(ticker)
 
         if not _scores_raw or len(_scores_raw) < 5:
-            resultado['aviso'] = (
-                "histórico de health scores insuficiente no banco. "
-                "usando proxy baseado em momentum de preço + "
-                "indicadores técnicos para simular."
-            )
-            _rets    = _hist.pct_change().dropna()
-            _mm200   = _hist.rolling(200).mean()
-            _mom_3m  = _hist.pct_change(63) * 100
+            # Score proxy com múltiplas médias móveis
+            _mm50  = _hist.rolling(50).mean()
+            _mm200 = _hist.rolling(200).mean()
+            _mm_ref = _mm200.where(_mm200.notna(), _mm50)
 
             _delta = _hist.diff()
             _gain  = _delta.clip(lower=0).rolling(14).mean()
             _loss  = (-_delta.clip(upper=0)).rolling(14).mean()
-            _rsi   = 100 - (100 / (1 + _gain / _loss.replace(0, 1)))
+            _rsi_raw = 100 - (100 / (1 + _gain / _loss.replace(0, 1)))
+            _rsi_norm = _rsi_raw.fillna(50)
+
+            _mom_3m = _hist.pct_change(63) * 100
+            _mom_norm = ((_mom_3m.clip(-40, 40) + 40) / 80 * 100).fillna(50)
+
+            _acima_mm = (_hist > _mm_ref).astype(float) * 100
+
+            _mom_1m = _hist.pct_change(21) * 100
+            _mom_1m_norm = ((_mom_1m.clip(-20, 20) + 20) / 40 * 100).fillna(50)
 
             _score_proxy = (
-                _rsi * 0.4
-                + (_hist > _mm200).astype(float) * 30
-                + (_mom_3m.clip(-30, 30) + 30) / 60 * 30
+                _rsi_norm    * 0.25 +
+                _acima_mm    * 0.25 +
+                _mom_norm    * 0.30 +
+                _mom_1m_norm * 0.20
             ).fillna(50).clip(0, 100)
 
             _scores_serie = _score_proxy.rename('score')
+
+            resultado['aviso'] = (
+                "histórico de health scores não encontrado no banco. "
+                "usando score proxy baseado em indicadores técnicos "
+                "(rsi 14, momentum 3m/1m, posição vs mm50/200). "
+                "o proxy é uma aproximação — os thresholds ideais para "
+                "o proxy são menores: tente entrada ≥55, saída <40. "
+                "para backtesting preciso, atualize os scores regularmente "
+                "pela watchlist para acumular histórico real."
+            )
 
         else:
             _scores_dict = {}
@@ -447,6 +463,32 @@ def rodar_backtesting_score(
             _scores_serie = pd.Series(
                 _score_vals, index=_hist.index, name='score'
             )
+
+        # Salva distribuição do score para calibração do usuário
+        resultado['score_distribution'] = {
+            'mediana': round(float(_scores_serie.median()), 1),
+            'p25':     round(float(_scores_serie.quantile(0.25)), 1),
+            'p75':     round(float(_scores_serie.quantile(0.75)), 1),
+            'min':     round(float(_scores_serie.min()), 1),
+            'max':     round(float(_scores_serie.max()), 1),
+        }
+
+        # CDI diário para remunerar capital fora do mercado
+        _cdi_dict_loop  = {}
+        _cdi_diario_loop = 0.0
+        try:
+            from bcb import sgs as _sgs_bt
+            import datetime as _dt_bt
+            _inicio_bt_str = _hist.index[0].strftime('%Y-%m-%d')
+            _df_cdi_loop = _sgs_bt.get({'cdi': 12}, start=_inicio_bt_str)
+            if not _df_cdi_loop.empty:
+                _cdi_serie_loop = _df_cdi_loop['cdi'] / 100 / 252
+                for _idx, _val in _cdi_serie_loop.items():
+                    _dt_key = _idx.date() if hasattr(_idx, 'date') else _idx
+                    _cdi_dict_loop[_dt_key] = float(_val)
+        except Exception:
+            _selic_loop = st.session_state.get('macro_context', {}).get('selic', 10.75)
+            _cdi_diario_loop = _selic_loop / 100 / 252
 
         # Simulação da estratégia
         _capital       = capital_inicial
@@ -489,6 +531,12 @@ def rodar_backtesting_score(
 
             if _posicao:
                 _capital *= (1 + _ret_dia)
+            else:
+                # Capital fora do mercado rende CDI (realista)
+                _dt_atual = _hist.index[_i]
+                _dt_key = _dt_atual.date() if hasattr(_dt_atual, 'date') else _dt_atual
+                _taxa_cdi_dia = _cdi_dict_loop.get(_dt_key, _cdi_diario_loop)
+                _capital *= (1 + _taxa_cdi_dia)
 
             _capital_serie.append(_capital)
             _bh_serie.append(_capital_bh)
@@ -540,28 +588,33 @@ def rodar_backtesting_score(
             )
 
         # Métricas finais
-        def _calc_metricas(serie_b100: pd.Series, nome: str) -> dict:
+        def _calc_metricas(serie_b100: pd.Series, nome: str, is_renda_fixa: bool = False) -> dict:
             _rets_d  = serie_b100.pct_change().dropna()
             _ret_tot = float(serie_b100.iloc[-1]) / 100 - 1
             _vol     = float(_rets_d.std() * np.sqrt(252) * 100)
-            _selic_d = st.session_state.get(
-                'macro_context', {}
-            ).get('selic', 10.75) / 100 / 252
-            _sharpe  = (
-                (_rets_d.mean() - _selic_d) / _rets_d.std() * np.sqrt(252)
-            ) if _rets_d.std() > 0 else 0.0
+
+            if is_renda_fixa or _vol < 0.01:
+                _sharpe = None
+            else:
+                _selic_d = st.session_state.get('macro_context', {}).get('selic', 10.75) / 100 / 252
+                _sharpe = (
+                    (_rets_d.mean() - _selic_d) / _rets_d.std() * np.sqrt(252)
+                ) if _rets_d.std() > 0.0001 else None
+
             _peak  = serie_b100.cummax()
             _dd    = (serie_b100 - _peak) / _peak * 100
             _max_dd = float(_dd.min())
+
             return {
                 'retorno':  round(_ret_tot * 100, 2),
-                'vol':      round(_vol, 2),
-                'sharpe':   round(float(_sharpe), 2),
+                'vol':      round(_vol, 2) if _vol > 0.01 else 0.0,
+                'sharpe':   round(float(_sharpe), 2) if _sharpe is not None else None,
                 'drawdown': round(_max_dd, 2),
             }
 
         for _nm, _sr in resultado['series'].items():
-            resultado['metricas'][_nm] = _calc_metricas(_sr, _nm)
+            _is_rf = 'cdi' in _nm.lower()
+            resultado['metricas'][_nm] = _calc_metricas(_sr, _nm, is_renda_fixa=_is_rf)
 
         resultado['trades']   = _trades
         resultado['n_trades'] = len(
@@ -2232,16 +2285,27 @@ with tab_backtest:
         _bt_entrada = st.slider(
             "threshold entrada (score ≥):",
             min_value=40, max_value=90,
-            value=65, step=5,
+            value=55,
+            step=5,
             key="sl_bt_entrada",
+            help=(
+                "score mínimo para sinal de compra. "
+                "com score proxy (sem histórico real), "
+                "use 50-55. com histórico real, use 60-70."
+            ),
         )
 
     with _bt_c3:
         _bt_saida = st.slider(
             "threshold saída (score <):",
             min_value=20, max_value=70,
-            value=40, step=5,
+            value=35,
+            step=5,
             key="sl_bt_saida",
+            help=(
+                "score máximo para sinal de venda. "
+                "deve ser menor que o threshold de entrada."
+            ),
         )
 
     with _bt_c4:
@@ -2256,6 +2320,8 @@ with tab_backtest:
         st.warning("threshold de entrada deve ser maior que o de saída.")
     else:
         if st.button("▶ rodar backtesting", type="primary", use_container_width=True, key="btn_rodar_bt"):
+            st.session_state.pop('bt_resultado', None)
+            st.session_state.pop('bt_ticker', None)
             with st.spinner(f"simulando estratégia para {_bt_ticker}..."):
                 _bt_result = rodar_backtesting_score(
                     ticker=_bt_ticker,
@@ -2275,6 +2341,22 @@ with tab_backtest:
                 if _bt_res.get('aviso'):
                     st.info(f"⚠️ {_bt_res['aviso']}")
 
+                if _bt_res.get('aviso') and 'proxy' in _bt_res.get('aviso', ''):
+                    _dist_score = _bt_res.get('score_distribution')
+                    if _dist_score is not None:
+                        _col_dist1, _col_dist2, _col_dist3 = st.columns(3)
+                        with _col_dist1:
+                            metric_card("score proxy — mediana", f"{_dist_score.get('mediana', 50):.0f}", "50% do tempo abaixo desse valor")
+                        with _col_dist2:
+                            metric_card("score proxy — percentil 75", f"{_dist_score.get('p75', 60):.0f}", "sugestão de threshold de entrada", "amber")
+                        with _col_dist3:
+                            metric_card("score proxy — percentil 25", f"{_dist_score.get('p25', 40):.0f}", "sugestão de threshold de saída", "amber")
+                        st.caption(
+                            "💡 para gerar trades com o proxy, use threshold de entrada "
+                            f"≈ {_dist_score.get('p75', 60):.0f} (percentil 75) e "
+                            f"saída ≈ {_dist_score.get('p25', 40):.0f} (percentil 25)."
+                        )
+
                 _bt_ticker_label = st.session_state.get('bt_ticker', _bt_ticker).replace('.SA', '')
 
                 # Métricas comparativas
@@ -2289,7 +2371,7 @@ with tab_backtest:
                             'estratégia': _nm,
                             'retorno total': f"{_mv['retorno']:+.2f}%",
                             'vol. anual': f"{_mv['vol']:.2f}%",
-                            'sharpe': f"{_mv['sharpe']:.2f}",
+                            'sharpe': f"{_mv['sharpe']:.2f}" if _mv.get('sharpe') is not None else "n/a",
                             'max drawdown': f"{_mv['drawdown']:.2f}%",
                         })
                     st.dataframe(pd.DataFrame(_bt_rows), use_container_width=True, hide_index=True)

@@ -155,34 +155,59 @@ def buscar_earnings_watchlist(tickers_tuple: tuple) -> dict:
     for ticker in tickers:
         t_base = mapear_ticker_base(ticker)
         try:
-            from database.db import get_earnings_dates
-            _data_str = get_earnings_dates(ticker)
+            _data_str = None
+            try:
+                from database.db import get_earnings_dates
+                _db_result = get_earnings_dates([ticker])
+                if _db_result and ticker in _db_result:
+                    _dt_obj = _db_result[ticker]
+                    if hasattr(_dt_obj, 'isoformat'):
+                        _data_str = _dt_obj.isoformat()
+                    else:
+                        _data_str = str(_dt_obj)[:10]
+            except Exception:
+                pass
 
             if not _data_str:
-                _acao = yf.Ticker(t_base)
-                _cal  = _acao.calendar
-                if _cal is not None:
+                try:
+                    _acao = yf.Ticker(t_base)
+                    _cal  = _acao.calendar
+                    if _cal is None:
+                        continue
+                    if hasattr(_cal, 'empty') and _cal.empty:
+                        continue
                     if hasattr(_cal, 'columns'):
-                        if 'Earnings Date' in _cal.columns:
+                        if 'Earnings Date' in _cal.columns and len(_cal) > 0:
                             _dt = _cal['Earnings Date'].iloc[0]
                             if hasattr(_dt, 'date'):
                                 _data_str = _dt.date().strftime('%Y-%m-%d')
+                            elif hasattr(_dt, 'strftime'):
+                                _data_str = str(_dt)[:10]
                     elif isinstance(_cal, dict):
                         _ed = _cal.get('Earnings Date', [])
                         if _ed:
-                            _dt = _ed[0] if hasattr(_ed[0], 'date') else None
-                            if _dt:
-                                _data_str = str(_dt)[:10]
+                            _primeiro = _ed[0] if isinstance(_ed, list) else _ed
+                            if hasattr(_primeiro, 'date'):
+                                _data_str = _primeiro.date().strftime('%Y-%m-%d')
+                            else:
+                                _data_str = str(_primeiro)[:10]
+                    if _data_str:
+                        try:
+                            from database.db import salvar_earnings_date
+                            salvar_earnings_date(ticker, _data_str)
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
 
             if not _data_str:
                 continue
 
             _dt_earn = None
-            for _fmt in ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y']:
+            for _fmt in ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y-%m-%dT%H:%M:%S', '%b %d, %Y']:
                 try:
-                    _dt_earn = datetime.datetime.strptime(
-                        str(_data_str)[:10], _fmt
-                    ).date()
+                    _data_limpa = str(_data_str)[:10]
+                    _dt_earn = datetime.datetime.strptime(_data_limpa, _fmt).date()
                     break
                 except ValueError:
                     continue
