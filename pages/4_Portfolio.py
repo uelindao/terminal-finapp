@@ -3001,7 +3001,7 @@ with tab_backtest:
                             name='score',
                             line=dict(color='#8B8FA8', width=1.5),
                             fill='tozeroy',
-                            fillcolor='#8B8FA820',
+                            fillcolor='rgba(139,143,168,0.12)',
                             hovertemplate='%{x}<br>score: %{y:.0f}<extra></extra>',
                         ))
 
@@ -3033,7 +3033,7 @@ with tab_backtest:
                         _fig_score_bt.add_hrect(
                             y0=_bt_saida,
                             y1=_bt_entrada,
-                            fillcolor='#FF990008',
+                            fillcolor='rgba(255,153,0,0.03)',
                             line_width=0,
                             annotation_text='zona neutra',
                             annotation_font_color='#333',
