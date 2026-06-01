@@ -2513,6 +2513,14 @@ with tab_backtest:
     from utils.components import label_com_tooltip
     section_title("🔬 backtesting — estratégia baseada no health score")
 
+    # Aplica thresholds pendentes (vindos dos botões de sugestão)
+    # ANTES de renderizar qualquer widget
+    if '_pending_entrada' in st.session_state:
+        st.session_state['sl_bt_entrada'] = st.session_state.pop('_pending_entrada')
+        st.session_state['sl_bt_saida']   = st.session_state.pop('_pending_saida')
+        st.session_state.pop('bt_resultado', None)
+        st.rerun()
+
     # Bias warnings banner
     st.warning(
         "⚠️ **limitações importantes** — "
@@ -2743,12 +2751,8 @@ with tab_backtest:
                             use_container_width=True,
                             help="entra nos melhores 25% momentos",
                         ):
-                            st.session_state.pop('bt_resultado', None)
-                            try:
-                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p90, 40, 90)
-                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
-                            except Exception as _e_bt1:
-                                st.error(f"erro threshold: {type(_e_bt1).__name__}: {_e_bt1}")
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p90, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p25, 20, 70)
                             st.rerun()
                     with _bt2:
                         if st.button(
@@ -2757,12 +2761,8 @@ with tab_backtest:
                             use_container_width=True,
                             help="entra nos melhores 25% momentos",
                         ):
-                            st.session_state.pop('bt_resultado', None)
-                            try:
-                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
-                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
-                            except Exception as _e_bt2:
-                                st.error(f"erro threshold: {type(_e_bt2).__name__}: {_e_bt2}")
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p75, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p25, 20, 70)
                             st.rerun()
                     with _bt3:
                         if st.button(
@@ -2771,12 +2771,8 @@ with tab_backtest:
                             use_container_width=True,
                             help="entra na maioria dos momentos positivos",
                         ):
-                            st.session_state.pop('bt_resultado', None)
-                            try:
-                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p50, 40, 90)
-                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p10, 20, 70)
-                            except Exception as _e_bt3:
-                                st.error(f"erro threshold: {type(_e_bt3).__name__}: {_e_bt3}")
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p50, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p10, 20, 70)
                             st.rerun()
                     with _bt3:
                         if st.button(
