@@ -382,57 +382,96 @@ def buscar_score_historico_fmp(ticker: str) -> pd.Series | None:
                 _cf  = _cashflow_map.get(_data, {})
 
                 _score_q = 0.0
+                _campos_ok = 0
+                _max_possivel = 0.0
 
+                # ── ROE (0-20 pts) ────────────────────────────────────
                 _roe = _safe_pct(_r.get('returnOnEquity'))
+                _max_possivel += 20
                 if _roe is not None:
-                    if _roe > 20:   _score_q += 15
-                    elif _roe > 10: _score_q += 10
-                    elif _roe > 0:  _score_q += 5
+                    _campos_ok += 1
+                    if _roe > 15:    _score_q += 20
+                    elif _roe > 8:   _score_q += 14
+                    elif _roe > 3:   _score_q += 8
+                    elif _roe > 0:   _score_q += 4
+                    else:            _score_q -= 5
 
+                # ── Margem Líquida (0-15 pts) ─────────────────────────
                 _mrg = _safe_pct(_r.get('netProfitMargin'))
+                _max_possivel += 15
                 if _mrg is not None:
-                    if _mrg > 15:   _score_q += 15
-                    elif _mrg > 5:  _score_q += 10
-                    elif _mrg >= 0: _score_q += 5
-                    else:           _score_q -= 5
+                    _campos_ok += 1
+                    if _mrg > 10:    _score_q += 15
+                    elif _mrg > 3:   _score_q += 10
+                    elif _mrg >= 0:  _score_q += 5
+                    else:            _score_q -= 5
 
+                # ── P/L (0-15 pts) — penaliza negativo ────────────────
                 _pl = _safe_float(_r.get('priceEarningsRatio'))
-                if _pl is not None and _pl > 0:
-                    if _pl <= 12:   _score_q += 15
-                    elif _pl <= 20: _score_q += 10
-                    elif _pl <= 35: _score_q += 5
+                _max_possivel += 15
+                if _pl is not None and _pl != 0:
+                    _campos_ok += 1
+                    if 0 < _pl <= 10:    _score_q += 15
+                    elif _pl <= 18:      _score_q += 10
+                    elif _pl <= 30:      _score_q += 5
+                    elif _pl > 50:       _score_q -= 3
 
+                # ── P/VP (0-10 pts) ───────────────────────────────────
                 _pvp = _safe_float(_r.get('priceToBookRatio'))
+                _max_possivel += 10
                 if _pvp is not None and _pvp > 0:
-                    if _pvp <= 1.5: _score_q += 10
-                    elif _pvp <= 3: _score_q += 6
-                    elif _pvp <= 6: _score_q += 3
+                    _campos_ok += 1
+                    if _pvp <= 1.0:      _score_q += 10
+                    elif _pvp <= 2.0:    _score_q += 7
+                    elif _pvp <= 4.0:    _score_q += 4
 
+                # ── Dívida/Equity (0-15 pts) ──────────────────────────
                 _de = _safe_float(_r.get('debtEquityRatio'))
+                _max_possivel += 15
                 if _de is not None:
-                    if _de < 30:    _score_q += 15
-                    elif _de < 80:  _score_q += 10
-                    elif _de < 150: _score_q += 5
-                    else:           _score_q -= 5
+                    _campos_ok += 1
+                    if _de < 0.3:        _score_q += 15
+                    elif _de < 0.8:      _score_q += 10
+                    elif _de < 1.5:      _score_q += 5
+                    else:                _score_q -= 3
 
-                _fcf = _safe_float(_cf.get('freeCashFlow') or _cf.get('operatingCashFlow'))
+                # ── FCF positivo (0-10 pts) ───────────────────────────
+                _fcf = _safe_float(_r.get('freeCashFlowPerShare'))
+                _max_possivel += 10
                 if _fcf is not None:
-                    if _fcf > 0: _score_q += 10
-                    else:        _score_q -= 5
+                    _campos_ok += 1
+                    if _fcf > 0:         _score_q += 10
+                    elif _fcf > -1:      _score_q += 3
+                    else:                _score_q -= 3
 
-                _rev_growth = _safe_float(_r.get('revenueGrowth'))
-                if _rev_growth is not None:
-                    if _rev_growth > 0.10:   _score_q += 10
-                    elif _rev_growth > 0.02: _score_q += 6
-                    elif _rev_growth < -0.05: _score_q -= 5
+                # ── Crescimento de Receita (0-10 pts) ─────────────────
+                _rev_g = _safe_float(_r.get('revenueGrowth'))
+                _max_possivel += 10
+                if _rev_g is not None:
+                    _campos_ok += 1
+                    if _rev_g > 0.15:    _score_q += 10
+                    elif _rev_g > 0.05:  _score_q += 7
+                    elif _rev_g > 0:     _score_q += 4
+                    else:                _score_q -= 3
 
-                _earn_growth = _safe_float(_r.get('epsgrowth')) or _safe_float(_r.get('earningsGrowth'))
-                if _earn_growth is not None:
-                    if _earn_growth > 0.15:   _score_q += 10
-                    elif _earn_growth > 0.03: _score_q += 6
-                    elif _earn_growth < -0.10: _score_q -= 5
+                # ── Crescimento de EPS (0-5 pts) ─────────────────────
+                _eps_g = _safe_float(_r.get('epsgrowth') or _r.get('earningsGrowth'))
+                _max_possivel += 5
+                if _eps_g is not None:
+                    _campos_ok += 1
+                    if _eps_g > 0.10:    _score_q += 5
+                    elif _eps_g > 0:     _score_q += 3
+                    else:                _score_q -= 2
 
-                scores_historicos[_data] = max(0, min(100, _score_q))
+                if _campos_ok < 3:
+                    continue
+
+                if _max_possivel > 0:
+                    _score_norm = max(0, min(100, _score_q / _max_possivel * 100))
+                else:
+                    _score_norm = 50.0
+
+                scores_historicos[_data] = round(_score_norm, 1)
 
             except Exception:
                 continue
@@ -647,164 +686,141 @@ def rodar_backtesting_score(
             'n_anos':    round(n_anos, 1),
         }
 
-        # ── CDI diário para remunerar capital fora do mercado ────────────
-        # BCB série 12 = CDI Over taxa anual em % (ex: 13.65 = 13.65% a.a.)
-        # Converte para diária: (1 + taxa_anual/100)^(1/252) - 1
-        _cdi_dict_loop  = {}
-        _cdi_diario_loop = 0.0
-        _cdi_alinhado   = None
-        try:
-            from bcb import sgs as _sgs_bt
-            import datetime as _dt_bt
-            _inicio_bt_str = _hist.index[0].strftime('%Y-%m-%d')
-            _df_cdi_loop = _sgs_bt.get({'cdi': 12}, start=_inicio_bt_str)
-            if not _df_cdi_loop.empty and 'cdi' in _df_cdi_loop.columns:
-                _cdi_anual_loop = _df_cdi_loop['cdi'].dropna()
-                if getattr(_cdi_anual_loop.index, 'tz', None) is not None:
-                    _cdi_anual_loop.index = _cdi_anual_loop.index.tz_localize(None)
-                _cdi_diario_loop_serie = (1 + _cdi_anual_loop / 100) ** (1 / 252) - 1
-                _cdi_alinhado = _cdi_diario_loop_serie.reindex(_hist.index, method='ffill')
-                _cdi_alinhado = _cdi_alinhado.fillna(float(_cdi_alinhado.mean()))
-
-                for _idx, _val in _cdi_alinhado.items():
-                    _dt_key = _idx.date() if hasattr(_idx, 'date') else _idx
-                    _cdi_dict_loop[_dt_key] = float(_val)
-        except Exception:
-            pass
-
-        if not _cdi_dict_loop:
-            _selic_loop = st.session_state.get('macro_context', {}).get('selic', 10.75)
-            _cdi_diario_loop = (1 + _selic_loop / 100) ** (1 / 252) - 1
-
-        # Simulação da estratégia com custos de transação
-        _custo_meio    = (custo_transacao_pct / 100) / 2  # metade na compra, metade na venda
-        _capital       = capital_inicial
-        _capital_bh    = capital_inicial
-        _posicao       = False
-        _trades        = []
-        _capital_serie = [capital_inicial]
-        _bh_serie      = [capital_inicial]
-        _preco_compra  = None
-        _preco_ant     = float(_hist.iloc[0])
-        _fora_mercado  = 0
-
-        for _i in range(1, len(_hist)):
-            _dt      = _hist.index[_i]
-            _preco   = float(_hist.iloc[_i])
-            _score   = float(_scores_serie.iloc[_i])
-            _ret_dia = _preco / _preco_ant - 1
-
-            _capital_bh *= (1 + _ret_dia)
-
-            if not _posicao and _score >= threshold_entrada:
-                _posicao      = True
-                _preco_compra = _preco * (1 + _custo_meio)
-                _trades.append({
-                    'tipo':     'compra',
-                    'data':     str(_dt)[:10],
-                    'preco':    round(_preco, 2),
-                    'score':    round(_score, 0),
-                    'custo':    round(_custo_meio * 100, 2),
-                })
-            elif _posicao and _score < threshold_saida:
-                _posicao = False
-                _preco_venda = _preco * (1 - _custo_meio)
-                _ret_trade   = _preco_venda / _preco_compra - 1 if _preco_compra else 0
-                _trades.append({
-                    'tipo':           'venda',
-                    'data':           str(_dt)[:10],
-                    'preco':          round(_preco, 2),
-                    'score':          round(_score, 0),
-                    'retorno_trade':  round(_ret_trade * 100, 2),
-                    'custo':          round(_custo_meio * 100, 2),
-                })
-                _preco_compra = None
-
-            if _posicao:
-                _capital *= (1 + _ret_dia)
-            else:
-                _fora_mercado += 1
-                _dt_atual = _hist.index[_i]
-                _dt_key = _dt_atual.date() if hasattr(_dt_atual, 'date') else _dt_atual
-                _taxa_cdi_dia = _cdi_dict_loop.get(_dt_key, _cdi_diario_loop)
-                _capital *= (1 + _taxa_cdi_dia)
-
-            _capital_serie.append(_capital)
-            _bh_serie.append(_capital_bh)
-            _preco_ant = _preco
-
-        # Fecha posição ao fim do período
-        if _posicao:
-            _preco_final = float(_hist.iloc[-1]) * (1 - _custo_meio)
-            _capital     = _capital * (1 + (_preco_final / _preco_compra - 1)) if _preco_compra else _capital
-            _trades.append({
-                'tipo':    'venda (final)',
-                'data':    str(_hist.index[-1])[:10],
-                'preco':   round(float(_hist.iloc[-1]), 2),
-                'score':   round(float(_scores_serie.iloc[-1]), 0),
-                'custo':   round(_custo_meio * 100, 2),
-            })
-            _capital_serie[-1] = _capital
-
-        resultado['pct_tempo_investido'] = round(
-            (1 - _fora_mercado / max(len(_hist) - 1, 1)) * 100, 1
-        )
-
-        # ── CDI acumulado no período ──────────────────────────────────
-        # BCB série 12 = CDI Over taxa anual em % (ex: 13.65 = 13.65% a.a.)
-        # Converte para diária: (1 + taxa_anual/100)^(1/252) - 1
+        # ── CDI via BCB (série 12 = taxa DIÁRIA em %) ────────────────
+        _cdi_taxa_diaria = {}
+        _cdi_taxa_fallback = (1 + 10.75 / 100) ** (1 / 252) - 1
         _cdi_acum_serie = None
 
         try:
-            from bcb import sgs as _sgs_bt_cdi
+            from bcb import sgs as _sgs_bt
 
-            _inicio_bt2 = _hist.index[0]
-            _inicio_str2 = (
-                _inicio_bt2.strftime('%Y-%m-%d')
-                if hasattr(_inicio_bt2, 'strftime')
-                else str(_inicio_bt2)[:10]
+            _inicio_str = (
+                _hist.index[0].strftime('%Y-%m-%d')
+                if hasattr(_hist.index[0], 'strftime')
+                else str(_hist.index[0])[:10]
             )
 
-            _df_cdi_bt2 = _sgs_bt_cdi.get({'cdi': 12}, start=_inicio_str2)
+            _df_cdi_raw = _sgs_bt.get({'cdi': 12}, start=_inicio_str)
 
-            if not _df_cdi_bt2.empty and 'cdi' in _df_cdi_bt2.columns:
-                _cdi_anual2 = _df_cdi_bt2['cdi'].dropna()
+            if not _df_cdi_raw.empty and 'cdi' in _df_cdi_raw.columns:
+                _serie_bcb = _df_cdi_raw['cdi'].dropna()
 
-                if getattr(_cdi_anual2.index, 'tz', None) is not None:
-                    _cdi_anual2.index = _cdi_anual2.index.tz_localize(None)
+                if getattr(_serie_bcb.index, 'tz', None) is not None:
+                    _serie_bcb.index = _serie_bcb.index.tz_localize(None)
 
-                _cdi_diario2 = (1 + _cdi_anual2 / 100) ** (1 / 252) - 1
+                # BCB série 12 = taxa DIÁRIA em % (ex: 0.042)
+                # Converte para decimal: divide por 100
+                _serie_diaria_decimal = _serie_bcb / 100
 
-                _cdi_alinhado2 = _cdi_diario2.reindex(_hist.index, method='ffill')
-                _media_cdi2 = float(_cdi_alinhado2.mean())
-                _cdi_alinhado2 = _cdi_alinhado2.fillna(_media_cdi2)
+                for _dt_bcb, _taxa in _serie_diaria_decimal.items():
+                    _d_key = _dt_bcb.date() if hasattr(_dt_bcb, 'date') else _dt_bcb
+                    _cdi_taxa_diaria[_d_key] = float(_taxa)
 
-                _cdi_acum_serie = (1 + _cdi_alinhado2).cumprod() * capital_inicial
+                if _cdi_taxa_diaria:
+                    _cdi_taxa_fallback = float(_serie_diaria_decimal.mean())
+
+                _cdi_alinhado = _serie_diaria_decimal.reindex(_hist.index, method='ffill').fillna(_cdi_taxa_fallback)
+                _cdi_acum_serie = (1 + _cdi_alinhado).cumprod() * capital_inicial
 
         except Exception:
             pass
 
-        # Fallback robusto se BCB falhou
-        if _cdi_acum_serie is None or _cdi_acum_serie.empty:
-            _selic_anual = st.session_state.get('macro_context', {}).get('selic', 10.75)
-            _cdi_dia_fallback = (1 + _selic_anual / 100) ** (1 / 252) - 1
+        if _cdi_acum_serie is None:
+            _selic_aa = st.session_state.get('macro_context', {}).get('selic', 10.75)
+            _cdi_taxa_fallback = (1 + _selic_aa / 100) ** (1 / 252) - 1
             _cdi_acum_serie = pd.Series(
-                [capital_inicial * ((1 + _cdi_dia_fallback) ** i) for i in range(len(_hist))],
+                [capital_inicial * ((1 + _cdi_taxa_fallback) ** i) for i in range(len(_hist))],
                 index=_hist.index,
             )
 
         resultado['series']['cdi'] = _cdi_acum_serie / capital_inicial * 100
 
-        # Séries base 100
-        _cap_serie_pd = pd.Series(_capital_serie, index=_hist.index)
-        _bh_serie_pd  = pd.Series(_bh_serie, index=_hist.index)
+        # ── Simulação da estratégia ─────────────────────────────────────
+        _capital       = capital_inicial
+        _capital_bh    = capital_inicial
+        _posicao       = False
+        _preco_compra  = None
+        _trades        = []
+        _capital_serie = [capital_inicial]
+        _bh_serie      = [capital_inicial]
+        _dias_investido = 0
+
+        _preco_ant = float(_hist.iloc[0])
+
+        for _i in range(1, len(_hist)):
+            _dt      = _hist.index[_i]
+            _preco   = float(_hist.iloc[_i])
+            _score   = float(_scores_serie.iloc[_i])
+            _ret_dia = (_preco / _preco_ant) - 1.0
+            _preco_ant = _preco
+
+            _capital_bh = _capital_bh * (1.0 + _ret_dia)
+
+            if _posicao:
+                _capital = _capital * (1.0 + _ret_dia)
+                _dias_investido += 1
+            else:
+                _dt_key  = _dt.date() if hasattr(_dt, 'date') else _dt
+                _taxa_cdi_d = _cdi_taxa_diaria.get(_dt_key, _cdi_taxa_fallback)
+                _capital = _capital * (1.0 + _taxa_cdi_d)
+
+            if not _posicao and _score >= threshold_entrada:
+                _custo_entrada = custo_transacao_pct / 200.0
+                _capital      *= (1.0 - _custo_entrada)
+                _posicao       = True
+                _preco_compra  = _preco * (1.0 + _custo_entrada)
+                _trades.append({
+                    'tipo':  'compra',
+                    'data':  str(_dt)[:10],
+                    'preco': round(_preco, 2),
+                    'score': round(_score, 1),
+                })
+
+            elif _posicao and _score < threshold_saida:
+                _custo_saida = custo_transacao_pct / 200.0
+                _capital    *= (1.0 - _custo_saida)
+                _ret_trade   = (
+                    (_preco * (1.0 - _custo_saida)) / _preco_compra - 1.0
+                    if _preco_compra else 0.0
+                )
+                _posicao      = False
+                _preco_compra = None
+                _trades.append({
+                    'tipo':           'venda',
+                    'data':           str(_dt)[:10],
+                    'preco':          round(_preco, 2),
+                    'score':          round(_score, 1),
+                    'retorno_trade':  round(_ret_trade * 100, 2),
+                })
+
+            _capital_serie.append(_capital)
+            _bh_serie.append(_capital_bh)
+
+        _cap_serie_pd = pd.Series(_capital_serie, index=_hist.index, dtype=float)
+        _bh_serie_pd  = pd.Series(_bh_serie, index=_hist.index, dtype=float)
 
         resultado['series']['estratégia (score)'] = (
-            _cap_serie_pd / capital_inicial * 100
+            _cap_serie_pd / capital_inicial * 100.0
         )
         resultado['series'][f'buy & hold ({ticker.replace(".SA","")})'] = (
-            _bh_serie_pd / capital_inicial * 100
+            _bh_serie_pd / capital_inicial * 100.0
         )
+        resultado['trades']            = _trades
+        resultado['n_trades']          = sum(1 for t in _trades if t['tipo'] == 'compra')
+        resultado['pct_tempo_investido'] = round(
+            _dias_investido / max(len(_hist) - 1, 1) * 100, 1
+        )
+
+        if resultado['pct_tempo_investido'] >= 99:
+            _ret_est = float(_cap_serie_pd.iloc[-1] / capital_inicial - 1)
+            _ret_bh  = float(_bh_serie_pd.iloc[-1] / capital_inicial - 1)
+            if abs(_ret_est - _ret_bh) > 0.02:
+                resultado['aviso_sanidade'] = (
+                    f"⚠️ divergência detectada: estratégia {_ret_est*100:+.1f}% "
+                    f"vs b&h {_ret_bh*100:+.1f}% mesmo 100% investida. "
+                    f"verifique dados de preço e score."
+                )
+
         # CDI já está base 100 em resultado['series']['cdi']
 
         # Métricas finais com CAGR, Calmar, % dias positivos
@@ -2651,21 +2667,97 @@ with tab_backtest:
                 if _bt_res.get('aviso'):
                     st.info(f"⚠️ {_bt_res['aviso']}")
 
-                if _bt_res.get('aviso') and 'proxy' in _bt_res.get('aviso', ''):
-                    _dist_score = _bt_res.get('score_distribution')
-                    if _dist_score is not None:
-                        _col_dist1, _col_dist2, _col_dist3 = st.columns(3)
-                        with _col_dist1:
-                            metric_card("score proxy — mediana", f"{_dist_score.get('mediana', 50):.0f}", "50% do tempo abaixo desse valor")
-                        with _col_dist2:
-                            metric_card("score proxy — percentil 75", f"{_dist_score.get('p75', 60):.0f}", "sugestão de threshold de entrada", "amber")
-                        with _col_dist3:
-                            metric_card("score proxy — percentil 25", f"{_dist_score.get('p25', 40):.0f}", "sugestão de threshold de saída", "amber")
-                        st.caption(
-                            "💡 para gerar trades com o proxy, use threshold de entrada "
-                            f"≈ {_dist_score.get('p75', 60):.0f} (percentil 75) e "
-                            f"saída ≈ {_dist_score.get('p25', 40):.0f} (percentil 25)."
-                        )
+                # Aviso de sanidade
+                if _bt_res.get('aviso_sanidade'):
+                    st.warning(_bt_res['aviso_sanidade'])
+
+                # Aviso quando 100% investido essencialmente = B&H
+                _pct_inv_ui = _bt_res.get('pct_tempo_investido', 0)
+                if _pct_inv_ui >= 95 and _bt_res.get('n_trades', 0) <= 2:
+                    st.info(
+                        f"💡 a estratégia ficou {_pct_inv_ui:.0f}% do tempo investida "
+                        f"com apenas {_bt_res.get('n_trades',0)} operação(ões). "
+                        f"o resultado é praticamente equivalente a buy & hold. "
+                        f"para uma estratégia mais seletiva, aumente o threshold "
+                        f"de entrada — use a distribuição do score abaixo como guia."
+                    )
+
+                # ── Distribuição do score + guia de thresholds ──────────────
+                _dist_ui = _bt_res.get('score_distribution', {})
+                if _dist_ui:
+                    _p90 = _dist_ui.get('p90', 75)
+                    _p75 = _dist_ui.get('p75', 65)
+                    _p50 = _dist_ui.get('mediana', 55)
+                    _p25 = _dist_ui.get('p25', 40)
+                    _p10 = _dist_ui.get('p10', 30)
+                    _fonte_ui = _bt_res.get('fonte_score', 'proxy_tecnico')
+
+                    st.markdown(
+                        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                        f'border-radius:6px;padding:12px 16px;margin-bottom:12px;">'
+                        f'<div style="font-family:Courier New;font-size:0.68rem;'
+                        f'color:#FF9900;font-weight:600;margin-bottom:8px;">'
+                        f'📊 distribuição do score — {_fonte_ui.replace("_"," ")}</div>'
+                        f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
+                        f'gap:8px;margin-bottom:10px;">'
+                        + ''.join([
+                            f'<div style="text-align:center;">'
+                            f'<div style="font-size:0.58rem;color:#555;'
+                            f'text-transform:uppercase;margin-bottom:2px;">{lbl}</div>'
+                            f'<div style="font-family:Courier New;font-size:0.9rem;'
+                            f'color:#ccc;font-weight:600;">{val:.0f}</div>'
+                            f'</div>'
+                            for lbl, val in [
+                                ('p10', _p10), ('p25', _p25),
+                                ('mediana', _p50), ('p75', _p75),
+                                ('p90', _p90),
+                            ]
+                        ]) +
+                        f'</div>'
+                        f'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    def _ajustar_threshold(val, lo, hi, step=5):
+                        clamped = max(lo, min(hi, round(float(val) / step) * step))
+                        return int(str(clamped))
+
+                    _bt1, _bt2, _bt3 = st.columns(3)
+                    with _bt1:
+                        if st.button(
+                            f"🎯 seletivo: entrada {_p90:.0f} / saída {_p25:.0f}",
+                            key="btn_th_seletivo",
+                            use_container_width=True,
+                            help="entra apenas nos melhores 10% momentos",
+                        ):
+                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p90, 40, 90)
+                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            st.session_state.pop('bt_resultado', None)
+                            st.rerun()
+                    with _bt2:
+                        if st.button(
+                            f"⚖️ moderado: entrada {_p75:.0f} / saída {_p25:.0f}",
+                            key="btn_th_moderado",
+                            use_container_width=True,
+                            help="entra nos melhores 25% momentos",
+                        ):
+                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
+                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            st.session_state.pop('bt_resultado', None)
+                            st.rerun()
+                    with _bt3:
+                        if st.button(
+                            f"📈 ativo: entrada {_p50:.0f} / saída {_p10:.0f}",
+                            key="btn_th_ativo",
+                            use_container_width=True,
+                            help="entra na maioria dos momentos positivos",
+                        ):
+                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p50, 40, 90)
+                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p10, 20, 70)
+                            st.session_state.pop('bt_resultado', None)
+                            st.rerun()
 
                 _bt_ticker_label = st.session_state.get('bt_ticker', _bt_ticker).replace('.SA', '')
 
@@ -2886,88 +2978,6 @@ with tab_backtest:
                             lambda x: f"{x:+.2f}%" if pd.notna(x) else "—"
                         )
                     st.dataframe(_df_trades, use_container_width=True, hide_index=True)
-
-            # Diagnóstico: zero operações
-            if _bt_res.get('n_trades', 0) == 0:
-                _dist = _bt_res.get('score_distribution', {})
-                _p75  = _dist.get('p75', 60)
-                _p25  = _dist.get('p25', 40)
-                _med  = _dist.get('mediana', 50)
-                _max  = _dist.get('max', 100)
-                _min  = _dist.get('min', 0)
-                _fonte_diag = _bt_res.get('fonte_score', 'proxy_tecnico')
-
-                st.warning(
-                    f"**nenhuma operação realizada** com os thresholds atuais. "
-                    f"o score nunca atingiu {_bt_entrada} (entrada) no período."
-                )
-
-                if _dist:
-                    st.markdown(
-                        f'<div style="background:#1a0f00;border:1px solid #FF990033;'
-                        f'border-radius:6px;padding:14px 18px;margin:8px 0;">'
-                        f'<div style="font-family:Courier New;font-size:0.72rem;'
-                        f'color:#FF9900;font-weight:600;margin-bottom:8px;">'
-                        f'📊 distribuição do score — {_fonte_diag.replace("_"," ")}'
-                        f'</div>'
-                        f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
-                        f'gap:8px;margin-bottom:12px;">'
-                        + ''.join([
-                            f'<div style="text-align:center;">'
-                            f'<div style="font-size:0.6rem;color:#555;'
-                            f'text-transform:uppercase;">{lbl}</div>'
-                            f'<div style="font-family:Courier New;font-size:0.85rem;'
-                            f'color:#ccc;font-weight:600;">{val:.0f}</div>'
-                            f'</div>'
-                            for lbl, val in [
-                                ('mínimo', _min), ('p25', _p25),
-                                ('mediana', _med), ('p75', _p75),
-                                ('máximo', _max),
-                            ]
-                        ]) +
-                        f'</div>'
-                        f'<div style="font-family:Courier New;font-size:0.72rem;'
-                        f'color:#FF9900;margin-bottom:6px;">'
-                        f'💡 thresholds sugeridos para este ativo:</div>'
-                        f'<div style="font-family:Courier New;font-size:0.72rem;'
-                        f'color:#888;">'
-                        f'entrada ≥ <b style="color:#FF9900">{_p75:.0f}</b> '
-                        f'(percentil 75) | '
-                        f'saída < <b style="color:#FF9900">{_p25:.0f}</b> '
-                        f'(percentil 25)<br>'
-                        f'<span style="color:#555;">garante que a estratégia '
-                        f'fique investida ~25% do tempo '
-                        f'nos melhores momentos do ativo.</span>'
-                        f'</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                    def _ajustar_threshold(val, lo, hi, step=5):
-                        clamped = max(lo, min(hi, round(float(val) / step) * step))
-                        return int(str(clamped))
-
-                    _dq1, _dq2 = st.columns(2)
-                    with _dq1:
-                        if st.button(
-                            f"aplicar sugestão: entrada {_p75:.0f} / saída {_p25:.0f}",
-                            key="btn_aplicar_sugestao", type="primary",
-                            use_container_width=True,
-                        ):
-                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
-                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
-                            st.session_state.pop('bt_resultado', None)
-                            st.rerun()
-                    with _dq2:
-                        if st.button(
-                            f"tentar conservador: entrada {_med:.0f} / saída {_p25:.0f}",
-                            key="btn_aplicar_conservador", type="secondary",
-                            use_container_width=True,
-                        ):
-                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_med, 40, 90)
-                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
-                            st.session_state.pop('bt_resultado', None)
-                            st.rerun()
 
 # ==========================================
 # tab 3: diário de decisões
