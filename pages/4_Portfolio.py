@@ -1163,7 +1163,13 @@ with tab_posicoes:
                 pm = row['preço médio']
                 v_total = row['valor total']
                 peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                salvar_peso(t, peso_real, pm, qtd, portfolio_id=portfolio_id_ativo)
+                # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+                import math as _mt
+                def _sn(v):
+                    if v is None: return None
+                    try: return None if _mt.isnan(v) or _mt.isinf(v) else v
+                    except TypeError: return v
+                salvar_peso(t, _sn(peso_real), _sn(pm), _sn(qtd), portfolio_id=portfolio_id_ativo)
                 
             st.success("✅ posições atualizadas.")
             st.rerun()

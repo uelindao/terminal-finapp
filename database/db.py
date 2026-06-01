@@ -503,10 +503,18 @@ def salvar_peso(ticker, peso, preco_medio=None, quantidade=None, portfolio_id=No
     if portfolio_id is None:
         portfolio_id = get_portfolio_padrao()
     sb = get_supabase()
+    # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+    import math as _mt
+    def _sn(v):
+        if v is None: return None
+        try: return None if _mt.isnan(v) or _mt.isinf(v) else v
+        except TypeError: return v
     sb.table('portfolio_positions').upsert(
         {
-            'ticker': ticker, 'peso': peso,
-            'preco_medio': preco_medio, 'quantidade': quantidade,
+            'ticker': ticker,
+            'peso': _sn(peso),
+            'preco_medio': _sn(preco_medio),
+            'quantidade': _sn(quantidade),
             'user_id': user_id, 'portfolio_id': portfolio_id,
         },
         on_conflict='ticker,user_id,portfolio_id',
