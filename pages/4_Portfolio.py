@@ -882,6 +882,14 @@ def rodar_backtesting_score(
     return resultado
 
 
+# Aplica thresholds pendentes (antes de renderizar widgets)
+if '_pending_entrada' in st.session_state:
+    st.session_state['sl_bt_entrada'] = st.session_state.pop('_pending_entrada')
+    st.session_state['sl_bt_saida']   = st.session_state.pop('_pending_saida')
+    st.session_state.pop('bt_resultado', None)
+    # não chama st.rerun() — os sliders lerão os valores
+    # quando forem renderizados ainda nesta execução
+
 # 4. criação das tabs
 tab_posicoes, tab_concentracao, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
@@ -2512,14 +2520,6 @@ with tab_stress:
 with tab_backtest:
     from utils.components import label_com_tooltip
     section_title("🔬 backtesting — estratégia baseada no health score")
-
-    # Aplica thresholds pendentes (vindos dos botões de sugestão)
-    # ANTES de renderizar qualquer widget
-    if '_pending_entrada' in st.session_state:
-        st.session_state['sl_bt_entrada'] = st.session_state.pop('_pending_entrada')
-        st.session_state['sl_bt_saida']   = st.session_state.pop('_pending_saida')
-        st.session_state.pop('bt_resultado', None)
-        st.rerun()
 
     # Bias warnings banner
     st.warning(
