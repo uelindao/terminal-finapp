@@ -2743,9 +2743,40 @@ with tab_backtest:
                             use_container_width=True,
                             help="entra nos melhores 25% momentos",
                         ):
-                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
-                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
                             st.session_state.pop('bt_resultado', None)
+                            try:
+                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p90, 40, 90)
+                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            except Exception as _e_bt1:
+                                st.error(f"erro threshold: {type(_e_bt1).__name__}: {_e_bt1}")
+                            st.rerun()
+                    with _bt2:
+                        if st.button(
+                            f"⚖️ moderado: entrada {_p75:.0f} / saída {_p25:.0f}",
+                            key="btn_th_moderado",
+                            use_container_width=True,
+                            help="entra nos melhores 25% momentos",
+                        ):
+                            st.session_state.pop('bt_resultado', None)
+                            try:
+                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p75, 40, 90)
+                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            except Exception as _e_bt2:
+                                st.error(f"erro threshold: {type(_e_bt2).__name__}: {_e_bt2}")
+                            st.rerun()
+                    with _bt3:
+                        if st.button(
+                            f"📈 ativo: entrada {_p50:.0f} / saída {_p10:.0f}",
+                            key="btn_th_ativo",
+                            use_container_width=True,
+                            help="entra na maioria dos momentos positivos",
+                        ):
+                            st.session_state.pop('bt_resultado', None)
+                            try:
+                                st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p50, 40, 90)
+                                st.session_state['sl_bt_saida']   = _ajustar_threshold(_p10, 20, 70)
+                            except Exception as _e_bt3:
+                                st.error(f"erro threshold: {type(_e_bt3).__name__}: {_e_bt3}")
                             st.rerun()
                     with _bt3:
                         if st.button(
