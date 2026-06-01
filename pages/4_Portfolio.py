@@ -2732,17 +2732,43 @@ with tab_backtest:
                         clamped = max(lo, min(hi, round(float(val) / step) * step))
                         return int(str(clamped))
 
+                    # Contador para evitar chaves duplicadas entre reruns
+                    if '_bt_click_gen' not in st.session_state:
+                        st.session_state['_bt_click_gen'] = 0
+
                     _bt1, _bt2, _bt3 = st.columns(3)
                     with _bt1:
                         if st.button(
                             f"🎯 seletivo: entrada {_p90:.0f} / saída {_p25:.0f}",
-                            key="btn_th_seletivo",
+                            key=f"btn_th_seletivo_{st.session_state['_bt_click_gen']}",
                             use_container_width=True,
                             help="entra apenas nos melhores 10% momentos",
                         ):
-                            st.session_state['sl_bt_entrada'] = _ajustar_threshold(_p90, 40, 90)
-                            st.session_state['sl_bt_saida']   = _ajustar_threshold(_p25, 20, 70)
-                            st.session_state.pop('bt_resultado', None)
+                            st.session_state['_bt_click_gen'] += 1
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p90, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            st.rerun()
+                    with _bt2:
+                        if st.button(
+                            f"⚖️ moderado: entrada {_p75:.0f} / saída {_p25:.0f}",
+                            key=f"btn_th_moderado_{st.session_state['_bt_click_gen']}",
+                            use_container_width=True,
+                            help="entra nos melhores 25% momentos",
+                        ):
+                            st.session_state['_bt_click_gen'] += 1
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p75, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p25, 20, 70)
+                            st.rerun()
+                    with _bt3:
+                        if st.button(
+                            f"📈 ativo: entrada {_p50:.0f} / saída {_p10:.0f}",
+                            key=f"btn_th_ativo_{st.session_state['_bt_click_gen']}",
+                            use_container_width=True,
+                            help="entra na maioria dos momentos positivos",
+                        ):
+                            st.session_state['_bt_click_gen'] += 1
+                            st.session_state['_pending_entrada'] = _ajustar_threshold(_p50, 40, 90)
+                            st.session_state['_pending_saida']   = _ajustar_threshold(_p10, 20, 70)
                             st.rerun()
                     with _bt2:
                         if st.button(
