@@ -600,8 +600,36 @@ def rodar_backtesting_score(
                         _ultimo_score = _scores_dict[_d]
                     _score_vals.append(_ultimo_score)
 
-                _scores_serie = pd.Series(_score_vals, index=_hist.index, name='score')
-                _fonte_score = 'banco_local'
+                _scores_serie_candidata = pd.Series(
+                    _score_vals, index=_hist.index, name='score'
+                )
+
+                # ── Verificação de qualidade dos dados ────────────
+                # Se todos os scores são iguais (ou quase), os dados
+                # são degenerados — provavelmente salvos com valor
+                # default de 50. Nesse caso, descarta e usa FMP/proxy.
+                _std_scores  = float(_scores_serie_candidata.std())
+                _range_scores = (
+                    float(_scores_serie_candidata.max())
+                    - float(_scores_serie_candidata.min())
+                )
+                _n_unicos = _scores_serie_candidata.nunique()
+
+                if _std_scores < 2.0 or _range_scores < 5 or _n_unicos < 3:
+                    # Dados degenerados — avisa e descarta
+                    resultado['aviso_banco'] = (
+                        f"histórico local com {len(_scores_raw)} registros "
+                        f"mas sem variação real (range {_range_scores:.0f} pts, "
+                        f"{_n_unicos} valores únicos). "
+                        "provavelmente scores salvos como default (50) antes "
+                        "da calibração do motor. usando fmp ou proxy como fallback."
+                    )
+                    _scores_serie = None
+                    _fonte_score  = None
+                else:
+                    _scores_serie = _scores_serie_candidata
+                    _fonte_score = 'banco_local'
+
             except Exception:
                 _scores_serie = None
 
@@ -734,6 +762,30 @@ def rodar_backtesting_score(
             )
 
         resultado['series']['cdi'] = _cdi_acum_serie / capital_inicial * 100
+
+        # Salva série do score para visualização
+        resultado['serie_score'] = _scores_serie.copy()
+
+        # Debug do CDI — confirma valores
+        if _cdi_acum_serie is not None and not _cdi_acum_serie.empty:
+            _cdi_retorno_total = float(
+                _cdi_acum_serie.iloc[-1] / capital_inicial - 1
+            ) * 100
+            _n_dias_cdi = len(_cdi_acum_serie)
+            _n_anos_cdi = _n_dias_cdi / 252
+            _cdi_cagr = (
+                (1 + _cdi_retorno_total / 100) ** (1 / _n_anos_cdi) - 1
+            ) * 100 if _n_anos_cdi > 0 else 0
+
+            resultado['cdi_debug'] = {
+                'retorno_total':  round(_cdi_retorno_total, 2),
+                'cagr_anual':     round(_cdi_cagr, 2),
+                'n_dias':         _n_dias_cdi,
+                'n_anos':         round(_n_anos_cdi, 2),
+                'taxa_media_dia': round(
+                    float(_cdi_taxa_fallback) * 100, 5
+                ),
+            }
 
         # ── Simulação da estratégia ─────────────────────────────────────
         _capital       = capital_inicial
@@ -2678,6 +2730,22 @@ with tab_backtest:
                     unsafe_allow_html=True,
                 )
 
+                # Debug do CDI (temporário — para validação)
+                _cdi_dbg = _bt_res.get('cdi_debug', {})
+                if _cdi_dbg:
+                    st.caption(
+                        f"📊 CDI calculado: retorno total {_cdi_dbg['retorno_total']:+.2f}% | "
+                        f"CAGR {_cdi_dbg['cagr_anual']:.2f}%/ano | "
+                        f"taxa diária média {_cdi_dbg['taxa_media_dia']:.4f}%/dia | "
+                        f"período: {_cdi_dbg['n_anos']:.1f} anos ({_cdi_dbg['n_dias']} pregões)"
+                    )
+                    if not (5 <= _cdi_dbg['cagr_anual'] <= 20):
+                        st.warning(
+                            f"⚠️ CDI com CAGR {_cdi_dbg['cagr_anual']:.2f}%/ano está "
+                            f"fora do range esperado (5-20%/ano). "
+                            f"verifique a fonte de dados do CDI."
+                        )
+
                 if _bt_res.get('aviso'):
                     st.info(f"⚠️ {_bt_res['aviso']}")
 
@@ -2685,15 +2753,28 @@ with tab_backtest:
                 if _bt_res.get('aviso_sanidade'):
                     st.warning(_bt_res['aviso_sanidade'])
 
-                # Aviso quando 100% investido essencialmente = B&H
+                # Aviso banco_local degenerado
+                if _bt_res.get('aviso_banco'):
+                    st.warning(f"⚠️ {_bt_res['aviso_banco']}")
+
                 _pct_inv_ui = _bt_res.get('pct_tempo_investido', 0)
-                if _pct_inv_ui >= 95 and _bt_res.get('n_trades', 0) <= 2:
+                _n_trades_ui = _bt_res.get('n_trades', 0)
+
+                if _n_trades_ui == 0:
+                    st.error(
+                        "**nenhuma operação realizada** — o score nunca atingiu "
+                        f"o threshold de entrada ({_bt_entrada}) no período. "
+                        "**a curva laranja (estratégia) mostra o rendimento do "
+                        "caixa (cdi) porque o capital ficou 100% em caixa.** "
+                        "use os botões de threshold abaixo para calibrar os "
+                        "parâmetros corretos para este ativo."
+                    )
+                elif _pct_inv_ui >= 95 and _n_trades_ui <= 2:
                     st.info(
                         f"💡 a estratégia ficou {_pct_inv_ui:.0f}% do tempo investida "
-                        f"com apenas {_bt_res.get('n_trades',0)} operação(ões). "
-                        f"o resultado é praticamente equivalente a buy & hold. "
-                        f"para uma estratégia mais seletiva, aumente o threshold "
-                        f"de entrada — use a distribuição do score abaixo como guia."
+                        f"com apenas {_n_trades_ui} operação(ões) — essencialmente "
+                        f"equivalente a buy & hold. para uma estratégia mais seletiva, "
+                        f"use os botões abaixo para ajustar os thresholds."
                     )
 
                 # ── Distribuição do score + guia de thresholds ──────────────
@@ -2835,17 +2916,24 @@ with tab_backtest:
 
                     _fig_bt = go.Figure()
                     _cores_bt = {
-                        'estratégia (score)': '#FF9900',
-                        'cdi': '#555',
-                        'cdi (aprox)': '#444',
+                        'estratégia (score)': '#FF9900',   # laranja sólido
+                        'cdi':                '#00B0FF',   # azul claro — visível no tema escuro
+                        'cdi (aprox)':        '#4488AA',   # azul médio
                     }
 
                     for _nm, _sr in _bt_series.items():
                         if _sr.empty:
                             continue
                         _cor_bt = _cores_bt.get(_nm, '#00C853')
-                        _lw     = 2.5 if 'estratégia' in _nm else 1.5
-                        _dash   = 'solid' if 'estratégia' in _nm else 'dot'
+                        if 'estratégia' in _nm:
+                            _lw   = 2.5
+                            _dash = 'solid'
+                        elif 'cdi' in _nm.lower():
+                            _lw   = 1.5
+                            _dash = 'dash'      # traço — mais visível que ponto
+                        else:
+                            _lw   = 1.8
+                            _dash = 'dot'
                         _ret_f  = float(_sr.iloc[-1]) - 100
                         _fig_bt.add_trace(go.Scatter(
                             x=_sr.index, y=_sr.values,
@@ -2897,6 +2985,104 @@ with tab_backtest:
                         "quando fora do mercado o capital fica em caixa (sem rendimento). "
                         "backtesting não garante performance futura."
                     )
+
+                    # ── GRÁFICO DO SCORE AO LONGO DO TEMPO ───────────────────
+                    _score_serie_ui = _bt_res.get('serie_score')
+                    if _score_serie_ui is not None and not _score_serie_ui.empty:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        section_title("📊 evolução do score — com thresholds")
+
+                        _fig_score_bt = go.Figure()
+
+                        # Linha do score
+                        _fig_score_bt.add_trace(go.Scatter(
+                            x=_score_serie_ui.index,
+                            y=_score_serie_ui.values,
+                            name='score',
+                            line=dict(color='#8B8FA8', width=1.5),
+                            fill='tozeroy',
+                            fillcolor='#8B8FA820',
+                            hovertemplate='%{x}<br>score: %{y:.0f}<extra></extra>',
+                        ))
+
+                        # Linha de threshold de entrada
+                        _fig_score_bt.add_hline(
+                            y=_bt_entrada,
+                            line_color='#00C853',
+                            line_dash='dash',
+                            line_width=1.5,
+                            annotation_text=f'entrada ≥{_bt_entrada}',
+                            annotation_font_color='#00C853',
+                            annotation_font_size=9,
+                            annotation_position='right',
+                        )
+
+                        # Linha de threshold de saída
+                        _fig_score_bt.add_hline(
+                            y=_bt_saida,
+                            line_color='#FF1744',
+                            line_dash='dash',
+                            line_width=1.5,
+                            annotation_text=f'saída <{_bt_saida}',
+                            annotation_font_color='#FF1744',
+                            annotation_font_size=9,
+                            annotation_position='right',
+                        )
+
+                        # Região de "zona de compra" (entre saída e entrada)
+                        _fig_score_bt.add_hrect(
+                            y0=_bt_saida,
+                            y1=_bt_entrada,
+                            fillcolor='#FF990008',
+                            line_width=0,
+                            annotation_text='zona neutra',
+                            annotation_font_color='#333',
+                            annotation_font_size=8,
+                        )
+
+                        _lay_sc = base_layout(
+                            height=220,
+                            title=f'score histórico — {_bt_ticker_label}',
+                        )
+                        _lay_sc.update(
+                            yaxis=dict(
+                                title='score',
+                                range=[0, 105],
+                                showgrid=True,
+                                gridcolor='#2A2C3E',
+                            ),
+                        )
+                        _fig_score_bt.update_layout(**_lay_sc)
+                        st.plotly_chart(
+                            _fig_score_bt,
+                            use_container_width=True,
+                            config={'responsive': True},
+                        )
+
+                        # Estatísticas do score no período
+                        _sc_max   = float(_score_serie_ui.max())
+                        _sc_min   = float(_score_serie_ui.min())
+                        _sc_med   = float(_score_serie_ui.median())
+                        _pct_acima = float(
+                            (_score_serie_ui >= _bt_entrada).mean() * 100
+                        )
+
+                        st.caption(
+                            f"score no período — "
+                            f"mín: {_sc_min:.0f} | "
+                            f"mediana: {_sc_med:.0f} | "
+                            f"máx: {_sc_max:.0f} | "
+                            f"% do tempo acima do threshold de entrada ({_bt_entrada}): "
+                            f"{_pct_acima:.1f}%"
+                        )
+
+                        if _pct_acima < 1:
+                            st.warning(
+                                f"⚠️ o score NUNCA atingiu {_bt_entrada} neste período. "
+                                f"o máximo foi {_sc_max:.0f}. "
+                                f"use os botões abaixo para ajustar os thresholds "
+                                f"baseado na distribuição real do score."
+                            )
 
                     # ── Gráfico de underwater (ocean chart) ──
                     _sr_est = _bt_series.get('estratégia (score)')
