@@ -715,8 +715,8 @@ def rodar_backtesting_score(
         # ── Diagnóstico de APIs externas ──────────────────────────────
         # Só interessa quando caiu em proxy (fundamentalistas falharam)
         if _fonte_score in ('proxy_tecnico', 'proxy_calibrado'):
-            from utils.alpha_vantage_client import _get_key as _av_key
-            if not _av_key():
+            from utils.api_cache import get_av_rotator
+            if not get_av_rotator().keys:
                 resultado['aviso_av_key'] = (
                     "Alpha Vantage API key nao configurada. "
                     "adicione no Streamlit Cloud: Settings > Secrets > [alpha_vantage] api_key"
