@@ -722,6 +722,65 @@ def rodar_backtesting_score(
                 )
 
         resultado['fonte_score'] = _fonte_score
+
+        # ── Diagnóstico de APIs externas ──────────────────────────────
+        # Só interessa quando caiu em proxy (fundamentalistas falharam)
+        if _fonte_score in ('proxy_tecnico', 'proxy_calibrado_brapi'):
+            from utils.alpha_vantage_client import _get_key as _av_key
+            if not _av_key():
+                resultado['aviso_av_key'] = (
+                    "Alpha Vantage API key nao configurada. "
+                    "adicione no Streamlit Cloud: Settings > Secrets > [alpha_vantage] api_key"
+                )
+
+            try:
+                import requests as _req
+                _r_av = _req.get(
+                    "https://www.alphavantage.co/query",
+                    params={"function": "OVERVIEW", "symbol": "PETR4.SAO", "apikey": "demo"},
+                    timeout=5,
+                )
+                if _r_av.status_code == 200:
+                    _j = _r_av.json()
+                    if "Note" in _j or "Information" in _j:
+                        resultado['aviso_av_limite'] = (
+                            "Alpha Vantage: limite de requisicoes diarias atingido (25/dia). "
+                            "os dados fundamentalistas serao usados amanha."
+                        )
+            except Exception:
+                pass
+
+            try:
+                _fmp_key = st.secrets.get("FMP_API_KEY", "")
+                if not _fmp_key:
+                    resultado['aviso_fmp_key'] = (
+                        "Financial Modeling Prep API key nao configurada no secrets.toml."
+                    )
+                else:
+                    _r_fmp = _req.get(
+                        f"https://financialmodelingprep.com/api/v3/ratios/PETR4",
+                        params={"limit": 1, "apikey": _fmp_key},
+                        timeout=5,
+                    )
+                    if _r_fmp.status_code == 403:
+                        resultado['aviso_fmp_403'] = (
+                            f"FMP API key ({_fmp_key[:8]}...) bloqueada (HTTP 403). "
+                            "a chave expirou ou o plano nao inclui mais esses endpoints. "
+                            "gere uma nova chave em financialmodelingprep.com."
+                        )
+            except Exception:
+                pass
+
+            try:
+                from utils.brapi_client import _get_token as _brapi_token
+                if not _brapi_token():
+                    resultado['aviso_brapi_key'] = (
+                        "BRAPI token nao configurado. "
+                        "adicione no Streamlit Cloud: Settings > Secrets > [brapi] token"
+                    )
+            except Exception:
+                pass
+
         n_anos = len(_hist) / 252
         resultado['score_distribution'] = {
             'mediana':   round(float(_scores_serie.median()), 1),
@@ -2796,6 +2855,18 @@ with tab_backtest:
                 # Aviso banco_local degenerado
                 if _bt_res.get('aviso_banco'):
                     st.warning(f"⚠️ {_bt_res['aviso_banco']}")
+
+                # ── Diagnóstico de APIs externas ────────────────────────
+                if _bt_res.get('aviso_av_key'):
+                    st.error(f"🔴 {_bt_res['aviso_av_key']}")
+                if _bt_res.get('aviso_av_limite'):
+                    st.warning(f"⚠️ {_bt_res['aviso_av_limite']}")
+                if _bt_res.get('aviso_fmp_403'):
+                    st.error(f"🔴 {_bt_res['aviso_fmp_403']}")
+                if _bt_res.get('aviso_fmp_key'):
+                    st.warning(f"⚠️ {_bt_res['aviso_fmp_key']}")
+                if _bt_res.get('aviso_brapi_key'):
+                    st.warning(f"⚠️ {_bt_res['aviso_brapi_key']}")
 
                 _pct_inv_ui = _bt_res.get('pct_tempo_investido', 0)
                 _n_trades_ui = _bt_res.get('n_trades', 0)
