@@ -67,14 +67,14 @@ def puxar_historico_mestre():
             if not df_temp.empty: dfs_br_dict[nome] = df_temp[nome]
         except Exception as e:
             logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
-    # Fallback Selic: se série 432 falhou, tenta série 11 (Selic efetiva diária)
+    # Fallback Selic: se série 432 falhou, tenta série 439 (Selic Over anualizada base 252)
     if 'Selic' not in dfs_br_dict:
         try:
-            _selic_fb = sgs.get({'Selic': 11}, start=inicio_10a)
+            _selic_fb = sgs.get({'Selic': 439}, start=inicio_10a)
             if not _selic_fb.empty:
                 dfs_br_dict['Selic'] = _selic_fb['Selic']
         except Exception as e:
-            logger.error(f"[macro] BCB Selic fallback (série 11) falhou: {e}")
+            logger.error(f"[macro] BCB Selic fallback (série 439) falhou: {e}")
             
     df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
     if df_br.empty:
@@ -757,7 +757,14 @@ with tab_global:
 
         if _selic_ss is not None or _vix_ss is not None:
             _selic_val = float(_selic_ss) if _selic_ss is not None else st.session_state.get("macro_context", {}).get("selic", 10.75)
+            # Sanidade: série 432/439 = % anual. Se < 1, veio como decimal
+            if 0 < _selic_val < 1:
+                _selic_val = _selic_val * 100
+            elif _selic_val > 50:
+                _selic_val = 10.75
             _ipca_val  = float(_ipca_ss)  if _ipca_ss  is not None else st.session_state.get("macro_context", {}).get("ipca", 4.5)
+            if abs(_ipca_val) > 5:
+                _ipca_val = 0.45
             _vix_val   = float(_vix_ss)   if _vix_ss   is not None else st.session_state.get("macro_context", {}).get("vix", 15.0)
 
             _juros_altos = _selic_val > 10.0

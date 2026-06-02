@@ -28,8 +28,16 @@ def _fetch_macro_rapido() -> dict:
         df_bcb = sgs.get({'selic': 432, 'ipca': 433}, start=inicio)
         if 'selic' in df_bcb.columns and not df_bcb['selic'].dropna().empty:
             selic = float(df_bcb['selic'].dropna().iloc[-1])
+            # Série 432 = % anual (ex: 14.75). Sanidade:
+            if 0 < selic < 1:
+                selic = selic * 100        # veio como decimal
+            elif selic > 50:
+                selic = 10.75              # erro — fallback seguro
         if 'ipca' in df_bcb.columns and not df_bcb['ipca'].dropna().empty:
             ipca = float(df_bcb['ipca'].dropna().iloc[-1])
+            # Série 433 = % mensal (ex: 0.38). Sanidade:
+            if abs(ipca) > 5:              # >5% no mês = hiperinflação
+                ipca = 0.45
     except Exception as e:
         logger.warning(f"[macro_context] falha BCB: {e}")
 
