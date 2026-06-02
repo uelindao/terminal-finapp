@@ -50,51 +50,233 @@ def _is_fii(ticker: str) -> bool:
         return True
     return False
 
-def calcular_piotroski(acao, setor: str = ""):
+def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
     try:
-        financials = acao.financials
-        balance_sheet = acao.balance_sheet
-        cashflow = acao.cashflow
-
-        def get_val(df, possiveis_nomes, col_idx=0):
+        def _get_val_financials(df, *nomes):
             if df is None or df.empty:
                 return None
-            for nome in possiveis_nomes:
-                if nome in df.index and len(df.columns) > col_idx:
-                    val = df.loc[nome, df.columns[col_idx]]
-                    if isinstance(val, pd.Series):
-                        val = val.iloc[0]
-                    if pd.notna(val):
+            for nome in nomes:
+                try:
+                    if nome in df.index:
+                        val = df.loc[nome]
+                        if isinstance(val, pd.Series):
+                            val = val.dropna()
+                            return float(val.iloc[0]) if not val.empty else None
                         return float(val)
+                except Exception:
+                    continue
             return None
 
-        total_assets_atual = get_val(balance_sheet, ["Total Assets"], 0)
-        total_assets_anterior = get_val(balance_sheet, ["Total Assets"], 1)
-        net_income = get_val(financials, ["Net Income", "Net Income Common Stockholders"], 0)
-        net_income_anterior = get_val(financials, ["Net Income", "Net Income Common Stockholders"], 1)
-        operating_cashflow = get_val(cashflow, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"], 0)
-        long_debt_atual = get_val(balance_sheet, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], 0)
-        long_debt_anterior = get_val(balance_sheet, ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"], 1)
-        current_assets_atual = get_val(balance_sheet, ["Current Assets"], 0)
-        current_assets_anterior = get_val(balance_sheet, ["Current Assets"], 1)
-        current_liab_atual = get_val(balance_sheet, ["Current Liabilities"], 0)
-        current_liab_anterior = get_val(balance_sheet, ["Current Liabilities"], 1)
-        shares_atual = get_val(balance_sheet, ["Ordinary Shares Number", "Share Issued"], 0)
-        shares_anterior = get_val(balance_sheet, ["Ordinary Shares Number", "Share Issued"], 1)
-        gross_profit_atual = get_val(financials, ["Gross Profit"], 0)
-        gross_profit_anterior = get_val(financials, ["Gross Profit"], 1)
-        revenue_atual = get_val(financials, ["Total Revenue", "Revenue"], 0)
-        revenue_anterior = get_val(financials, ["Total Revenue", "Revenue"], 1)
+        try:
+            fin   = acao.financials if acao else None
+            bal   = acao.balance_sheet if acao else None
+            cf    = acao.cashflow if acao else None
+            fin_q = acao.quarterly_financials if acao else None
+            bal_q = acao.quarterly_balance_sheet if acao else None
+        except Exception:
+            fin = bal = cf = fin_q = bal_q = None
 
-        f1 = 1 if total_assets_atual is not None and total_assets_atual > 0 and net_income is not None and (net_income / total_assets_atual) > 0 else 0
-        
-        f2 = 1 if operating_cashflow is not None and operating_cashflow > 0 else 0
-        
-        roa_atual = (net_income / total_assets_atual) if net_income is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        roa_anterior = (net_income_anterior / total_assets_anterior) if net_income_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f3 = 1 if roa_atual is not None and roa_anterior is not None and roa_atual > roa_anterior else 0
-        
-        f4 = 1 if operating_cashflow is not None and total_assets_atual is not None and total_assets_atual > 0 and net_income is not None and (operating_cashflow / total_assets_atual) > (net_income / total_assets_atual) else 0
+        # Total Assets (dois períodos)
+        total_assets_atual = None
+        total_assets_ant   = None
+        try:
+            if bal is not None and not bal.empty:
+                row = None
+                for nome in ['Total Assets', 'TotalAssets', 'totalAssets']:
+                    if nome in bal.index:
+                        row = bal.loc[nome].dropna()
+                        break
+                if row is not None and len(row) >= 1:
+                    total_assets_atual = float(row.iloc[0])
+                if row is not None and len(row) >= 2:
+                    total_assets_ant   = float(row.iloc[1])
+        except Exception:
+            pass
+
+        # Net Income
+        net_income = _get_val_financials(
+            fin,
+            'Net Income', 'NetIncome', 'netIncome',
+            'Net Income Common Stockholders',
+        )
+
+        # Para ativos .SA: desconta 'Other Income Expense'
+        # (variação cambial que contamina o net_income no yfinance)
+        if is_br and net_income is not None:
+            try:
+                other_income = _get_val_financials(
+                    fin,
+                    'Other Income Expense',
+                    'Non Operating Income',
+                    'otherIncomeExpense',
+                )
+                if (other_income is not None
+                        and abs(other_income) > abs(net_income) * 0.5):
+                    ebit_proxy = _get_val_financials(
+                        fin, 'EBIT', 'Operating Income',
+                        'operatingIncome', 'Total Operating Income'
+                    )
+                    if ebit_proxy is not None:
+                        net_income = ebit_proxy * (1 - 0.34)
+            except Exception:
+                pass
+
+        # Operating Cash Flow
+        op_cashflow = _get_val_financials(
+            cf,
+            'Operating Cash Flow', 'operatingCashFlow',
+            'Total Cash From Operating Activities',
+            'Cash From Operations',
+        )
+
+        # Return on Assets (atual e anterior)
+        roa_atual = None
+        roa_ant   = None
+        try:
+            if net_income is not None and total_assets_atual and total_assets_atual > 0:
+                roa_atual = net_income / total_assets_atual
+            ni_ant = None
+            try:
+                row_ni = None
+                for nome in ['Net Income', 'NetIncome']:
+                    if fin is not None and nome in fin.index:
+                        row_ni = fin.loc[nome].dropna()
+                        break
+                if row_ni is not None and len(row_ni) >= 2:
+                    ni_ant = float(row_ni.iloc[1])
+            except Exception:
+                pass
+            if ni_ant is not None and total_assets_ant and total_assets_ant > 0:
+                roa_ant = ni_ant / total_assets_ant
+        except Exception:
+            pass
+
+        # Long Term Debt
+        debt_atual = _get_val_financials(
+            bal,
+            'Long Term Debt', 'longTermDebt',
+            'Long Term Debt And Capital Lease Obligation',
+            'Total Long Term Debt',
+        )
+        debt_ant = None
+        try:
+            for nome in ['Long Term Debt', 'longTermDebt',
+                         'Long Term Debt And Capital Lease Obligation']:
+                if bal is not None and nome in bal.index:
+                    row_d = bal.loc[nome].dropna()
+                    if len(row_d) >= 2:
+                        debt_ant = float(row_d.iloc[1])
+                    break
+        except Exception:
+            pass
+
+        # Current Ratio
+        current_ratio_atual = None
+        current_ratio_ant   = None
+        try:
+            ca = _get_val_financials(bal, 'Current Assets', 'currentAssets',
+                                      'Total Current Assets')
+            cl = _get_val_financials(bal, 'Current Liabilities', 'currentLiabilities',
+                                      'Total Current Liabilities')
+            if ca and cl and cl > 0:
+                current_ratio_atual = ca / cl
+            for nome_ca in ['Current Assets', 'Total Current Assets']:
+                if bal is not None and nome_ca in bal.index:
+                    row_ca = bal.loc[nome_ca].dropna()
+                    for nome_cl in ['Current Liabilities', 'Total Current Liabilities']:
+                        if nome_cl in bal.index:
+                            row_cl = bal.loc[nome_cl].dropna()
+                            if len(row_ca) >= 2 and len(row_cl) >= 2:
+                                ca2, cl2 = float(row_ca.iloc[1]), float(row_cl.iloc[1])
+                                if cl2 > 0:
+                                    current_ratio_ant = ca2 / cl2
+                            break
+                    break
+        except Exception:
+            pass
+
+        # Shares outstanding (para F7 — diluição)
+        shares_atual = _get_val_financials(
+            bal, 'Share Issued', 'sharesIssued',
+            'Ordinary Shares Number', 'commonStock',
+        )
+        shares_ant = None
+        try:
+            for nome in ['Share Issued', 'Ordinary Shares Number']:
+                if bal is not None and nome in bal.index:
+                    row_s = bal.loc[nome].dropna()
+                    if len(row_s) >= 2:
+                        shares_ant = float(row_s.iloc[1])
+                    break
+        except Exception:
+            pass
+
+        # Gross Margin (atual e anterior)
+        gross_margin_atual = None
+        gross_margin_ant   = None
+        try:
+            rev = _get_val_financials(fin, 'Total Revenue', 'totalRevenue')
+            gp  = _get_val_financials(fin, 'Gross Profit', 'grossProfit')
+            if rev and rev > 0 and gp is not None:
+                gross_margin_atual = gp / rev
+
+            for nome_r in ['Total Revenue', 'totalRevenue']:
+                if fin is not None and nome_r in fin.index:
+                    row_r = fin.loc[nome_r].dropna()
+                    for nome_g in ['Gross Profit', 'grossProfit']:
+                        if nome_g in fin.index:
+                            row_g = fin.loc[nome_g].dropna()
+                            if len(row_r) >= 2 and len(row_g) >= 2:
+                                r2 = float(row_r.iloc[1])
+                                g2 = float(row_g.iloc[1])
+                                if r2 > 0:
+                                    gross_margin_ant = g2 / r2
+                            break
+                    break
+        except Exception:
+            pass
+
+        # Asset Turnover (F9)
+        asset_turnover_atual = None
+        asset_turnover_ant   = None
+        try:
+            rev_val = _get_val_financials(fin, 'Total Revenue', 'totalRevenue')
+            if rev_val and total_assets_atual and total_assets_atual > 0:
+                asset_turnover_atual = rev_val / total_assets_atual
+            for nome_r in ['Total Revenue', 'totalRevenue']:
+                if fin is not None and nome_r in fin.index:
+                    row_r = fin.loc[nome_r].dropna()
+                    if len(row_r) >= 2 and total_assets_ant and total_assets_ant > 0:
+                        asset_turnover_ant = float(row_r.iloc[1]) / total_assets_ant
+                    break
+        except Exception:
+            pass
+
+        # ── Critérios Piotroski com try/except individual ─────────────
+        f1 = f2 = f3 = f4 = f5 = f6 = f7 = f8 = f9 = 0
+
+        try:
+            f1 = 1 if (roa_atual is not None and roa_atual > 0) else 0
+        except Exception:
+            pass
+
+        try:
+            f2 = 1 if (op_cashflow is not None and op_cashflow > 0) else 0
+        except Exception:
+            pass
+
+        try:
+            f3 = 1 if (roa_atual and roa_ant and roa_atual > roa_ant) else 0
+        except Exception:
+            pass
+
+        try:
+            if (op_cashflow and net_income and
+                    total_assets_atual and total_assets_atual > 0):
+                accrual = op_cashflow / total_assets_atual
+                f4 = 1 if accrual > (net_income / total_assets_atual) else 0
+        except Exception:
+            pass
 
         # Empresas financeiras são estruturalmente alavancadas — F5 e F6 distorcem
         _setor_lower  = setor.lower()
@@ -108,23 +290,38 @@ def calcular_piotroski(acao, setor: str = ""):
             f5 = None
             f6 = None
         else:
-            leverage_atual = (long_debt_atual / total_assets_atual) if long_debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-            leverage_anterior = (long_debt_anterior / total_assets_anterior) if long_debt_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-            f5 = 1 if leverage_atual is not None and leverage_anterior is not None and leverage_atual < leverage_anterior else 0
-            
-            current_ratio_atual = (current_assets_atual / current_liab_atual) if current_assets_atual is not None and current_liab_atual is not None and current_liab_atual > 0 else None
-            current_ratio_anterior = (current_assets_anterior / current_liab_anterior) if current_assets_anterior is not None and current_liab_anterior is not None and current_liab_anterior > 0 else None
-            f6 = 1 if current_ratio_atual is not None and current_ratio_anterior is not None and current_ratio_atual > current_ratio_anterior else 0
-        
-        f7 = 1 if shares_atual is not None and shares_anterior is not None and shares_atual <= shares_anterior else 0
-        
-        gross_margin_atual = (gross_profit_atual / revenue_atual) if gross_profit_atual is not None and revenue_atual is not None and revenue_atual > 0 else None
-        gross_margin_anterior = (gross_profit_anterior / revenue_anterior) if gross_profit_anterior is not None and revenue_anterior is not None and revenue_anterior > 0 else None
-        f8 = 1 if gross_margin_atual is not None and gross_margin_anterior is not None and gross_margin_atual > gross_margin_anterior else 0
-        
-        asset_turnover_atual = (revenue_atual / total_assets_atual) if revenue_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
-        asset_turnover_anterior = (revenue_anterior / total_assets_anterior) if revenue_anterior is not None and total_assets_anterior is not None and total_assets_anterior > 0 else None
-        f9 = 1 if asset_turnover_atual is not None and asset_turnover_anterior is not None and asset_turnover_atual > asset_turnover_anterior else 0
+            try:
+                _lev_atual = (debt_atual / total_assets_atual) if debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
+                _lev_ant   = (debt_ant / total_assets_ant) if debt_ant is not None and total_assets_ant is not None and total_assets_ant > 0 else None
+                f5 = 1 if _lev_atual is not None and _lev_ant is not None and _lev_atual < _lev_ant else 0
+            except Exception:
+                pass
+            try:
+                _cr_atual = current_ratio_atual
+                _cr_ant   = current_ratio_ant
+                f6 = 1 if _cr_atual is not None and _cr_ant is not None and _cr_atual > _cr_ant else 0
+            except Exception:
+                pass
+
+        try:
+            if shares_atual and shares_ant:
+                f7 = 1 if shares_atual <= shares_ant * 1.01 else 0
+            else:
+                f7 = 1
+        except Exception:
+            f7 = 1
+
+        try:
+            f8 = 1 if (gross_margin_atual and gross_margin_ant and
+                       gross_margin_atual > gross_margin_ant) else 0
+        except Exception:
+            pass
+
+        try:
+            f9 = 1 if (asset_turnover_atual and asset_turnover_ant and
+                       asset_turnover_atual > asset_turnover_ant) else 0
+        except Exception:
+            pass
 
         _criterios = [f1, f2, f3, f4, f5, f6, f7, f8, f9]
         _criterios_validos = [c for c in _criterios if c is not None]
@@ -132,7 +329,7 @@ def calcular_piotroski(acao, setor: str = ""):
         _n_validos = len(_criterios_validos)
         if _n_validos < 9 and _n_validos > 0:
             f_score_total = round((f_score_total / _n_validos) * 9)
-        
+
         detalhamento = {
             "F1 ROA positivo":               f1,
             "F2 FCF positivo":               f2,
@@ -144,7 +341,7 @@ def calcular_piotroski(acao, setor: str = ""):
             "F8 margem bruta crescendo":     f8,
             "F9 giro de ativos crescendo":   f9,
         }
-        
+
         return f_score_total, detalhamento
     except Exception as e:
         logger.warning(f"[health_engine] falha ao calcular Piotroski F-Score: {e}")
@@ -723,7 +920,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         # ==========================================
         else:
             if acao is not None:
-                f_score, f_detalhamento = calcular_piotroski(acao, setor_yf)
+                f_score, f_detalhamento = calcular_piotroski(acao, setor_yf, is_br=ticker.endswith('.SA'))
             else:
                 f_score, f_detalhamento = 0, {}
             
