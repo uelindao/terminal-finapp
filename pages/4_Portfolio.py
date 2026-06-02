@@ -751,22 +751,37 @@ def rodar_backtesting_score(
                 pass
 
             try:
-                _fmp_key = st.secrets.get("FMP_API_KEY", "")
-                if not _fmp_key:
+                _fmp_keys = []
+                for _k_name in ("FMP_API_KEY", "FMP_API_KEY_2"):
+                    _k = st.secrets.get(_k_name, "")
+                    if _k: _fmp_keys.append(_k)
+
+                if not _fmp_keys:
                     resultado['aviso_fmp_key'] = (
-                        "Financial Modeling Prep API key nao configurada no secrets.toml."
+                        "Financial Modeling Prep API keys nao configuradas no secrets.toml."
                     )
                 else:
-                    _r_fmp = _req.get(
-                        f"https://financialmodelingprep.com/api/v3/ratios/PETR4",
-                        params={"limit": 1, "apikey": _fmp_key},
-                        timeout=5,
-                    )
-                    if _r_fmp.status_code == 403:
+                    _falhas = []
+                    for _fk in _fmp_keys:
+                        _rf = _req.get(
+                            f"https://financialmodelingprep.com/api/v3/ratios/PETR4",
+                            params={"limit": 1, "apikey": _fk},
+                            timeout=5,
+                        )
+                        if _rf.status_code == 403:
+                            _falhas.append(_fk[:8])
+
+                    if len(_falhas) == len(_fmp_keys):
                         resultado['aviso_fmp_403'] = (
-                            f"FMP API key ({_fmp_key[:8]}...) bloqueada (HTTP 403). "
-                            "a chave expirou ou o plano nao inclui mais esses endpoints. "
-                            "gere uma nova chave em financialmodelingprep.com."
+                            f"todas as {len(_fmp_keys)} FMP API keys bloqueadas (403). "
+                            f"ultima testada: {_fmp_keys[-1][:8]}... "
+                            "gere novas chaves em financialmodelingprep.com."
+                        )
+                    elif _falhas:
+                        resultado['aviso_fmp_403'] = (
+                            f"{len(_falhas)} de {len(_fmp_keys)} FMP key(s) bloqueadas: "
+                            f"{', '.join(f'{f}...' for f in _falhas)}. "
+                            "as demais estao funcionando."
                         )
             except Exception:
                 pass

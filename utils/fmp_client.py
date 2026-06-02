@@ -31,47 +31,72 @@ FMP_BASE = "https://financialmodelingprep.com/api/v3"
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
-def _get_key() -> str:
-    """Retorna FMP_API_KEY sem expor o valor em logs."""
-    key = ""
+def _get_keys() -> list[str]:
+    """Retorna lista de FMP_API_KEYs configuradas (ordem de tentativa)."""
+    keys = []
     try:
-        key = st.secrets.get("FMP_API_KEY", "")
+        k1 = st.secrets.get("FMP_API_KEY", "")
+        if k1: keys.append(k1)
+        k2 = st.secrets.get("FMP_API_KEY_2", "")
+        if k2: keys.append(k2)
     except Exception:
         pass
-    if key:
-        logger.debug("FMP_API_KEY configurada")
+    if keys:
+        logger.debug(f"{len(keys)} FMP_API_KEY(s) configurada(s)")
     else:
-        logger.warning("[fmp] FMP_API_KEY ausente em secrets.toml")
-    return key
+        logger.warning("[fmp] nenhuma FMP_API_KEY configurada em secrets.toml")
+    return keys
 
 
 def _get(endpoint: str, params: dict | None = None) -> dict | list:
     """
-    GET genérico para a API FMP.
-    Retorna [] em caso de erro, timeout ou chave ausente.
-    FMP sinaliza erros via {'Error Message': '...'} em vez de status != 200.
+    GET genérico para a API FMP com fallback entre múltiplas chaves.
+    Tenta cada chave em ordem; se uma retorna 403, passa para a próxima.
+    Retorna [] em caso de todas falharem.
     """
-    key = _get_key()
-    if not key:
+    keys = _get_keys()
+    if not keys:
         return []
 
-    try:
-        p = dict(params or {})
-        p["apikey"] = key
+    p = dict(params or {})
 
-        resp = requests.get(f"{FMP_BASE}/{endpoint}", params=p, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
+    for i, key in enumerate(keys):
+        try:
+            p["apikey"] = key
+            resp = requests.get(f"{FMP_BASE}/{endpoint}", params=p, timeout=10)
 
-        if isinstance(data, dict) and "Error Message" in data:
-            logger.warning(f"[fmp] erro da API em /{endpoint}: {data['Error Message']}")
+            if resp.status_code == 403:
+                if i < len(keys) - 1:
+                    logger.info(
+                        f"[fmp] key {i+1} bloqueada (403), tentando key {i+2}"
+                    )
+                    continue
+                logger.warning(
+                    f"[fmp] todas as {len(keys)} keys retornaram 403 em /{endpoint}"
+                )
+                return []
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            if isinstance(data, dict) and "Error Message" in data:
+                logger.warning(
+                    f"[fmp] erro da API em /{endpoint}: {data['Error Message']}"
+                )
+                return []
+
+            return data
+
+        except Exception as e:
+            if i < len(keys) - 1:
+                logger.info(
+                    f"[fmp] key {i+1} falhou ({type(e).__name__}), tentando key {i+2}"
+                )
+                continue
+            logger.warning(f"[fmp] falha em /{endpoint}: {e}")
             return []
 
-        return data
-
-    except Exception as e:
-        logger.warning(f"[fmp] falha em /{endpoint}: {e}")
-        return []
+    return []
 
 
 def _safe_pct(val) -> float | None:
