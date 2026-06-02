@@ -349,10 +349,29 @@ def calcular_performance_vs_benchmarks(
     return resultado
 
 
-# ── Score histórico via FMP (fundamentais reais) ─────────────────────
+# ── Score histórico via fontes externas ──────────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def buscar_score_historico_fmp(ticker: str) -> pd.Series | None:
+def buscar_score_historico_externo(ticker: str) -> tuple[pd.Series | None, str]:
+    """
+    Busca score historico fundamentalista de fontes externas.
+    Ordem de prioridade:
+    1. Alpha Vantage (quarterly statements historicos)
+    2. FMP (ratios historicos)
+    3. BRAPI snapshot x proxy tecnico (apenas para BR)
+
+    Retorna (serie_diaria | None, fonte_label)
+    """
+    # -- Opcao 1: Alpha Vantage ----------------------------------------
+    try:
+        from utils.alpha_vantage_client import calcular_score_historico_av
+        _av_serie = calcular_score_historico_av(ticker)
+        if _av_serie is not None and len(_av_serie) >= 60:
+            return _av_serie, 'alpha_vantage'
+    except Exception:
+        pass
+
+    # -- Opcao 2: FMP (ja existente) -----------------------------------
     try:
         from utils.fmp_client import _get, _safe_float, _safe_pct
 
@@ -363,136 +382,105 @@ def buscar_score_historico_fmp(ticker: str) -> pd.Series | None:
         _balance = _get(f"balance-sheet-statement/{t_clean}", {"limit": 40, "period": "quarter"})
         _cashflow = _get(f"cash-flow-statement/{t_clean}", {"limit": 40, "period": "quarter"})
 
-        if not _ratios or len(_ratios) < 4 or not _income or len(_income) < 4:
-            return None
+        if _ratios and len(_ratios) >= 4:
+            _income_map   = {it.get('date', ''): it for it in (_income or [])}
+            _balance_map  = {it.get('date', ''): it for it in (_balance or [])}
+            _cashflow_map = {it.get('date', ''): it for it in (_cashflow or [])}
 
-        _income_map   = {it.get('date', ''): it for it in _income}
-        _balance_map  = {it.get('date', ''): it for it in _balance}
-        _cashflow_map = {it.get('date', ''): it for it in _cashflow}
+            _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
 
-        _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
+            scores_fmp = {}
+            for _data in _datas_ratio:
+                try:
+                    _r = next((x for x in _ratios if x.get('date') == _data), {})
 
-        scores_historicos = {}
+                    s = 0.0
+                    m = 0.0
+                    ok = 0
 
-        for _data in _datas_ratio:
-            try:
-                _r  = next((x for x in _ratios if x.get('date') == _data), {})
-                _inc = _income_map.get(_data, {})
-                _bal = _balance_map.get(_data, {})
-                _cf  = _cashflow_map.get(_data, {})
+                    pe  = _safe_float(_r.get('priceEarningsRatio'))
+                    m += 15
+                    if pe and 0 < pe <= 30:
+                        ok += 1
+                        if pe <= 10: s += 15
+                        elif pe <= 18: s += 10
+                        elif pe <= 30: s += 5
 
-                _score_q = 0.0
-                _campos_ok = 0
-                _max_possivel = 0.0
+                    pb = _safe_float(_r.get('priceToBookRatio'))
+                    m += 10
+                    if pb and pb > 0:
+                        ok += 1
+                        if pb <= 1.5: s += 10
+                        elif pb <= 3: s += 6
+                        elif pb <= 6: s += 3
 
-                # ── ROE (0-20 pts) ────────────────────────────────────
-                _roe = _safe_pct(_r.get('returnOnEquity'))
-                _max_possivel += 20
-                if _roe is not None:
-                    _campos_ok += 1
-                    if _roe > 15:    _score_q += 20
-                    elif _roe > 8:   _score_q += 14
-                    elif _roe > 3:   _score_q += 8
-                    elif _roe > 0:   _score_q += 4
-                    else:            _score_q -= 5
+                    roe = _safe_pct(_r.get('returnOnEquity'))
+                    m += 20
+                    if roe is not None:
+                        ok += 1
+                        if roe > 20: s += 20
+                        elif roe > 10: s += 13
+                        elif roe > 0: s += 6
+                        else: s -= 5
 
-                # ── Margem Líquida (0-15 pts) ─────────────────────────
-                _mrg = _safe_pct(_r.get('netProfitMargin'))
-                _max_possivel += 15
-                if _mrg is not None:
-                    _campos_ok += 1
-                    if _mrg > 10:    _score_q += 15
-                    elif _mrg > 3:   _score_q += 10
-                    elif _mrg >= 0:  _score_q += 5
-                    else:            _score_q -= 5
+                    de = _safe_float(_r.get('debtEquityRatio'))
+                    m += 10
+                    if de is not None:
+                        ok += 1
+                        if de < 0.3: s += 10
+                        elif de < 0.8: s += 6
+                        elif de < 1.5: s += 3
+                        else: s -= 3
 
-                # ── P/L (0-15 pts) — penaliza negativo ────────────────
-                _pl = _safe_float(_r.get('priceEarningsRatio'))
-                _max_possivel += 15
-                if _pl is not None and _pl != 0:
-                    _campos_ok += 1
-                    if 0 < _pl <= 10:    _score_q += 15
-                    elif _pl <= 18:      _score_q += 10
-                    elif _pl <= 30:      _score_q += 5
-                    elif _pl > 50:       _score_q -= 3
+                    fcf = _safe_float(_r.get('freeCashFlowPerShare'))
+                    m += 10
+                    if fcf is not None:
+                        ok += 1
+                        if fcf > 0: s += 10
+                        elif fcf > -1: s += 3
 
-                # ── P/VP (0-10 pts) ───────────────────────────────────
-                _pvp = _safe_float(_r.get('priceToBookRatio'))
-                _max_possivel += 10
-                if _pvp is not None and _pvp > 0:
-                    _campos_ok += 1
-                    if _pvp <= 1.0:      _score_q += 10
-                    elif _pvp <= 2.0:    _score_q += 7
-                    elif _pvp <= 4.0:    _score_q += 4
+                    rev_g = _safe_float(_r.get('revenueGrowth'))
+                    m += 10
+                    if rev_g is not None:
+                        ok += 1
+                        if rev_g > 0.15: s += 10
+                        elif rev_g > 0.05: s += 7
+                        elif rev_g > 0: s += 4
+                        else: s -= 3
 
-                # ── Dívida/Equity (0-15 pts) ──────────────────────────
-                _de = _safe_float(_r.get('debtEquityRatio'))
-                _max_possivel += 15
-                if _de is not None:
-                    _campos_ok += 1
-                    if _de < 0.3:        _score_q += 15
-                    elif _de < 0.8:      _score_q += 10
-                    elif _de < 1.5:      _score_q += 5
-                    else:                _score_q -= 3
-
-                # ── FCF positivo (0-10 pts) ───────────────────────────
-                _fcf = _safe_float(_r.get('freeCashFlowPerShare'))
-                _max_possivel += 10
-                if _fcf is not None:
-                    _campos_ok += 1
-                    if _fcf > 0:         _score_q += 10
-                    elif _fcf > -1:      _score_q += 3
-                    else:                _score_q -= 3
-
-                # ── Crescimento de Receita (0-10 pts) ─────────────────
-                _rev_g = _safe_float(_r.get('revenueGrowth'))
-                _max_possivel += 10
-                if _rev_g is not None:
-                    _campos_ok += 1
-                    if _rev_g > 0.15:    _score_q += 10
-                    elif _rev_g > 0.05:  _score_q += 7
-                    elif _rev_g > 0:     _score_q += 4
-                    else:                _score_q -= 3
-
-                # ── Crescimento de EPS (0-5 pts) ─────────────────────
-                _eps_g = _safe_float(_r.get('epsgrowth') or _r.get('earningsGrowth'))
-                _max_possivel += 5
-                if _eps_g is not None:
-                    _campos_ok += 1
-                    if _eps_g > 0.10:    _score_q += 5
-                    elif _eps_g > 0:     _score_q += 3
-                    else:                _score_q -= 2
-
-                if _campos_ok < 3:
+                    if ok >= 2 and m > 0:
+                        scores_fmp[_data] = round(
+                            max(0, min(100, s / m * 100)), 1
+                        )
+                except Exception:
                     continue
 
-                if _max_possivel > 0:
-                    _score_norm = max(0, min(100, _score_q / _max_possivel * 100))
-                else:
-                    _score_norm = 50.0
+            if len(scores_fmp) >= 3:
+                _serie_fmp = pd.Series(scores_fmp)
+                _serie_fmp.index = pd.to_datetime(_serie_fmp.index)
+                _serie_fmp = _serie_fmp.sort_index()
+                _datas = pd.date_range(
+                    _serie_fmp.index[0],
+                    pd.Timestamp.today(), freq="B"
+                )
+                _serie_d = _serie_fmp.reindex(_datas, method="ffill"
+                ).rolling(5, min_periods=1).mean()
+                return _serie_d.round(1), 'fmp'
 
-                scores_historicos[_data] = round(_score_norm, 1)
+    except Exception:
+        pass
 
-            except Exception:
-                continue
+    # -- Opcao 3: BRAPI snapshot x proxy (apenas BR) -------------------
+    if ticker.endswith('.SA'):
+        try:
+            from utils.brapi_client import get_score_snapshot_brapi
+            _snap = get_score_snapshot_brapi(ticker)
+            if _snap is not None:
+                return None, f'brapi_snapshot:{_snap:.1f}'
+        except Exception:
+            pass
 
-        if len(scores_historicos) < 4:
-            return None
-
-        _serie_q = pd.Series(scores_historicos)
-        _serie_q.index = pd.to_datetime(_serie_q.index)
-        _serie_q = _serie_q.sort_index()
-
-        _datas_diarias = pd.date_range(start=_serie_q.index[0], end=pd.Timestamp.today(), freq='B')
-        _serie_diaria = _serie_q.reindex(_datas_diarias, method='ffill')
-        _serie_diaria = _serie_diaria.rolling(5, min_periods=1).mean()
-
-        return _serie_diaria.round(1)
-
-    except Exception as e:
-        from utils.logger import get_logger
-        get_logger(__name__).warning(f"[backtesting] FMP histórico falhou para {ticker}: {e}")
-        return None
+    return None, 'sem_dados'
 
 
 # ── Backtesting do health score ──────────────────────────────────────
@@ -633,24 +621,28 @@ def rodar_backtesting_score(
             except Exception:
                 _scores_serie = None
 
-        # Opção 2: FMP histórico (fundamentais reais)
+        # Opção 2: Alpha Vantage / FMP / BRAPI (externo)
         if _scores_serie is None:
-            with st.spinner(f"buscando dados históricos fundamentalistas (fmp) para {ticker}..."):
-                _fmp_serie = buscar_score_historico_fmp(ticker)
+            with st.spinner(
+                f"buscando dados fundamentalistas para {ticker} "
+                f"(alpha vantage / fmp / brapi)..."
+            ):
+                _ext_serie, _ext_fonte = buscar_score_historico_externo(ticker)
 
-            if _fmp_serie is not None and len(_fmp_serie) >= 60:
+            if _ext_serie is not None and len(_ext_serie) >= 60:
                 try:
-                    _hist_index_clean = _hist.index
-                    if getattr(_hist_index_clean, 'tz', None) is not None:
-                        _hist_index_clean = _hist_index_clean.tz_localize(None)
-
-                    _fmp_aligned = _fmp_serie.reindex(_hist_index_clean, method='ffill').fillna(50)
-                    _scores_serie = _fmp_aligned.rename('score')
-                    _fonte_score  = 'fmp_fundamentais'
+                    _hist_idx = _hist.index
+                    if getattr(_hist_idx, 'tz', None) is not None:
+                        _hist_idx = _hist_idx.tz_localize(None)
+                    _ext_alinhada = _ext_serie.reindex(
+                        _hist_idx, method='ffill'
+                    ).fillna(50)
+                    _scores_serie = _ext_alinhada.rename('score')
+                    _fonte_score  = _ext_fonte
                 except Exception:
                     _scores_serie = None
 
-        # Opção 3: proxy técnico (fallback)
+        # Opção 3: Proxy técnico + calibração BRAPI (fallback final)
         if _scores_serie is None:
             _fonte_score = 'proxy_tecnico'
 
@@ -692,13 +684,42 @@ def rodar_backtesting_score(
                 + _low_vol * 0.10 + _range_52w * 0.15 + _aceleracao * 0.05
             ).fillna(50).clip(0, 100)
 
-            _scores_serie = _score_proxy.rename('score')
+            # ── Calibração com BRAPI snapshot (apenas BR) ─────────
+            # Se BRAPI retornou um snapshot, usa como fator
+            # de escala para o proxy: ancora o proxy no
+            # nivel fundamentalista atual
+            if (
+                ticker.endswith('.SA')
+                and isinstance(_ext_fonte, str)
+                and _ext_fonte.startswith('brapi_snapshot:')
+            ):
+                try:
+                    _snap_val = float(_ext_fonte.split(':')[1])
+                    # Proxy medio ao redor de 50 -> ancora em snap_val
+                    # Mantem a variacao relativa mas muda o nivel medio
+                    _proxy_mean = float(_score_proxy.mean())
+                    _delta_ancora = _snap_val - _proxy_mean
+                    _score_proxy_cal = (
+                        _score_proxy + _delta_ancora
+                    ).clip(0, 100)
+                    _scores_serie = _score_proxy_cal.rename('score')
+                    _fonte_score  = 'proxy_calibrado_brapi'
 
-            resultado['aviso'] = (
-                "score proxy técnico ativo — FMP sem cobertura fundamentalista "
-                "para este ativo. usando indicadores técnicos (momentum 12-1m, "
-                "trend mm200, rsi). não representa fundamentos reais."
-            )
+                    resultado['aviso'] = (
+                        f"proxy técnico calibrado com dados fundamentais "
+                        f"atuais da brapi (ancora: {_snap_val:.0f}/100). "
+                        "o nivel do score reflete os fundamentos atuais, "
+                        "mas a variacao historica e tecnica."
+                    )
+                except Exception:
+                    _scores_serie = _score_proxy.rename('score')
+            else:
+                _scores_serie = _score_proxy.rename('score')
+                resultado['aviso'] = (
+                    "score proxy puramente tecnico — sem dados "
+                    "fundamentalistas disponiveis para este ativo. "
+                    "resultados de qualidade inferior."
+                )
 
         resultado['fonte_score'] = _fonte_score
         n_anos = len(_hist) / 252
@@ -2698,17 +2719,36 @@ with tab_backtest:
                         'scores reais do banco local',
                         'melhor qualidade — dados calculados pelo motor do app'
                     ),
-                    'fmp_fundamentais': (
+                    'alpha_vantage': (
                         '#00B0FF', '📊',
-                        'fundamentais históricos (fmp)',
-                        'dados fundamentalistas reais trimestrais via financial modeling prep'
+                        'alpha vantage — dre/balanço histórico trimestral',
+                        'dados fundamentalistas reais: receita, lucro, dívida, fcf — trimestrais desde 2010'
+                    ),
+                    'fmp': (
+                        '#00B0FF', '📈',
+                        'financial modeling prep — múltiplos históricos',
+                        'ratios históricos via fmp: p/l, p/vp, roe, margens'
+                    ),
+                    'proxy_calibrado_brapi': (
+                        '#FF9900', '🔧',
+                        'proxy técnico calibrado (brapi)',
+                        'indicadores técnicos com nível âncora nos fundamentos atuais via brapi'
                     ),
                     'proxy_tecnico': (
-                        '#FF9900', '⚠️',
-                        'proxy técnico (sem dados reais)',
-                        'fmp sem cobertura para este ativo — usando indicadores técnicos como proxy'
+                        '#FF1744', '⚠️',
+                        'proxy puramente técnico',
+                        'sem dados fundamentalistas disponíveis — menor qualidade'
+                    ),
+                    'sem_dados': (
+                        '#555', '❓',
+                        'sem dados externos',
+                        'nenhuma fonte disponível'
                     ),
                 }
+                # Fallback para prefixo 'brapi_snapshot'
+                if isinstance(_fonte, str) and _fonte.startswith('brapi_snapshot'):
+                    _fonte = 'proxy_calibrado_brapi'
+
                 _f_cor, _f_icon, _f_label, _f_desc = _fonte_configs.get(
                     _fonte, _fonte_configs['proxy_tecnico']
                 )
