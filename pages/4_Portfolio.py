@@ -352,135 +352,119 @@ def calcular_performance_vs_benchmarks(
 # ── Score histórico via fontes externas ──────────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def buscar_score_historico_externo(ticker: str) -> tuple[pd.Series | None, str]:
+@st.cache_data(ttl=3600, show_spinner=False)
+def buscar_score_historico_externo(
+    ticker: str,
+) -> tuple[pd.Series | None, str]:
     """
-    Busca score historico fundamentalista de fontes externas.
-    Ordem de prioridade:
-    1. Alpha Vantage (quarterly statements historicos)
-    2. FMP (ratios historicos)
-    3. BRAPI snapshot x proxy tecnico (apenas para BR)
+    Busca score histórico de fontes externas na ordem:
+    1. Alpha Vantage (via Supabase cache)
+    2. FMP (somente para ativos EUA)
+    3. BRAPI snapshot (apenas BR — para calibrar proxy)
 
     Retorna (serie_diaria | None, fonte_label)
     """
-    # -- Opcao 1: Alpha Vantage ----------------------------------------
+    # ── Opção 1: Alpha Vantage + Supabase ────────────────────────
     try:
         from utils.alpha_vantage_client import calcular_score_historico_av
-        _av_serie = calcular_score_historico_av(ticker)
-        if _av_serie is not None and len(_av_serie) >= 60:
-            return _av_serie, 'alpha_vantage'
+        _av = calcular_score_historico_av(ticker)
+        if _av is not None and len(_av) >= 60:
+            _max_v = float(_av.max())
+            _min_v = float(_av.min())
+            _std_v = float(_av.std())
+            # Valida qualidade: precisa ter variação real
+            if _std_v >= 2.0 and (_max_v - _min_v) >= 5:
+                return _av, 'alpha_vantage'
+            else:
+                _av_snap = float(_av.median()) if _av is not None else None
     except Exception:
-        pass
+        _av_snap = None
 
-    # -- Opcao 2: FMP (SOMENTE para ativos fora da B3) -------------------
-    # Free tier FMP bloqueia .SA com 403 — nao desperdica requisicao
+    # ── Opção 2: FMP (somente EUA) ────────────────────────────────
     if not ticker.endswith('.SA'):
         try:
-            from utils.fmp_client import _get, _safe_float, _safe_pct
+            from utils.fmp_client import get_multiplos_historicos
+            t_clean  = ticker.upper()
+            hist_fmp = get_multiplos_historicos(t_clean, anos=7)
 
-            t_clean = ticker.replace('.SA', '').upper()
-
-            _ratios  = _get(f"ratios/{t_clean}", {"limit": 40})
-            _income  = _get(f"income-statement/{t_clean}", {"limit": 40, "period": "quarter"})
-            _balance = _get(f"balance-sheet-statement/{t_clean}", {"limit": 40, "period": "quarter"})
-            _cashflow = _get(f"cash-flow-statement/{t_clean}", {"limit": 40, "period": "quarter"})
-
-            if _ratios and len(_ratios) >= 4:
-                _income_map   = {it.get('date', ''): it for it in (_income or [])}
-                _balance_map  = {it.get('date', ''): it for it in (_balance or [])}
-                _cashflow_map = {it.get('date', ''): it for it in (_cashflow or [])}
-
-                _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
-
+            if hist_fmp and len(hist_fmp) >= 4:
                 scores_fmp = {}
-                for _data in _datas_ratio:
-                    try:
-                        _r = next((x for x in _ratios if x.get('date') == _data), {})
-
-                        s = 0.0
-                        m = 0.0
-                        ok = 0
-
-                        pe  = _safe_float(_r.get('priceEarningsRatio'))
-                        m += 15
-                        if pe and 0 < pe <= 30:
-                            ok += 1
-                            if pe <= 10: s += 15
-                            elif pe <= 18: s += 10
-                            elif pe <= 30: s += 5
-
-                        pb = _safe_float(_r.get('priceToBookRatio'))
-                        m += 10
-                        if pb and pb > 0:
-                            ok += 1
-                            if pb <= 1.5: s += 10
-                            elif pb <= 3: s += 6
-                            elif pb <= 6: s += 3
-
-                        roe = _safe_pct(_r.get('returnOnEquity'))
-                        m += 20
-                        if roe is not None:
-                            ok += 1
-                            if roe > 20: s += 20
-                            elif roe > 10: s += 13
-                            elif roe > 0: s += 6
-                            else: s -= 5
-
-                        de = _safe_float(_r.get('debtEquityRatio'))
-                        m += 10
-                        if de is not None:
-                            ok += 1
-                            if de < 0.3: s += 10
-                            elif de < 0.8: s += 6
-                            elif de < 1.5: s += 3
-                            else: s -= 3
-
-                        fcf = _safe_float(_r.get('freeCashFlowPerShare'))
-                        m += 10
-                        if fcf is not None:
-                            ok += 1
-                            if fcf > 0: s += 10
-                            elif fcf > -1: s += 3
-
-                        rev_g = _safe_float(_r.get('revenueGrowth'))
-                        m += 10
-                        if rev_g is not None:
-                            ok += 1
-                            if rev_g > 0.15: s += 10
-                            elif rev_g > 0.05: s += 7
-                            elif rev_g > 0: s += 4
-                            else: s -= 3
-
-                        if ok >= 2 and m > 0:
-                            scores_fmp[_data] = round(
-                                max(0, min(100, s / m * 100)), 1
-                            )
-                    except Exception:
+                for item in hist_fmp:
+                    data = item.get('data', '')
+                    if not data:
                         continue
+                    s, m, ok = 0.0, 0.0, 0
+
+                    pe  = item.get('pe')
+                    m  += 15
+                    if pe and 0 < pe <= 40:
+                        ok += 1
+                        if pe <= 12:   s += 15
+                        elif pe <= 20: s += 10
+                        elif pe <= 30: s += 5
+
+                    roe = item.get('roe')
+                    m  += 20
+                    if roe is not None:
+                        ok += 1
+                        if roe > 20:   s += 20
+                        elif roe > 12: s += 14
+                        elif roe > 6:  s += 8
+                        elif roe > 0:  s += 4
+                        else:          s -= 5
+
+                    roic = item.get('roic')
+                    m   += 15
+                    if roic is not None:
+                        ok += 1
+                        if roic > 15:   s += 15
+                        elif roic > 8:  s += 10
+                        elif roic > 0:  s += 5
+
+                    mrg = item.get('margem')
+                    m  += 15
+                    if mrg is not None:
+                        ok += 1
+                        if mrg > 15:   s += 15
+                        elif mrg > 8:  s += 10
+                        elif mrg > 3:  s += 6
+                        elif mrg >= 0: s += 2
+                        else:          s -= 5
+
+                    if ok >= 2 and m > 0:
+                        scores_fmp[data] = round(
+                            max(0, min(100, s / m * 100)), 1
+                        )
 
                 if len(scores_fmp) >= 3:
-                    _serie_fmp = pd.Series(scores_fmp)
-                    _serie_fmp.index = pd.to_datetime(_serie_fmp.index)
-                    _serie_fmp = _serie_fmp.sort_index()
-                    _datas = pd.date_range(
-                        _serie_fmp.index[0],
+                    serie = pd.Series(scores_fmp)
+                    serie.index = pd.to_datetime(serie.index)
+                    serie = serie.sort_index()
+                    datas = pd.date_range(
+                        serie.index[0],
                         pd.Timestamp.today(), freq="B"
                     )
-                    _serie_d = _serie_fmp.reindex(_datas, method="ffill"
+                    serie_d = serie.reindex(
+                        datas, method="ffill"
                     ).rolling(5, min_periods=1).mean()
-                    return _serie_d.round(1), 'fmp'
-
+                    if float(serie_d.std()) >= 2.0:
+                        return serie_d.round(1), 'fmp'
         except Exception:
             pass
 
-    # -- Opcao 3: BRAPI snapshot x proxy (apenas BR) -------------------
+    # ── Opção 3: BRAPI snapshot para calibração (apenas BR) ───────
     if ticker.endswith('.SA'):
         try:
             from utils.brapi_client import get_score_snapshot_brapi
-            _snap = get_score_snapshot_brapi(ticker)
-            if _snap is not None:
-                return None, f'brapi_snapshot:{_snap:.1f}'
+            snap = get_score_snapshot_brapi(ticker)
+            if snap is not None:
+                return None, f'brapi_snapshot:{snap:.1f}'
         except Exception:
             pass
+
+    # Se AV retornou dados mas sem variação, usa como calibração
+    if 'av_snap' in dir() and _av_snap is not None:
+        return None, f'av_snapshot:{_av_snap:.1f}'
 
     return None, 'sem_dados'
 
@@ -686,48 +670,51 @@ def rodar_backtesting_score(
                 + _low_vol * 0.10 + _range_52w * 0.15 + _aceleracao * 0.05
             ).fillna(50).clip(0, 100)
 
-            # ── Calibração com BRAPI snapshot (apenas BR) ─────────
-            # Se BRAPI retornou um snapshot, usa como fator
-            # de escala para o proxy: ancora o proxy no
-            # nivel fundamentalista atual
-            if (
-                ticker.endswith('.SA')
-                and isinstance(_ext_fonte, str)
-                and _ext_fonte.startswith('brapi_snapshot:')
-            ):
-                try:
-                    _snap_val = float(_ext_fonte.split(':')[1])
-                    # Proxy medio ao redor de 50 -> ancora em snap_val
-                    # Mantem a variacao relativa mas muda o nivel medio
-                    _proxy_mean = float(_score_proxy.mean())
-                    _delta_ancora = _snap_val - _proxy_mean
-                    _score_proxy_cal = (
-                        _score_proxy + _delta_ancora
-                    ).clip(0, 100)
-                    _scores_serie = _score_proxy_cal.rename('score')
-                    _fonte_score  = 'proxy_calibrado_brapi'
+            _scores_serie = _score_proxy.rename('score')
 
-                    resultado['aviso'] = (
-                        f"proxy técnico calibrado com dados fundamentais "
-                        f"atuais da brapi (ancora: {_snap_val:.0f}/100). "
-                        "o nivel do score reflete os fundamentos atuais, "
-                        "mas a variacao historica e tecnica."
-                    )
-                except Exception:
-                    _scores_serie = _score_proxy.rename('score')
-            else:
-                _scores_serie = _score_proxy.rename('score')
+            # ── Calibração por snapshot (BRAPI ou AV) ────────────────
+            _snap_val = None
+            if isinstance(_ext_fonte, str):
+                for _prefix in ('brapi_snapshot:', 'av_snapshot:'):
+                    if _ext_fonte.startswith(_prefix):
+                        try:
+                            _snap_val = float(
+                                _ext_fonte.replace(_prefix, '')
+                            )
+                        except Exception:
+                            pass
+                        break
+
+            if _snap_val is not None and _scores_serie is not None:
+                _proxy_mean  = float(_scores_serie.mean())
+                _delta       = _snap_val - _proxy_mean
+                _scores_cal  = (_scores_serie + _delta).clip(0, 100)
+                _scores_serie = _scores_cal.rename('score')
+                _fonte_score  = 'proxy_calibrado'
+                _fonte_label  = (
+                    'alpha_vantage' if 'av_snapshot' in _ext_fonte
+                    else 'brapi'
+                )
                 resultado['aviso'] = (
-                    "score proxy puramente tecnico — sem dados "
-                    "fundamentalistas disponiveis para este ativo. "
-                    "resultados de qualidade inferior."
+                    f"proxy técnico calibrado com snapshot "
+                    f"fundamentalista ({_fonte_label}: "
+                    f"{_snap_val:.0f}/100). "
+                    "a variação histórica é técnica; o nível reflete "
+                    "os fundamentos atuais do ativo."
+                )
+            elif _scores_serie is not None:
+                _fonte_score = 'proxy_tecnico'
+                resultado['aviso'] = (
+                    "score proxy puramente técnico — sem dados "
+                    "fundamentalistas disponíveis (alpha vantage e "
+                    "brapi sem cobertura para este ativo)."
                 )
 
         resultado['fonte_score'] = _fonte_score
 
         # ── Diagnóstico de APIs externas ──────────────────────────────
         # Só interessa quando caiu em proxy (fundamentalistas falharam)
-        if _fonte_score in ('proxy_tecnico', 'proxy_calibrado_brapi'):
+        if _fonte_score in ('proxy_tecnico', 'proxy_calibrado'):
             from utils.alpha_vantage_client import _get_key as _av_key
             if not _av_key():
                 resultado['aviso_av_key'] = (
@@ -2792,42 +2779,52 @@ with tab_backtest:
                 _fonte_configs = {
                     'banco_local': (
                         '#00C853', '✅',
-                        'scores reais do banco local',
-                        'melhor qualidade — dados calculados pelo motor do app'
+                        'scores reais (banco local)',
+                        'calculados pelo motor do app — máxima qualidade'
                     ),
                     'alpha_vantage': (
                         '#00B0FF', '📊',
-                        'alpha vantage — dre/balanço histórico trimestral',
-                        'dados fundamentalistas reais: receita, lucro, dívida, fcf — trimestrais desde 2010'
+                        'alpha vantage — dre/balanço histórico (supabase)',
+                        'fundamentais trimestrais reais desde 2010 via alpha vantage + cache supabase'
                     ),
                     'fmp': (
                         '#00B0FF', '📈',
                         'financial modeling prep — múltiplos históricos',
-                        'ratios históricos via fmp: p/l, p/vp, roe, margens'
+                        'ratios históricos via fmp (somente ativos eua)'
                     ),
-                    'proxy_calibrado_brapi': (
+                    'proxy_calibrado': (
                         '#FF9900', '🔧',
-                        'proxy técnico calibrado (brapi)',
-                        'indicadores técnicos com nível âncora nos fundamentos atuais via brapi'
+                        'proxy técnico calibrado por fundamentos',
+                        'indicadores técnicos com nível âncora nos fundamentos atuais'
                     ),
                     'proxy_tecnico': (
                         '#FF1744', '⚠️',
                         'proxy puramente técnico',
-                        'sem dados fundamentalistas disponíveis — menor qualidade'
+                        'sem dados fundamentalistas — qualidade inferior'
                     ),
                     'sem_dados': (
                         '#555', '❓',
-                        'sem dados externos',
-                        'nenhuma fonte disponível'
+                        'sem dados disponíveis',
+                        'nenhuma fonte retornou dados para este ativo'
                     ),
                 }
-                # Fallback para prefixo 'brapi_snapshot'
-                if isinstance(_fonte, str) and _fonte.startswith('brapi_snapshot'):
-                    _fonte = 'proxy_calibrado_brapi'
+                # Normaliza prefixos de snapshot
+                if isinstance(_fonte, str):
+                    if _fonte.startswith(('brapi_snapshot:', 'av_snapshot:')):
+                        _fonte = 'proxy_calibrado'
 
                 _f_cor, _f_icon, _f_label, _f_desc = _fonte_configs.get(
                     _fonte, _fonte_configs['proxy_tecnico']
                 )
+
+                # Adiciona info de Supabase se fonte é AV
+                if _fonte == 'alpha_vantage':
+                    try:
+                        from utils.api_cache import _get_supabase_client
+                        _sb_info = " | cache supabase ativo" if _get_supabase_client() else " | sem supabase"
+                    except Exception:
+                        _sb_info = ""
+                    _f_desc += _sb_info
 
                 st.markdown(
                     f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
