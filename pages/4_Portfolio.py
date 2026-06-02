@@ -371,104 +371,106 @@ def buscar_score_historico_externo(ticker: str) -> tuple[pd.Series | None, str]:
     except Exception:
         pass
 
-    # -- Opcao 2: FMP (ja existente) -----------------------------------
-    try:
-        from utils.fmp_client import _get, _safe_float, _safe_pct
+    # -- Opcao 2: FMP (SOMENTE para ativos fora da B3) -------------------
+    # Free tier FMP bloqueia .SA com 403 — nao desperdica requisicao
+    if not ticker.endswith('.SA'):
+        try:
+            from utils.fmp_client import _get, _safe_float, _safe_pct
 
-        t_clean = ticker.replace('.SA', '').upper()
+            t_clean = ticker.replace('.SA', '').upper()
 
-        _ratios  = _get(f"ratios/{t_clean}", {"limit": 40})
-        _income  = _get(f"income-statement/{t_clean}", {"limit": 40, "period": "quarter"})
-        _balance = _get(f"balance-sheet-statement/{t_clean}", {"limit": 40, "period": "quarter"})
-        _cashflow = _get(f"cash-flow-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+            _ratios  = _get(f"ratios/{t_clean}", {"limit": 40})
+            _income  = _get(f"income-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+            _balance = _get(f"balance-sheet-statement/{t_clean}", {"limit": 40, "period": "quarter"})
+            _cashflow = _get(f"cash-flow-statement/{t_clean}", {"limit": 40, "period": "quarter"})
 
-        if _ratios and len(_ratios) >= 4:
-            _income_map   = {it.get('date', ''): it for it in (_income or [])}
-            _balance_map  = {it.get('date', ''): it for it in (_balance or [])}
-            _cashflow_map = {it.get('date', ''): it for it in (_cashflow or [])}
+            if _ratios and len(_ratios) >= 4:
+                _income_map   = {it.get('date', ''): it for it in (_income or [])}
+                _balance_map  = {it.get('date', ''): it for it in (_balance or [])}
+                _cashflow_map = {it.get('date', ''): it for it in (_cashflow or [])}
 
-            _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
+                _datas_ratio = sorted([r.get('date', '') for r in _ratios if r.get('date')], reverse=True)
 
-            scores_fmp = {}
-            for _data in _datas_ratio:
-                try:
-                    _r = next((x for x in _ratios if x.get('date') == _data), {})
+                scores_fmp = {}
+                for _data in _datas_ratio:
+                    try:
+                        _r = next((x for x in _ratios if x.get('date') == _data), {})
 
-                    s = 0.0
-                    m = 0.0
-                    ok = 0
+                        s = 0.0
+                        m = 0.0
+                        ok = 0
 
-                    pe  = _safe_float(_r.get('priceEarningsRatio'))
-                    m += 15
-                    if pe and 0 < pe <= 30:
-                        ok += 1
-                        if pe <= 10: s += 15
-                        elif pe <= 18: s += 10
-                        elif pe <= 30: s += 5
+                        pe  = _safe_float(_r.get('priceEarningsRatio'))
+                        m += 15
+                        if pe and 0 < pe <= 30:
+                            ok += 1
+                            if pe <= 10: s += 15
+                            elif pe <= 18: s += 10
+                            elif pe <= 30: s += 5
 
-                    pb = _safe_float(_r.get('priceToBookRatio'))
-                    m += 10
-                    if pb and pb > 0:
-                        ok += 1
-                        if pb <= 1.5: s += 10
-                        elif pb <= 3: s += 6
-                        elif pb <= 6: s += 3
+                        pb = _safe_float(_r.get('priceToBookRatio'))
+                        m += 10
+                        if pb and pb > 0:
+                            ok += 1
+                            if pb <= 1.5: s += 10
+                            elif pb <= 3: s += 6
+                            elif pb <= 6: s += 3
 
-                    roe = _safe_pct(_r.get('returnOnEquity'))
-                    m += 20
-                    if roe is not None:
-                        ok += 1
-                        if roe > 20: s += 20
-                        elif roe > 10: s += 13
-                        elif roe > 0: s += 6
-                        else: s -= 5
+                        roe = _safe_pct(_r.get('returnOnEquity'))
+                        m += 20
+                        if roe is not None:
+                            ok += 1
+                            if roe > 20: s += 20
+                            elif roe > 10: s += 13
+                            elif roe > 0: s += 6
+                            else: s -= 5
 
-                    de = _safe_float(_r.get('debtEquityRatio'))
-                    m += 10
-                    if de is not None:
-                        ok += 1
-                        if de < 0.3: s += 10
-                        elif de < 0.8: s += 6
-                        elif de < 1.5: s += 3
-                        else: s -= 3
+                        de = _safe_float(_r.get('debtEquityRatio'))
+                        m += 10
+                        if de is not None:
+                            ok += 1
+                            if de < 0.3: s += 10
+                            elif de < 0.8: s += 6
+                            elif de < 1.5: s += 3
+                            else: s -= 3
 
-                    fcf = _safe_float(_r.get('freeCashFlowPerShare'))
-                    m += 10
-                    if fcf is not None:
-                        ok += 1
-                        if fcf > 0: s += 10
-                        elif fcf > -1: s += 3
+                        fcf = _safe_float(_r.get('freeCashFlowPerShare'))
+                        m += 10
+                        if fcf is not None:
+                            ok += 1
+                            if fcf > 0: s += 10
+                            elif fcf > -1: s += 3
 
-                    rev_g = _safe_float(_r.get('revenueGrowth'))
-                    m += 10
-                    if rev_g is not None:
-                        ok += 1
-                        if rev_g > 0.15: s += 10
-                        elif rev_g > 0.05: s += 7
-                        elif rev_g > 0: s += 4
-                        else: s -= 3
+                        rev_g = _safe_float(_r.get('revenueGrowth'))
+                        m += 10
+                        if rev_g is not None:
+                            ok += 1
+                            if rev_g > 0.15: s += 10
+                            elif rev_g > 0.05: s += 7
+                            elif rev_g > 0: s += 4
+                            else: s -= 3
 
-                    if ok >= 2 and m > 0:
-                        scores_fmp[_data] = round(
-                            max(0, min(100, s / m * 100)), 1
-                        )
-                except Exception:
-                    continue
+                        if ok >= 2 and m > 0:
+                            scores_fmp[_data] = round(
+                                max(0, min(100, s / m * 100)), 1
+                            )
+                    except Exception:
+                        continue
 
-            if len(scores_fmp) >= 3:
-                _serie_fmp = pd.Series(scores_fmp)
-                _serie_fmp.index = pd.to_datetime(_serie_fmp.index)
-                _serie_fmp = _serie_fmp.sort_index()
-                _datas = pd.date_range(
-                    _serie_fmp.index[0],
-                    pd.Timestamp.today(), freq="B"
-                )
-                _serie_d = _serie_fmp.reindex(_datas, method="ffill"
-                ).rolling(5, min_periods=1).mean()
-                return _serie_d.round(1), 'fmp'
+                if len(scores_fmp) >= 3:
+                    _serie_fmp = pd.Series(scores_fmp)
+                    _serie_fmp.index = pd.to_datetime(_serie_fmp.index)
+                    _serie_fmp = _serie_fmp.sort_index()
+                    _datas = pd.date_range(
+                        _serie_fmp.index[0],
+                        pd.Timestamp.today(), freq="B"
+                    )
+                    _serie_d = _serie_fmp.reindex(_datas, method="ffill"
+                    ).rolling(5, min_periods=1).mean()
+                    return _serie_d.round(1), 'fmp'
 
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     # -- Opcao 3: BRAPI snapshot x proxy (apenas BR) -------------------
     if ticker.endswith('.SA'):

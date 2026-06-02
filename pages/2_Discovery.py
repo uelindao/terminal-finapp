@@ -62,6 +62,81 @@ _n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
 _n_cache_us = sum(1 for t in CACHE_FUNDAMENTOS if not str(t).endswith('.SA'))
 st.caption(f"cache: {_n_cache_br} ativos BR | {_n_cache_us} ativos EUA")
 
+# ══ SYNC AVANÇADO — FUNDAMENTOS POR ALPHA VANTAGE ══════════════════════
+with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", expanded=True):
+    col_stats_a, col_stats_b, col_stats_c = st.columns(3)
+    with col_stats_a:
+        status_card("cache local", f"{len(CACHE_FUNDAMENTOS)} ativos", tipo="info")
+    with col_stats_b:
+        _sb_total = 0
+        try:
+            from utils.api_cache import get_todos_do_provider
+            amostra = list(CACHE_FUNDAMENTOS.keys())[:5] if CACHE_FUNDAMENTOS else []
+            if amostra:
+                _amostra_av = get_todos_do_provider(amostra[0], "alpha_vantage", "INCOME_STATEMENT")
+                _sb_total = "ok" if _amostra_av else "vazio"
+        except Exception:
+            _sb_total = "—"
+        status_card("supabase", str(_sb_total), tipo="success" if _sb_total == "ok" else "warning")
+
+    with col_stats_c:
+        _chaves_disp = 0
+        try:
+            from utils.api_cache import get_av_rotator
+            _r = get_av_rotator()
+            _chaves_disp = sum(1 for _ in range(10) if _r.get_available_key())
+        except Exception:
+            _chaves_disp = 0
+        status_card("chaves AV", f"{_chaves_disp} disp.", tipo="success" if _chaves_disp > 0 else "danger")
+
+    _modo_sync = st.radio("modo:", ["watchlist", "ticker avulso"], horizontal=True, key="sync_modo")
+
+    _wl_opts = {}
+    _ticker_input = st.text_input("ticker:", placeholder="ex: PETR4", key="sync_ticker_input",
+                                  disabled=(_modo_sync != "ticker avulso"))
+    if _modo_sync == "watchlist":
+        _wl_list = listar_watchlists()
+        _wl_opts = {f"{w.get('icone','📋')} {w['nome']} ({w.get('total_ativos',0)} ativos)": w['id'] for w in _wl_list}
+        _wl_sel = st.selectbox("selecionar watchlist:", list(_wl_opts.keys()) if _wl_opts else ["(nenhuma)"],
+                               key="sync_wl_sel")
+
+    if st.button("🚀 iniciar sincronização", type="primary", use_container_width=True,
+                 key="btn_sync_avancado"):
+        _lista_sync = []
+        if _modo_sync == "watchlist" and _wl_opts and _wl_sel in _wl_opts:
+            _wl_id = _wl_opts[_wl_sel]
+            _items = listar_watchlist(_wl_id)
+            _lista_sync = list(set(it['ticker'] for it in _items))
+        elif _modo_sync == "ticker avulso" and _ticker_input:
+            _lista_sync = [t.strip().upper() for t in _ticker_input.replace(",", " ").split() if t.strip()]
+
+        if not _lista_sync:
+            st.warning("nenhum ativo selecionado.")
+        else:
+            _progresso = st.progress(0, text="iniciando...")
+            _log_area  = st.empty()
+            _log_linhas = []
+            _total = len(_lista_sync)
+
+            from utils.alpha_vantage_client import get_quarterly_fundamentals_cached
+
+            for _i, _t in enumerate(_lista_sync):
+                try:
+                    _q = get_quarterly_fundamentals_cached(_t)
+                    _n_periodos = len(_q) if _q else 0
+                    _msg = f"✅ {_t} — {_n_periodos} trimestres"
+                except Exception as _e:
+                    _msg = f"❌ {_t} — {_e}"
+                _log_linhas.append(_msg)
+                _log_area.code("\n".join(_log_linhas[-20:]), language="")
+                _progresso.progress((_i + 1) / _total,
+                                    text=f"{_i+1}/{_total} — {_t}")
+                time.sleep(0.3)
+
+            _progresso.progress(1.0, text="concluído!")
+            st.success(f"✅ sincronização finalizada — {_total} ativos processados.")
+            st.rerun()
+
 st.markdown("---")
 
 def traduzir_setor(setor_raw: str) -> str:
