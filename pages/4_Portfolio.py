@@ -351,8 +351,6 @@ def calcular_performance_vs_benchmarks(
 
 # ── Score histórico via fontes externas ──────────────────────────────
 
-@st.cache_data(ttl=86400, show_spinner=False)
-@st.cache_data(ttl=3600, show_spinner=False)
 def buscar_score_historico_externo(
     ticker: str,
 ) -> tuple[pd.Series | None, str]:
@@ -364,6 +362,8 @@ def buscar_score_historico_externo(
 
     Retorna (serie_diaria | None, fonte_label)
     """
+    _av_snap = None
+
     # ── Opção 1: Alpha Vantage + Supabase ────────────────────────
     try:
         from utils.alpha_vantage_client import calcular_score_historico_av
@@ -376,9 +376,9 @@ def buscar_score_historico_externo(
             if _std_v >= 2.0 and (_max_v - _min_v) >= 5:
                 return _av, 'alpha_vantage'
             else:
-                _av_snap = float(_av.median()) if _av is not None else None
+                _av_snap = float(_av.median())
     except Exception:
-        _av_snap = None
+        pass
 
     # ── Opção 2: FMP (somente EUA) ────────────────────────────────
     if not ticker.endswith('.SA'):
@@ -463,7 +463,7 @@ def buscar_score_historico_externo(
             pass
 
     # Se AV retornou dados mas sem variação, usa como calibração
-    if 'av_snap' in dir() and _av_snap is not None:
+    if _av_snap is not None:
         return None, f'av_snapshot:{_av_snap:.1f}'
 
     return None, 'sem_dados'

@@ -184,7 +184,6 @@ def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
     return resultados
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def calcular_score_historico_av(ticker: str) -> pd.Series | None:
     """
     Calcula serie de scores fundamentalistas historicos usando

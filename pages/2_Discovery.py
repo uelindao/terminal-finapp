@@ -114,11 +114,22 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
             st.warning("nenhum ativo selecionado.")
         else:
             _progresso = st.progress(0, text="iniciando...")
-            _log_area  = st.empty()
             _log_linhas = []
             _total = len(_lista_sync)
 
             from utils.alpha_vantage_client import get_quarterly_fundamentals_cached
+            from utils.api_cache import get_av_rotator, _get_supabase_client
+
+            # ── Diagnóstico: status das chaves e Supabase ──────────────
+            _diag_lines = []
+            _sb = _get_supabase_client()
+            _diag_lines.append(f"supabase: {'conectado' if _sb else 'desconectado'}")
+            _rot = get_av_rotator()
+            _diag_lines.append(f"chaves AV configuradas: {len(_rot.keys)}")
+            _av_key = _rot.get_available_key()
+            _diag_lines.append(f"chave AV disponivel: {_av_key is not None}")
+            _log_area = st.empty()
+            _log_area.code("\n".join(_diag_lines), language="")
 
             for _i, _t in enumerate(_lista_sync):
                 try:
@@ -135,6 +146,7 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
 
             _progresso.progress(1.0, text="concluído!")
             st.success(f"✅ sincronização finalizada — {_total} ativos processados.")
+            st.cache_data.clear()
             st.rerun()
 
 st.markdown("---")
