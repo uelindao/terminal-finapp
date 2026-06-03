@@ -326,8 +326,11 @@ class AlphaVantageKeyRotator:
         AV_BASE = "https://www.alphavantage.co/query"
 
         for key in self.keys:
+            if key in self._exhausted_keys:
+                continue
             uso = self._get_uso_hoje(key)
             if uso >= self.LIMITE_DIARIO:
+                self._exhausted_keys.add(key)
                 continue
 
             try:
