@@ -31,7 +31,12 @@ from utils.components import page_header, section_title, status_card, empty_stat
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
-from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client, get_sync_dashboard
+from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
+try:
+    from utils.api_cache import get_sync_dashboard
+except ImportError:
+    def get_sync_dashboard():
+        return {}
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
