@@ -32,11 +32,19 @@ from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
 from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
+
 try:
     from utils.api_cache import get_sync_dashboard
 except ImportError:
     def get_sync_dashboard():
         return {}
+
+try:
+    from utils.alpha_vantage_client import sync_progressivo
+except ImportError:
+    def sync_progressivo(watchlist_tickers=None, max_requests=None,
+                         incluir_fiis_brapi=False, callback=None):
+        return {"_erro": "alpha_vantage_client não disponível"}
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -55,7 +63,6 @@ if st.session_state.get("_av_auto_sync_date") != _hoje_sync:
     if _rot_check.get_available_key():
         with st.spinner("🔄 sincronização automática diária (2 ativos)…"):
             try:
-                from utils.alpha_vantage_client import sync_progressivo
                 sync_progressivo(watchlist_tickers=[], max_requests=6)  # 2 ativos × 3 req
             except Exception as _e_auto:
                 pass  # silencioso — não bloqueia o usuário
@@ -212,8 +219,6 @@ with st.expander("🔄 sincronização de fundamentos (AV + yfinance)", expanded
 
     # ── Execução do sync ───────────────────────────────────────────────
     if st.button("🚀 iniciar sincronização", type="primary", use_container_width=True, key="btn_sync_avancado"):
-        from utils.alpha_vantage_client import sync_progressivo
-
         _wl_tickers: list[str] = []
         _max_req = None
 
