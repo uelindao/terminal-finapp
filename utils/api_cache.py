@@ -256,6 +256,8 @@ class AlphaVantageKeyRotator:
         except Exception:
             pass
         self.keys = keys
+        self._exhausted_keys: set[str] = set()
+        self._today: str = str(datetime.date.today())
 
     def _hash_key(self, key: str) -> str:
         return hashlib.sha256(key.encode()).hexdigest()[:16]
@@ -297,10 +299,18 @@ class AlphaVantageKeyRotator:
             pass
 
     def get_available_key(self) -> str | None:
+        _hoje = str(datetime.date.today())
+        if _hoje != self._today:
+            self._exhausted_keys.clear()
+            self._today = _hoje
+
         for key in self.keys:
+            if key in self._exhausted_keys:
+                continue
             uso = self._get_uso_hoje(key)
             if uso < self.LIMITE_DIARIO:
                 return key
+            self._exhausted_keys.add(key)
         logger.warning(
             "[av] todas as chaves atingiram o limite diario de "
             f"{self.LIMITE_DIARIO} requests"
@@ -339,6 +349,7 @@ class AlphaVantageKeyRotator:
                         f"[av] chave {self._hash_key(key)} atingiu limite"
                     )
                     self._incrementar_uso(key)
+                    self._exhausted_keys.add(key)
                     time.sleep(sleep_between)
                     continue
 

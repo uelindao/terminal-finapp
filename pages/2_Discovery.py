@@ -131,17 +131,23 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
             _log_area = st.empty()
             _log_area.code("\n".join(_diag_lines), language="")
 
+            _fii_set = set(FII_TODOS)
+
             for _i, _t in enumerate(_lista_sync):
-                try:
-                    _q = get_quarterly_fundamentals_cached(_t)
-                    _n_periodos = len(_q) if _q else 0
-                    _msg = f"✅ {_t} — {_n_periodos} trimestres"
-                except Exception as _e:
-                    _msg = f"❌ {_t} — {_e}"
+                _t_up = _t.upper()
+                if _t_up in _fii_set:
+                    _msg = f"⏭️ {_t_up} — FII (AV não cobre)"
+                else:
+                    try:
+                        _q = get_quarterly_fundamentals_cached(_t_up)
+                        _n_periodos = len(_q) if _q else 0
+                        _msg = f"✅ {_t_up} — {_n_periodos} trimestres"
+                    except Exception as _e:
+                        _msg = f"❌ {_t_up} — {_e}"
                 _log_linhas.append(_msg)
                 _log_area.code("\n".join(_log_linhas[-20:]), language="")
                 _progresso.progress((_i + 1) / _total,
-                                    text=f"{_i+1}/{_total} — {_t}")
+                                    text=f"{_i+1}/{_total} — {_t_up}")
                 time.sleep(0.3)
 
             _progresso.progress(1.0, text="concluído!")
