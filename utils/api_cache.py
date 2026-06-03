@@ -382,8 +382,9 @@ class AlphaVantageKeyRotator:
 
 def get_tickers_cached_av() -> dict[str, int]:
     """
-    Retorna dict {ticker: n_trimestres} de todos os ativos
-    que tem ao menos 1 trimestre de INCOME_STATEMENT no cache AV.
+    Retorna dict {ticker: n_trimestres} de todos os ativos com pelo menos
+    1 trimestre de INCOME_STATEMENT no cache — inclui dados de
+    alpha_vantage E yfinance.
     """
     sb = _get_supabase_client()
     if sb is None:
@@ -392,7 +393,7 @@ def get_tickers_cached_av() -> dict[str, int]:
         resp = (
             sb.table("api_cache")
             .select("ticker, periodo")
-            .eq("provider", "alpha_vantage")
+            .in_("provider", ["alpha_vantage", "yfinance"])
             .eq("endpoint", "INCOME_STATEMENT")
             .not_.is_("periodo", "null")
             .execute()
@@ -429,12 +430,24 @@ def get_sync_dashboard() -> dict:
 
     rotator = get_av_rotator()
     chave   = rotator.get_available_key()
+
+    # Lê n_chaves direto do st.secrets (ignora o rotator cacheado)
+    try:
+        _av_sec   = st.secrets.get("alpha_vantage", {})
+        _lista    = _av_sec.get("api_keys", [])
+        _singular = _av_sec.get("api_key", "")
+        n_chaves_real = len(_lista) + (
+            1 if _singular and _singular not in list(_lista) else 0
+        )
+    except Exception:
+        n_chaves_real = max(1, len(rotator.keys))
+
     # calcula uso somando todas as chaves configuradas para hoje
     uso_total_hoje = sum(rotator._get_uso_hoje(k) for k in rotator.keys) if rotator.keys else 0
-    quota_total    = AlphaVantageKeyRotator.LIMITE_DIARIO * max(1, len(rotator.keys))
+    quota_total    = AlphaVantageKeyRotator.LIMITE_DIARIO * max(1, n_chaves_real)
     quota_restante = max(0, quota_total - uso_total_hoje)
 
-    # ativos sincronizados hoje (updated_at >= início do dia UTC)
+    # ativos sincronizados hoje (qualquer provider)
     sincronizados_hoje: list[str] = []
     sb = _get_supabase_client()
     if sb:
@@ -443,7 +456,7 @@ def get_sync_dashboard() -> dict:
             r = (
                 sb.table("api_cache")
                 .select("ticker")
-                .eq("provider", "alpha_vantage")
+                .in_("provider", ["alpha_vantage", "yfinance"])
                 .eq("endpoint", "INCOME_STATEMENT")
                 .not_.is_("periodo", "null")
                 .gte("updated_at", hoje_str)
@@ -463,7 +476,7 @@ def get_sync_dashboard() -> dict:
         "restantes_count":     len(restantes),
         "restantes_list":      restantes,
         "fii_count":           len([t for t in fii_set if t in set(SCREENER_B3)]),
-        "n_chaves":            len(rotator.keys),
+        "n_chaves":            n_chaves_real,
         "quota_total":         quota_total,
         "quota_usada_hoje":    uso_total_hoje,
         "quota_restante_hoje": quota_restante,
