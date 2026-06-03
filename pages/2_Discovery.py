@@ -31,6 +31,7 @@ from utils.components import page_header, section_title, status_card, empty_stat
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
+from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -64,7 +65,6 @@ st.caption(f"cache: {_n_cache_br} ativos BR | {_n_cache_us} ativos EUA")
 
 # ══ SYNC AVANÇADO — FUNDAMENTOS POR ALPHA VANTAGE ══════════════════════
 with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", expanded=True):
-    from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
 
     _cache_av = get_tickers_cached_av()
     _n_cached_av = len(_cache_av)
