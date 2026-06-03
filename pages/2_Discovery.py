@@ -31,7 +31,7 @@ from utils.components import page_header, section_title, status_card, empty_stat
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
-from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
+from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client, get_sync_dashboard
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -41,6 +41,19 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+
+# ── Auto-sync diário: roda 1x por sessão por dia ─────────────────────────────
+_hoje_sync = str(datetime.date.today())
+if st.session_state.get("_av_auto_sync_date") != _hoje_sync:
+    st.session_state["_av_auto_sync_date"] = _hoje_sync
+    _rot_check = get_av_rotator()
+    if _rot_check.get_available_key():
+        with st.spinner("🔄 sincronização automática diária (2 ativos)…"):
+            try:
+                from utils.alpha_vantage_client import sync_progressivo
+                sync_progressivo(watchlist_tickers=[], max_requests=6)  # 2 ativos × 3 req
+            except Exception as _e_auto:
+                pass  # silencioso — não bloqueia o usuário
 
 init_db()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
@@ -63,134 +76,192 @@ _n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
 _n_cache_us = sum(1 for t in CACHE_FUNDAMENTOS if not str(t).endswith('.SA'))
 st.caption(f"cache: {_n_cache_br} ativos BR | {_n_cache_us} ativos EUA")
 
-# ══ SYNC AVANÇADO — FUNDAMENTOS POR ALPHA VANTAGE ══════════════════════
-with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", expanded=True):
+# ══ SYNC AVANÇADO — FUNDAMENTOS POR ALPHA VANTAGE / YFINANCE ═══════════
+with st.expander("🔄 sincronização de fundamentos (AV + yfinance)", expanded=True):
 
-    _cache_av = get_tickers_cached_av()
-    _n_cached_av = len(_cache_av)
+    # ── Dashboard de progresso ─────────────────────────────────────────
+    _dash = get_sync_dashboard()
     _fii_set = set(FII_TODOS)
-    _b3_set = set(SCREENER_B3)
-    _b3_sem_cache = sorted(_b3_set - set(_cache_av.keys()) - _fii_set)
-    _n_b3_restantes = len(_b3_sem_cache)
+    _b3_set  = set(SCREENER_B3)
 
-    col_stats_a, col_stats_b, col_stats_c, col_stats_d = st.columns(4)
-    with col_stats_a:
-        status_card("🗄️ cached AV", f"{_n_cached_av} ativos", tipo="success" if _n_cached_av > 0 else "info")
-    with col_stats_b:
-        _wl_list = listar_watchlists()
-        _wl_total = sum(w.get('total_ativos', 0) for w in _wl_list)
-        status_card("📋 watchlists", f"{_wl_total} ativos", tipo="info")
-    with col_stats_c:
-        _rot = get_av_rotator()
-        _n_chaves = len(_rot.keys)
-        _k_disp = "sim" if _rot.get_available_key() else "não"
-        status_card("🔑 chaves AV", f"{_n_chaves} ({_k_disp})", tipo="success" if _k_disp == "sim" else "danger")
-    with col_stats_d:
-        status_card("📦 restantes B3", f"{_n_b3_restantes}" if _n_b3_restantes > 0 else "0", tipo="warning" if _n_b3_restantes > 0 else "success")
+    _da, _db, _dc, _dd, _de, _df = st.columns(6)
+    with _da:
+        metric_card("cached",    str(_dash.get("cached_count", 0)),
+                    f"de {_dash.get('b3_total',0)} ações B3", "bull" if _dash.get("cached_count",0) > 0 else "muted")
+    with _db:
+        metric_card("restantes", str(_dash.get("restantes_count", 0)), "sem cache", "amber" if _dash.get("restantes_count",0) > 0 else "bull")
+    with _dc:
+        _q_rest = _dash.get("quota_restante_hoje", 0)
+        metric_card("quota hoje", str(_q_rest), f"req restantes / {_dash.get('quota_total',25)}", "bull" if _q_rest > 0 else "bear")
+    with _dd:
+        metric_card("chaves AV", str(_dash.get("n_chaves", 0)), "configuradas",
+                    "bull" if _dash.get("chave_disponivel") else "bear")
+    with _de:
+        _hoje_sinc = len(_dash.get("sincronizados_hoje", []))
+        metric_card("hoje",      str(_hoje_sinc), "ativos sincronizados", "info")
+    with _df:
+        _est = _dash.get("est_dias_uteis", 0)
+        metric_card("previsão",  f"{_est}d" if _est > 0 else "✅",
+                    "dias úteis restantes", "muted" if _est > 2 else "bull")
 
-    if st.button("📋 ver quais ativos estão em cache", use_container_width=True, key="btn_ver_cache"):
-        _rows = []
-        _todos_b3 = sorted(set(t.upper() for t in (_b3_set | _fii_set)))
-        for _t in _todos_b3:
-            _nq = _cache_av.get(_t, 0)
-            if _nq > 0:
-                _status = "✅"
-            elif _t in _fii_set:
-                _status = "⏭️"
-            else:
-                _status = "❌"
-            _rows.append({"ativo": _t, "trimestres": _nq if _nq > 0 else "—", "status": _status})
-        st.dataframe(
-            _rows,
-            column_config={
-                "ativo":    st.column_config.TextColumn("ativo", width="small"),
-                "trimestres": st.column_config.TextColumn("trim.", width="small"),
-                "status":   st.column_config.TextColumn("status", width="small"),
-            },
-            use_container_width=True,
-            hide_index=True,
-            height=min(60 * len(_rows), 360),
-        )
+    # ── Barra de progresso ─────────────────────────────────────────────
+    _pct = _dash.get("pct_completo", 0)
+    _n_c = _dash.get("cached_count", 0)
+    _n_t = _dash.get("b3_total", 1)
+    st.markdown(
+        f'<div style="margin:10px 0 4px;">'
+        f'<div style="font-family:var(--font-ui); font-size:0.65rem;'
+        f' color:var(--text-muted); margin-bottom:4px;">'
+        f'universo b3 (ações): {_n_c}/{_n_t} — {_pct}%</div>'
+        f'<div style="background:var(--bg-elevated); border-radius:4px; height:6px;">'
+        f'<div style="background:var(--accent); width:{_pct}%; height:6px;'
+        f' border-radius:4px; transition:width 0.3s;"></div>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
 
-    _modo_sync = st.radio("modo:", ["watchlist", "ticker avulso"], horizontal=True, key="sync_modo")
+    # Aviso se sem quota e sem yfinance
+    if not _dash.get("chave_disponivel") and _dash.get("restantes_count", 0) > 0:
+        st.info("⚡ quota AV esgotada hoje — o sync usará **yfinance** como fallback (4-5 anos de histórico).", icon="ℹ️")
+
+    st.markdown("---")
+
+    # ── Controles de sincronização ─────────────────────────────────────
+    _modo_sync = st.radio("modo:", ["watchlist", "ticker avulso", "b3 completo"], horizontal=True, key="sync_modo")
 
     _wl_opts = {}
-    _ticker_input = st.text_input("ticker:", placeholder="ex: PETR4", key="sync_ticker_input",
-                                  disabled=(_modo_sync != "ticker avulso"))
+    _ticker_input = ""
+    _continuar_b3 = False
+    _sync_fiis    = False
+
     if _modo_sync == "watchlist":
         _wl_list = listar_watchlists()
         _wl_opts = {f"{w.get('icone','📋')} {w['nome']} ({w.get('total_ativos',0)} ativos)": w['id'] for w in _wl_list}
-        _wl_sel = st.selectbox("selecionar watchlist:", list(_wl_opts.keys()) if _wl_opts else ["(nenhuma)"],
-                               key="sync_wl_sel")
+        _wl_sel = st.selectbox("selecionar watchlist:", list(_wl_opts.keys()) if _wl_opts else ["(nenhuma)"], key="sync_wl_sel")
+        _col_opt1, _col_opt2 = st.columns(2)
+        with _col_opt1:
+            _continuar_b3 = st.checkbox("continuar com B3 restante após watchlist", value=True, key="sync_continuar_b3")
+        with _col_opt2:
+            _sync_fiis = st.checkbox("incluir FIIs via BRAPI", value=False, key="sync_fiis")
 
-    if st.button("🚀 iniciar sincronização", type="primary", use_container_width=True,
-                 key="btn_sync_avancado"):
-        _lista_sync = []
+    elif _modo_sync == "ticker avulso":
+        _ticker_input = st.text_input("ticker(es):", placeholder="ex: PETR4, VALE3", key="sync_ticker_input")
+
+    elif _modo_sync == "b3 completo":
+        st.caption(f"sincronizará todos os {_dash.get('restantes_count',0)} ativos B3 restantes. usa AV quando disponível, yfinance como fallback.")
+        _col_opt2, _ = st.columns(2)
+        with _col_opt2:
+            _sync_fiis = st.checkbox("incluir FIIs via BRAPI", value=False, key="sync_fiis_b3")
+
+    # ── Botão de ver cache ─────────────────────────────────────────────
+    if st.button("📋 ver status de todos os ativos", use_container_width=True, key="btn_ver_cache"):
+        _rows = []
+        _todos_b3 = sorted(set(t.upper() for t in (_b3_set | _fii_set)))
+        _cache_av = get_tickers_cached_av()
+        # também verifica cache yfinance
+        from utils.api_cache import get_tickers_cached_av as _gtca
+        _cache_yf_raw = _get_supabase_client()
+        _cache_yf: dict = {}
+        if _cache_yf_raw:
+            try:
+                _r_yf = (_cache_yf_raw.table("api_cache")
+                         .select("ticker, periodo")
+                         .eq("provider", "yfinance")
+                         .eq("endpoint", "INCOME_STATEMENT")
+                         .not_.is_("periodo", "null")
+                         .execute())
+                for _rr in (_r_yf.data or []):
+                    _t2 = _rr["ticker"]
+                    _cache_yf[_t2] = _cache_yf.get(_t2, 0) + 1
+            except Exception:
+                pass
+
+        for _t in _todos_b3:
+            _nq_av = _cache_av.get(_t, 0)
+            _nq_yf = _cache_yf.get(_t, 0)
+            _nq    = _nq_av or _nq_yf
+            if _t in _fii_set:
+                _status = "⏭️ FII"
+                _fonte  = "brapi"
+            elif _nq_av > 0:
+                _status = "✅ av"
+                _fonte  = "alpha_vantage"
+            elif _nq_yf > 0:
+                _status = "✅ yf"
+                _fonte  = "yfinance"
+            else:
+                _status = "❌"
+                _fonte  = "—"
+            _rows.append({"ativo": _t, "trim.": _nq if _nq > 0 else "—", "fonte": _fonte, "status": _status})
+        st.dataframe(
+            _rows,
+            column_config={
+                "ativo":   st.column_config.TextColumn("ativo",  width="small"),
+                "trim.":   st.column_config.TextColumn("trim.",  width="small"),
+                "fonte":   st.column_config.TextColumn("fonte",  width="medium"),
+                "status":  st.column_config.TextColumn("status", width="small"),
+            },
+            use_container_width=True, hide_index=True,
+            height=min(60 * len(_rows), 400),
+        )
+
+    # ── Execução do sync ───────────────────────────────────────────────
+    if st.button("🚀 iniciar sincronização", type="primary", use_container_width=True, key="btn_sync_avancado"):
+        from utils.alpha_vantage_client import sync_progressivo
+
+        _wl_tickers: list[str] = []
+        _max_req = None
+
         if _modo_sync == "watchlist" and _wl_opts and _wl_sel in _wl_opts:
             _wl_id = _wl_opts[_wl_sel]
             _items = listar_watchlist(_wl_id)
-            _lista_sync = list(set(it['ticker'] for it in _items))
-        elif _modo_sync == "ticker avulso" and _ticker_input:
-            _lista_sync = [t.strip().upper() for t in _ticker_input.replace(",", " ").split() if t.strip()]
+            _wl_tickers = list({it['ticker'].upper() for it in _items})
+            if not _continuar_b3:
+                _max_req = len(_wl_tickers) * 3 + 3  # limita à watchlist
 
-        if not _lista_sync:
+        elif _modo_sync == "ticker avulso" and _ticker_input:
+            _wl_tickers = [t.strip().upper() for t in _ticker_input.replace(",", " ").split() if t.strip()]
+            _max_req = len(_wl_tickers) * 3 + 3
+
+        elif _modo_sync == "b3 completo":
+            _wl_tickers = []  # usa toda a fila B3
+
+        if not _wl_tickers and _modo_sync not in ("b3 completo",):
             st.warning("nenhum ativo selecionado.")
         else:
-            _progresso = st.progress(0, text="iniciando...")
-            _log_linhas = []
-            _adicionados = []
-            _total = len(_lista_sync)
+            _progresso  = st.progress(0, text="iniciando…")
+            _log_area   = st.empty()
+            _log_linhas: list[str] = []
+            _adicionados: list[str] = []
 
-            from utils.alpha_vantage_client import get_quarterly_fundamentals_cached
-
-            # ── Diagnóstico: status das chaves e Supabase ──────────────
-            _diag_lines = []
-            _sb = _get_supabase_client()
-            _diag_lines.append(f"supabase: {'conectado' if _sb else 'desconectado'}")
-            _rot = get_av_rotator()
-            _diag_lines.append(f"chaves AV configuradas: {len(_rot.keys)}")
-            _av_key = _rot.get_available_key()
-            _diag_lines.append(f"chave AV disponivel: {_av_key is not None}")
-            _diag_lines.append(f"cached AV antes: {_n_cached_av} ativos")
-            _log_area = st.empty()
-            _log_area.code("\n".join(_diag_lines), language="")
-
-            for _i, _t in enumerate(_lista_sync):
-                _t_up = _t.upper()
-                if _t_up in _fii_set:
-                    _msg = f"⏭️ {_t_up} — FII (AV não cobre)"
-                else:
-                    try:
-                        _q = get_quarterly_fundamentals_cached(_t_up)
-                        _n_periodos = len(_q) if _q else 0
-                        if _n_periodos > 0:
-                            _adicionados.append(_t_up)
-                        _msg = f"{'✅' if _n_periodos > 0 else '❌'} {_t_up} — {_n_periodos} trimestres"
-                    except Exception as _e:
-                        _msg = f"❌ {_t_up} — {_e}"
+            def _cb(ticker, status, n_trim, fonte):
+                _icon = "⚡" if fonte == "yfinance" else ("⏭️" if "fii" in fonte.lower() else ("✅" if n_trim > 0 else "❌"))
+                _msg  = f"{_icon} {ticker} — {n_trim} trim. [{fonte}]"
                 _log_linhas.append(_msg)
-                _log_area.code("\n".join(_log_linhas[-20:]), language="")
-                _progresso.progress((_i + 1) / _total,
-                                    text=f"{_i+1}/{_total} — {_t_up}")
-                time.sleep(0.3)
+                _log_area.code("\n".join(_log_linhas[-25:]), language="")
+                if isinstance(n_trim, (int, float)) and n_trim > 0:
+                    _adicionados.append(ticker)
+
+            with st.spinner("sincronizando…"):
+                _res = sync_progressivo(
+                    watchlist_tickers   = _wl_tickers,
+                    max_requests        = _max_req,
+                    incluir_fiis_brapi  = _sync_fiis,
+                    callback            = _cb,
+                )
 
             _progresso.progress(1.0, text="concluído!")
-            st.success(f"✅ sincronização finalizada — {_total} ativos processados.")
+            _proc = _res.get("_processados", len(_adicionados))
+            _qus  = _res.get("_quota_usada", 0)
+            _qre  = _res.get("_quota_restante", 0)
+            st.success(
+                f"✅ {_proc} ativos com dados · {_qus} req AV usadas · {_qre} req restantes hoje"
+            )
+
             if _adicionados:
-                _cache_apos = get_tickers_cached_av()
-                _rows_final = []
-                for _t in sorted(_adicionados):
-                    _nq = _cache_apos.get(_t, 0)
-                    _rows_final.append({"ativo": _t, "trimestres": str(_nq), "status": "✅ adicionado"})
                 st.dataframe(
-                    _rows_final,
-                    column_config={
-                        "ativo":      st.column_config.TextColumn("ativo", width="small"),
-                        "trimestres": st.column_config.TextColumn("trim.", width="small"),
-                        "status":     st.column_config.TextColumn("status", width="medium"),
-                    },
-                    use_container_width=True,
-                    hide_index=True,
+                    [{"ativo": t, "status": "✅ sincronizado"} for t in sorted(_adicionados)],
+                    use_container_width=True, hide_index=True,
                 )
             st.cache_data.clear()
             st.rerun()

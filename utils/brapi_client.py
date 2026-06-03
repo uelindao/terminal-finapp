@@ -229,3 +229,67 @@ def get_score_snapshot_brapi(ticker: str) -> float | None:
         return None
 
     return round(max(0.0, min(100.0, score / max_p * 100)), 1)
+
+
+def calcular_score_fii_brapi(ticker: str) -> float | None:
+    """
+    Score 0-100 para FIIs baseado em snapshot BRAPI.
+    FIIs não têm histórico trimestral de DRE — usa dados atuais.
+
+    Componentes:
+      DY    (40pts) — principal métrica de FII
+      P/VP  (30pts) — desconto/prêmio sobre patrimônio
+      Ev/Ebitda (20pts) — eficiência
+      ROE   (10pts) — qualidade de gestão
+    """
+    dados = get_quote(ticker)
+    if not dados:
+        return None
+
+    score, max_p, ok = 0.0, 0.0, 0
+
+    # DY (40pts) — mais importante para FIIs
+    dy = dados.get("dy")
+    max_p += 40
+    if dy is not None and 0 < dy <= 30:
+        ok += 1
+        if dy > 10:    score += 40
+        elif dy > 8:   score += 32
+        elif dy > 6:   score += 22
+        elif dy > 4:   score += 12
+        else:          score += 5
+
+    # P/VP (30pts)
+    pb = dados.get("pb")
+    max_p += 30
+    if pb is not None and pb > 0:
+        ok += 1
+        if pb < 0.85:    score += 30
+        elif pb < 0.95:  score += 24
+        elif pb < 1.05:  score += 16
+        elif pb < 1.20:  score += 8
+        elif pb < 1.50:  score += 3
+
+    # EV/EBITDA (20pts) — proxy de eficiência
+    ev = dados.get("ev_ebitda")
+    max_p += 20
+    if ev is not None and 0 < ev < 50:
+        ok += 1
+        if ev < 8:     score += 20
+        elif ev < 12:  score += 14
+        elif ev < 18:  score += 7
+
+    # ROE (10pts) — qualidade de gestão
+    roe = dados.get("roe")
+    max_p += 10
+    if roe is not None:
+        ok += 1
+        roe_pct = roe * 100 if abs(roe) < 2 else roe
+        if roe_pct > 10:   score += 10
+        elif roe_pct > 6:  score += 7
+        elif roe_pct > 0:  score += 3
+
+    if ok < 2 or max_p == 0:
+        return None
+
+    return round(max(0.0, min(100.0, score / max_p * 100)), 1)

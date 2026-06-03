@@ -282,21 +282,30 @@ class AlphaVantageKeyRotator:
             return 0
 
     def _incrementar_uso(self, key: str) -> None:
+        """Incremento atômico via RPC. Fallback para upsert se RPC não existir."""
         sb = _get_supabase_client()
         if sb is None:
             return
+        h = self._hash_key(key)
         try:
-            sb.table("api_key_usage").upsert(
-                {
-                    "provider":     "alpha_vantage",
-                    "api_key_hash": self._hash_key(key),
-                    "data_uso":     str(datetime.date.today()),
-                    "n_requests":   self._get_uso_hoje(key) + 1,
-                },
-                on_conflict="provider,api_key_hash,data_uso"
-            ).execute()
+            sb.rpc("increment_api_usage", {
+                "p_provider": "alpha_vantage",
+                "p_key_hash": h,
+            }).execute()
         except Exception:
-            pass
+            # fallback: upsert convencional (não atômico, mas funciona para 1 usuário)
+            try:
+                sb.table("api_key_usage").upsert(
+                    {
+                        "provider":     "alpha_vantage",
+                        "api_key_hash": h,
+                        "data_uso":     str(datetime.date.today()),
+                        "n_requests":   self._get_uso_hoje(key) + 1,
+                    },
+                    on_conflict="provider,api_key_hash,data_uso"
+                ).execute()
+            except Exception:
+                pass
 
     def get_available_key(self) -> str | None:
         _hoje = str(datetime.date.today())
@@ -400,3 +409,67 @@ def get_tickers_cached_av() -> dict[str, int]:
 @st.cache_resource
 def get_av_rotator() -> AlphaVantageKeyRotator:
     return AlphaVantageKeyRotator()
+
+
+def get_sync_dashboard() -> dict:
+    """
+    Retorna métricas de progresso da sincronização AV para o dashboard.
+    Inclui: ativos cached, restantes, quota hoje, estimativa de dias.
+    """
+    import math
+    try:
+        from utils.tickers import SCREENER_B3, FII_TODOS
+    except ImportError:
+        return {}
+
+    cached  = get_tickers_cached_av()
+    fii_set = set(FII_TODOS)
+    b3_acoes   = [t for t in dict.fromkeys(SCREENER_B3) if t not in fii_set]
+    restantes  = [t for t in b3_acoes if t not in cached]
+
+    rotator = get_av_rotator()
+    chave   = rotator.get_available_key()
+    # calcula uso somando todas as chaves configuradas para hoje
+    uso_total_hoje = sum(rotator._get_uso_hoje(k) for k in rotator.keys) if rotator.keys else 0
+    quota_total    = AlphaVantageKeyRotator.LIMITE_DIARIO * max(1, len(rotator.keys))
+    quota_restante = max(0, quota_total - uso_total_hoje)
+
+    # ativos sincronizados hoje (updated_at >= início do dia UTC)
+    sincronizados_hoje: list[str] = []
+    sb = _get_supabase_client()
+    if sb:
+        try:
+            hoje_str = str(datetime.date.today())
+            r = (
+                sb.table("api_cache")
+                .select("ticker")
+                .eq("provider", "alpha_vantage")
+                .eq("endpoint", "INCOME_STATEMENT")
+                .not_.is_("periodo", "null")
+                .gte("updated_at", hoje_str)
+                .execute()
+            )
+            sincronizados_hoje = list({row["ticker"] for row in (r.data or [])})
+        except Exception:
+            pass
+
+    acoes_por_dia = max(1, quota_total // 3)
+    est_dias      = math.ceil(len(restantes) / acoes_por_dia) if restantes else 0
+    pct           = round(len(cached) / max(1, len(b3_acoes)) * 100, 1)
+
+    return {
+        "cached_count":        len(cached),
+        "b3_total":            len(b3_acoes),
+        "restantes_count":     len(restantes),
+        "restantes_list":      restantes,
+        "fii_count":           len([t for t in fii_set if t in set(SCREENER_B3)]),
+        "n_chaves":            len(rotator.keys),
+        "quota_total":         quota_total,
+        "quota_usada_hoje":    uso_total_hoje,
+        "quota_restante_hoje": quota_restante,
+        "chave_disponivel":    chave is not None,
+        "est_dias_uteis":      est_dias,
+        "acoes_por_dia":       acoes_por_dia,
+        "sincronizados_hoje":  sincronizados_hoje,
+        "pct_completo":        pct,
+    }
