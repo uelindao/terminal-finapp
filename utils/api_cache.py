@@ -371,6 +371,32 @@ class AlphaVantageKeyRotator:
         return {}
 
 
+def get_tickers_cached_av() -> dict[str, int]:
+    """
+    Retorna dict {ticker: n_trimestres} de todos os ativos
+    que tem ao menos 1 trimestre de INCOME_STATEMENT no cache AV.
+    """
+    sb = _get_supabase_client()
+    if sb is None:
+        return {}
+    try:
+        resp = (
+            sb.table("api_cache")
+            .select("ticker, periodo")
+            .eq("provider", "alpha_vantage")
+            .eq("endpoint", "INCOME_STATEMENT")
+            .not_.is_("periodo", "null")
+            .execute()
+        )
+        result: dict[str, int] = {}
+        for r in resp.data or []:
+            t = r["ticker"]
+            result[t] = result.get(t, 0) + 1
+        return result
+    except Exception:
+        return {}
+
+
 @st.cache_resource
 def get_av_rotator() -> AlphaVantageKeyRotator:
     return AlphaVantageKeyRotator()

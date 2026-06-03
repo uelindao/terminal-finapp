@@ -64,30 +64,53 @@ st.caption(f"cache: {_n_cache_br} ativos BR | {_n_cache_us} ativos EUA")
 
 # ══ SYNC AVANÇADO — FUNDAMENTOS POR ALPHA VANTAGE ══════════════════════
 with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", expanded=True):
-    col_stats_a, col_stats_b, col_stats_c = st.columns(3)
-    with col_stats_a:
-        status_card("cache local", f"{len(CACHE_FUNDAMENTOS)} ativos", tipo="info")
-    with col_stats_b:
-        _sb_total = 0
-        try:
-            from utils.api_cache import get_todos_do_provider
-            amostra = list(CACHE_FUNDAMENTOS.keys())[:5] if CACHE_FUNDAMENTOS else []
-            if amostra:
-                _amostra_av = get_todos_do_provider(amostra[0], "alpha_vantage", "INCOME_STATEMENT")
-                _sb_total = "ok" if _amostra_av else "vazio"
-        except Exception:
-            _sb_total = "—"
-        status_card("supabase", str(_sb_total), tipo="success" if _sb_total == "ok" else "warning")
+    from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
 
+    _cache_av = get_tickers_cached_av()
+    _n_cached_av = len(_cache_av)
+    _fii_set = set(FII_TODOS)
+    _b3_set = set(SCREENER_B3)
+    _b3_sem_cache = sorted(_b3_set - set(_cache_av.keys()) - _fii_set)
+    _n_b3_restantes = len(_b3_sem_cache)
+
+    col_stats_a, col_stats_b, col_stats_c, col_stats_d = st.columns(4)
+    with col_stats_a:
+        status_card("🗄️ cached AV", f"{_n_cached_av} ativos", tipo="success" if _n_cached_av > 0 else "info")
+    with col_stats_b:
+        _wl_list = listar_watchlists()
+        _wl_total = sum(w.get('total_ativos', 0) for w in _wl_list)
+        status_card("📋 watchlists", f"{_wl_total} ativos", tipo="info")
     with col_stats_c:
-        _chaves_disp = 0
-        try:
-            from utils.api_cache import get_av_rotator
-            _r = get_av_rotator()
-            _chaves_disp = sum(1 for _ in range(10) if _r.get_available_key())
-        except Exception:
-            _chaves_disp = 0
-        status_card("chaves AV", f"{_chaves_disp} disp.", tipo="success" if _chaves_disp > 0 else "danger")
+        _rot = get_av_rotator()
+        _n_chaves = len(_rot.keys)
+        _k_disp = "sim" if _rot.get_available_key() else "não"
+        status_card("🔑 chaves AV", f"{_n_chaves} ({_k_disp})", tipo="success" if _k_disp == "sim" else "danger")
+    with col_stats_d:
+        status_card("📦 restantes B3", f"{_n_b3_restantes}" if _n_b3_restantes > 0 else "0", tipo="warning" if _n_b3_restantes > 0 else "success")
+
+    if st.button("📋 ver quais ativos estão em cache", use_container_width=True, key="btn_ver_cache"):
+        _rows = []
+        _todos_b3 = sorted(set(t.upper() for t in (_b3_set | _fii_set)))
+        for _t in _todos_b3:
+            _nq = _cache_av.get(_t, 0)
+            if _nq > 0:
+                _status = "✅"
+            elif _t in _fii_set:
+                _status = "⏭️"
+            else:
+                _status = "❌"
+            _rows.append({"ativo": _t, "trimestres": _nq if _nq > 0 else "—", "status": _status})
+        st.dataframe(
+            _rows,
+            column_config={
+                "ativo":    st.column_config.TextColumn("ativo", width="small"),
+                "trimestres": st.column_config.TextColumn("trim.", width="small"),
+                "status":   st.column_config.TextColumn("status", width="small"),
+            },
+            use_container_width=True,
+            hide_index=True,
+            height=min(60 * len(_rows), 360),
+        )
 
     _modo_sync = st.radio("modo:", ["watchlist", "ticker avulso"], horizontal=True, key="sync_modo")
 
@@ -115,10 +138,10 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
         else:
             _progresso = st.progress(0, text="iniciando...")
             _log_linhas = []
+            _adicionados = []
             _total = len(_lista_sync)
 
             from utils.alpha_vantage_client import get_quarterly_fundamentals_cached
-            from utils.api_cache import get_av_rotator, _get_supabase_client
 
             # ── Diagnóstico: status das chaves e Supabase ──────────────
             _diag_lines = []
@@ -128,10 +151,9 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
             _diag_lines.append(f"chaves AV configuradas: {len(_rot.keys)}")
             _av_key = _rot.get_available_key()
             _diag_lines.append(f"chave AV disponivel: {_av_key is not None}")
+            _diag_lines.append(f"cached AV antes: {_n_cached_av} ativos")
             _log_area = st.empty()
             _log_area.code("\n".join(_diag_lines), language="")
-
-            _fii_set = set(FII_TODOS)
 
             for _i, _t in enumerate(_lista_sync):
                 _t_up = _t.upper()
@@ -141,7 +163,9 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
                     try:
                         _q = get_quarterly_fundamentals_cached(_t_up)
                         _n_periodos = len(_q) if _q else 0
-                        _msg = f"✅ {_t_up} — {_n_periodos} trimestres"
+                        if _n_periodos > 0:
+                            _adicionados.append(_t_up)
+                        _msg = f"{'✅' if _n_periodos > 0 else '❌'} {_t_up} — {_n_periodos} trimestres"
                     except Exception as _e:
                         _msg = f"❌ {_t_up} — {_e}"
                 _log_linhas.append(_msg)
@@ -152,6 +176,22 @@ with st.expander("🔄 sincronização avançada (alpha vantage / supabase)", ex
 
             _progresso.progress(1.0, text="concluído!")
             st.success(f"✅ sincronização finalizada — {_total} ativos processados.")
+            if _adicionados:
+                _cache_apos = get_tickers_cached_av()
+                _rows_final = []
+                for _t in sorted(_adicionados):
+                    _nq = _cache_apos.get(_t, 0)
+                    _rows_final.append({"ativo": _t, "trimestres": str(_nq), "status": "✅ adicionado"})
+                st.dataframe(
+                    _rows_final,
+                    column_config={
+                        "ativo":      st.column_config.TextColumn("ativo", width="small"),
+                        "trimestres": st.column_config.TextColumn("trim.", width="small"),
+                        "status":     st.column_config.TextColumn("status", width="medium"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
             st.cache_data.clear()
             st.rerun()
 
