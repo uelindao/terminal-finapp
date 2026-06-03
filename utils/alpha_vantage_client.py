@@ -7,7 +7,6 @@ Cache Supabase: dados trimestrais historicos permanentes (3650 dias).
 Cobertura B3: tickers .SA -> .SAO (ex: PETR4.SA -> PETR4.SAO)
 """
 from __future__ import annotations
-import streamlit as st
 import pandas as pd
 from utils.logger import get_logger
 from utils.api_cache import (
@@ -42,7 +41,6 @@ def _fetch_statement_av(av_symbol: str, function: str) -> dict:
     return rotator.request({"function": function, "symbol": av_symbol})
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
     """
     Busca dados fundamentalistas trimestrais completos.
