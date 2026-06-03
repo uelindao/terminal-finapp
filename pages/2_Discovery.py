@@ -60,10 +60,14 @@ _hoje_sync = str(datetime.date.today())
 if st.session_state.get("_av_auto_sync_date") != _hoje_sync:
     st.session_state["_av_auto_sync_date"] = _hoje_sync
     _rot_check = get_av_rotator()
-    if _rot_check.get_available_key():
-        with st.spinner("🔄 sincronização automática diária (2 ativos)…"):
+    _quota_disp = sum(
+        max(0, 25 - _rot_check._get_uso_hoje(k)) for k in _rot_check.keys
+    ) if _rot_check.keys else 0
+    if _quota_disp > 0:
+        _n_est = _quota_disp // 3
+        with st.spinner(f"🔄 sincronização automática diária (~{_n_est} ativos via AV + yfinance)…"):
             try:
-                sync_progressivo(watchlist_tickers=[], max_requests=6)  # 2 ativos × 3 req
+                sync_progressivo(watchlist_tickers=[], max_requests=None)  # usa toda a quota disponível
             except Exception as _e_auto:
                 pass  # silencioso — não bloqueia o usuário
 
