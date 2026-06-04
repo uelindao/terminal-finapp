@@ -382,9 +382,12 @@ class AlphaVantageKeyRotator:
 
 def get_tickers_cached_av() -> dict[str, int]:
     """
-    Retorna dict {ticker: n_trimestres} de todos os ativos com pelo menos
-    1 trimestre de INCOME_STATEMENT no cache — inclui dados de
-    alpha_vantage E yfinance.
+    Retorna dict {ticker: n_trimestres} de ativos com dados AV reais
+    (provider='alpha_vantage' APENAS).
+
+    Usado pela fila de sync para saber quais tickers JÁ têm dados AV
+    e podem ser pulados. NÃO inclui yfinance — tickers com apenas
+    yfinance precisam ser sincronizados via AV para ter 10 anos.
     """
     sb = _get_supabase_client()
     if sb is None:
@@ -393,6 +396,33 @@ def get_tickers_cached_av() -> dict[str, int]:
         resp = (
             sb.table("api_cache")
             .select("ticker, periodo")
+            .eq("provider", "alpha_vantage")
+            .eq("endpoint", "INCOME_STATEMENT")
+            .not_.is_("periodo", "null")
+            .execute()
+        )
+        result: dict[str, int] = {}
+        for r in resp.data or []:
+            t = r["ticker"]
+            result[t] = result.get(t, 0) + 1
+        return result
+    except Exception:
+        return {}
+
+
+def get_tickers_cached_total() -> dict[str, int]:
+    """
+    Retorna dict {ticker: n_trimestres} contando AV + yfinance.
+    Usado APENAS para exibição no dashboard (progresso geral).
+    NÃO usar para determinar fila de sync AV.
+    """
+    sb = _get_supabase_client()
+    if sb is None:
+        return {}
+    try:
+        resp = (
+            sb.table("api_cache")
+            .select("ticker, periodo, provider")
             .in_("provider", ["alpha_vantage", "yfinance"])
             .eq("endpoint", "INCOME_STATEMENT")
             .not_.is_("periodo", "null")
@@ -423,10 +453,12 @@ def get_sync_dashboard() -> dict:
     except ImportError:
         return {}
 
-    cached  = get_tickers_cached_av()
+    cached_av    = get_tickers_cached_av()     # somente AV (10 anos)
+    cached_total = get_tickers_cached_total()  # AV + yfinance (qualquer dado)
     fii_set = set(FII_TODOS)
     b3_acoes   = [t for t in dict.fromkeys(SCREENER_B3) if t not in fii_set]
-    restantes  = [t for t in b3_acoes if t not in cached]
+    restantes  = [t for t in b3_acoes if t not in cached_av]   # precisa de AV
+    sem_dados  = [t for t in b3_acoes if t not in cached_total] # sem nada ainda
 
     rotator = get_av_rotator()
     chave   = rotator.get_available_key()
@@ -467,13 +499,18 @@ def get_sync_dashboard() -> dict:
             pass
 
     acoes_por_dia = max(1, quota_total // 3)
-    est_dias      = math.ceil(len(restantes) / acoes_por_dia) if restantes else 0
-    pct           = round(len(cached) / max(1, len(b3_acoes)) * 100, 1)
+    # Estimativa baseada nos que AINDA PRECISAM de AV (têm yfinance mas não AV)
+    est_dias  = math.ceil(len(restantes) / acoes_por_dia) if restantes else 0
+    pct_av    = round(len(cached_av)    / max(1, len(b3_acoes)) * 100, 1)
+    pct_total = round(len(cached_total) / max(1, len(b3_acoes)) * 100, 1)
 
     return {
-        "cached_count":        len(cached),
+        # Contagens separadas: AV (10 anos) vs total (qualquer fonte)
+        "cached_count":        len(cached_total),  # display geral
+        "cached_av_count":     len(cached_av),      # display "10 anos"
+        "sem_dados_count":     len(sem_dados),      # sem nenhum dado
         "b3_total":            len(b3_acoes),
-        "restantes_count":     len(restantes),
+        "restantes_count":     len(restantes),      # precisam de sync AV
         "restantes_list":      restantes,
         "fii_count":           len([t for t in fii_set if t in set(SCREENER_B3)]),
         "n_chaves":            n_chaves_real,
@@ -484,5 +521,6 @@ def get_sync_dashboard() -> dict:
         "est_dias_uteis":      est_dias,
         "acoes_por_dia":       acoes_por_dia,
         "sincronizados_hoje":  sincronizados_hoje,
-        "pct_completo":        pct,
+        "pct_completo":        pct_av,    # % com 10 anos (AV)
+        "pct_total":           pct_total, # % com qualquer dado
     }

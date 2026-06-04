@@ -102,33 +102,46 @@ with st.expander("🔄 sincronização de fundamentos (AV + yfinance)", expanded
 
     _da, _db, _dc, _dd, _de, _df = st.columns(6)
     with _da:
-        metric_card("cached",    str(_dash.get("cached_count", 0)),
-                    f"de {_dash.get('b3_total',0)} ações B3", "bull" if _dash.get("cached_count",0) > 0 else "muted")
+        _n_av  = _dash.get("cached_av_count", 0)
+        _n_tot = _dash.get("cached_count", 0)
+        _n_b3  = _dash.get("b3_total", 143)
+        metric_card("av (10 anos)", str(_n_av),
+                    f"{_n_tot} c/ dados · {_n_b3} total",
+                    "bull" if _n_av > 0 else "muted")
     with _db:
-        metric_card("restantes", str(_dash.get("restantes_count", 0)), "sem cache", "amber" if _dash.get("restantes_count",0) > 0 else "bull")
+        _n_rest = _dash.get("restantes_count", 0)
+        metric_card("fila av", str(_n_rest),
+                    "precisam de sync AV",
+                    "amber" if _n_rest > 0 else "bull")
     with _dc:
         _q_rest = _dash.get("quota_restante_hoje", 0)
-        metric_card("quota hoje", str(_q_rest), f"req restantes / {_dash.get('quota_total',25)}", "bull" if _q_rest > 0 else "bear")
+        metric_card("quota hoje", str(_q_rest),
+                    f"req restantes / {_dash.get('quota_total',25)}",
+                    "bull" if _q_rest > 0 else "bear")
     with _dd:
         metric_card("chaves AV", str(_dash.get("n_chaves", 0)), "configuradas",
                     "bull" if _dash.get("chave_disponivel") else "bear")
     with _de:
         _hoje_sinc = len(_dash.get("sincronizados_hoje", []))
-        metric_card("hoje",      str(_hoje_sinc), "ativos sincronizados", "info")
+        metric_card("hoje",      str(_hoje_sinc), "via AV", "info")
     with _df:
         _est = _dash.get("est_dias_uteis", 0)
         metric_card("previsão",  f"{_est}d" if _est > 0 else "✅",
                     "dias úteis restantes", "muted" if _est > 2 else "bull")
 
     # ── Barra de progresso ─────────────────────────────────────────────
-    _pct = _dash.get("pct_completo", 0)
-    _n_c = _dash.get("cached_count", 0)
-    _n_t = _dash.get("b3_total", 1)
+    _pct   = _dash.get("pct_completo", 0)   # % com AV (10 anos)
+    _pct_t = _dash.get("pct_total", 0)      # % com qualquer dado
+    _n_av  = _dash.get("cached_av_count", 0)
+    _n_tot = _dash.get("cached_count", 0)
+    _n_t   = _dash.get("b3_total", 1)
     st.markdown(
         f'<div style="margin:10px 0 4px;">'
         f'<div style="font-family:var(--font-ui); font-size:0.65rem;'
         f' color:var(--text-muted); margin-bottom:4px;">'
-        f'universo b3 (ações): {_n_c}/{_n_t} — {_pct}%</div>'
+        f'av (10 anos): {_n_av}/{_n_t} — {_pct}%'
+        f'&nbsp;&nbsp;·&nbsp;&nbsp;'
+        f'com dados (yf+av): {_n_tot}/{_n_t} — {_pct_t}%</div>'
         f'<div style="background:var(--bg-elevated); border-radius:4px; height:6px;">'
         f'<div style="background:var(--accent); width:{_pct}%; height:6px;'
         f' border-radius:4px; transition:width 0.3s;"></div>'
