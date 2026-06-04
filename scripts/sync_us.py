@@ -179,83 +179,85 @@ def transform_fmp(ticker: str) -> dict | None:
     return data
 
 
+def _get_yf_close(hist) -> pd.DataFrame:
+    """Extrai DataFrame de Close de um yfinance MultiIndex (lida com ambos formatos)."""
+    import pandas as pd
+    if not isinstance(hist, pd.DataFrame) or hist.empty:
+        return pd.DataFrame()
+    if not isinstance(hist.columns, pd.MultiIndex):
+        return hist['Close'] if 'Close' in hist else hist
+    try:
+        return hist.xs('Close', axis=1, level=0)
+    except KeyError:
+        return hist.xs('Close', axis=1, level=1)
+
+
 def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
     """Busca precos via yfinance em lotes menores (evita rate limit)."""
-    try:
-        import yfinance as yf
-        import pandas as pd
-        import numpy as np
+    total_ok = 0
+    total_fail = 0
 
-        total_ok = 0
-        total_fail = 0
+    for batch_start in range(0, len(tickers), batch_size):
+        batch = tickers[batch_start:batch_start + batch_size]
+        print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch)} ativos...")
 
-        for batch_start in range(0, len(tickers), batch_size):
-            batch = tickers[batch_start:batch_start + batch_size]
-            print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch)} ativos...")
+        try:
+            import yfinance as yf
+            hist = yf.download(batch, period="1y", auto_adjust=True, progress=False)
+        except Exception as e:
+            print(f"  [yfinance] lote falhou download: {e}")
+            total_fail += len(batch)
+            continue
 
+        if hist.empty:
+            print(f"  [yfinance] lote vazio, pulando")
+            total_fail += len(batch)
+            continue
+
+        close = _get_yf_close(hist)
+        if close.empty:
+            total_fail += len(batch)
+            continue
+
+        for ticker in batch:
             try:
-                hist = yf.download(batch, period="1y", auto_adjust=True, progress=False)
-            except Exception as e:
-                print(f"  [yfinance] lote falhou download: {e}")
-                total_fail += len(batch)
-                continue
+                if isinstance(close, pd.DataFrame):
+                    s = close[ticker].dropna() if ticker in close.columns else pd.Series()
+                else:
+                    s = close.dropna()
 
-            if hist.empty:
-                print(f"  [yfinance] lote vazio, pulando")
-                total_fail += len(batch)
-                continue
-
-            if isinstance(hist.columns, pd.MultiIndex):
-                close = hist.xs('Close', axis=1, level=1)
-            else:
-                close = hist['Close'] if 'Close' in hist else hist
-
-            for ticker in batch:
-                try:
-                    if isinstance(close, pd.DataFrame) and ticker in close.columns:
-                        s = close[ticker].dropna()
-                    elif isinstance(close, pd.Series):
-                        s = close.dropna()
-                    else:
-                        total_fail += 1
-                        continue
-
-                    if len(s) < 2:
-                        total_fail += 1
-                        continue
-
-                    preco = float(s.iloc[-1])
-
-                    price_data = {
-                        "preco":  round(preco, 2),
-                        "var_1d": round(((preco / float(s.iloc[-2])) - 1) * 100, 2),
-                        "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
-                        "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
-                        "volume": None,
-                        "max_52s": round(float(s.max()), 2),
-                        "min_52s": round(float(s.min()), 2),
-                    }
-
-                    try:
-                        delta = s.diff().dropna()
-                        gain = delta.clip(lower=0).rolling(14).mean()
-                        loss = (-delta.clip(upper=0)).rolling(14).mean()
-                        rs = gain / loss.replace(0, np.nan)
-                        rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs) >= 14 else 50.0
-                        price_data["rsi_14"] = round(rsi, 1)
-                    except Exception:
-                        pass
-
-                    upsert_price(ticker, price_data)
-                    total_ok += 1
-                except Exception as e:
-                    print(f"  [yfinance] ERRO {ticker}: {e}")
+                if len(s) < 2:
                     total_fail += 1
+                    continue
 
-        return total_ok, total_fail
-    except Exception as e:
-        print(f"  [yfinance] ERRO GERAL: {e}")
-        return 0, len(tickers)
+                preco = float(s.iloc[-1])
+                price_data = {
+                    "preco":  round(preco, 2),
+                    "var_1d": round(((preco / float(s.iloc[-2])) - 1) * 100, 2),
+                    "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
+                    "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
+                    "volume": None,
+                    "max_52s": round(float(s.max()), 2),
+                    "min_52s": round(float(s.min()), 2),
+                }
+
+                try:
+                    delta = s.diff().dropna()
+                    gain = delta.clip(lower=0).rolling(14).mean()
+                    loss = (-delta.clip(upper=0)).rolling(14).mean()
+                    rs = gain / loss.replace(0, float('nan'))
+                    rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs.dropna()) >= 14 else 50.0
+                    price_data["rsi_14"] = round(rsi, 1)
+                except Exception:
+                    pass
+
+                upsert_price(ticker, price_data)
+                total_ok += 1
+            except Exception as e:
+                print(f"  [yfinance] ERRO {ticker}: {e}")
+                total_fail += 1
+
+    return total_ok, total_fail
 
 
 def main():

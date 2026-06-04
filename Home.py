@@ -86,7 +86,10 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
                 progress=False,
             )
             if isinstance(hist.columns, pd.MultiIndex):
-                close = hist.xs('Close', axis=1, level=1)
+                try:
+                    close = hist.xs('Close', axis=1, level=0)
+                except KeyError:
+                    close = hist.xs('Close', axis=1, level=1)
             else:
                 close = hist.get('Close', hist)
             volume = hist.get('Volume', None)
@@ -1368,7 +1371,10 @@ if ativos_alocados:
                 tickers_base_port = list(set([mapear_ticker_base(t) for t in missing_port]))
                 _raw_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)
                 if isinstance(_raw_port.columns, pd.MultiIndex):
-                    hist_port = _raw_port.xs('Close', axis=1, level=1)
+                    try:
+                        hist_port = _raw_port.xs('Close', axis=1, level=0)
+                    except KeyError:
+                        hist_port = _raw_port.xs('Close', axis=1, level=1)
                 else:
                     hist_port = _raw_port['Close']
                 if isinstance(hist_port, pd.Series):
@@ -1736,7 +1742,10 @@ else:
                 
                 if not data.empty:
                     if isinstance(data.columns, pd.MultiIndex):
-                        hist = data.xs('Close', axis=1, level=1)
+                        try:
+                            hist = data.xs('Close', axis=1, level=0)
+                        except KeyError:
+                            hist = data.xs('Close', axis=1, level=1)
                     else:
                         hist = data.get('Close', data)
                 else:
