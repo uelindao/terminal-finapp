@@ -1166,3 +1166,105 @@ def get_user_setting(user_id: int, chave: str, default: str = '') -> str:
     except Exception as e:
         logger.warning(f"[db] get_user_setting: {e}")
         return default
+
+
+# ==========================================
+# NOVAS TABELAS ETL — price_cache / macro_cache
+# ==========================================
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_price_cache(ticker: str) -> dict | None:
+    """Retorna dados de preco da price_cache (se frescos)."""
+    try:
+        sb = get_supabase()
+        res = (
+            sb.table("price_cache")
+            .select("*")
+            .eq("ticker", ticker)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]
+        return None
+    except Exception as e:
+        logger.warning(f"[db] get_price_cache {ticker}: {e}")
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_all_price_cache() -> dict:
+    """Retorna dict {ticker: price_data} de todo o cache de precos."""
+    try:
+        sb = get_supabase()
+        res = sb.table("price_cache").select("*").execute()
+        return {r["ticker"]: r for r in (res.data or [])}
+    except Exception as e:
+        logger.warning(f"[db] get_all_price_cache: {e}")
+        return {}
+
+
+def get_macro_cache(indicator: str) -> float | None:
+    """Retorna o valor de um indicador macro especifico."""
+    try:
+        sb = get_supabase()
+        res = (
+            sb.table("macro_cache")
+            .select("value")
+            .eq("indicator", indicator)
+            .execute()
+        )
+        if res.data:
+            return float(res.data[0]["value"])
+        return None
+    except Exception as e:
+        logger.warning(f"[db] get_macro_cache {indicator}: {e}")
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_all_macro_cache() -> dict:
+    """Retorna dict {indicator: {value, label, unit}} de todos indicadores macro."""
+    try:
+        sb = get_supabase()
+        res = sb.table("macro_cache").select("*").execute()
+        result = {}
+        for r in (res.data or []):
+            result[r["indicator"]] = {
+                "value": float(r["value"]) if r.get("value") is not None else None,
+                "label": r.get("label", ""),
+                "unit":  r.get("unit", ""),
+                "source": r.get("source", ""),
+            }
+        return result
+    except Exception as e:
+        logger.warning(f"[db] get_all_macro_cache: {e}")
+        return {}
+
+
+# ==========================================
+# ETL LOG — auditoria das sincronizacoes
+# ==========================================
+
+
+def get_ultimo_etl(job_name: str, dias: int = 7) -> dict | None:
+    """Retorna o ultimo registro de execucao ETL para um job."""
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+        res = (
+            sb.table("etl_log")
+            .select("*")
+            .eq("job_name", job_name)
+            .gte("started_at", cutoff)
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]
+        return None
+    except Exception as e:
+        logger.warning(f"[db] get_ultimo_etl: {e}")
+        return None

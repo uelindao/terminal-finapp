@@ -1,0 +1,103 @@
+name: ETL Financeiro — Sincronizacao de Dados
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 BRT — fundamentos BR (antes da abertura)
+    - cron: '0 6 * * *'
+    # 12:00 UTC = 09:00 BRT — precos pos-abertura
+    - cron: '0 12 * * *'
+    # 00:00 UTC = 21:00 BRT dia anterior — precos fechamento EUA
+    - cron: '0 0 * * *'
+    # A cada 2h — dados macro (Selic, VIX, cambio)
+    - cron: '0 */2 * * *'
+  workflow_dispatch:  # permite execucao manual
+
+concurrency:
+  group: etl-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+  FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+  FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+
+jobs:
+  sync-br:
+    name: Sincronizar Ativos Brasil (B3 + FIIs)
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 6 * * *' || github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase yfinance pandas numpy python-bcb fredapi
+
+      - name: Executar sync_br
+        run: python scripts/sync_br.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
+
+  sync-us:
+    name: Sincronizar Ativos EUA
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * *' || github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase yfinance pandas numpy
+
+      - name: Executar sync_us
+        run: python scripts/sync_us.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+
+  sync-macro:
+    name: Sincronizar Dados Macro
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase yfinance pandas numpy python-bcb fredapi
+
+      - name: Executar sync_macro
+        run: python scripts/sync_macro.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
