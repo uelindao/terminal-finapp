@@ -69,6 +69,7 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
                     'preco': float(pc.get('preco', 0) or 0),
                     'var_1d': float(pc.get('var_1d', 0) or 0),
                     'volume': int(pc.get('volume', 0) or 0),
+                    'fonte': 'cache',
                 }
     except Exception:
         pass
@@ -112,6 +113,7 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
                         'preco': round(preco_atual, 2),
                         'var_1d': round(var_1d, 2),
                         'volume': vol,
+                        'fonte': 'api',
                     }
                 except Exception:
                     continue
@@ -937,28 +939,29 @@ def buscar_dados_semaforo():
     dados = {
         "selic": None, "ipca": None,
         "t10y2y": None, "vix": None, "hy_spread": None,
-        # fiscal BR
         "divida_pib": None, "tendencia_divida": None, "result_primario": None,
     }
+    fontes = {k: None for k in dados}
+    _chaves_macro_map = {
+        "selic": "selic", "ipca": "ipca_12m",
+        "t10y2y": "t10y2y", "vix": "vix",
+        "hy_spread": "hy_spread",
+        "divida_pib": "divida_pib", "result_primario": "result_primario",
+    }
+
     # 1. Tenta ler do macro_cache (preenchido pelo ETL)
     try:
         cache = get_all_macro_cache()
-        _map = {
-            "selic": "selic", "ipca": "ipca_12m",
-            "t10y2y": "t10y2y", "vix": "vix",
-            "hy_spread": "hy_spread",
-            "divida_pib": "divida_pib", "result_primario": "result_primario",
-        }
-        for chave_db, chave_dados in _map.items():
+        for chave_db, chave_dados in _chaves_macro_map.items():
             if chave_db in cache and cache[chave_db].get("value") is not None:
                 dados[chave_dados] = cache[chave_db]["value"]
-        # tendencia da divida: calcula do cache se tiver historico (via etl_log)
+                fontes[chave_dados] = "cache"
         if dados["divida_pib"] is not None:
-            dados["tendencia_divida"] = 0.0  # fallback: sem tendencia
+            dados["tendencia_divida"] = 0.0
     except Exception:
         pass
 
-    # 2. Fallback: BCB/FRED ao vivo se cache vazio
+    # 2. Fallback: BCB ao vivo se cache vazio
     if dados["selic"] is None or dados["ipca"] is None or dados["divida_pib"] is None:
         try:
             from bcb import sgs
@@ -966,14 +969,17 @@ def buscar_dados_semaforo():
                 selic_serie = sgs.get({'selic': 432}, last=1)
                 if not selic_serie.empty:
                     dados["selic"] = float(selic_serie['selic'].iloc[-1])
+                    fontes["selic"] = "api"
             if dados["ipca"] is None:
                 ipca_serie = sgs.get({'ipca': 433}, last=1)
                 if not ipca_serie.empty:
                     dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
+                    fontes["ipca"] = "api"
             if dados["divida_pib"] is None or dados["result_primario"] is None:
                 divida_serie = sgs.get({'divida': 13762}, last=7)
                 if not divida_serie.empty:
                     dados["divida_pib"] = float(divida_serie['divida'].iloc[-1])
+                    fontes["divida_pib"] = "api"
                     if len(divida_serie) >= 7:
                         dados["tendencia_divida"] = (
                             float(divida_serie['divida'].iloc[-1]) - float(divida_serie['divida'].iloc[0])
@@ -982,8 +988,11 @@ def buscar_dados_semaforo():
                     primario_serie = sgs.get({'primario': 5793}, last=1)
                     if not primario_serie.empty:
                         dados["result_primario"] = float(primario_serie['primario'].iloc[-1])
+                        fontes["result_primario"] = "api"
         except Exception:
             pass
+
+    # 3. Fallback: FRED ao vivo se cache vazio
     if dados["t10y2y"] is None or dados["vix"] is None or dados["hy_spread"] is None:
         try:
             from fredapi import Fred
@@ -992,19 +1001,22 @@ def buscar_dados_semaforo():
                 t10y2y = fred.get_series('T10Y2Y', limit=1)
                 if not t10y2y.empty:
                     dados["t10y2y"] = float(t10y2y.iloc[-1])
+                    fontes["t10y2y"] = "api"
             if dados["vix"] is None:
                 vix = fred.get_series('VIXCLS', limit=1)
                 if not vix.empty:
                     dados["vix"] = float(vix.iloc[-1])
+                    fontes["vix"] = "api"
             if dados["hy_spread"] is None:
                 hy = fred.get_series('BAMLH0A0HYM2', limit=1)
                 if not hy.empty:
                     dados["hy_spread"] = float(hy.iloc[-1])
+                    fontes["hy_spread"] = "api"
         except Exception:
             pass
-    return dados
+    return dados, fontes
 
-dados_sem = buscar_dados_semaforo()
+dados_sem, fontes_sem = buscar_dados_semaforo()
 
 def avaliar_semaforo_brasil(selic, ipca):
     if selic is None: return "amber", "⚠️", "dados indisponíveis"
@@ -1266,6 +1278,19 @@ with col_sinais_mac:
     st.markdown("<br>", unsafe_allow_html=True)
     status_card("leitura macro", ambiente['descr'], tipo=ambiente['tipo'])
 
+    # Badge de fonte dos indicadores macro
+    _badges = []
+    for _k in ["selic", "ipca", "t10y2y", "vix", "hy_spread", "divida_pib"]:
+        _f = fontes_sem.get(_k)
+        if _f:
+            _ic = "📦" if _f == "cache" else "📡"
+            _badges.append(f'<span style="font-size:0.6rem; color:#555; margin-right:8px;">{_ic} {_k}</span>')
+    if _badges:
+        st.markdown(
+            f'<div style="text-align:center; padding:2px 0 6px;">{"".join(_badges)}</div>',
+            unsafe_allow_html=True,
+        )
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
@@ -1326,6 +1351,7 @@ if ativos_alocados:
     with st.spinner("sincronizando..."):
         live_data_port = {}
         var_dia_port = {}
+        fonte_port = "api"
         cache_port = get_all_price_cache()
         for t in tickers_com_peso:
             if t in cache_port:
@@ -1333,6 +1359,7 @@ if ativos_alocados:
                 preco_pc = float(pc.get('preco', 0) or 0)
                 live_data_port[t] = preco_pc
                 var_dia_port[t] = float(pc.get('var_1d', 0) or 0)
+                fonte_port = "cache"
         missing_port = [t for t in tickers_com_peso if t not in live_data_port]
         if missing_port:
             try:
@@ -1350,6 +1377,8 @@ if ativos_alocados:
                             var_dia_port[t] = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
                     except:
                         live_data_port[t] = 0.0
+                if missing_port and any(live_data_port.get(tt) for tt in missing_port if tt not in cache_port):
+                    fonte_port = "api"
             except:
                 pass
 
@@ -1359,14 +1388,14 @@ if ativos_alocados:
     pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0
 
     pf1, pf2, pf3, pf4 = st.columns(4)
-    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear", destaque=True)
-    with pf2: metric_card("p&l total", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear")
+    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear", destaque=True, data_source=fonte_port)
+    with pf2: metric_card("p&l total", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear", data_source=fonte_port)
 
     if var_dia_port:
         melhor_t = max(var_dia_port, key=var_dia_port.get)
         pior_t = min(var_dia_port, key=var_dia_port.get)
-        with pf3: metric_card("melhor hoje", melhor_t, fmt_pct(var_dia_port[melhor_t]), "bull")
-        with pf4: metric_card("pior hoje", pior_t, fmt_pct(var_dia_port[pior_t]), "bear")
+        with pf3: metric_card("melhor hoje", melhor_t, fmt_pct(var_dia_port[melhor_t]), "bull", data_source=fonte_port)
+        with pf4: metric_card("pior hoje", pior_t, fmt_pct(var_dia_port[pior_t]), "bear", data_source=fonte_port)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1673,6 +1702,7 @@ if not watchlist:
 else:
     tickers_ativos = [item['ticker'] for item in watchlist]
     live_data = {}
+    fonte_wl = {}
     health_data = {h['ticker']: h for h in get_health_scores()}
 
     with st.spinner("sincronizando cotações..."):
@@ -1687,6 +1717,7 @@ else:
                         'var_1d': float(pc.get('var_1d', 0) or 0),
                         'var_1m': float(pc.get('var_1m', 0) or 0),
                     }
+                    fonte_wl[t] = "cache"
         except Exception:
             pass
 
@@ -1713,6 +1744,7 @@ else:
                                     p_ontem = float(s.iloc[-2])
                                     p_1m = float(s.iloc[0])
                                     live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
+                                    fonte_wl[t] = "api"
                         except:
                             pass
             except:
@@ -1724,6 +1756,8 @@ else:
     for _tk_cot, _d_cot in _cotacoes.items():
         if _tk_cot not in live_data or live_data[_tk_cot].get('preco', 0) == 0:
             live_data[_tk_cot] = _d_cot
+            if _tk_cot not in fonte_wl:
+                fonte_wl[_tk_cot] = _d_cot.get('fonte', 'api')
 
     # Earnings próximos (próximos 14 dias)
     _earnings_prox = buscar_earnings_proximos(_tickers_cot) if _tickers_cot else {}
@@ -1998,6 +2032,7 @@ else:
                 health_score  = h_info.get('score'),
                 alertas       = lista_alertas,
                 earnings_info = _earnings_info_map.get(t_base),
+                data_source   = fonte_wl.get(t, ''),
             )
 
             # Confirmação de deleção

@@ -52,6 +52,14 @@ def section_title(titulo: str):
     )
 
 
+def _fonte_badge(fonte: str = "") -> str:
+    if not fonte:
+        return ""
+    icone = "📦" if fonte == "cache" else "📡"
+    cor = "#4CAF50" if fonte == "cache" else "#FF9900"
+    return f'<span style="font-size:0.55rem; color:{cor}; margin-left:5px; font-weight:400; opacity:0.7;">{icone} {fonte}</span>'
+
+
 def metric_card(
     label:      str,
     valor:      str,
@@ -59,6 +67,7 @@ def metric_card(
     cor_delta:  str  = "muted",
     icone:      str  = "",
     destaque:   bool = False,
+    data_source: str = "",
 ):
     """
     Renderiza card de métrica com 4 níveis visuais.
@@ -72,6 +81,7 @@ def metric_card(
 
     destaque: True → card com background mais escuro e tamanho de
               valor maior — para KPIs principais
+    data_source: "cache" | "api" → mostra badge de origem
     """
     _cores = {
         "bull":  {"borda": "#00C853", "valor": "#00C853",
@@ -119,7 +129,7 @@ def metric_card(
         f'text-transform:uppercase; '
         f'letter-spacing:.08em; '
         f'margin-bottom:4px;">'
-        f'{label}</div>'
+        f'{label}{_fonte_badge(data_source)}</div>'
 
         f'<div style="'
         f'font-family:Courier New; '
@@ -230,6 +240,7 @@ def watchlist_row(
     health_score:  float = None,
     alertas:       list  = None,
     earnings_info: dict  = None,
+    data_source:   str   = "",
     on_delete:     str   = None,   # aceito mas ignorado — chave = ticker
     on_memorial:   str   = None,   # aceito mas ignorado — chave = ticker
 ):
@@ -334,7 +345,7 @@ def watchlist_row(
             f'<div style="font-family:var(--font-data);'
             f' font-weight:600; color:var(--text-primary);'
             f' font-size:0.88rem; padding:11px 0 3px;">'
-            f'{moeda} {preco:,.2f}</div>',
+            f'{moeda} {preco:,.2f}{_fonte_badge(data_source)}</div>',
             unsafe_allow_html=True,
         )
 
