@@ -179,66 +179,82 @@ def transform_fmp(ticker: str) -> dict | None:
     return data
 
 
-def sync_prices_batch_yfinance(tickers: list[str]):
-    """Busca precos em batch via yfinance e salva na price_cache."""
+def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
+    """Busca precos via yfinance em lotes menores (evita rate limit)."""
     try:
         import yfinance as yf
         import pandas as pd
         import numpy as np
 
-        print(f"  [yfinance] baixando precos para {len(tickers)} ativos US...")
+        total_ok = 0
+        total_fail = 0
 
-        hist = yf.download(tickers, period="1y", auto_adjust=True, progress=False)
+        for batch_start in range(0, len(tickers), batch_size):
+            batch = tickers[batch_start:batch_start + batch_size]
+            print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch)} ativos...")
 
-        if hist.empty:
-            print("  [yfinance] hist vazio, pulando")
-            return 0, 0
-
-        if isinstance(hist.columns, pd.MultiIndex):
-            close = hist.xs('Close', axis=1, level=1)
-        else:
-            close = hist['Close']
-        ok = 0
-
-        for ticker in tickers:
             try:
-                if isinstance(close, pd.DataFrame) and ticker in close.columns:
-                    s = close[ticker].dropna()
-                elif isinstance(close, pd.Series):
-                    s = close.dropna()
-                else:
-                    continue
-
-                if len(s) < 2:
-                    continue
-
-                preco = float(s.iloc[-1])
-                var_1d = ((preco / float(s.iloc[-2])) - 1) * 100
-
-                delta = s.diff().dropna()
-                gain = delta.clip(lower=0).rolling(14).mean()
-                loss = (-delta.clip(upper=0)).rolling(14).mean()
-                rs = gain / loss.replace(0, np.nan)
-                rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs) >= 14 else 50.0
-
-                price_data = {
-                    "preco":  round(preco, 2),
-                    "var_1d": round(var_1d, 2),
-                    "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
-                    "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
-                    "volume": None,
-                    "max_52s": round(float(s.max()), 2),
-                    "min_52s": round(float(s.min()), 2),
-                    "rsi_14":  round(rsi, 1),
-                }
-                upsert_price(ticker, price_data)
-                ok += 1
+                hist = yf.download(batch, period="1y", auto_adjust=True, progress=False)
             except Exception as e:
-                print(f"  [ERRO] preco {ticker}: {e}")
+                print(f"  [yfinance] lote falhou download: {e}")
+                total_fail += len(batch)
+                continue
 
-        return ok, len(tickers) - ok
+            if hist.empty:
+                print(f"  [yfinance] lote vazio, pulando")
+                total_fail += len(batch)
+                continue
+
+            if isinstance(hist.columns, pd.MultiIndex):
+                close = hist.xs('Close', axis=1, level=1)
+            else:
+                close = hist['Close'] if 'Close' in hist else hist
+
+            for ticker in batch:
+                try:
+                    if isinstance(close, pd.DataFrame) and ticker in close.columns:
+                        s = close[ticker].dropna()
+                    elif isinstance(close, pd.Series):
+                        s = close.dropna()
+                    else:
+                        total_fail += 1
+                        continue
+
+                    if len(s) < 2:
+                        total_fail += 1
+                        continue
+
+                    preco = float(s.iloc[-1])
+
+                    price_data = {
+                        "preco":  round(preco, 2),
+                        "var_1d": round(((preco / float(s.iloc[-2])) - 1) * 100, 2),
+                        "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
+                        "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
+                        "volume": None,
+                        "max_52s": round(float(s.max()), 2),
+                        "min_52s": round(float(s.min()), 2),
+                    }
+
+                    try:
+                        delta = s.diff().dropna()
+                        gain = delta.clip(lower=0).rolling(14).mean()
+                        loss = (-delta.clip(upper=0)).rolling(14).mean()
+                        rs = gain / loss.replace(0, np.nan)
+                        rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs) >= 14 else 50.0
+                        price_data["rsi_14"] = round(rsi, 1)
+                    except Exception:
+                        pass
+
+                    upsert_price(ticker, price_data)
+                    total_ok += 1
+                except Exception as e:
+                    print(f"  [yfinance] ERRO {ticker}: {e}")
+                    total_fail += 1
+
+        return total_ok, total_fail
     except Exception as e:
-        print(f"  [ERRO] sync_prices_batch: {e}")
+        print(f"  [yfinance] ERRO GERAL: {e}")
         return 0, len(tickers)
 
 
@@ -270,8 +286,9 @@ def main():
     p_ok, p_fail = sync_prices_batch_yfinance(SCREENER_US)
     print(f"[sync_us] precos: {p_ok} ok, {p_fail} falha")
 
-    log_etl_finish(log_id, ok=ok, fail=fail)
-    print(f"[sync_us] fim — {ok} ok, {fail} falha")
+    _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
+    log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)
+    print(f"[sync_us] fim — fund. {ok}/{fail}, precos {p_ok}/{p_fail}")
 
 
 if __name__ == "__main__":
