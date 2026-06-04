@@ -154,6 +154,8 @@ def _get_yf_close(hist) -> pd.DataFrame:
 
 def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
     """Busca precos via yfinance em lotes menores (evita rate limit)."""
+    import yfinance as yf
+    import pandas as pd
     total_ok = 0
     total_fail = 0
 
@@ -162,7 +164,6 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
         print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch_full)} ativos...")
 
         try:
-            import yfinance as yf
             hist = yf.download(batch_full, period="1y", auto_adjust=True, progress=False)
         except Exception as e:
             print(f"  [yfinance] lote falhou download: {e}")
