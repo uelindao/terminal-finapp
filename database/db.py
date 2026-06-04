@@ -11,6 +11,7 @@ import sqlite3 as _sqlite3
 import os as _os
 from datetime import datetime
 import hashlib
+import streamlit as st
 from database.supabase_client import get_supabase
 from utils.logger import get_logger
 
