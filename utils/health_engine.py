@@ -2,7 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from database.db import salvar_health_score, get_todos_fundamentos_cache, registrar_historico_score
+from datetime import datetime, timezone, timedelta
+from database.db import (
+    salvar_health_score, get_todos_fundamentos_cache, registrar_historico_score,
+    get_health_scores, get_all_price_cache,
+)
 from utils.tickers import FII_TODOS
 from utils.logger import get_logger
 
@@ -657,9 +661,31 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
+        # Se score foi calculado nas últimas 24h, retorna do cache
+        try:
+            todos_health = get_health_scores()
+            if todos_health:
+                h = next((h for h in todos_health if h['ticker'] == ticker), None)
+                if h and h.get('updated_at'):
+                    updated = h['updated_at']
+                    if isinstance(updated, str):
+                        from datetime import datetime as _dt
+                        updated = _dt.fromisoformat(updated.replace('Z', '+00:00'))
+                    idade = (datetime.now(timezone.utc) - updated).total_seconds()
+                    if idade < 86400 and h.get('score', 0) >= 30:
+                        return {'score': h['score'], 'alertas': [], 'status': 'cached'}
+        except Exception:
+            pass
+
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})
         cache_disponivel = bool(dados_base and dados_base.get('qualidade_dados', 0) >= 40)
+
+        # Tenta price_cache primeiro (mais rápido que yfinance)
+        preco_cached = None
+        preco_cache_data = get_all_price_cache()
+        if ticker in preco_cache_data:
+            preco_cached = preco_cache_data[ticker]
 
         # usar hist_externo se disponível, senão buscar individualmente
         if hist_externo is not None and not (isinstance(hist_externo, pd.DataFrame) and hist_externo.empty):
@@ -704,18 +730,30 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         breakdown = {}
         
         if hist.empty or len(hist) < 50:
-            payload = {"alertas": ["histórico insuficiente para análise técnica"], "breakdown": {}}
-            salvar_health_score(ticker, 50, payload)
-            return {'score': 50, 'alertas': ["histórico insuficiente"]}
+            # Fallback: usa price_cache se disponível
+            if preco_cached and preco_cached.get('rsi_14') is not None:
+                pass  # segue com dados minimos
+            else:
+                payload = {"alertas": ["histórico insuficiente para análise técnica"], "breakdown": {}}
+                salvar_health_score(ticker, 50, payload)
+                return {'score': 50, 'alertas': ["histórico insuficiente"]}
 
         close = hist['Close']
         mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean()
-        preco_atual = close.iloc[-1]
-        
-        delta = close.diff()
-        ganho = delta.clip(lower=0).rolling(14).mean()
-        perda = (-delta.clip(upper=0)).rolling(14).mean()
-        rsi = (100 - (100 / (1 + (ganho / perda)))).iloc[-1] if len(close) >= 15 else 50
+        preco_atual = close.iloc[-1] if not hist.empty else (float(preco_cached.get('preco', 0)) if preco_cached else 0)
+
+        # RSI: prefere o da price_cache (já calculado no ETL com dados consistentes)
+        rsi = None
+        if preco_cached and preco_cached.get('rsi_14') is not None:
+            rsi = float(preco_cached['rsi_14'])
+        if rsi is None and len(close) >= 15:
+            delta = close.diff()
+            ganho = delta.clip(lower=0).rolling(14).mean()
+            perda = (-delta.clip(upper=0)).rolling(14).mean()
+            rs = ganho / perda.replace(0, float('nan'))
+            rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(perda) >= 14 else 50
+        if rsi is None:
+            rsi = 50
         
         penalidade_tec = 0
         if preco_atual < mm200:

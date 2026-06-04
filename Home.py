@@ -24,6 +24,7 @@ from database.db import (
     get_earnings_dates, salvar_earnings_date,
     listar_tags_watchlist, atualizar_tag_ativo,
     get_user_settings,
+    get_all_macro_cache, get_all_price_cache,
 )
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score, _is_fii
@@ -51,53 +52,71 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
     """
     Busca preço atual e variação do dia para uma lista de tickers.
     Cache de 5 minutos. Retorna dict: {ticker: {preco, var_1d, volume}}
+    Tenta price_cache primeiro, fallback yfinance.
     """
     tickers = list(tickers_tuple)
     resultado = {}
     if not tickers:
         return resultado
+
+    # 1. Tenta cache do Supabase (mais rápido, sem chamada externa)
     try:
-        from utils.tickers import mapear_ticker_base
-        tickers_base = [mapear_ticker_base(t) for t in tickers]
-        hist = yf.download(
-            tickers_base,
-            period="2d",
-            auto_adjust=True,
-            progress=False,
-            multi_level_index=False,
-        )
-        close = hist.get('Close', hist)
-        volume = hist.get('Volume', None)
-
-        for i, t in enumerate(tickers):
-            tb = tickers_base[i]
-            try:
-                if isinstance(close, pd.DataFrame):
-                    serie = close[tb].dropna() if tb in close.columns else pd.Series()
-                else:
-                    serie = close.dropna()
-
-                if len(serie) < 1:
-                    continue
-
-                preco_atual = float(serie.iloc[-1])
-                preco_ant   = float(serie.iloc[-2]) if len(serie) >= 2 else preco_atual
-                var_1d      = ((preco_atual / preco_ant) - 1) * 100 if preco_ant > 0 else 0.0
-
-                vol = None
-                if volume is not None and isinstance(volume, pd.DataFrame):
-                    if tb in volume.columns:
-                        vol = float(volume[tb].dropna().iloc[-1])
-
+        cache_pc = get_all_price_cache()
+        for t in tickers:
+            if t in cache_pc:
+                pc = cache_pc[t]
                 resultado[t] = {
-                    'preco': round(preco_atual, 2),
-                    'var_1d': round(var_1d, 2),
-                    'volume': vol,
+                    'preco': float(pc.get('preco', 0) or 0),
+                    'var_1d': float(pc.get('var_1d', 0) or 0),
+                    'volume': int(pc.get('volume', 0) or 0),
                 }
-            except Exception:
-                continue
     except Exception:
         pass
+
+    # 2. Fallback yfinance para tickers sem cache
+    missing = [t for t in tickers if t not in resultado]
+    if missing:
+        try:
+            tickers_base = [mapear_ticker_base(t) for t in missing]
+            hist = yf.download(
+                tickers_base,
+                period="2d",
+                auto_adjust=True,
+                progress=False,
+                multi_level_index=False,
+            )
+            close = hist.get('Close', hist)
+            volume = hist.get('Volume', None)
+
+            for i, t in enumerate(missing):
+                tb = tickers_base[i]
+                try:
+                    if isinstance(close, pd.DataFrame):
+                        serie = close[tb].dropna() if tb in close.columns else pd.Series()
+                    else:
+                        serie = close.dropna()
+
+                    if len(serie) < 1:
+                        continue
+
+                    preco_atual = float(serie.iloc[-1])
+                    preco_ant   = float(serie.iloc[-2]) if len(serie) >= 2 else preco_atual
+                    var_1d      = ((preco_atual / preco_ant) - 1) * 100 if preco_ant > 0 else 0.0
+
+                    vol = None
+                    if volume is not None and isinstance(volume, pd.DataFrame):
+                        if tb in volume.columns:
+                            vol = float(volume[tb].dropna().iloc[-1])
+
+                    resultado[t] = {
+                        'preco': round(preco_atual, 2),
+                        'var_1d': round(var_1d, 2),
+                        'volume': vol,
+                    }
+                except Exception:
+                    continue
+        except Exception:
+            pass
     return resultado
 
 
@@ -921,41 +940,68 @@ def buscar_dados_semaforo():
         # fiscal BR
         "divida_pib": None, "tendencia_divida": None, "result_primario": None,
     }
+    # 1. Tenta ler do macro_cache (preenchido pelo ETL)
     try:
-        from fredapi import Fred
-        fred = Fred(api_key=st.secrets["FRED_API_KEY"])
-        t10y2y = fred.get_series('T10Y2Y', limit=1)
-        if not t10y2y.empty:
-            dados["t10y2y"] = float(t10y2y.iloc[-1])
-        vix = fred.get_series('VIXCLS', limit=1)
-        if not vix.empty:
-            dados["vix"] = float(vix.iloc[-1])
-        hy = fred.get_series('BAMLH0A0HYM2', limit=1)
-        if not hy.empty:
-            dados["hy_spread"] = float(hy.iloc[-1])
-    except:
+        cache = get_all_macro_cache()
+        _map = {
+            "selic": "selic", "ipca": "ipca_12m",
+            "t10y2y": "t10y2y", "vix": "vix",
+            "hy_spread": "hy_spread",
+            "divida_pib": "divida_pib", "result_primario": "result_primario",
+        }
+        for chave_db, chave_dados in _map.items():
+            if chave_db in cache and cache[chave_db].get("value") is not None:
+                dados[chave_dados] = cache[chave_db]["value"]
+        # tendencia da divida: calcula do cache se tiver historico (via etl_log)
+        if dados["divida_pib"] is not None:
+            dados["tendencia_divida"] = 0.0  # fallback: sem tendencia
+    except Exception:
         pass
-    try:
-        from bcb import sgs
-        selic_serie = sgs.get({'selic': 432}, last=1)
-        if not selic_serie.empty:
-            dados["selic"] = float(selic_serie['selic'].iloc[-1])
-        ipca_serie = sgs.get({'ipca': 433}, last=1)
-        if not ipca_serie.empty:
-            dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
-        # fiscal: dívida/PIB (últimos 7 pontos para calcular tendência 6 meses)
-        divida_serie = sgs.get({'divida': 13762}, last=7)
-        if not divida_serie.empty:
-            dados["divida_pib"] = float(divida_serie['divida'].iloc[-1])
-            if len(divida_serie) >= 7:
-                dados["tendencia_divida"] = (
-                    float(divida_serie['divida'].iloc[-1]) - float(divida_serie['divida'].iloc[0])
-                )
-        primario_serie = sgs.get({'primario': 5793}, last=1)
-        if not primario_serie.empty:
-            dados["result_primario"] = float(primario_serie['primario'].iloc[-1])
-    except:
-        pass
+
+    # 2. Fallback: BCB/FRED ao vivo se cache vazio
+    if dados["selic"] is None or dados["ipca"] is None or dados["divida_pib"] is None:
+        try:
+            from bcb import sgs
+            if dados["selic"] is None:
+                selic_serie = sgs.get({'selic': 432}, last=1)
+                if not selic_serie.empty:
+                    dados["selic"] = float(selic_serie['selic'].iloc[-1])
+            if dados["ipca"] is None:
+                ipca_serie = sgs.get({'ipca': 433}, last=1)
+                if not ipca_serie.empty:
+                    dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
+            if dados["divida_pib"] is None or dados["result_primario"] is None:
+                divida_serie = sgs.get({'divida': 13762}, last=7)
+                if not divida_serie.empty:
+                    dados["divida_pib"] = float(divida_serie['divida'].iloc[-1])
+                    if len(divida_serie) >= 7:
+                        dados["tendencia_divida"] = (
+                            float(divida_serie['divida'].iloc[-1]) - float(divida_serie['divida'].iloc[0])
+                        )
+                if dados["result_primario"] is None:
+                    primario_serie = sgs.get({'primario': 5793}, last=1)
+                    if not primario_serie.empty:
+                        dados["result_primario"] = float(primario_serie['primario'].iloc[-1])
+        except Exception:
+            pass
+    if dados["t10y2y"] is None or dados["vix"] is None or dados["hy_spread"] is None:
+        try:
+            from fredapi import Fred
+            fred = Fred(api_key=st.secrets["FRED_API_KEY"])
+            if dados["t10y2y"] is None:
+                t10y2y = fred.get_series('T10Y2Y', limit=1)
+                if not t10y2y.empty:
+                    dados["t10y2y"] = float(t10y2y.iloc[-1])
+            if dados["vix"] is None:
+                vix = fred.get_series('VIXCLS', limit=1)
+                if not vix.empty:
+                    dados["vix"] = float(vix.iloc[-1])
+            if dados["hy_spread"] is None:
+                hy = fred.get_series('BAMLH0A0HYM2', limit=1)
+                if not hy.empty:
+                    dados["hy_spread"] = float(hy.iloc[-1])
+        except Exception:
+            pass
     return dados
 
 dados_sem = buscar_dados_semaforo()
@@ -1280,23 +1326,32 @@ if ativos_alocados:
     with st.spinner("sincronizando..."):
         live_data_port = {}
         var_dia_port = {}
-        try:
-            tickers_base_port = list(set([mapear_ticker_base(t) for t in tickers_com_peso]))
-            hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
-            if isinstance(hist_port, pd.Series):
-                hist_port = hist_port.to_frame(name=tickers_base_port[0])
-            hist_port = hist_port.ffill()
-            for t in tickers_com_peso:
-                t_base = mapear_ticker_base(t)
-                try:
-                    s = hist_port[t_base].dropna()
-                    if len(s) >= 2:
-                        live_data_port[t] = float(s.iloc[-1])
-                        var_dia_port[t] = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
-                except:
-                    live_data_port[t] = 0.0
-        except:
-            pass
+        cache_port = get_all_price_cache()
+        for t in tickers_com_peso:
+            if t in cache_port:
+                pc = cache_port[t]
+                preco_pc = float(pc.get('preco', 0) or 0)
+                live_data_port[t] = preco_pc
+                var_dia_port[t] = float(pc.get('var_1d', 0) or 0)
+        missing_port = [t for t in tickers_com_peso if t not in live_data_port]
+        if missing_port:
+            try:
+                tickers_base_port = list(set([mapear_ticker_base(t) for t in missing_port]))
+                hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
+                if isinstance(hist_port, pd.Series):
+                    hist_port = hist_port.to_frame(name=tickers_base_port[0])
+                hist_port = hist_port.ffill()
+                for t in missing_port:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        s = hist_port[t_base].dropna()
+                        if len(s) >= 2:
+                            live_data_port[t] = float(s.iloc[-1])
+                            var_dia_port[t] = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
+                    except:
+                        live_data_port[t] = 0.0
+            except:
+                pass
 
     custo_total = sum(float(d.get('quantidade',0)) * float(d.get('preco_medio',0)) for d in ativos_alocados.values())
     valor_atual = sum(float(d.get('quantidade',0)) * live_data_port.get(t,0) for t, d in ativos_alocados.items())
@@ -1620,31 +1675,48 @@ else:
     live_data = {}
     health_data = {h['ticker']: h for h in get_health_scores()}
 
-    with st.spinner("sincronizando cotações em tempo real..."):
+    with st.spinner("sincronizando cotações..."):
+        # 1. Tenta ler da price_cache (preenchido pelo ETL)
         try:
-            tickers_base = list(set([mapear_ticker_base(t) for t in tickers_ativos]))
-            data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
-            
-            if not data.empty and 'Close' in data.columns:
-                hist = data['Close']
-                if isinstance(hist, pd.Series): 
-                    hist = hist.to_frame(name=tickers_base[0])
-                hist = hist.ffill()
-                
-                for t in tickers_ativos:
-                    t_base = mapear_ticker_base(t)
-                    try:
-                        if t_base in hist.columns:
-                            s = hist[t_base].dropna()
-                            if len(s) >= 2:
-                                p_atual = float(s.iloc[-1])
-                                p_ontem = float(s.iloc[-2])
-                                p_1m = float(s.iloc[0])
-                                live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
-                    except:
-                        pass
-        except:
+            cache_precos = get_all_price_cache()
+            for t in tickers_ativos:
+                if t in cache_precos:
+                    pc = cache_precos[t]
+                    live_data[t] = {
+                        'preco': float(pc.get('preco', 0) or 0),
+                        'var_1d': float(pc.get('var_1d', 0) or 0),
+                        'var_1m': float(pc.get('var_1m', 0) or 0),
+                    }
+        except Exception:
             pass
+
+        # 2. Fallback: yfinance batch ao vivo
+        missing = [t for t in tickers_ativos if t not in live_data]
+        if missing:
+            try:
+                tickers_base = list(set([mapear_ticker_base(t) for t in missing]))
+                data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
+                
+                if not data.empty and 'Close' in data.columns:
+                    hist = data['Close']
+                    if isinstance(hist, pd.Series): 
+                        hist = hist.to_frame(name=tickers_base[0])
+                    hist = hist.ffill()
+                    
+                    for t in missing:
+                        t_base = mapear_ticker_base(t)
+                        try:
+                            if t_base in hist.columns:
+                                s = hist[t_base].dropna()
+                                if len(s) >= 2:
+                                    p_atual = float(s.iloc[-1])
+                                    p_ontem = float(s.iloc[-2])
+                                    p_1m = float(s.iloc[0])
+                                    live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
+                        except:
+                            pass
+            except:
+                pass
 
     # ── Complementa com cotações em lote (cache de 5min) ─────────────────
     _tickers_cot = tuple([item['ticker'] for item in watchlist if item.get('ticker')])
