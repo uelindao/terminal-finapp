@@ -194,7 +194,10 @@ def sync_prices_batch_yfinance(tickers: list[str]):
             print("  [yfinance] hist vazio, pulando")
             return 0, 0
 
-        close = hist.get("Close", hist)
+        if isinstance(hist.columns, pd.MultiIndex):
+            close = hist.xs('Close', axis=1, level=1)
+        else:
+            close = hist['Close']
         ok = 0
 
         for ticker in tickers:

@@ -84,9 +84,11 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
                 period="2d",
                 auto_adjust=True,
                 progress=False,
-                multi_level_index=False,
             )
-            close = hist.get('Close', hist)
+            if isinstance(hist.columns, pd.MultiIndex):
+                close = hist.xs('Close', axis=1, level=1)
+            else:
+                close = hist.get('Close', hist)
             volume = hist.get('Volume', None)
 
             for i, t in enumerate(missing):
@@ -1364,7 +1366,11 @@ if ativos_alocados:
         if missing_port:
             try:
                 tickers_base_port = list(set([mapear_ticker_base(t) for t in missing_port]))
-                hist_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)['Close']
+                _raw_port = yf.download(tickers_base_port, period="5d", auto_adjust=True, progress=False)
+                if isinstance(_raw_port.columns, pd.MultiIndex):
+                    hist_port = _raw_port.xs('Close', axis=1, level=1)
+                else:
+                    hist_port = _raw_port['Close']
                 if isinstance(hist_port, pd.Series):
                     hist_port = hist_port.to_frame(name=tickers_base_port[0])
                 hist_port = hist_port.ffill()
@@ -1728,8 +1734,13 @@ else:
                 tickers_base = list(set([mapear_ticker_base(t) for t in missing]))
                 data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
                 
-                if not data.empty and 'Close' in data.columns:
-                    hist = data['Close']
+                if not data.empty:
+                    if isinstance(data.columns, pd.MultiIndex):
+                        hist = data.xs('Close', axis=1, level=1)
+                    else:
+                        hist = data.get('Close', data)
+                else:
+                    hist = pd.DataFrame()
                     if isinstance(hist, pd.Series): 
                         hist = hist.to_frame(name=tickers_base[0])
                     hist = hist.ffill()
