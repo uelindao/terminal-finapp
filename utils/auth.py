@@ -1,8 +1,76 @@
 import streamlit as st
 import hmac
+import uuid
 from utils.style import aplicar_tema
 from utils.components import page_header, empty_state
-from database.db import autenticar_usuario, criar_usuario, listar_usuarios, alterar_senha, deletar_usuario
+from database.db import (
+    autenticar_usuario, criar_usuario, listar_usuarios, alterar_senha, deletar_usuario,
+    criar_sessao, validar_sessao, revogar_sessao,
+)
+
+_COOKIE_NAME = "finterminal_session"
+_COOKIE_DAYS = 7
+
+
+def _get_cookie_manager():
+    """Retorna instância do CookieManager (lazy, cached por sessão)."""
+    if 'cookie_manager' not in st.session_state:
+        try:
+            import extra_streamlit_components as stx
+            st.session_state['cookie_manager'] = stx.CookieManager(key="finterminal_cm")
+        except Exception:
+            st.session_state['cookie_manager'] = None
+    return st.session_state['cookie_manager']
+
+
+def _salvar_cookie(token: str):
+    cm = _get_cookie_manager()
+    if cm is None:
+        return
+    try:
+        from datetime import datetime, timedelta
+        cm.set(
+            _COOKIE_NAME, token,
+            expires_at=datetime.now() + timedelta(days=_COOKIE_DAYS),
+            key=f"set_{token[:8]}",
+        )
+    except Exception:
+        pass
+
+
+def _ler_cookie() -> str | None:
+    cm = _get_cookie_manager()
+    if cm is None:
+        return None
+    try:
+        return cm.get(_COOKIE_NAME)
+    except Exception:
+        return None
+
+
+def _apagar_cookie():
+    cm = _get_cookie_manager()
+    if cm is None:
+        return
+    try:
+        cm.delete(_COOKIE_NAME, key="del_session")
+    except Exception:
+        pass
+
+
+def _login_por_sessao(token: str) -> bool:
+    """Valida token no banco e preenche session_state. Retorna True se OK."""
+    user = validar_sessao(token)
+    if not user:
+        return False
+    st.session_state['autenticado']   = True
+    st.session_state['user_id']       = user['id']
+    st.session_state['username']      = user['username']
+    st.session_state['nome']          = user.get('nome') or user['username']
+    st.session_state['is_admin']      = bool(user.get('is_admin', False))
+    st.session_state['session_token'] = token
+    return True
+
 
 def get_current_user() -> dict | None:
     """retorna o utilizador logado ou none."""
@@ -15,20 +83,34 @@ def get_current_user() -> dict | None:
         }
     return None
 
+
 def logout():
-    """limpa a sessão e redireciona para o login."""
-    for key in ['autenticado', 'user_id', 'username', 'nome', 'is_admin', 'password_correct', 'logged_in_user']:
+    """Revoga o token, apaga o cookie e limpa a sessão."""
+    token = st.session_state.get('session_token')
+    if token:
+        revogar_sessao(token)
+    _apagar_cookie()
+    for key in ['autenticado', 'user_id', 'username', 'nome', 'is_admin',
+                'password_correct', 'logged_in_user', 'session_token', 'cookie_manager']:
         st.session_state.pop(key, None)
     st.rerun()
 
+
 def require_auth() -> bool:
     """
-    verifica autenticação. se não estiver logado, mostra a tela de login e retorna false.
-    usar no topo de cada página.
+    Verifica autenticação por session_state (mesma aba) ou cookie (nova aba).
+    Mostrar tela de login só se ambos falharem.
     """
+    # 1. Já autenticado nesta aba
     if st.session_state.get('autenticado', False):
         return True
 
+    # 2. Tenta auto-login via cookie (nova aba ou reload)
+    token = _ler_cookie()
+    if token and _login_por_sessao(token):
+        return True
+
+    # 3. Mostra tela de login
     _render_tela_login()
     return False
 
@@ -77,17 +159,21 @@ def _render_tela_login():
 
                 if st.form_submit_button("entrar", type="primary", use_container_width=True):
                     if usuario_input and senha_input:
-                        # a validação agora volta a ser estritamente via banco de dados
                         usuario = autenticar_usuario(usuario_input, senha_input)
-                        
+
                         if usuario:
-                            st.session_state['autenticado']  = True
-                            st.session_state['user_id']      = usuario['id']
-                            st.session_state['username']     = usuario['username']
-                            st.session_state['nome']         = usuario['nome'] or usuario['username']
-                            st.session_state['is_admin']     = bool(usuario['is_admin'])
+                            token = str(uuid.uuid4())
+                            criar_sessao(usuario['id'], token, dias=_COOKIE_DAYS)
+                            _salvar_cookie(token)
+
+                            st.session_state['autenticado']       = True
+                            st.session_state['user_id']           = usuario['id']
+                            st.session_state['username']          = usuario['username']
+                            st.session_state['nome']              = usuario['nome'] or usuario['username']
+                            st.session_state['is_admin']          = bool(usuario['is_admin'])
                             st.session_state['password_correct']  = True
                             st.session_state['logged_in_user']    = usuario['username']
+                            st.session_state['session_token']     = token
                             st.rerun()
                         else:
                             st.error("⚠️ usuário ou senha incorretos.")

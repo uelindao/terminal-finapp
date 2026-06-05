@@ -1,4 +1,5 @@
 streamlit
+extra-streamlit-components>=0.3.6
 yfinance
 pandas
 numpy

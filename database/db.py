@@ -78,6 +78,76 @@ def autenticar_usuario(username: str, senha: str) -> dict | None:
         return None
 
 
+# ==========================================
+# SESSÕES PERSISTENTES (cross-tab login)
+# ==========================================
+
+def criar_sessao(user_id: int, token: str, dias: int = 7) -> bool:
+    """Persiste um token de sessão no banco com expiração."""
+    from datetime import timezone, timedelta
+    sb = get_supabase()
+    try:
+        expires = (datetime.now(timezone.utc) + timedelta(days=dias)).isoformat()
+        sb.table('user_sessions').upsert(
+            {'token': token, 'user_id': user_id, 'expires_at': expires},
+            on_conflict='token',
+        ).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[db] falha ao criar sessão para user {user_id}: {e}")
+        return False
+
+
+def validar_sessao(token: str) -> dict | None:
+    """Verifica se token existe, não expirou e retorna dados do usuário."""
+    from datetime import timezone
+    sb = get_supabase()
+    try:
+        agora = datetime.now(timezone.utc).isoformat()
+        rows = (
+            sb.table('user_sessions')
+            .select('user_id, expires_at')
+            .eq('token', token)
+            .gt('expires_at', agora)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not rows:
+            return None
+        user_id = rows[0]['user_id']
+        user_rows = (
+            sb.table('users')
+            .select('id, username, nome, is_admin')
+            .eq('id', user_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return user_rows[0] if user_rows else None
+    except Exception as e:
+        logger.warning(f"[db] falha ao validar sessão: {e}")
+        return None
+
+
+def revogar_sessao(token: str) -> None:
+    """Remove o token de sessão do banco (logout)."""
+    try:
+        get_supabase().table('user_sessions').delete().eq('token', token).execute()
+    except Exception as e:
+        logger.warning(f"[db] falha ao revogar sessão: {e}")
+
+
+def limpar_sessoes_expiradas() -> None:
+    """Remove sessões expiradas do banco (manutenção periódica)."""
+    from datetime import timezone
+    try:
+        agora = datetime.now(timezone.utc).isoformat()
+        get_supabase().table('user_sessions').delete().lt('expires_at', agora).execute()
+    except Exception:
+        pass
+
+
 def listar_usuarios() -> list[dict]:
     sb = get_supabase()
     try:
