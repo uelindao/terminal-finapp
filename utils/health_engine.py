@@ -643,7 +643,7 @@ def _detectar_segmento_fii(ticker: str, dados: dict) -> str:
     return 'hibrido'
 
 
-def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None) -> dict:
+def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None, force: bool = False) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
     Cruza pilares fundamentalistas com o cenário macro e momentum técnico.
@@ -661,21 +661,23 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
-        # Se score foi calculado nas últimas 24h, retorna do cache
-        try:
-            todos_health = get_health_scores()
-            if todos_health:
-                h = next((h for h in todos_health if h['ticker'] == ticker), None)
-                if h and h.get('updated_at'):
-                    updated = h['updated_at']
-                    if isinstance(updated, str):
-                        from datetime import datetime as _dt
-                        updated = _dt.fromisoformat(updated.replace('Z', '+00:00'))
-                    idade = (datetime.now(timezone.utc) - updated).total_seconds()
-                    if idade < 86400 and h.get('score', 0) >= 30:
-                        return {'score': h['score'], 'alertas': [], 'status': 'cached'}
-        except Exception:
-            pass
+        # Se score foi calculado nas últimas 24h, retorna do cache (exceto se force=True)
+        # threshold > 50 para não servir o fallback de erro (que é exatamente 50)
+        if not force:
+            try:
+                todos_health = get_health_scores()
+                if todos_health:
+                    h = next((h for h in todos_health if h['ticker'] == ticker), None)
+                    if h and h.get('updated_at'):
+                        updated = h['updated_at']
+                        if isinstance(updated, str):
+                            from datetime import datetime as _dt
+                            updated = _dt.fromisoformat(updated.replace('Z', '+00:00'))
+                        idade = (datetime.now(timezone.utc) - updated).total_seconds()
+                        if idade < 86400 and h.get('score', 0) > 50:
+                            return {'score': h['score'], 'alertas': [], 'status': 'cached'}
+            except Exception:
+                pass
 
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})

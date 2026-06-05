@@ -1610,7 +1610,7 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
             t = item['ticker']
             txt.caption(f"a analisar {t.lower()}...")
             
-            calcular_health_score(mapear_ticker_base(t))
+            calcular_health_score(mapear_ticker_base(t), force=True)
             
             barra.progress((idx + 1) / total)
             
