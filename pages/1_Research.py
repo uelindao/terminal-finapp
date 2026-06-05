@@ -1253,7 +1253,9 @@ with tab_earn:
                     fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'], name="lucro", marker_color=CORES_SERIES[2]))
                     fig_earn.update_layout(**base_layout(height=400), barmode='group')
                     st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
-        except: st.error("Erro earnings.")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
+            st.error(f"erro ao carregar demonstrações: {e}")
 
 with tab_ia:
     section_title("🧠 análise ia — deepseek v4 pro")
@@ -1470,10 +1472,10 @@ with tab_ia:
     ):
         try:
             from utils.health_engine import safe_int as _si
-        except:
+        except ImportError:
             def _si(v, d=0):
                 try: return int(float(v)) if v is not None else d
-                except: return d
+                except Exception: return d
         val_pl   = _si(cache_d.get('p/l'))
         val_pvp  = _si(cache_d.get('p/vp'))
         val_roe  = _si(cache_d.get('roe%'))
@@ -2043,7 +2045,7 @@ with tab_dcf:
                             vp_soma = sum(eps_input * (1 + g_c_dec)**t / (1 + w_c_dec)**t for t in range(1, n_anos + 1))
                             vp_term = (eps_input * (1 + g_c_dec)**n_anos * (1 + g_terminal)) / (w_c_dec - g_terminal) / ((1 + w_c_dec)**n_anos)
                             linha[f"g={g_c}%"] = round(vp_soma + vp_term, 2)
-                    except:
+                    except Exception:
                         linha[f"g={g_c}%"] = "—"
                 dados_sens.append(linha)
                 

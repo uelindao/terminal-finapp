@@ -1399,11 +1399,11 @@ if ativos_alocados:
                         if len(s) >= 2:
                             live_data_port[t] = float(s.iloc[-1])
                             var_dia_port[t] = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
-                    except:
+                    except Exception:
                         live_data_port[t] = 0.0
                 if missing_port and any(live_data_port.get(tt) for tt in missing_port if tt not in cache_port):
                     fonte_port = "api"
-            except:
+            except Exception:
                 pass
 
     custo_total = sum(float(d.get('quantidade',0)) * float(d.get('preco_medio',0)) for d in ativos_alocados.values())
@@ -1828,9 +1828,9 @@ else:
                                     p_1m = float(s.iloc[0])
                                     live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
                                     fonte_wl[t] = "api"
-                        except:
+                        except Exception:
                             pass
-            except:
+            except Exception:
                 pass
 
     # ── Complementa com cotações em lote (cache de 5min) ─────────────────
@@ -2225,7 +2225,7 @@ if btn_relatorio:
                                 var_1d = ((float(s.iloc[-1]) / float(s.iloc[-2])) - 1) * 100
                             if len(s) >= 22:
                                 var_1m = ((float(s.iloc[-1]) / float(s.iloc[-22])) - 1) * 100
-                    except:
+                    except Exception:
                         pass
 
                     dados_carteira.append({
