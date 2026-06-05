@@ -1605,14 +1605,12 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
         txt = st.empty()
         total = len(ativos_atuais)
         
-        # LOOP LIMPO DE VELOCIDADE MÁXIMA
         for idx, item in enumerate(ativos_atuais):
             t = item['ticker']
             txt.caption(f"a analisar {t.lower()}...")
-            
             calcular_health_score(mapear_ticker_base(t), force=True)
-            
             barra.progress((idx + 1) / total)
+            time.sleep(1.5)  # evita rate limit do Yahoo Finance
             
         txt.empty()
         barra.empty()
@@ -1992,6 +1990,9 @@ else:
         empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
                     "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
+    # Acumula qual ticker pediu o memorial (dialog só pode ser chamado 1x por render)
+    _memorial_pendente = None
+
     for mercado, ativos in mercados_dict.items():
         # Header do grupo de mercado
         st.markdown(
@@ -2069,14 +2070,15 @@ else:
                         st.session_state.pop(f"confirm_del_{t}", None)
                         st.rerun()
 
-            # Memorial de cálculo
+            # Marca memorial pendente (chamada real acontece fora do loop)
             if st.session_state.get(f"show_memorial_{t}"):
-                exibir_memorial(t, h_info.get('score', 0), breakdown, lista_alertas)
-                if st.button("fechar", key=f"close_mem_{t}"):
-                    st.session_state.pop(f"show_memorial_{t}", None)
-                    st.rerun()
+                _memorial_pendente = (t, h_info.get('score', 0), breakdown, lista_alertas)
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+    # Chama o dialog uma única vez fora do loop para evitar DuplicateElementId
+    if _memorial_pendente:
+        exibir_memorial(*_memorial_pendente)
 
     # ── Botão de comparar ativos selecionados ──────────────────────────────
     _selecionados_comp = st.session_state.get('comp_selecionados', [])
