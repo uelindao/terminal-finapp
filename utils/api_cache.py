@@ -126,7 +126,10 @@ def get_from_cache(
         resp = query.limit(1).execute()
 
         if resp.data:
-            return resp.data[0]["data"]
+            data = resp.data[0]["data"]
+            # Ignora entradas vazias salvas por sessões anteriores com quota esgotada
+            if data is not None and data != {} and data != []:
+                return data
         return None
 
     except Exception as e:
@@ -194,8 +197,10 @@ def fetch_with_cache(
         logger.warning(f"[api_cache] fetch_func falhou: {e}")
         return None
 
-    if resultado is None:
-        return None
+    if resultado is None or resultado == {} or resultado == []:
+        # Não cacheia respostas vazias — permite re-tentativa na próxima sessão
+        # (ocorre quando AV retorna erro, ticker sem cobertura, ou quota esgotada)
+        return resultado
 
     save_to_cache(ticker, provider, endpoint, resultado, periodo)
     return resultado

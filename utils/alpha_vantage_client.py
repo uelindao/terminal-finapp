@@ -281,7 +281,8 @@ def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
         return av_result
 
     # -- Passo 4: Fallback yfinance (AV sem quota ou sem cobertura) ----------
-    logger.info(f"[av] sem dados AV para {ticker} — tentando yfinance como fallback")
+    motivo = "sem quota" if not key_ok else "sem cobertura AV ou resposta vazia"
+    logger.info(f"[av] {ticker} — {motivo} — usando yfinance como fallback")
     yf_result = get_quarterly_fundamentals_yfinance(ticker)
     return yf_result
 
