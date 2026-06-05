@@ -716,7 +716,9 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         dados_confiaveis = qualidade >= 40
 
         pvp = safe_float(dados_base.get('p/vp')) or safe_float(info.get('priceToBook'))
-        dy = safe_float(dados_base.get('dy%')) or (safe_float(info.get('dividendYield'), 0) * 100 if info.get('dividendYield') else 0)
+        _dy_raw_info = safe_float(info.get('dividendYield'))
+        _dy_from_info = (_dy_raw_info if _dy_raw_info and _dy_raw_info > 0.30 else (_dy_raw_info * 100 if _dy_raw_info else 0))
+        dy = safe_float(dados_base.get('dy%')) or _dy_from_info
         if dy is not None:
             try:
                 dy = float(dy)
@@ -817,7 +819,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         # Benchmarks corrigidos: P/VP por segmento, yield vs NTN-B (IPCA+)
         # ══════════════════════════════════════════════════════════════════════
         if is_fii:
-            segmento = _detectar_segmento_fii(ticker, dados)
+            segmento = _detectar_segmento_fii(ticker, dados_base)
             yield_ntnb = _buscar_yield_ntnb()   # yield REAL NTN-B (ex: 6.8%)
 
             # ── P/VP por segmento ──────────────────────────────────────────
@@ -957,11 +959,14 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         # MOTOR 2 e 3: AÇÕES (B3 vs EUA)
         # ==========================================
         else:
+            # setor_yf precisa ser definido antes de calcular_piotroski
+            setor_yf = (info.get('sector', '') or dados_base.get('setor', '')).lower()
+
             if acao is not None:
                 f_score, f_detalhamento = calcular_piotroski(acao, setor_yf, is_br=ticker.endswith('.SA'))
             else:
                 f_score, f_detalhamento = 0, {}
-            
+
             pl = safe_float(dados_base.get('p/l')) or safe_float(info.get('trailingPE')) or safe_float(info.get('forwardPE'))
             raw_roe = safe_float(info.get('returnOnEquity'))
             roe = safe_float(dados_base.get('roe%')) or (raw_roe * 100 if raw_roe is not None else None)
@@ -983,10 +988,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif margem > 5: score_q += 8
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
             else: score_q += 6
-            
+
             # --- Valuation Adaptativo com múltiplos setoriais (máx 26pts) ---
-            # Fonte: info.get('sector') em inglês (yfinance) ou fallback para dado do cache
-            setor_yf = (info.get('sector', '') or dados_base.get('setor', '')).lower()
             if setor_yf in MULTIPLOS_SETOR:
                 # setor identificado — usa thresholds específicos do setor
                 limite_pl_bom, limite_pl_medio, limite_pvp_bom, limite_pvp_medio = MULTIPLOS_SETOR[setor_yf]
