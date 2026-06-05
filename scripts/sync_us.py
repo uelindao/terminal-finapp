@@ -193,11 +193,12 @@ def _get_yf_close(hist):
 
 
 def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
-    """Busca precos via yfinance em lotes menores (evita rate limit)."""
+    """Busca precos via yfinance em lotes. Retorna (ok, fail, hist_dict)."""
     import yfinance as yf
     import pandas as pd
     total_ok = 0
     total_fail = 0
+    hist_dict: dict[str, pd.DataFrame] = {}  # {ticker: DataFrame com coluna Close}
 
     for batch_start in range(0, len(tickers), batch_size):
         batch = tickers[batch_start:batch_start + batch_size]
@@ -253,12 +254,39 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                     pass
 
                 upsert_price(ticker, price_data)
+                # Captura hist para reuso no health score (evita re-download)
+                hist_dict[ticker] = s.to_frame(name='Close')
                 total_ok += 1
             except Exception as e:
                 print(f"  [yfinance] ERRO {ticker}: {e}")
                 total_fail += 1
 
-    return total_ok, total_fail
+    return total_ok, total_fail, hist_dict
+
+
+def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict):
+    """Calcula e persiste health scores usando dados já cacheados — sem download extra."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.health_engine import calcular_health_score
+
+    ok = 0
+    fail = 0
+    for ticker in tickers_ok:
+        try:
+            hist_df = hist_dict.get(ticker)
+            calcular_health_score(
+                ticker,
+                macro_context=macro_ctx,
+                hist_externo=hist_df,
+                force=True,
+            )
+            ok += 1
+        except Exception as e:
+            print(f"  [health] SKIP {ticker}: {e}")
+            fail += 1
+    print(f"[sync_us] health scores: {ok} ok, {fail} skip")
+    return ok, fail
 
 
 def main():
@@ -286,8 +314,24 @@ def main():
 
     # Sync precos
     print("[sync_us] sincronizando precos...")
-    p_ok, p_fail = sync_prices_batch_yfinance(SCREENER_US)
+    p_ok, p_fail, hist_dict = sync_prices_batch_yfinance(SCREENER_US)
     print(f"[sync_us] precos: {p_ok} ok, {p_fail} falha")
+
+    # Health scores — usa hist já baixado, sem chamadas extras ao Yahoo
+    print("[sync_us] calculando health scores...")
+    tickers_com_hist = [t for t in SCREENER_US if t in hist_dict]
+    try:
+        from database.db import get_all_macro_cache
+        _mc = get_all_macro_cache()
+        macro_ctx = {
+            'selic':  _mc.get('selic', {}).get('value', 10.5),
+            'vix':    _mc.get('vix', {}).get('value', 15.0),
+            'ipca':   _mc.get('ipca_12m', {}).get('value', 4.5),
+        }
+    except Exception:
+        macro_ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
+
+    sync_health_scores(tickers_com_hist, hist_dict, macro_ctx)
 
     _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
     log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)

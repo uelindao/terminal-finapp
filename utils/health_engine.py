@@ -1,4 +1,20 @@
-import streamlit as st
+try:
+    import streamlit as st
+    _ST_AVAILABLE = True
+except ImportError:
+    # ETL context (GitHub Actions) — sem Streamlit instalado
+    class _NoOpCache:
+        def __call__(self, *a, **kw):
+            return lambda f: f
+    class _FakeSt:
+        cache_data = _NoOpCache()
+        class session_state:
+            @staticmethod
+            def get(*a, **kw):
+                return kw.get('default', a[1] if len(a) > 1 else {})
+    st = _FakeSt()
+    _ST_AVAILABLE = False
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -710,11 +726,17 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             except Exception as _e_info:
                 logger.warning(f"[health_engine] info yfinance falhou para {ticker}: {_e_info} — usando cache")
 
-        # acao (balanço) sempre é buscada para ações (Piotroski, ROIC, Crescimento)
+        # acao (balanço) para Piotroski/ROIC/Crescimento
+        # Quando hist_externo é fornecido (ETL) e cache tem dados, evita chamada extra ao Yahoo
+        _hist_externo_usado = hist_externo is not None and not (
+            isinstance(hist_externo, pd.DataFrame) and hist_externo.empty
+        )
         if is_fii:
-            acao = None  # FIIs não usam cálculos de balanço
+            acao = None
         elif 'acao_temp' in locals():
             acao = acao_temp
+        elif _hist_externo_usado and cache_disponivel:
+            acao = None  # ETL com cache suficiente — pula balanço (sem yfinance extra)
         else:
             acao = yf.Ticker(ticker)
 
