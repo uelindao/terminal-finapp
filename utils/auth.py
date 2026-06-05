@@ -12,48 +12,40 @@ _COOKIE_NAME = "finterminal_session"
 _COOKIE_DAYS = 7
 
 
-def _get_cookie_manager():
-    """Retorna instância do CookieManager (lazy, cached por sessão)."""
-    if 'cookie_manager' not in st.session_state:
-        try:
-            import extra_streamlit_components as stx
-            st.session_state['cookie_manager'] = stx.CookieManager(key="finterminal_cm")
-        except Exception:
-            st.session_state['cookie_manager'] = None
-    return st.session_state['cookie_manager']
-
-
 def _salvar_cookie(token: str):
-    cm = _get_cookie_manager()
-    if cm is None:
-        return
+    """Escreve cookie via JavaScript (sem dependência externa)."""
     try:
-        from datetime import datetime, timedelta
-        cm.set(
-            _COOKIE_NAME, token,
-            expires_at=datetime.now() + timedelta(days=_COOKIE_DAYS),
-            key=f"set_{token[:8]}",
+        import streamlit.components.v1 as _components
+        max_age = _COOKIE_DAYS * 24 * 3600
+        _components.html(
+            f"<script>"
+            f"document.cookie='{_COOKIE_NAME}={token};"
+            f"max-age={max_age};path=/;SameSite=Strict';"
+            f"</script>",
+            height=0,
         )
     except Exception:
         pass
 
 
 def _ler_cookie() -> str | None:
-    cm = _get_cookie_manager()
-    if cm is None:
-        return None
+    """Lê cookie via st.context.cookies (Streamlit ≥1.37)."""
     try:
-        return cm.get(_COOKIE_NAME)
+        return st.context.cookies.get(_COOKIE_NAME)
     except Exception:
         return None
 
 
 def _apagar_cookie():
-    cm = _get_cookie_manager()
-    if cm is None:
-        return
+    """Expira o cookie via JavaScript."""
     try:
-        cm.delete(_COOKIE_NAME, key="del_session")
+        import streamlit.components.v1 as _components
+        _components.html(
+            f"<script>"
+            f"document.cookie='{_COOKIE_NAME}=;max-age=0;path=/;SameSite=Strict';"
+            f"</script>",
+            height=0,
+        )
     except Exception:
         pass
 
@@ -91,7 +83,7 @@ def logout():
         revogar_sessao(token)
     _apagar_cookie()
     for key in ['autenticado', 'user_id', 'username', 'nome', 'is_admin',
-                'password_correct', 'logged_in_user', 'session_token', 'cookie_manager']:
+                'password_correct', 'logged_in_user', 'session_token']:
         st.session_state.pop(key, None)
     st.rerun()
 
