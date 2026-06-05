@@ -1433,38 +1433,7 @@ if ativos_alocados:
 # ==========================================
 section_title("👁️ watchlist & radar de alertas")
 
-watchlists_disponiveis = listar_watchlists()
-if not watchlists_disponiveis:
-    get_watchlist_padrao()
-    watchlists_disponiveis = listar_watchlists()
-
-if 'watchlist_ativa_id' not in st.session_state:
-    st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
-
-opcoes_wl = {f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id'] for wl in watchlists_disponiveis}
-
-idx_ativo = 0
-for i, wl in enumerate(watchlists_disponiveis):
-    if wl['id'] == st.session_state['watchlist_ativa_id']:
-        idx_ativo = i
-        break
-
-col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
-
-with col_sel_wl:
-    sel_wl_label = st.selectbox("watchlist ativa:", list(opcoes_wl.keys()), index=idx_ativo, key="sel_watchlist_ativa_ui", label_visibility="collapsed")
-    st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
-    watchlist_id_ativo = st.session_state['watchlist_ativa_id']
-
-with col_btn_nova:
-    if st.button("➕ nova watchlist", use_container_width=True):
-        st.session_state['criar_wl_modal'] = True
-
-with col_btn_cfg:
-    if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
-        st.session_state['cfg_wl_modal'] = True
-
-# ── MODAIS DA WATCHLIST ───────────────────────
+# ── MODAIS DA WATCHLIST (definidos aqui — chamados dentro do fragment) ──
 @st.dialog("➕ criar nova watchlist")
 def modal_criar_watchlist():
     icones_opcoes = ["⭐","📈","🎯","💰","🏦","🌍","⚡","🔬","💼","🛡️"]
@@ -1493,13 +1462,13 @@ def modal_criar_watchlist():
     if c_cancel.button("cancelar", use_container_width=True):
         st.rerun()
 
-if st.session_state.get('criar_wl_modal'):
-    st.session_state.pop('criar_wl_modal')
-    modal_criar_watchlist()
 
 @st.dialog("⚙️ configurar watchlist")
 def modal_cfg_watchlist():
-    wl_atual = next((wl for wl in watchlists_disponiveis if wl['id'] == watchlist_id_ativo), None)
+    # auto-contido: lê do DB e session_state diretamente
+    _wls = listar_watchlists()
+    _wl_id = st.session_state.get('watchlist_ativa_id')
+    wl_atual = next((wl for wl in _wls if wl['id'] == _wl_id), None)
     if not wl_atual:
         st.rerun()
         return
@@ -1513,28 +1482,160 @@ def modal_cfg_watchlist():
 
     col_a, col_b, col_c = st.columns(3)
     if col_a.button("💾 salvar", type="primary", use_container_width=True):
-        renomear_watchlist(watchlist_id_ativo, novo_nome, nova_desc, novo_icone)
+        renomear_watchlist(_wl_id, novo_nome, nova_desc, novo_icone)
         st.success("watchlist atualizada!")
         time.sleep(1)
         st.rerun()
 
     if col_b.button("⭐ definir padrão", use_container_width=True):
-        definir_watchlist_padrao(watchlist_id_ativo)
+        definir_watchlist_padrao(_wl_id)
         st.success("definida como padrão!")
         time.sleep(1)
         st.rerun()
 
-    pode_deletar = len(watchlists_disponiveis) > 1
+    pode_deletar = len(_wls) > 1
     if col_c.button("🗑️ deletar", use_container_width=True, disabled=not pode_deletar, help="deleta a watchlist e todos os ativos nela"):
-        deletar_watchlist(watchlist_id_ativo)
-        st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+        deletar_watchlist(_wl_id)
+        st.session_state['watchlist_ativa_id'] = _wls[0]['id']
         st.success("watchlist deletada.")
         time.sleep(1)
         st.rerun()
 
-if st.session_state.get('cfg_wl_modal'):
-    st.session_state.pop('cfg_wl_modal')
-    modal_cfg_watchlist()
+
+@st.dialog("🗑 remover ativo")
+def _dialog_remover_ativo(ticker: str, watchlist_id: int):
+    _label = ticker.replace('.SA', '').upper()
+    st.markdown(
+        f'<div style="font-family:Courier New; font-size:0.9rem; color:#ccc; padding:8px 0;">'
+        f'remover <strong style="color:#FF9900;">{_label}</strong> da watchlist?</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("remover", type="primary", use_container_width=True):
+        remover_ativo(ticker, watchlist_id=watchlist_id)
+        st.rerun()
+    if c2.button("cancelar", use_container_width=True):
+        st.rerun()
+
+
+@st.dialog("🧮 memorial de cálculo")
+def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
+    import re as _re
+
+    st.markdown(f"#### ativo: {ticker_nome.lower()}")
+
+    cor_score = "#00C853" if score_final >= 65 else ("#FF9900" if score_final >= 40 else "#FF1744")
+    st.markdown(
+        f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; "
+        f"color:{cor_score}; text-align:center; padding:10px; background:#111; "
+        f"border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>",
+        unsafe_allow_html=True,
+    )
+
+    if breakdown_dict:
+        st.markdown("**🧱 pilares de pontuação:**")
+
+        for pilar, v in breakdown_dict.items():
+            pts_num = None
+            if isinstance(v, (int, float)):
+                pts_num = float(v)
+            elif isinstance(v, str):
+                m = _re.search(r'([+-]?\d+\.?\d*)', str(v))
+                if m:
+                    try:
+                        pts_num = float(m.group(1))
+                    except Exception:
+                        pts_num = None
+
+            eh_pilar = isinstance(v, (int, float))
+
+            if eh_pilar and pts_num is not None:
+                if pts_num == 0 and "penalidade" in pilar.lower():
+                    continue
+                cor_pts = "#00C853" if pts_num > 0 else ("#FF1744" if pts_num < 0 else "#666")
+                sinal   = "+" if pts_num > 0 else ""
+                st.markdown(
+                    f"<div style='display:flex; justify-content:space-between; "
+                    f"border-bottom:1px solid #222; padding:4px 0;'>"
+                    f"<span style='color:#ccc;'>{pilar.lower()}</span> "
+                    f"<span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>"
+                    f"{sinal}{pts_num:.0f} pts</span></div>",
+                    unsafe_allow_html=True,
+                )
+            elif isinstance(v, str) and v not in ('n/d', '—', 'None', '', 'nan'):
+                cor_v = "#00C853" if v.startswith('+') else ("#FF1744" if v.startswith('-') else "#555")
+                st.markdown(
+                    f"<div style='display:flex; justify-content:space-between; "
+                    f"padding:3px 0; font-family:Courier New; font-size:0.72rem;'>"
+                    f"<span style='color:#444;'>{pilar.lower()}</span>"
+                    f"<span style='color:{cor_v};'>{v}</span></div>",
+                    unsafe_allow_html=True,
+                )
+    else:
+        st.info("💡 memorial não disponível. clique em '🚨 atualizar health scores' no topo da página para recalcular este ativo na nova versão.")
+
+    if alertas_lista:
+        st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
+        for a in alertas_lista:
+            st.markdown(
+                f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; "
+                f"padding-left:10px; border-left:2px solid #444;'>{a}</div>",
+                unsafe_allow_html=True,
+            )
+
+
+# ── WATCHLIST SECTION — @st.fragment (selector + busca + scores + grid) ──
+# Interações dentro deste fragment NÃO recarregam o restante da página
+@st.fragment
+def _watchlist_section():
+    # ── Selector e gerenciamento de watchlists ───────────────────────────
+    watchlists_disponiveis = listar_watchlists()
+    if not watchlists_disponiveis:
+        get_watchlist_padrao()
+        watchlists_disponiveis = listar_watchlists()
+
+    if 'watchlist_ativa_id' not in st.session_state:
+        st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
+
+    opcoes_wl = {f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id'] for wl in watchlists_disponiveis}
+
+    idx_ativo = 0
+    for i, wl in enumerate(watchlists_disponiveis):
+        if wl['id'] == st.session_state['watchlist_ativa_id']:
+            idx_ativo = i
+            break
+
+    col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
+
+    with col_sel_wl:
+        sel_wl_label = st.selectbox("watchlist ativa:", list(opcoes_wl.keys()), index=idx_ativo, key="sel_watchlist_ativa_ui", label_visibility="collapsed")
+        st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
+        watchlist_id_ativo = st.session_state['watchlist_ativa_id']
+
+    with col_btn_nova:
+        if st.button("➕ nova watchlist", use_container_width=True):
+            st.session_state['criar_wl_modal'] = True
+
+    with col_btn_cfg:
+        if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
+            st.session_state['cfg_wl_modal'] = True
+
+    if st.session_state.get('criar_wl_modal'):
+        st.session_state.pop('criar_wl_modal')
+        modal_criar_watchlist()
+
+    if st.session_state.get('cfg_wl_modal'):
+        st.session_state.pop('cfg_wl_modal')
+        modal_cfg_watchlist()
+
+
+# ── Chama o fragment do selector ────────────────────────────────────────────
+_watchlist_section()
+
+# ── Variáveis de módulo para buscar ativo e atualizar scores ────────────────
+# (o grid usa st.session_state diretamente; o selector as define no fragment)
+watchlists_disponiveis = listar_watchlists() or []
+watchlist_id_ativo = st.session_state.get('watchlist_ativa_id') or (watchlists_disponiveis[0]['id'] if watchlists_disponiveis else None)
 
 # ── BUSCAR E ADICIONAR ATIVO ──
 expandir_busca = bool(st.session_state.get('resultados_busca'))
@@ -1618,78 +1719,6 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
         progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
         time.sleep(1) # pausa de UI (interface) rápida só pra mostrar "concluído" antes de sumir
         st.rerun()
-
-# ── FUNÇÃO MODAL DO MEMORIAL ───────────────────────
-@st.dialog("🧮 memorial de cálculo")
-def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
-    import re as _re
-
-    st.markdown(f"#### ativo: {ticker_nome.lower()}")
-
-    cor_score = "#00C853" if score_final >= 65 else ("#FF9900" if score_final >= 40 else "#FF1744")
-    st.markdown(
-        f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; "
-        f"color:{cor_score}; text-align:center; padding:10px; background:#111; "
-        f"border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>",
-        unsafe_allow_html=True,
-    )
-
-    if breakdown_dict:
-        st.markdown("**🧱 pilares de pontuação:**")
-
-        for pilar, v in breakdown_dict.items():
-            # ── Extrai número da forma mais robusta possível ──────────────
-            # v pode ser int, float ou string como "+6 pts", "12.5%", "n/d"
-            pts_num = None
-            if isinstance(v, (int, float)):
-                pts_num = float(v)
-            elif isinstance(v, str):
-                m = _re.search(r'([+-]?\d+\.?\d*)', str(v))
-                if m:
-                    try:
-                        pts_num = float(m.group(1))
-                    except Exception:
-                        pts_num = None
-
-            # Decide se é pilar de pontuação (numérico inteiro/float direto)
-            # ou dado informativo (string percentual, ratio, etc.)
-            eh_pilar = isinstance(v, (int, float))
-
-            if eh_pilar and pts_num is not None:
-                # Pula penalidades zeradas para não poluir
-                if pts_num == 0 and "penalidade" in pilar.lower():
-                    continue
-                cor_pts = "#00C853" if pts_num > 0 else ("#FF1744" if pts_num < 0 else "#666")
-                sinal   = "+" if pts_num > 0 else ""
-                st.markdown(
-                    f"<div style='display:flex; justify-content:space-between; "
-                    f"border-bottom:1px solid #222; padding:4px 0;'>"
-                    f"<span style='color:#ccc;'>{pilar.lower()}</span> "
-                    f"<span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>"
-                    f"{sinal}{pts_num:.0f} pts</span></div>",
-                    unsafe_allow_html=True,
-                )
-            elif isinstance(v, str) and v not in ('n/d', '—', 'None', '', 'nan'):
-                # Dado informativo: mostra em cinza mais claro
-                cor_v = "#00C853" if v.startswith('+') else ("#FF1744" if v.startswith('-') else "#555")
-                st.markdown(
-                    f"<div style='display:flex; justify-content:space-between; "
-                    f"padding:3px 0; font-family:Courier New; font-size:0.72rem;'>"
-                    f"<span style='color:#444;'>{pilar.lower()}</span>"
-                    f"<span style='color:{cor_v};'>{v}</span></div>",
-                    unsafe_allow_html=True,
-                )
-    else:
-        st.info("💡 memorial não disponível. clique em '🚨 atualizar health scores' no topo da página para recalcular este ativo na nova versão.")
-
-    if alertas_lista:
-        st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
-        for a in alertas_lista:
-            st.markdown(
-                f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; "
-                f"padding-left:10px; border-left:2px solid #444;'>{a}</div>",
-                unsafe_allow_html=True,
-            )
 
 # ── GRID DA WATCHLIST ATIVA ─────────────────────────────
 watchlist = listar_watchlist(watchlist_id=watchlist_id_ativo)
@@ -1918,11 +1947,11 @@ else:
                             atualizar_tag_ativo(watchlist_id_ativo, _ticker_t, _tag_t)
                     st.success("✅ tags salvas!")
                     st.session_state['modo_editar_tags'] = False
-                    st.rerun()
+                    st.rerun(scope="fragment")
             with _cc:
                 if st.button("cancelar", type="secondary", use_container_width=True, key="btn_cancel_tags"):
                     st.session_state['modo_editar_tags'] = False
-                    st.rerun()
+                    st.rerun(scope="fragment")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1947,7 +1976,7 @@ else:
         if st.button("↺", key="btn_reset_ordem", help="resetar ordenação"):
             st.session_state.pop('wl_ordem_campo', None)
             st.session_state.pop('wl_ordem_dir', None)
-            st.rerun()
+            st.rerun(scope="fragment")
 
     _ordem_reversa = "maior" in _ordem_dir
 
@@ -1991,8 +2020,9 @@ else:
         empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
                     "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
-    # Acumula qual ticker pediu o memorial (dialog só pode ser chamado 1x por render)
+    # Acumula dialogs pendentes — cada @st.dialog só pode ser chamado 1x por render
     _memorial_pendente = None
+    _remover_pendente  = None   # (ticker, watchlist_id) para o dialog de remoção
 
     for mercado, ativos in mercados_dict.items():
         # Header do grupo de mercado
@@ -2057,19 +2087,9 @@ else:
                 data_source   = fonte_wl.get(t, ''),
             )
 
-            # Confirmação de deleção
+            # Coleta remoção pendente (dialog chamado fora do loop)
             if st.session_state.get(f"confirm_del_{t}"):
-                st.warning(f"remover {t.replace('.SA', '')} da watchlist?")
-                c1, c2 = st.columns([1, 3])
-                with c1:
-                    if st.button("confirmar", type="primary", key=f"conf_del_{t}"):
-                        remover_ativo(t, watchlist_id=watchlist_id_ativo)
-                        st.session_state.pop(f"confirm_del_{t}", None)
-                        st.rerun()
-                with c2:
-                    if st.button("cancelar", key=f"canc_del_{t}"):
-                        st.session_state.pop(f"confirm_del_{t}", None)
-                        st.rerun()
+                _remover_pendente = (t, watchlist_id_ativo)
 
             # Marca memorial pendente (chamada real acontece fora do loop)
             if st.session_state.get(f"show_memorial_{t}"):
@@ -2077,7 +2097,9 @@ else:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # Chama o dialog uma única vez fora do loop para evitar DuplicateElementId
+    # Dialogs chamados uma única vez fora do loop (evita DuplicateElementId)
+    if _remover_pendente:
+        _dialog_remover_ativo(*_remover_pendente)
     if _memorial_pendente:
         exibir_memorial(*_memorial_pendente)
 
