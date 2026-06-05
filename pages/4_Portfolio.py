@@ -74,7 +74,8 @@ def calcular_betas(tickers_tuple: tuple) -> dict:
                 'beta_sp': round(beta * 0.3, 2) if is_br else round(beta, 2),
                 'is_br': is_br
             }
-    except:
+    except Exception as e:
+        logger.warning(f"[portfolio] falha ao calcular betas: {e}")
         for t in tickers:
             betas[t] = {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')}
 

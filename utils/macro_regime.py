@@ -52,17 +52,23 @@ REGIMES = {
     },
 }
 
-SETOR_NORMALIZE = {}
-for k, v in {
-    "tecnologia": "tecnologia", "financeiro": "bancos/financeiro",
-    "consumo ciclico": "consumo discricionario", "consumo discricionario": "consumo discricionario",
-    "consumo def.": "consumo basico", "consumo basico": "consumo basico",
-    "industria": "industria", "materiais": "commodities", "commodities": "commodities",
-    "energia": "energia", "imobiliario": "imobiliario",
-    "utilities": "utilities", "saude": "saude defensiva",
-    "telecom": "tecnologia", "saude defensiva": "saude defensiva",
-}.items():
-    SETOR_NORMALIZE[k] = v
+SETOR_NORMALIZE = {
+    "tecnologia":             "tecnologia",
+    "financeiro":             "bancos/financeiro",
+    "consumo ciclico":        "consumo discricionario",
+    "consumo discricionario": "consumo discricionario",
+    "consumo def.":           "consumo basico",
+    "consumo basico":         "consumo basico",
+    "industria":              "industria",
+    "materiais":              "commodities",
+    "commodities":            "commodities",
+    "energia":                "energia",
+    "imobiliario":            "imobiliario",
+    "utilities":              "utilities",
+    "saude":                  "saude defensiva",
+    "telecom":                "tecnologia",
+    "saude defensiva":        "saude defensiva",
+}
 
 
 def classificar_regime(selic=None, vix=None, ipca=None, treasury_10y=None):
@@ -108,8 +114,9 @@ def get_impacto_setor(setor_nome=None, regime_dict=None):
     fav = [s.lower() for s in regime_dict.get("setores_favorecidos", [])]
     prej = [s.lower() for s in regime_dict.get("setores_prejudicados", [])]
     sl = sn.lower()
+    regime_label = regime_dict.get("label", "")
     if any(s in sl for s in fav):
-        return {"setor_normalizado": sn, "impacto": "favoravel", "cor": "#00C853", "justificativa": f"setor favorecido no regime de {regime_dict[chr(108)+chr(97)+chr(98)+chr(101)+chr(108)]}"}
+        return {"setor_normalizado": sn, "impacto": "favoravel", "cor": "#00C853", "justificativa": f"setor favorecido no regime de {regime_label}"}
     elif any(p in sl for p in prej):
-        return {"setor_normalizado": sn, "impacto": "desfavoravel", "cor": "#FF1744", "justificativa": f"setor prejudicado no regime de {regime_dict[chr(108)+chr(97)+chr(98)+chr(101)+chr(108)]}"}
+        return {"setor_normalizado": sn, "impacto": "desfavoravel", "cor": "#FF1744", "justificativa": f"setor prejudicado no regime de {regime_label}"}
     return {"setor_normalizado": sn, "impacto": "neutro", "cor": "#FF9900", "justificativa": "setor sem correlacao direta com o regime atual"}

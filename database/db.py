@@ -33,6 +33,9 @@ def get_user_id() -> int:
 # ==========================================
 
 def _hash_senha(senha: str, salt: str = "finterminal_2025") -> str:
+    # NOTA DE SEGURANÇA: salt fixo é uma limitação conhecida — migração para argon2/bcrypt
+    # exigiria adicionar coluna 'salt' na tabela users e re-hash de todos os usuários.
+    # Para terminal pessoal (1-2 usuários) o risco é baixo, mas não usar em produção multi-tenant.
     return hashlib.sha256(f"{salt}{senha}".encode()).hexdigest()
 
 

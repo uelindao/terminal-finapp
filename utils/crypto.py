@@ -27,14 +27,18 @@ def _get_fernet():
             "adicione 'cryptography>=41.0.0' ao requirements.txt."
         ) from exc
 
+    import os
     try:
         import streamlit as st
-        try:
-            app_secret = st.secrets["APP_SECRET"]
-        except (KeyError, AttributeError):
-            app_secret = "finterminal_default_secret_2026"
+        app_secret = st.secrets.get("APP_SECRET") or os.environ.get("APP_SECRET")
     except Exception:
-        app_secret = "finterminal_default_secret_2026"
+        app_secret = os.environ.get("APP_SECRET")
+
+    if not app_secret:
+        raise RuntimeError(
+            "APP_SECRET não configurado. "
+            "Adicione APP_SECRET ao .streamlit/secrets.toml ou como variável de ambiente."
+        )
 
     key_bytes = hashlib.sha256(app_secret.encode()).digest()
     key_b64   = base64.urlsafe_b64encode(key_bytes)

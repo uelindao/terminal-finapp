@@ -325,7 +325,8 @@ def buscar_ativo_yahoo(query):
     try:
         r = requests.get(url, headers=headers, timeout=5)
         return r.json().get('quotes', [])
-    except:
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"[buscar_ativo_yahoo] falha: {e}")
         return []
 
 # ==========================================
@@ -879,9 +880,9 @@ def buscar_indices_completo():
                     preco = float(s.iloc[-1])
                     var = ((preco / float(s.iloc[-2])) - 1) * 100
                     resultados[nome] = {"preco": preco, "var": var, "ticker": tk}
-            except:
+            except Exception:
                 pass
-    except:
+    except Exception:
         pass
     return resultados
 
@@ -1310,8 +1311,6 @@ import datetime as dt_module
 def get_proximos_eventos_home():
     hoje = dt_module.date.today()
     eventos = [
-        {"data": dt_module.date(2026, 5, 13), "evento": "CPI EUA", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 6, 5),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
         {"data": dt_module.date(2026, 6, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
         {"data": dt_module.date(2026, 6, 10), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
         {"data": dt_module.date(2026, 6, 17), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
@@ -1321,6 +1320,18 @@ def get_proximos_eventos_home():
         {"data": dt_module.date(2026, 7, 14), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
         {"data": dt_module.date(2026, 7, 29), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
         {"data": dt_module.date(2026, 7, 29), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 8, 7),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 8, 12), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 8, 12), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 9, 16), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 9, 16), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 10, 7), "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 10, 9), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 10, 14),"evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 10, 28),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 11, 4), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 12, 10),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 12, 15),"evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
     ]
     proximos = sorted([e for e in eventos if e['data'] >= hoje], key=lambda x: x['data'])
     return proximos[:4]

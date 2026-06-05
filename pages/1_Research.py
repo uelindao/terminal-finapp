@@ -68,7 +68,8 @@ def buscar_ativo_yahoo(query):
     try:
         r = requests.get(url, headers=headers, timeout=5)
         return r.json().get('quotes', [])
-    except:
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"[buscar_ativo_yahoo] falha: {e}")
         return []
 
 # ==========================================
@@ -159,7 +160,6 @@ with st.sidebar:
                                      ])
     
     st.markdown("---")
-    st.caption("v2.4 — busca universal implementada")
 
     # ── HEALTH SCORE DO ATIVO ATUAL (sidebar) ──────────────────────────────
     st.markdown(

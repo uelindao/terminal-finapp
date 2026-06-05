@@ -706,7 +706,11 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             preco_cached = preco_cache_data[ticker]
 
         # usar hist_externo se disponível, senão buscar individualmente
-        if hist_externo is not None and not (isinstance(hist_externo, pd.DataFrame) and hist_externo.empty):
+        acao_temp = None
+        _hist_externo_usado = hist_externo is not None and not (
+            isinstance(hist_externo, pd.DataFrame) and hist_externo.empty
+        )
+        if _hist_externo_usado:
             hist = hist_externo if isinstance(hist_externo, pd.DataFrame) else pd.DataFrame({'Close': hist_externo})
         else:
             acao_temp = yf.Ticker(ticker)
@@ -721,19 +725,16 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         info = {}
         if not cache_disponivel:
             try:
-                acao_info = acao_temp if 'acao_temp' in locals() else yf.Ticker(ticker)
+                acao_info = acao_temp if acao_temp is not None else yf.Ticker(ticker)
                 info = acao_info.info or {}
             except Exception as _e_info:
                 logger.warning(f"[health_engine] info yfinance falhou para {ticker}: {_e_info} — usando cache")
 
         # acao (balanço) para Piotroski/ROIC/Crescimento
         # Quando hist_externo é fornecido (ETL) e cache tem dados, evita chamada extra ao Yahoo
-        _hist_externo_usado = hist_externo is not None and not (
-            isinstance(hist_externo, pd.DataFrame) and hist_externo.empty
-        )
         if is_fii:
             acao = None
-        elif 'acao_temp' in locals():
+        elif acao_temp is not None:
             acao = acao_temp
         elif _hist_externo_usado and cache_disponivel:
             acao = None  # ETL com cache suficiente — pula balanço (sem yfinance extra)
