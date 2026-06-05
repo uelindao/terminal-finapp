@@ -694,7 +694,12 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             hist = hist_externo if isinstance(hist_externo, pd.DataFrame) else pd.DataFrame({'Close': hist_externo})
         else:
             acao_temp = yf.Ticker(ticker)
-            hist = acao_temp.history(period="1y")
+            hist = acao_temp.history(period="1y", auto_adjust=True)
+            # yfinance recente pode retornar MultiIndex mesmo para único ticker
+            if isinstance(hist.columns, pd.MultiIndex):
+                hist.columns = hist.columns.get_level_values(0)
+            if hist.index.tz is not None:
+                hist.index = hist.index.tz_localize(None)
 
         # info (mercado) pode vir vazia se cache tem dados
         if cache_disponivel:
@@ -1290,7 +1295,9 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         return {'score': score, 'alertas': alertas, 'status': status_acao}
         
     except Exception as e:
-        logger.error(f"[health_engine] erro crítico ao calcular health score para {ticker}: {e}")
-        payload = {"alertas": [f"erro no cálculo: {e}"], "breakdown": {}}
+        import traceback
+        _tb = traceback.format_exc()
+        logger.error(f"[health_engine] erro crítico ao calcular health score para {ticker}: {e}\n{_tb}")
+        payload = {"alertas": [f"erro no cálculo: {e}", f"traceback: {_tb[:300]}"], "breakdown": {}}
         salvar_health_score(ticker, 50, payload)
         return {'score': 50, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}
