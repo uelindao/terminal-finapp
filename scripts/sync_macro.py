@@ -54,7 +54,7 @@ def fetch_bcb():
                         if v < 1:
                             v = v * 100
                         if v > 50:
-                            v = 10.75
+                            v = 14.75  # fallback — atualizar com a Selic atual se necessário
                     # Sanidade IPCA
                     if nome == "ipca":
                         if v > 5:

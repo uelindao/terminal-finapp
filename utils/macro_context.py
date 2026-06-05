@@ -8,6 +8,12 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Valores de fallback (usados quando APIs estão indisponíveis)
+SELIC_FALLBACK       = 14.75   # % a.a. — atualizar quando COPOM mudar
+IPCA_FALLBACK        =  0.45   # % mês
+VIX_FALLBACK         = 15.0    # pontos
+TREASURY_10Y_FALLBACK =  4.5   # % a.a.
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_macro_rapido() -> dict:
@@ -16,9 +22,9 @@ def _fetch_macro_rapido() -> dict:
     Cache de 1 hora — chamada barata (~300ms).
     Retorna dict com valores atuais e label de regime.
     """
-    selic = 10.75
-    ipca = 4.5
-    vix = 15.0
+    selic = SELIC_FALLBACK
+    ipca  = IPCA_FALLBACK
+    vix   = VIX_FALLBACK
 
     # Selic e IPCA via BCB SGS
     try:
@@ -32,7 +38,7 @@ def _fetch_macro_rapido() -> dict:
             if 0 < selic < 1:
                 selic = selic * 100        # veio como decimal
             elif selic > 50:
-                selic = 10.75              # erro — fallback seguro
+                selic = SELIC_FALLBACK     # erro — fallback seguro
         if 'ipca' in df_bcb.columns and not df_bcb['ipca'].dropna().empty:
             ipca = float(df_bcb['ipca'].dropna().iloc[-1])
             # Série 433 = % mensal (ex: 0.38). Sanidade:
@@ -51,7 +57,7 @@ def _fetch_macro_rapido() -> dict:
         logger.warning(f"[macro_context] falha VIX: {e}")
 
     # Treasury 10y via yfinance (^TNX = yield em percentual direto)
-    treasury_10y = 4.5
+    treasury_10y = TREASURY_10Y_FALLBACK
     try:
         hist_tnx = yf.Ticker("^TNX").history(period="2d")
         if not hist_tnx.empty:

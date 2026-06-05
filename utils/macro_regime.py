@@ -5,6 +5,8 @@ utils/macro_regime.py
 from __future__ import annotations
 import streamlit as st
 from utils.logger import get_logger
+from utils.macro_context import SELIC_FALLBACK, VIX_FALLBACK, IPCA_FALLBACK, TREASURY_10Y_FALLBACK
+
 logger = get_logger(__name__)
 
 REGIMES = {
@@ -73,10 +75,10 @@ SETOR_NORMALIZE = {
 
 def classificar_regime(selic=None, vix=None, ipca=None, treasury_10y=None):
     ctx = st.session_state.get("macro_context", {})
-    if selic is None: selic = ctx.get("selic", 10.75)
-    if vix is None: vix = ctx.get("vix", 15.0)
-    if ipca is None: ipca = ctx.get("ipca", 4.5)
-    if treasury_10y is None: treasury_10y = ctx.get("treasury_10y", 4.5)
+    if selic is None: selic = ctx.get("selic", SELIC_FALLBACK)
+    if vix is None: vix = ctx.get("vix", VIX_FALLBACK)
+    if ipca is None: ipca = ctx.get("ipca", IPCA_FALLBACK)
+    if treasury_10y is None: treasury_10y = ctx.get("treasury_10y", TREASURY_10Y_FALLBACK)
     selic = float(selic); vix = float(vix)
     if selic >= 13.0: jb = "muito_altos"
     elif selic > 10.0: jb = "altos"

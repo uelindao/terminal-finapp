@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.auth   import require_auth, get_current_user, render_user_badge
+from utils.auth   import require_auth, get_current_user, render_user_badge, logout
 from utils.style  import aplicar_tema
 from utils.components import (
     page_header, section_title, metric_card, status_card, empty_state
@@ -113,10 +113,7 @@ with tab_conta:
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 encerrar sessão", type="secondary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.success("sessão encerrada. recarregue a página para fazer login.")
-        st.rerun()
+        logout()  # revoga token no banco e limpa session_state
 
 
 # ══════════════════════════════════════════════════════════════════════════════
