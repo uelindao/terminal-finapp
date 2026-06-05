@@ -948,7 +948,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             # ── Score total FII e breakdown ───────────────────────────────
             score += score_pvp + score_y
             try:
-                from utils.health_engine import _detectar_segmento_fii
                 _seg_fii = _detectar_segmento_fii(ticker, dados_base)
             except Exception:
                 _seg_fii = "fii"
@@ -1297,6 +1296,14 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         import traceback
         _tb = traceback.format_exc()
         logger.error(f"[health_engine] erro crítico ao calcular health score para {ticker}: {e}\n{_tb}")
+        # Não sobrescreve o score salvo no banco — preserva o último valor válido
+        try:
+            _scores_db = get_health_scores()
+            _score_atual = next((h['score'] for h in (_scores_db or []) if h['ticker'] == ticker), 0)
+        except Exception:
+            _score_atual = 0
+        _score_retorno = _score_atual if _score_atual > 50 else 50
         payload = {"alertas": [f"erro no cálculo: {e}", f"traceback: {_tb[:300]}"], "breakdown": {}}
-        salvar_health_score(ticker, 50, payload)
-        return {'score': 50, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}
+        if _score_atual <= 50:  # só sobrescreve se não há score válido salvo
+            salvar_health_score(ticker, 50, payload)
+        return {'score': _score_retorno, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}
