@@ -284,10 +284,10 @@ def calcular_crescimento_implicito(preco, eps, wacc, g_terminal, n_anos):
                     hi = mid
                 else:
                     lo = mid
-            except:
+            except Exception:
                 return None
         return mid
-    except:
+    except Exception:
         return None
 
 # ==========================================

@@ -1394,13 +1394,14 @@ with tab_posicoes:
             live_data = {}
             for t in tickers_com_peso:
                 t_base = mapear_ticker_base(t)
-                try: 
+                try:
                     hist = yf.Ticker(t_base).history(period="5d")['Close'].dropna()
                     if not hist.empty:
                         live_data[t] = float(hist.iloc[-1])
                     else:
                         live_data[t] = 0.0
-                except: 
+                except Exception as _e:
+                    logger.debug(f"[portfolio] live_data fallback para {t_base}: {_e}")
                     live_data[t] = 0.0
 
         st.markdown("---")
@@ -3367,12 +3368,12 @@ with tab_diario:
             for d in decisoes:
                 t = d['ticker']
                 t_base = mapear_ticker_base(t)
-                try: 
+                try:
                     preco_atual = yf.Ticker(t_base).fast_info.last_price
-                except: 
+                except Exception:
                     try:
                         preco_atual = float(yf.Ticker(t_base).history(period="1d")['Close'].iloc[-1])
-                    except:
+                    except Exception:
                         preco_atual = 0.0
                     
                 retorno_pct = ((preco_atual / d['preco_decisao']) - 1) * 100 if d['preco_decisao'] and preco_atual else 0.0
