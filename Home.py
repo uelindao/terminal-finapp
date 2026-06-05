@@ -1502,6 +1502,30 @@ def modal_cfg_watchlist():
         st.rerun()
 
 
+@st.dialog("🗑 remover ativos selecionados")
+def _dialog_remover_varios(tickers: tuple, watchlist_id: int):
+    n = len(tickers)
+    st.markdown(
+        f'<div style="font-family:Courier New; font-size:0.9rem; color:#ccc; padding:4px 0 8px;">'
+        f'remover <strong style="color:#FF1744;">{n} ativo{"s" if n > 1 else ""}</strong> da watchlist?</div>',
+        unsafe_allow_html=True,
+    )
+    for _tk in tickers:
+        st.markdown(
+            f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; padding:1px 0;">• {_tk.replace(".SA","")}</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    if c1.button("remover todos", type="primary", use_container_width=True):
+        for _tk in tickers:
+            remover_ativo(_tk, watchlist_id=watchlist_id)
+        st.session_state['del_selecionados'] = []
+        st.rerun()
+    if c2.button("cancelar", use_container_width=True):
+        st.rerun()
+
+
 @st.dialog("🗑 remover ativo")
 def _dialog_remover_ativo(ticker: str, watchlist_id: int):
     _label = ticker.replace('.SA', '').upper()
@@ -2060,19 +2084,14 @@ else:
                 lista_alertas = []
                 breakdown     = {}
 
-            # Checkbox de seleção para comparativo
-            _chk_key = f"chk_comp_{t}"
+            # Checkbox de seleção para deleção múltipla
+            _chk_key = f"chk_del_{t}"
             _selecionado = st.checkbox("", key=_chk_key, label_visibility="collapsed")
-            if _selecionado:
-                _sel_list = st.session_state.get('comp_selecionados', [])
-                if t not in _sel_list:
-                    _sel_list.append(t)
-                    st.session_state['comp_selecionados'] = _sel_list
-            else:
-                _sel_list = st.session_state.get('comp_selecionados', [])
-                if t in _sel_list:
-                    _sel_list.remove(t)
-                    st.session_state['comp_selecionados'] = _sel_list
+            _del_list = st.session_state.setdefault('del_selecionados', [])
+            if _selecionado and t not in _del_list:
+                _del_list.append(t)
+            elif not _selecionado and t in _del_list:
+                _del_list.remove(t)
 
             watchlist_row(
                 ticker        = t,
@@ -2103,25 +2122,38 @@ else:
     if _memorial_pendente:
         exibir_memorial(*_memorial_pendente)
 
-    # ── Botão de comparar ativos selecionados ──────────────────────────────
-    _selecionados_comp = st.session_state.get('comp_selecionados', [])
-    if len(_selecionados_comp) >= 2:
-        if st.button(
-            f"⚖️ comparar selecionados "
-            f"({', '.join([t.replace('.SA','') for t in _selecionados_comp])})",
-            type="primary",
-            use_container_width=True,
-            key="btn_ir_comparativo",
-        ):
-            st.session_state['comp_ativos_presel'] = _selecionados_comp
-            st.session_state['research_modo'] = 'Comparativo (Múltiplos)'
-            st.session_state['comp_selecionados'] = []
-            st.switch_page("pages/1_Research.py")
-    elif len(_selecionados_comp) == 1:
-        st.caption(
-            f"selecione mais 1 ativo para comparar com "
-            f"{_selecionados_comp[0].replace('.SA','')}"
-        )
+    # ── Barra de deleção múltipla ──────────────────────────────────────────
+    _del_selecionados = st.session_state.get('del_selecionados', [])
+    if _del_selecionados:
+        _n_del = len(_del_selecionados)
+        _labels = ', '.join(t.replace('.SA', '') for t in _del_selecionados[:5])
+        if _n_del > 5:
+            _labels += f' +{_n_del - 5}'
+
+        _cb1, _cb2 = st.columns([3, 1])
+        with _cb1:
+            st.markdown(
+                f'<div style="background:#1a0505; border:1px solid #FF1744; border-radius:6px;'
+                f' padding:10px 16px; font-family:Courier New; font-size:0.8rem; color:#FF6B6B;">'
+                f'🗑 selecionados: <strong>{_labels}</strong></div>',
+                unsafe_allow_html=True,
+            )
+        with _cb2:
+            _cols_del = st.columns(2)
+            if _cols_del[0].button(
+                f"remover {_n_del}",
+                type="primary",
+                use_container_width=True,
+                key="btn_remover_varios",
+            ):
+                _dialog_remover_varios(tuple(_del_selecionados), watchlist_id_ativo)
+            if _cols_del[1].button(
+                "limpar",
+                use_container_width=True,
+                key="btn_limpar_sel",
+            ):
+                st.session_state['del_selecionados'] = []
+                st.rerun(scope="fragment")
 
 # ==========================================
 # RELATÓRIO SEMANAL
