@@ -459,7 +459,7 @@ def calcular_momentum(tickers_tuple: tuple) -> list[dict]:
                 'acima mm200': '✅' if acima_mm200 else '❌',
                 'score momentum': score_mom,
             }
-        except:
+        except Exception:
             return None
 
     with ThreadPoolExecutor(max_workers=8) as ex:

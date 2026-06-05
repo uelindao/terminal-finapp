@@ -13,7 +13,7 @@ def fmt_numero(n, prefixo=""):
         if abs(n) >= 1e6:  return f"{prefixo}{n/1e6:.2f}M"
         if abs(n) >= 1e3:  return f"{prefixo}{n/1e3:.2f}K"
         return f"{prefixo}{n:,.2f}"
-    except:
+    except Exception:
         return "N/D"
 
 def fmt_pct(n, casas=2, sinal=True):
@@ -23,7 +23,7 @@ def fmt_pct(n, casas=2, sinal=True):
         n = float(n)
         s = "+" if (sinal and n > 0) else ""
         return f"{s}{n:.{casas}f}%"
-    except:
+    except Exception:
         return "N/D"
 
 def fmt_preco(n, moeda="R$"):
@@ -32,5 +32,5 @@ def fmt_preco(n, moeda="R$"):
     try:
         n = float(n)
         return f"{moeda} {n:,.2f}"
-    except:
+    except Exception:
         return "N/D"
