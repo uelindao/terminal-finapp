@@ -139,7 +139,7 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     }
 
 
-def _get_yf_close(hist) -> pd.DataFrame:
+def _get_yf_close(hist):
     """Extrai DataFrame de Close de um yfinance MultiIndex (lida com ambos formatos)."""
     import pandas as pd
     if not isinstance(hist, pd.DataFrame) or hist.empty:
