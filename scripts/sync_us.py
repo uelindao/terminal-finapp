@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.supabase_helper import (
     upsert_fundamentals, upsert_price, log_etl_start, log_etl_finish,
 )
+# Importa lista de tickers diretamente de utils/tickers.py (sem dependência de streamlit)
+from utils.tickers import SCREENER_US
 
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
 FMP_KEYS = []
@@ -33,48 +35,6 @@ def _init_keys():
         FMP_KEYS.append(k2)
     if not FMP_KEYS:
         print("[sync_us] AVISO: nenhuma FMP_API_KEY configurada")
-
-
-# Universo US (fonte: utils/tickers.py)
-SCREENER_US = [
-    # Technology
-    "AAPL","ADBE","ADI","AMAT","AMD","AMZN","ANET","ANSS","ASML","AVGO",
-    "CDNS","CRM","CSCO","FTNT","GOOG","GOOGL","HPQ","IBM","INTC","INTU",
-    "KLAC","LRCX","META","MSFT","MU","NOW","NVDA","ORCL","PANW","PYPL",
-    "QCOM","SNPS","TXN","ZBRA",
-    # Health
-    "ABBV","ABT","AMGN","BAX","BDX","BIIB","BMY","BSX","CI","CVS","DHR",
-    "ELV","GILD","HCA","HUM","IDXX","ISRG","JNJ","MDT","MRK","PFE",
-    "REGN","SYK","TMO","UNH","VRTX","ZBH",
-    # Financial
-    "AIG","AMP","AON","AXP","BAC","BK","BLK","BRK-B","C","CB","CFG",
-    "CME","COF","DFS","FI","GS","ICE","JPM","MCO","MMC","MS","MSCI",
-    "PGR","SCHW","SPGI","TFC","TRV","USB","V","WFC",
-    # Consumer Cyclical
-    "ABNB","AMZN","AZO","BKNG","CMG","DHI","EBAY","F","GM","HD","LEN",
-    "LOW","LVS","MAR","MCD","MGM","NKE","ORLY","PHM","ROST","SBUX",
-    "TGT","TJX","TSLA","YUM",
-    # Consumer Defensive
-    "CAG","CL","CLX","COST","EL","GIS","HSY","K","KMB","KO","MDLZ",
-    "MKC","MO","PEP","PG","PM","SJM","STZ","SYY","WMT",
-    # Energy
-    "BKR","COP","CVX","DVN","EOG","FANG","HAL","HES","KMI","MPC","MRO",
-    "OKE","OXY","PSX","SLB","VLO","WMB","XOM",
-    # Industrial
-    "BA","CAT","CSX","DE","EMR","ETN","FDX","GD","GE","HON","ITW","LMT",
-    "MMM","NOC","NSC","PH","RTX","TT","UNP","UPS","WM",
-    # Materials
-    "ALB","APD","CF","DD","ECL","FCX","FMC","IP","LIN","MOS","NEM",
-    "NUE","PKG","PPG","SHW",
-    # Utilities
-    "AEE","AEP","AES","AWK","D","DTE","DUK","ED","EIX","ES","ETR",
-    "EXC","FE","NEE","NI","PCG","PEG","SO","SRE","WEC","XEL",
-    # Telecom
-    "CHTR","CMCSA","DISH","LUMN","T","TMUS","VZ",
-    # REITs
-    "AMT","ARE","AVB","CCI","DLR","EQR","EXR","IRM","KIM","O","PSA",
-    "PLD","SBAC","SPG","WELL","WY",
-]
 
 
 def _sf(val):

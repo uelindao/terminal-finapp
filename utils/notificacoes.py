@@ -42,8 +42,8 @@ def disparar_notificacao_browser(titulo: str, corpo: str, icone: str = "⚡"):
         if (Notification.permission === 'granted') {{
             var n = new Notification('{icone} {titulo_esc}', {{
                 body:    '{corpo_esc}',
-                icon:    'https://finterminal.app/favicon.ico',
-                badge:   'https://finterminal.app/favicon.ico',
+                icon:    '',
+                badge:   '',
                 tag:     'finterminal-alert',
                 requireInteraction: true
             }});

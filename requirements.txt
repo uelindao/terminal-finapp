@@ -3,7 +3,6 @@ yfinance
 pandas
 numpy
 plotly
-google-genai
 fredapi
 python-bcb
 supabase>=2.3.0
@@ -11,3 +10,6 @@ openai>=1.30.0
 reportlab>=4.0.0
 cryptography>=41.0.0
 matplotlib>=3.8.0
+requests
+beautifulsoup4
+google-genai
