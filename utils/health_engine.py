@@ -702,14 +702,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 hist.index = hist.index.tz_localize(None)
 
         # info (mercado) pode vir vazia se cache tem dados
-        if cache_disponivel:
-            info = {}
-        else:
-            if 'acao_temp' in locals():
-                acao_info = acao_temp
-            else:
-                acao_info = yf.Ticker(ticker)
-            info = acao_info.info
+        info = {}
+        if not cache_disponivel:
+            try:
+                acao_info = acao_temp if 'acao_temp' in locals() else yf.Ticker(ticker)
+                info = acao_info.info or {}
+            except Exception as _e_info:
+                logger.warning(f"[health_engine] info yfinance falhou para {ticker}: {_e_info} — usando cache")
 
         # acao (balanço) sempre é buscada para ações (Piotroski, ROIC, Crescimento)
         if is_fii:
