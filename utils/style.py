@@ -933,6 +933,27 @@ def aplicar_tema():
         }
     }
 
+    /* ═══════════════════════════════════════════════════
+       TICKER NAVIGATION LINKS
+       ═══════════════════════════════════════════════════ */
+
+    a.ticker-nav {
+        color: var(--accent) !important;
+        font-family: var(--font-data) !important;
+        font-weight: bold !important;
+        text-decoration: none !important;
+        cursor: pointer !important;
+        letter-spacing: 0.02em !important;
+        transition: color 0.15s ease !important;
+    }
+    a.ticker-nav:hover {
+        color: var(--accent-hover) !important;
+        text-decoration: underline !important;
+    }
+    a.ticker-nav:visited {
+        color: var(--accent) !important;
+    }
+
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)

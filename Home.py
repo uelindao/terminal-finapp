@@ -37,6 +37,7 @@ from utils.components import (
     empty_state, progress_steps,
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
     tooltip, label_com_tooltip,
+    handle_ticker_nav,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -291,6 +292,7 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+handle_ticker_nav()  # navega para Research quando ticker é clicado em qualquer lista
 
 # Garante macro_context atualizado em todas as páginas filhas
 garantir_macro_context()
@@ -489,10 +491,9 @@ if _tickers_earn:
                         f'align-items:center;">'
 
                         f'<div>'
-                        f'<div style="font-family:Courier New;'
-                        f'font-size:0.82rem;font-weight:700;'
-                        f'color:#FF9900;">'
-                        f'{_ep["ticker"].replace(".SA","")}</div>'
+                        f'<a href="?research_ticker={_ep["ticker"]}" class="ticker-nav" '
+                        f'style="font-size:0.82rem;" title="abrir research">'
+                        f'{_ep["ticker"].replace(".SA","")}</a>'
                         f'<div style="font-family:Courier New;'
                         f'font-size:0.65rem;color:#555;">'
                         f'{_ep["data_str"]}</div>'

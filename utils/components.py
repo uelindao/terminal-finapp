@@ -7,6 +7,18 @@ import streamlit as st
 import time
 
 
+def handle_ticker_nav():
+    """
+    Trata navegação via ?research_ticker=TICKER.
+    Chamar no topo de cada página que exibe tickers clicáveis.
+    """
+    _rt = st.query_params.get("research_ticker")
+    if _rt:
+        st.query_params.clear()
+        st.session_state['research_ticker_externo'] = _rt
+        st.switch_page("pages/1_Research.py")
+
+
 def page_header(titulo: str, subtitulo: str = ""):
     """Header compacto de página."""
     st.markdown(
@@ -318,12 +330,12 @@ def watchlist_row(
     )
 
     with col_tk:
+        _ticker_label = ticker.replace(".SA", "")
         st.markdown(
-            f'<div style="font-family:var(--font-data);'
-            f' font-weight:bold; color:var(--accent);'
-            f' font-size:0.85rem; padding:11px 0 3px;'
-            f' letter-spacing:0.02em;">'
-            f'{ticker.replace(".SA", "")}{earn_html}</div>',
+            f'<div style="padding:11px 0 3px;">'
+            f'<a href="?research_ticker={ticker}" class="ticker-nav" '
+            f'title="abrir research: {_ticker_label}">'
+            f'{_ticker_label}</a>{earn_html}</div>',
             unsafe_allow_html=True,
         )
 
@@ -467,10 +479,9 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         f' margin-bottom:6px; transition:border-color 0.15s;">'
         f'<div style="display:flex; align-items:center;'
         f' margin-bottom:4px;">'
-        f'<span style="font-family:var(--font-data);'
-        f' font-weight:bold; color:var(--accent);'
-        f' font-size:0.85rem;">'
-        f'{ticker.replace(".SA", "")}{earn_html}</span>'
+        f'<a href="?research_ticker={ticker}" class="ticker-nav" '
+        f'style="font-size:0.85rem;" title="abrir research">'
+        f'{ticker.replace(".SA", "")}</a>{earn_html}'
         f'{_alert_badge}'
         f'</div>'
         f'<div style="font-family:var(--font-ui);'

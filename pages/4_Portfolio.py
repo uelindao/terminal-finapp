@@ -18,7 +18,7 @@ from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_se
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -35,6 +35,7 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+handle_ticker_nav()
 
 page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
 
@@ -1283,9 +1284,22 @@ with tab_posicoes:
         patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
         num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
         
-        c_txt, c_btn = st.columns([3, 1])
+        c_txt, c_nav, c_btn = st.columns([3, 2, 1])
         with c_txt:
             st.markdown(f"<div style='font-family: Courier New; font-size: 0.85rem; color: #888; padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
+        with c_nav:
+            _tickers_port = df_ativas['ticker'].tolist()
+            _sel_nav = st.selectbox(
+                "→ research:",
+                [""] + [t.replace('.SA','') for t in _tickers_port],
+                label_visibility="collapsed",
+                key="port_nav_ticker",
+                placeholder="abrir no research...",
+            )
+            if _sel_nav:
+                _match = next((t for t in _tickers_port if t.replace('.SA','') == _sel_nav), _sel_nav)
+                st.session_state['research_ticker_externo'] = _match
+                st.switch_page("pages/1_Research.py")
         with c_btn:
             btn_salvar = st.button("💾 salvar correções da tabela", type="primary", use_container_width=True)
             
@@ -1851,7 +1865,7 @@ with tab_posicoes:
                         f'<div style="display:flex; justify-content:space-between; '
                         f'padding:4px 0; border-bottom:1px solid #111; '
                         f'font-family:Courier New; font-size:0.75rem;">'
-                        f'<span style="color:#FF9900;">{pos["ticker"].replace(".SA","")}</span>'
+                        f'<a href="?research_ticker={pos["ticker"]}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
                         f'<span style="color:#555;">R$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
@@ -1879,7 +1893,7 @@ with tab_posicoes:
                         f'<div style="display:flex; justify-content:space-between; '
                         f'padding:4px 0; border-bottom:1px solid #111; '
                         f'font-family:Courier New; font-size:0.75rem;">'
-                        f'<span style="color:#FF9900;">{pos["ticker"].replace(".SA","")}</span>'
+                        f'<a href="?research_ticker={pos["ticker"]}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
                         f'<span style="color:#555;">$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p}; font-size:0.68rem;">R$ {pos["pl_brl"]:+,.0f}</span>'

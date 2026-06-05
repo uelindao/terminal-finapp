@@ -27,7 +27,7 @@ from utils.tickers import (
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip
+from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
@@ -54,6 +54,7 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+handle_ticker_nav()
 
 # ── Auto-sync diário: roda 1x por sessão por dia ─────────────────────────────
 _hoje_sync = str(datetime.date.today())
@@ -836,7 +837,12 @@ with tab_mom:
         with col_a1:
             for _, row in df_m.iterrows():
                 c1, c2, c3 = st.columns([2, 3, 2])
-                c1.markdown(f"**{row['ticker']}**")
+                _tk_mom = row['ticker']
+                c1.markdown(
+                    f'<a href="?research_ticker={_tk_mom}" class="ticker-nav" style="font-size:0.85rem;">'
+                    f'{_tk_mom.replace(".SA","")}</a>',
+                    unsafe_allow_html=True,
+                )
                 score = row['score momentum']
                 cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
                 barra = "█" * int(score // 10) + "░" * int(10 - score // 10)
@@ -1090,10 +1096,14 @@ with tab_screen:
                         lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
                     )
 
-            st.dataframe(
+            st.caption("clique em uma linha para abrir no research →")
+            _sel_screener = st.dataframe(
                 df_display,
                 use_container_width=True,
                 hide_index=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key="df_screener_quant",
                 column_config={
                     'ticker': st.column_config.TextColumn("Ticker", width="small"),
                     'nome':   st.column_config.TextColumn("Nome",   width="medium"),
@@ -1105,6 +1115,11 @@ with tab_screen:
                     'margem%':st.column_config.TextColumn("Margem %", width="small"),
                 },
             )
+            if _sel_screener and _sel_screener.selection.rows:
+                _row_idx = _sel_screener.selection.rows[0]
+                _sel_ticker = df_res.iloc[_row_idx]['_ticker_full']
+                st.session_state['research_ticker_externo'] = _sel_ticker
+                st.switch_page("pages/1_Research.py")
 
             # ── adicionar à watchlist ────────────────────────────────────────
             section_title("➕ adicionar à watchlist")
