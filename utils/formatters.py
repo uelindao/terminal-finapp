@@ -3,6 +3,23 @@ utils/formatters.py
 Funções centrais para formatação de números, moedas e percentuais.
 """
 
+
+def safe_float(val, default=None):
+    """Converte valor para float de forma segura, tratando None/NaN/strings."""
+    if val is None:
+        return default
+    try:
+        import pandas as pd
+        if isinstance(val, float) and pd.isna(val):
+            return default
+    except Exception:
+        pass
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def fmt_numero(n, prefixo=""):
     """Formata grandes números para K, M, B, T de forma elegante."""
     if n is None: return "N/D"

@@ -57,6 +57,16 @@ def safe_float(val, default=None) -> float | None:
         return default
 
 
+def safe_int(val, default=0) -> int:
+    """Converte valor para int de forma segura, tratando string/None."""
+    if val is None:
+        return default
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return default
+
+
 def _is_fii(ticker: str) -> bool:
     """Determina se o ativo é um Fundo Imobiliário (FII)."""
     nao_fiis = [
