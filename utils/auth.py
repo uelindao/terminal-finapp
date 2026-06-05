@@ -8,50 +8,12 @@ from database.db import (
     criar_sessao, validar_sessao, revogar_sessao,
 )
 
-_COOKIE_NAME = "finterminal_session"
-_COOKIE_DAYS = 7
-
-
-def _salvar_cookie(token: str):
-    """Escreve cookie via JavaScript (sem dependência externa)."""
-    try:
-        import streamlit.components.v1 as _components
-        max_age = _COOKIE_DAYS * 24 * 3600
-        _components.html(
-            f"<script>"
-            f"document.cookie='{_COOKIE_NAME}={token};"
-            f"max-age={max_age};path=/;SameSite=Strict';"
-            f"</script>",
-            height=0,
-        )
-    except Exception:
-        pass
-
-
-def _ler_cookie() -> str | None:
-    """Lê cookie via st.context.cookies (Streamlit ≥1.37)."""
-    try:
-        return st.context.cookies.get(_COOKIE_NAME)
-    except Exception:
-        return None
-
-
-def _apagar_cookie():
-    """Expira o cookie via JavaScript."""
-    try:
-        import streamlit.components.v1 as _components
-        _components.html(
-            f"<script>"
-            f"document.cookie='{_COOKIE_NAME}=;max-age=0;path=/;SameSite=Strict';"
-            f"</script>",
-            height=0,
-        )
-    except Exception:
-        pass
+_SESSION_PARAM = "s"   # query param que carrega o token de sessão
+_SESSION_DAYS  = 7
 
 
 def _login_por_sessao(token: str) -> bool:
-    """Valida token no banco e preenche session_state. Retorna True se OK."""
+    """Valida token no Supabase e preenche session_state. Retorna True se OK."""
     user = validar_sessao(token)
     if not user:
         return False
@@ -62,6 +24,23 @@ def _login_por_sessao(token: str) -> bool:
     st.session_state['is_admin']      = bool(user.get('is_admin', False))
     st.session_state['session_token'] = token
     return True
+
+
+def _token_na_url() -> str | None:
+    """Lê ?s=TOKEN da URL atual."""
+    try:
+        return st.query_params.get(_SESSION_PARAM)
+    except Exception:
+        return None
+
+
+def _fixar_token_na_url(token: str):
+    """Garante que ?s=TOKEN está na URL — sem sobrescrever outros params."""
+    try:
+        if st.query_params.get(_SESSION_PARAM) != token:
+            st.query_params[_SESSION_PARAM] = token
+    except Exception:
+        pass
 
 
 def get_current_user() -> dict | None:
@@ -77,11 +56,14 @@ def get_current_user() -> dict | None:
 
 
 def logout():
-    """Revoga o token, apaga o cookie e limpa a sessão."""
+    """Revoga o token no Supabase, remove da URL e limpa a sessão."""
     token = st.session_state.get('session_token')
     if token:
         revogar_sessao(token)
-    _apagar_cookie()
+    try:
+        st.query_params.pop(_SESSION_PARAM, None)
+    except Exception:
+        pass
     for key in ['autenticado', 'user_id', 'username', 'nome', 'is_admin',
                 'password_correct', 'logged_in_user', 'session_token']:
         st.session_state.pop(key, None)
@@ -90,19 +72,22 @@ def logout():
 
 def require_auth() -> bool:
     """
-    Verifica autenticação por session_state (mesma aba) ou cookie (nova aba).
-    Mostrar tela de login só se ambos falharem.
+    Verifica autenticação em 3 camadas:
+    1. session_state (aba já logada)
+    2. ?s=TOKEN na URL (nova aba com link de sessão)
+    3. tela de login
     """
-    # 1. Já autenticado nesta aba
+    # 1. Já autenticado nesta aba — garante token na URL para links cross-tab
     if st.session_state.get('autenticado', False):
+        _fixar_token_na_url(st.session_state.get('session_token', ''))
         return True
 
-    # 2. Tenta auto-login via cookie (nova aba ou reload)
-    token = _ler_cookie()
+    # 2. Token na URL (nova aba aberta via link ou cópia de URL)
+    token = _token_na_url()
     if token and _login_por_sessao(token):
         return True
 
-    # 3. Mostra tela de login
+    # 3. Tela de login
     _render_tela_login()
     return False
 
@@ -155,8 +140,7 @@ def _render_tela_login():
 
                         if usuario:
                             token = str(uuid.uuid4())
-                            criar_sessao(usuario['id'], token, dias=_COOKIE_DAYS)
-                            _salvar_cookie(token)
+                            criar_sessao(usuario['id'], token, dias=_SESSION_DAYS)
 
                             st.session_state['autenticado']       = True
                             st.session_state['user_id']           = usuario['id']
@@ -166,6 +150,8 @@ def _render_tela_login():
                             st.session_state['password_correct']  = True
                             st.session_state['logged_in_user']    = usuario['username']
                             st.session_state['session_token']     = token
+                            # fixa o token na URL imediatamente (cross-tab session)
+                            st.query_params[_SESSION_PARAM] = token
                             st.rerun()
                         else:
                             st.error("⚠️ usuário ou senha incorretos.")

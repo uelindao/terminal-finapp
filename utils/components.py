@@ -7,14 +7,29 @@ import streamlit as st
 import time
 
 
+def ticker_nav_url(ticker: str) -> str:
+    """Gera URL de navegação para Research com token de sessão embutido."""
+    s = st.session_state.get('session_token', '')
+    if s:
+        return f"?research_ticker={ticker}&s={s}"
+    return f"?research_ticker={ticker}"
+
+_ticker_nav_url = ticker_nav_url  # alias interno
+
+
 def handle_ticker_nav():
     """
     Trata navegação via ?research_ticker=TICKER.
+    Preserva ?s=TOKEN (da URL ou session_state) para auto-login na nova página.
     Chamar no topo de cada página que exibe tickers clicáveis.
     """
     _rt = st.query_params.get("research_ticker")
     if _rt:
+        # Prioridade: token da URL → session_state (aba já logada)
+        _s = st.query_params.get("s") or st.session_state.get('session_token', '')
         st.query_params.clear()
+        if _s:
+            st.query_params["s"] = _s
         st.session_state['research_ticker_externo'] = _rt
         st.switch_page("pages/1_Research.py")
 
@@ -333,7 +348,7 @@ def watchlist_row(
         _ticker_label = ticker.replace(".SA", "")
         st.markdown(
             f'<div style="padding:11px 0 3px;">'
-            f'<a href="?research_ticker={ticker}" class="ticker-nav" '
+            f'<a href="{_ticker_nav_url(ticker)}" class="ticker-nav" '
             f'title="abrir research: {_ticker_label}">'
             f'{_ticker_label}</a>{earn_html}</div>',
             unsafe_allow_html=True,
@@ -479,7 +494,7 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         f' margin-bottom:6px; transition:border-color 0.15s;">'
         f'<div style="display:flex; align-items:center;'
         f' margin-bottom:4px;">'
-        f'<a href="?research_ticker={ticker}" class="ticker-nav" '
+        f'<a href="{_ticker_nav_url(ticker)}" class="ticker-nav" '
         f'style="font-size:0.85rem;" title="abrir research">'
         f'{ticker.replace(".SA", "")}</a>{earn_html}'
         f'{_alert_badge}'

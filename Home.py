@@ -37,7 +37,7 @@ from utils.components import (
     empty_state, progress_steps,
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
     tooltip, label_com_tooltip,
-    handle_ticker_nav,
+    handle_ticker_nav, ticker_nav_url,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -491,7 +491,7 @@ if _tickers_earn:
                         f'align-items:center;">'
 
                         f'<div>'
-                        f'<a href="?research_ticker={_ep["ticker"]}" class="ticker-nav" '
+                        f'<a href="{ticker_nav_url(_ep["ticker"])}" class="ticker-nav" '
                         f'style="font-size:0.82rem;" title="abrir research">'
                         f'{_ep["ticker"].replace(".SA","")}</a>'
                         f'<div style="font-family:Courier New;'

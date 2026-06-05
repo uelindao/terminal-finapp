@@ -18,7 +18,7 @@ from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_se
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -1865,7 +1865,7 @@ with tab_posicoes:
                         f'<div style="display:flex; justify-content:space-between; '
                         f'padding:4px 0; border-bottom:1px solid #111; '
                         f'font-family:Courier New; font-size:0.75rem;">'
-                        f'<a href="?research_ticker={pos["ticker"]}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
+                        f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
                         f'<span style="color:#555;">R$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
@@ -1893,7 +1893,7 @@ with tab_posicoes:
                         f'<div style="display:flex; justify-content:space-between; '
                         f'padding:4px 0; border-bottom:1px solid #111; '
                         f'font-family:Courier New; font-size:0.75rem;">'
-                        f'<a href="?research_ticker={pos["ticker"]}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
+                        f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
                         f'<span style="color:#555;">$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p}; font-size:0.68rem;">R$ {pos["pl_brl"]:+,.0f}</span>'

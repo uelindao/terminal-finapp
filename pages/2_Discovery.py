@@ -27,7 +27,7 @@ from utils.tickers import (
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav
+from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout
 from utils.macro_regime import classificar_regime
@@ -839,7 +839,7 @@ with tab_mom:
                 c1, c2, c3 = st.columns([2, 3, 2])
                 _tk_mom = row['ticker']
                 c1.markdown(
-                    f'<a href="?research_ticker={_tk_mom}" class="ticker-nav" style="font-size:0.85rem;">'
+                    f'<a href="{ticker_nav_url(_tk_mom)}" class="ticker-nav" style="font-size:0.85rem;">'
                     f'{_tk_mom.replace(".SA","")}</a>',
                     unsafe_allow_html=True,
                 )
