@@ -43,6 +43,11 @@ st.set_page_config(
 
 page_header("🕐 backfill histórico", "popula 10 anos de health scores históricos via FMP.")
 inject_ui_enhancements()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FUNÇÕES CORE (sem dependência de arquivo local — tudo via banco)

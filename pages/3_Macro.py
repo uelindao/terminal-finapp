@@ -22,7 +22,7 @@ from utils.components import page_header, section_title, metric_card, status_car
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout
+from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
 
@@ -34,6 +34,11 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 garantir_macro_context()
 
 page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
@@ -132,7 +137,8 @@ def valor_atual_seguro(df, coluna):
         return df[coluna].dropna().iloc[-1]
     return None
 
-def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
+def criar_grafico_macro(df, coluna_y, titulo, cor_linha, tipo: str = "linha"):
+    """Gráfico macro com suporte a linha ou barras (tipo = 'linha'|'barras')."""
     layout = base_layout(height=280, title=titulo)
     if df.empty or coluna_y not in df.columns or df[coluna_y].dropna().empty:
         fig = px.line()
@@ -142,9 +148,16 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha):
         fig.update_layout(**layout)
         return fig
     df_plot = df.dropna(subset=[coluna_y])
-    fig = px.line(df_plot, x=df_plot.index, y=coluna_y)
+    if tipo == "barras":
+        fig = go.Figure(go.Bar(
+            x=df_plot.index, y=df_plot[coluna_y],
+            marker_color=cor_linha,
+            hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
+        ))
+    else:
+        fig = px.line(df_plot, x=df_plot.index, y=coluna_y)
+        fig.update_traces(line_color=cor_linha, line_width=1.5)
     fig.update_layout(**layout)
-    fig.update_traces(line_color=cor_linha, line_width=1.5)
     return fig
 
 def _hex_to_rgba(hex_color: str, alpha: float = 0.08) -> str:
@@ -816,6 +829,7 @@ with tab_global:
         st.markdown("<br>", unsafe_allow_html=True)
         
         if aba_sel == "🇧🇷 brasil":
+            _macro_tipo = chart_type_toggle(key="macro_br", default="linha")
             c1, c2, c3, c4 = st.columns(4)
             v_selic = valor_atual_seguro(df_br, 'Selic')
             v_ipca_m = valor_atual_seguro(df_br, 'IPCA')
@@ -839,7 +853,7 @@ with tab_global:
             
             st.markdown(tooltip_info("Selic — taxa básica de juros definida pelo Copom. Impacta diretamente renda fixa, crédito e atividade econômica."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", "#00C853"), use_container_width=True, config={'responsive': True})
+            with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", _chart_cores()["bull"], _macro_tipo), use_container_width=True, config={'responsive': True})
             with g2:
                 if 'IPCA_12M' in df_br.columns and not df_br['IPCA_12M'].dropna().empty:
                     _fig_ipca = go.Figure()
@@ -941,6 +955,7 @@ with tab_global:
             status_card("interpretação fiscal", corpo_fiscal, tipo=tipo_fiscal)
 
         elif aba_sel == "🇺🇸 estados unidos":
+            _macro_us_tipo = chart_type_toggle(key="macro_us", default="linha")
             c1, c2, c3, c4 = st.columns(4)
             v_fed    = valor_atual_seguro(df_global, 'FEDFUNDS')
             v_dgs10  = valor_atual_seguro(df_global, 'DGS10')
@@ -981,7 +996,7 @@ with tab_global:
             st.markdown(tooltip_info("Fed Funds Rate — taxa de juros básica americana definida pelo FOMC. Referência global para custo do dinheiro."), unsafe_allow_html=True)
             st.markdown(tooltip_info("CPI YoY — variação anual do índice de preços ao consumidor americano. Principal referência de inflação nos EUA, acompanhada de perto pelo Fed."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", "#00C853"), use_container_width=True, config={'responsive': True})
+            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", _chart_cores()["bull"], _macro_us_tipo), use_container_width=True, config={'responsive': True})
 
             # Gráfico CPI YoY
             with g2:

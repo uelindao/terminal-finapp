@@ -294,6 +294,13 @@ aplicar_tema()
 inject_keyboard_shortcuts()
 handle_ticker_nav()  # navega para Research quando ticker é clicado em qualquer lista
 
+# Tema switcher na sidebar (após autenticação)
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
+
 # Garante macro_context atualizado em todas as páginas filhas
 garantir_macro_context()
 

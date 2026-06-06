@@ -638,7 +638,11 @@ def inject_ui_enhancements():
         {"label": "Backfill",      "icon": "🗄️", "nav": "Backfill",      "key": "6"},
     ])
 
-    st.markdown(f"""
+    # IMPORTANTE: st.markdown() NÃO executa <script> no Streamlit moderno (React
+    # sanitiza innerHTML). Usar st.components.v1.html() que cria iframe real onde
+    # scripts executam. O JS usa window.parent para acessar o DOM do Streamlit.
+    import streamlit.components.v1 as _comp
+    _comp.html(f"""
 <script>
 (function() {{
     var doc = window.parent.document;
@@ -1007,7 +1011,7 @@ def inject_ui_enhancements():
     }});
 }})();
 </script>
-""", unsafe_allow_html=True)
+""", height=0, scrolling=False)
 
 
 def inject_keyboard_shortcuts():
@@ -1028,6 +1032,7 @@ def show_toast(message: str, type: str = "success", duration: int = 3000) -> Non
     Requer que inject_ui_enhancements() (ou inject_keyboard_shortcuts())
     tenha sido chamado na mesma página antes de show_toast().
     """
+    import streamlit.components.v1 as _comp
     msg_safe = (
         message
         .replace("\\", "\\\\")
@@ -1035,12 +1040,13 @@ def show_toast(message: str, type: str = "success", duration: int = 3000) -> Non
         .replace('"', '\\"')
         .replace("\n", " ")
     )
-    st.markdown(
+    _comp.html(
         f"<script>(function(){{"
         f"  if (window.parent._fintermToast)"
         f"    window.parent._fintermToast('{msg_safe}','{type}',{duration});"
         f"}})();</script>",
-        unsafe_allow_html=True,
+        height=0,
+        scrolling=False,
     )
 
 

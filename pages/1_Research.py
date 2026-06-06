@@ -33,7 +33,7 @@ from utils.components import (
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout, CORES_SERIES, base100, linha
+from utils.charts import base_layout, CORES_SERIES, base100, linha, chart_type_toggle, barras_verticais, _cores as _chart_cores
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -43,6 +43,11 @@ if not require_auth():
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 garantir_macro_context()
 init_db()
 
@@ -1236,6 +1241,7 @@ with tab_tec:
 with tab_earn:
     if is_fii: st.info("💡 FIIs não possuem DRE trimestral padrão. Avalie os Rendimentos em Fundamentos.")
     else:
+        _earn_tipo = chart_type_toggle(key=f"earn_{t_base}", default="barras")
         st.subheader("receita vs lucro (últimos períodos)")
         try:
             fin = acao_obj.quarterly_financials
@@ -1248,10 +1254,22 @@ with tab_earn:
                 if row_rev and row_net:
                     df_earn = pd.DataFrame({'Receita': fin.loc[row_rev[0]], 'Lucro Líquido': fin.loc[row_net[0]]}).sort_index()
                     df_earn.index = df_earn.index.astype(str)
+                    _cc = _chart_cores()
                     fig_earn = go.Figure()
-                    fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'], name="receita", marker_color=CORES_SERIES[1]))
-                    fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'], name="lucro", marker_color=CORES_SERIES[2]))
-                    fig_earn.update_layout(**base_layout(height=400), barmode='group')
+                    if _earn_tipo == "barras":
+                        fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'],
+                            name="receita", marker_color=_cc["info"]))
+                        fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'],
+                            name="lucro", marker_color=_cc["bull"]))
+                        fig_earn.update_layout(**base_layout(height=400), barmode='group')
+                    else:
+                        fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Receita'],
+                            name="receita", mode="lines+markers",
+                            line=dict(color=_cc["info"], width=2)))
+                        fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Lucro Líquido'],
+                            name="lucro", mode="lines+markers",
+                            line=dict(color=_cc["bull"], width=2)))
+                        fig_earn.update_layout(**base_layout(height=400))
                     st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
         except Exception as e:
             logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
@@ -1626,20 +1644,32 @@ with tab_fund:
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
+                        _div_tipo = chart_type_toggle(key=f"div_{t_base}", default="barras")
+
                         import plotly.graph_objects as go
                         _datas_div = [str(d.date()) for d in _divs.index]
                         _vals_div  = _divs.values.tolist()
-                        _cores_div = ["#00C853" if v >= _media_div else "#FF9900" for v in _vals_div]
+                        _cc_div    = _chart_cores()
+                        _cores_div = [_cc_div["bull"] if v >= _media_div else _cc_div["accent"] for v in _vals_div]
 
                         _fig_div = go.Figure()
-                        _fig_div.add_trace(go.Bar(
-                            x=_datas_div, y=_vals_div,
-                            marker_color=_cores_div, name="provento",
-                        ))
+                        if _div_tipo == "barras":
+                            _fig_div.add_trace(go.Bar(
+                                x=_datas_div, y=_vals_div,
+                                marker_color=_cores_div, name="provento",
+                            ))
+                        else:
+                            _fig_div.add_trace(go.Scatter(
+                                x=_datas_div, y=_vals_div,
+                                mode="lines+markers",
+                                line=dict(color=_cc_div["accent"], width=2),
+                                marker=dict(color=_cores_div, size=7),
+                                name="provento",
+                            ))
                         _fig_div.add_hline(
-                            y=_media_div, line_color="#FF9900", line_dash="dash",
+                            y=_media_div, line_color=_cc_div["accent"], line_dash="dash",
                             line_width=1, annotation_text=f"média r$ {_media_div:.4f}",
-                            annotation_font_color="#FF9900", annotation_font_size=9,
+                            annotation_font_color=_cc_div["accent"], annotation_font_size=9,
                         )
 
                         if _n_divs >= 4:

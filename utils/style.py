@@ -60,12 +60,19 @@ def aplicar_tema():
     </script>
     """, height=0)
 
+    # Injeta variáveis CSS do tema ativo (sobrescreve :root padrão)
+    try:
+        from utils.themes import get_tema_css
+        st.markdown(get_tema_css(), unsafe_allow_html=True)
+    except Exception:
+        pass  # fallback gracioso se temas não disponíveis
+
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     /* ═══════════════════════════════════════════════════
-       VARIÁVEIS GLOBAIS
+       VARIÁVEIS GLOBAIS (fallback — override pelo tema)
        ═══════════════════════════════════════════════════ */
 
     :root {

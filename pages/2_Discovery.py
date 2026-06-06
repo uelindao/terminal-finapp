@@ -52,6 +52,11 @@ render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
 handle_ticker_nav()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 
 # ── Auto-sync diário: roda 1x por sessão por dia ─────────────────────────────
 _hoje_sync = str(datetime.date.today())

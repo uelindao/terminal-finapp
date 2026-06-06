@@ -36,6 +36,11 @@ render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
 handle_ticker_nav()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 
 page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
 
