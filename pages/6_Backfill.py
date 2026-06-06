@@ -256,13 +256,10 @@ def _processar_ticker_st(
     ticker_yf: str,
     macro_tl:  pd.DataFrame,
     status_placeholder,
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
     """
     Processa um ticker dentro do contexto Streamlit.
-    Estratégia de dados FMP:
-      1. Tenta /ratios?period=quarter (EUA sempre; BR raramente)
-      2. Fallback: /ratios sem period (anual — 10 pontos, cobre BR)
-    Retorna (n_inseridos, n_skipped).
+    Retorna (n_inseridos, n_skipped, diagnostico).
     """
     import yfinance as yf
     from utils.fmp_client import get_ratios_trimestrais, get_key_metrics_trimestrais, _get
@@ -270,35 +267,35 @@ def _processar_ticker_st(
 
     is_br  = ticker_yf.endswith(".SA")
     tk_fmp = ticker_yf.replace(".SA", "").upper()
+    diag   = ""
 
-    status_placeholder.write(f"🔄 `{tk_fmp}` — buscando FMP…")
+    status_placeholder.write(f"🔄 `{tk_fmp}` — buscando FMP (quarterly)…")
 
-    # ── 1. Tenta dados TRIMESTRAIS (funciona bem para EUA) ────────────────────
+    # ── 1. Trimestral ─────────────────────────────────────────────────────────
     ratios_list = get_ratios_trimestrais(tk_fmp, limit=40)
     time.sleep(0.4)
     km_list     = get_key_metrics_trimestrais(tk_fmp, limit=40)
     time.sleep(0.4)
-    yoy_offset  = 4   # trimestral: 4 trimestres = 1 ano
+    yoy_offset  = 4
+    granular    = "trimestral"
 
-    # ── 2. Fallback ANUAL (cobre ações BR e internacionais) ───────────────────
+    # ── 2. Fallback anual ─────────────────────────────────────────────────────
     if not ratios_list:
-        status_placeholder.write(
-            f"🔄 `{tk_fmp}` — sem dados trimestrais, tentando anuais…"
-        )
+        status_placeholder.write(f"🔄 `{tk_fmp}` — quarterly vazio, tentando annual…")
         ratios_list = _get(f"ratios/{tk_fmp}", {"limit": 10}) or []
         time.sleep(0.4)
         km_list     = _get(f"key-metrics/{tk_fmp}", {"limit": 10}) or []
         time.sleep(0.4)
-        yoy_offset  = 1   # anual: 1 posição = 1 ano atrás
+        yoy_offset  = 1
+        granular    = "anual"
 
     if not ratios_list:
-        status_placeholder.write(f"⚠️ `{tk_fmp}` — sem dados FMP (ativo não coberto)")
-        return 0, 0
+        diag = "FMP: sem dados (ativo não coberto ou quota esgotada)"
+        status_placeholder.write(f"⚠️ `{tk_fmp}` — {diag}")
+        return 0, 0, diag
 
-    granularidade = "trimestral" if yoy_offset == 4 else "anual"
-    status_placeholder.write(
-        f"🔄 `{tk_fmp}` — {len(ratios_list)} períodos ({granularidade})"
-    )
+    diag = f"FMP: {len(ratios_list)} períodos ({granular}), km: {len(km_list)}"
+    status_placeholder.write(f"🔄 `{tk_fmp}` — {diag}")
 
     km_by_date       = {item.get("date", ""): item for item in km_list}
     datas_existentes = get_datas_historico_score(ticker_yf) | get_datas_historico_score(tk_fmp)
@@ -315,11 +312,12 @@ def _processar_ticker_st(
             if getattr(precos.index, "tz", None) is not None:
                 precos.index = precos.index.tz_localize(None)
     except Exception:
-        pass   # sem preços — momentum ficará None (não bloqueia o cálculo)
+        pass
 
-    # ── Calcula score para cada período ───────────────────────────────────────
-    registros: list[dict] = []
-    skipped = 0
+    # ── Calcula score por período ─────────────────────────────────────────────
+    registros:  list[dict] = []
+    skipped     = 0
+    calc_erros  = 0
 
     for i, ratios in enumerate(ratios_list):
         data_str = ratios.get("date", "")
@@ -329,10 +327,10 @@ def _processar_ticker_st(
             skipped += 1
             continue
 
-        km          = km_by_date.get(data_str, {})
-        ratios_yoy  = ratios_list[i + yoy_offset] if i + yoy_offset < len(ratios_list) else None
-        km_yoy      = km_by_date.get((ratios_yoy or {}).get("date", ""), {})
-        macro       = _macro_na_data(macro_tl, data_str)
+        km         = km_by_date.get(data_str, {})
+        ratios_yoy = ratios_list[i + yoy_offset] if i + yoy_offset < len(ratios_list) else None
+        km_yoy     = km_by_date.get((ratios_yoy or {}).get("date", ""), {})
+        macro      = _macro_na_data(macro_tl, data_str)
 
         try:
             score = _score_offline(
@@ -341,20 +339,38 @@ def _processar_ticker_st(
                 precos=precos, data_ref=data_str,
                 macro=macro, is_br=is_br,
             )
+            # Usa somente a data (sem timezone) — mais compatível com Supabase
             registros.append({
                 "ticker":       ticker_yf,
-                "score":        score,
-                "calculado_em": data_str + "T00:00:00+00:00",
+                "score":        int(score),
+                "calculado_em": data_str,   # "YYYY-MM-DD" — Supabase converte para TIMESTAMPTZ
             })
         except Exception as e:
-            logger.debug(f"[backfill] {tk_fmp} {data_str}: {e}")
+            calc_erros += 1
+            logger.warning(f"[backfill] score {tk_fmp} {data_str}: {e}")
 
-    if registros:
-        status_placeholder.write(f"💾 `{tk_fmp}` — salvando {len(registros)} pontos…")
+    diag += f" | calculados: {len(registros)} | skip: {skipped} | calc_erros: {calc_erros}"
+
+    if not registros:
+        status_placeholder.write(
+            f"ℹ️ `{tk_fmp}` — sem registros novos "
+            f"(skip={skipped}, calc_erros={calc_erros})"
+        )
+        return 0, skipped, diag
+
+    # ── Salva no Supabase ─────────────────────────────────────────────────────
+    status_placeholder.write(
+        f"💾 `{tk_fmp}` — inserindo {len(registros)} pontos no Supabase…"
+    )
+    try:
         n = registrar_historico_score_batch(registros, ignorar_existentes=False)
-        return n, skipped
-
-    return 0, skipped
+        diag += f" | inseridos: {n}"
+        return n, skipped, diag
+    except Exception as e:
+        diag += f" | ERRO INSERT: {e}"
+        status_placeholder.write(f"❌ `{tk_fmp}` — falha no insert: {e}")
+        logger.error(f"[backfill] insert {tk_fmp}: {e}", exc_info=True)
+        return 0, skipped, diag
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -524,6 +540,50 @@ if lote:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── Diagnóstico rápido ────────────────────────────────────────────────────────
+with st.expander("🔍 diagnóstico (testar FMP + Supabase antes de rodar)", expanded=False):
+    ticker_teste = st.text_input("ticker de teste:", value="AAPL",
+                                 help="EUA sem sufixo. Para BR: PETR4 (sem .SA)")
+    if st.button("🧪 testar agora", key="btn_diag"):
+        from utils.fmp_client import _get
+        from database.supabase_client import get_supabase
+
+        col_d1, col_d2 = st.columns(2)
+
+        # Teste FMP
+        with col_d1:
+            st.markdown("**FMP — /ratios (quarterly)**")
+            try:
+                r = _get(f"ratios/{ticker_teste.upper().replace('.SA','')}", {"period": "quarter", "limit": 3})
+                if r and isinstance(r, list) and len(r) > 0:
+                    st.success(f"✅ {len(r)} registros | primeiro: {r[0].get('date')}")
+                    st.json({"amostra": r[0]}, expanded=False)
+                elif isinstance(r, list) and len(r) == 0:
+                    st.warning("⚠️ FMP retornou lista vazia — quota esgotada ou ticker não coberto")
+                else:
+                    st.error(f"❌ resposta inesperada: {r}")
+            except Exception as e:
+                st.error(f"❌ exceção: {e}")
+
+        # Teste Supabase insert
+        with col_d2:
+            st.markdown("**Supabase — insert de teste**")
+            try:
+                sb = get_supabase()
+                payload = [{
+                    "ticker": "_BACKFILL_TEST_",
+                    "score": 42,
+                    "calculado_em": "2000-01-01",
+                }]
+                sb.table("health_score_history").insert(payload).execute()
+                # Limpa o registro de teste
+                sb.table("health_score_history").delete().eq("ticker", "_BACKFILL_TEST_").execute()
+                st.success("✅ insert + delete OK — Supabase funcionando")
+            except Exception as e:
+                st.error(f"❌ insert falhou: {e}")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
 # Botão de execução
 col_btn1, col_btn2, _ = st.columns([2, 2, 4])
 btn_run   = col_btn1.button("▶ iniciar backfill", type="primary",
@@ -563,17 +623,25 @@ if btn_run and lote:
 
         status_ph = log_area.empty()
         try:
-            n_ins, n_skip = _processar_ticker_st(ticker, macro_tl, status_ph)
+            n_ins, n_skip, diag = _processar_ticker_st(ticker, macro_tl, status_ph)
             total_inseridos += n_ins
             total_skipped   += n_skip
-            log_area.success(
-                f"✅ `{ticker.replace('.SA','')}` "
-                f"— {n_ins} pontos inseridos "
-                f"({n_skip} já existiam)"
-            )
+
+            if n_ins > 0:
+                log_area.success(
+                    f"✅ `{ticker.replace('.SA','')}` — {n_ins} pts inseridos | {diag}"
+                )
+            elif "sem dados" in diag or "quota" in diag:
+                log_area.warning(
+                    f"⚠️ `{ticker.replace('.SA','')}` — {diag}"
+                )
+            else:
+                log_area.info(
+                    f"ℹ️ `{ticker.replace('.SA','')}` — {diag}"
+                )
         except Exception as e:
             erros.append(ticker)
-            log_area.warning(f"⚠️ `{ticker.replace('.SA','')}` — erro: {e}")
+            log_area.error(f"❌ `{ticker.replace('.SA','')}` — exceção: {e}")
             logger.error(f"[backfill] {ticker}: {e}", exc_info=True)
 
         # Atualiza resumo corrente
