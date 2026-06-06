@@ -60,13 +60,6 @@ def aplicar_tema():
     </script>
     """, height=0)
 
-    # Injeta variáveis CSS do tema ativo (sobrescreve :root padrão)
-    try:
-        from utils.themes import get_tema_css
-        st.markdown(get_tema_css(), unsafe_allow_html=True)
-    except Exception:
-        pass  # fallback gracioso se temas não disponíveis
-
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -90,6 +83,7 @@ def aplicar_tema():
         --text-muted:     #6B7280;
 
         --accent:        #FF8C00;
+        --accent-rgb:    255,140,0;
         --accent-hover:  #FF6B00;
         --accent-soft:   rgba(255,140,0,0.08);
         --accent-border: rgba(255,140,0,0.25);
@@ -105,8 +99,9 @@ def aplicar_tema():
         --radius-md: 10px;
         --radius-lg: 14px;
 
-        --font-ui:   'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-        --font-data: 'Courier New', 'Consolas', monospace;
+        --font-ui:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --font-data:  'Courier New', 'Consolas', monospace;
+        --sidebar-bg: #0B0C15;
     }
 
     /* ═══════════════════════════════════════════════════
@@ -321,11 +316,11 @@ def aplicar_tema():
         min-height: 34px !important;
         padding: 0 16px !important;
         transition: all 0.15s ease !important;
-        box-shadow: 0 2px 8px rgba(255,140,0,0.25) !important;
+        box-shadow: 0 2px 8px rgba(var(--accent-rgb),0.25) !important;
     }
     [data-testid="stBaseButton-primary"]:hover {
         background: var(--accent-hover) !important;
-        box-shadow: 0 4px 12px rgba(255,140,0,0.35) !important;
+        box-shadow: 0 4px 12px rgba(var(--accent-rgb),0.35) !important;
         transform: translateY(-1px) !important;
     }
 
@@ -377,7 +372,7 @@ def aplicar_tema():
     [data-testid="stTextInput"] input:focus,
     [data-testid="stNumberInput"] input:focus {
         border-color: var(--border-focus) !important;
-        box-shadow: 0 0 0 3px rgba(255,140,0,0.12) !important;
+        box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.12) !important;
         outline: none !important;
     }
     [data-testid="stTextArea"] textarea {
@@ -391,7 +386,7 @@ def aplicar_tema():
     }
     [data-testid="stTextArea"] textarea:focus {
         border-color: var(--border-focus) !important;
-        box-shadow: 0 0 0 3px rgba(255,140,0,0.12) !important;
+        box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.12) !important;
     }
 
     /* Labels dos campos */
@@ -499,7 +494,7 @@ def aplicar_tema():
 
     /* ─── SIDEBAR ─────────────────────────────────────────── */
     [data-testid="stSidebar"] {
-        background: #0B0C15 !important;
+        background: var(--sidebar-bg) !important;
         border-right: 1px solid var(--border-subtle) !important;
         min-width: 200px !important;
         max-width: 220px !important;
@@ -1236,11 +1231,11 @@ def aplicar_tema():
     /* Botão primário com pulse sutil no hover */
     [data-testid="stBaseButton-primary"]:hover {
         transform: translateY(-1px) !important;
-        box-shadow: 0 4px 16px rgba(255,140,0,0.35) !important;
+        box-shadow: 0 4px 16px rgba(var(--accent-rgb),0.35) !important;
     }
     [data-testid="stBaseButton-primary"]:active {
         transform: translateY(0) !important;
-        box-shadow: 0 2px 8px rgba(255,140,0,0.2) !important;
+        box-shadow: 0 2px 8px rgba(var(--accent-rgb),0.2) !important;
     }
     [data-testid="stBaseButton-primary"] {
         transition: all 0.12s ease !important;
@@ -1254,7 +1249,7 @@ def aplicar_tema():
     /* Inputs com glow no focus */
     [data-testid="stTextInput"] input:focus,
     [data-testid="stNumberInput"] input:focus {
-        box-shadow: 0 0 0 3px rgba(255,140,0,0.15) !important;
+        box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.15) !important;
     }
 
     /* Spinner animado mais elegante */
@@ -1265,7 +1260,7 @@ def aplicar_tema():
     /* Progress bar animada */
     [data-testid="stProgressBar"] > div > div {
         background: linear-gradient(90deg,
-            var(--accent), #FFB347, var(--accent)) !important;
+            var(--accent), var(--amber), var(--accent)) !important;
         background-size: 200% 100% !important;
         animation: ft-progress-shimmer 1.5s linear infinite !important;
     }
@@ -1277,3 +1272,11 @@ def aplicar_tema():
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
+
+    # Injeta variáveis CSS + fontes do tema ativo APÓS o CSS base para que
+    # os valores do tema sobrescrevam o :root de fallback (CSS: último ganha).
+    try:
+        from utils.themes import get_tema_css
+        st.markdown(get_tema_css(), unsafe_allow_html=True)
+    except Exception:
+        pass

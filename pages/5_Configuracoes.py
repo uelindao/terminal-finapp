@@ -742,10 +742,16 @@ with tab_aparencia:
                     f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
                     if _is_active else ""
                 )
+                # Extrai nomes das fontes para exibição
+                _font_ui_raw   = _vars.get("--font-ui", "'Inter'")
+                _font_data_raw = _vars.get("--font-data", "'Consolas'")
+                _font_ui_name   = _font_ui_raw.split("'")[1] if "'" in _font_ui_raw else _font_ui_raw.split(",")[0]
+                _font_data_name = _font_data_raw.split("'")[1] if "'" in _font_data_raw else _font_data_raw.split(",")[0]
+
                 col.markdown(
                     f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
                         border-radius:12px;padding:16px;margin-bottom:8px;
-                        box-shadow:0 4px 16px rgba(0,0,0,.3);">
+                        box-shadow:0 4px 16px rgba(0,0,0,.3);transition:all .15s ease;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                             <span style="font-size:1.2rem">{tema['emoji']}</span>
                             {_selected_badge}
@@ -753,14 +759,24 @@ with tab_aparencia:
                         <div style="font-family:'Inter',system-ui;font-size:.78rem;
                             font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
                         <div style="font-family:'Inter',system-ui;font-size:.62rem;
-                            color:{_vars['--text-muted']};margin-bottom:12px;">{tema['desc']}</div>
-                        <div style="display:flex;gap:5px;margin-bottom:2px;">
-                            <div style="width:20px;height:20px;border-radius:50%;background:{_acc};
-                                title='acento'"></div>
-                            <div style="width:20px;height:20px;border-radius:50%;background:{_bull};"></div>
-                            <div style="width:20px;height:20px;border-radius:50%;background:{_bear};"></div>
-                            <div style="width:20px;height:20px;border-radius:50%;
-                                background:{_vars['--info']};"></div>
+                            color:{_vars['--text-muted']};margin-bottom:10px;">{tema['desc']}</div>
+                        <div style="display:flex;gap:5px;margin-bottom:10px;">
+                            <div style="width:18px;height:18px;border-radius:50%;background:{_acc};"
+                                title="acento"></div>
+                            <div style="width:18px;height:18px;border-radius:50%;background:{_bull};"
+                                title="alta"></div>
+                            <div style="width:18px;height:18px;border-radius:50%;background:{_bear};"
+                                title="baixa"></div>
+                            <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--info']};"
+                                title="info"></div>
+                            <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--amber']};"
+                                title="alerta"></div>
+                        </div>
+                        <div style="font-family:'Inter',system-ui;font-size:.58rem;
+                            color:{_vars['--text-muted']};border-top:1px solid {_brd};
+                            padding-top:8px;display:flex;flex-direction:column;gap:2px;">
+                            <span>UI · <em>{_font_ui_name}</em></span>
+                            <span>DATA · <em>{_font_data_name}</em></span>
                         </div>
                     </div>''',
                     unsafe_allow_html=True,
