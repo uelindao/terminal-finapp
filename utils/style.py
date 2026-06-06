@@ -99,8 +99,9 @@ def aplicar_tema():
         --radius-md: 10px;
         --radius-lg: 14px;
 
+        --font-title: 'Space Grotesk', 'Inter', system-ui, sans-serif;
         --font-ui:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-        --font-data:  'Courier New', 'Consolas', monospace;
+        --font-data:  'JetBrains Mono', 'Courier New', monospace;
         --sidebar-bg: #0B0C15;
     }
 
@@ -138,11 +139,11 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     .page-title {
-        font-family: var(--font-ui);
+        font-family: var(--font-title);
         font-size: 1.1rem;
         font-weight: 700;
         color: var(--text-primary);
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
         margin-bottom: 4px;
     }
 
@@ -182,10 +183,16 @@ def aplicar_tema():
         color: var(--text-secondary) !important;
         line-height: 1.6 !important;
     }
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        font-family: var(--font-ui) !important;
+    .stMarkdown h1, .stMarkdown h2 {
+        font-family: var(--font-title) !important;
         color: var(--text-primary) !important;
         font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+    }
+    .stMarkdown h3 {
+        font-family: var(--font-title) !important;
+        color: var(--text-secondary) !important;
+        font-weight: 600 !important;
         letter-spacing: -0.01em !important;
     }
     .stMarkdown h5 {
@@ -506,7 +513,7 @@ def aplicar_tema():
     [data-testid="stSidebar"] > div:first-child::before {
         content: "⚡  FINTERMINAL";
         display: block;
-        font-family: var(--font-ui);
+        font-family: var(--font-title);
         font-size: 0.66rem;
         font-weight: 700;
         color: var(--accent);

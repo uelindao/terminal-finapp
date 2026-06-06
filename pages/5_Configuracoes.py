@@ -742,11 +742,12 @@ with tab_aparencia:
                     f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
                     if _is_active else ""
                 )
-                # Extrai nomes das fontes para exibição
-                _font_ui_raw   = _vars.get("--font-ui", "'Inter'")
-                _font_data_raw = _vars.get("--font-data", "'Consolas'")
-                _font_ui_name   = _font_ui_raw.split("'")[1] if "'" in _font_ui_raw else _font_ui_raw.split(",")[0]
-                _font_data_name = _font_data_raw.split("'")[1] if "'" in _font_data_raw else _font_data_raw.split(",")[0]
+                # Extrai nomes das fontes padrão do tema
+                from utils.themes import TEMAS_FONTES_DEFAULT, FONTES_TITULO as _FT, FONTES_UI as _FU, FONTES_DATA as _FD
+                _fdef = TEMAS_FONTES_DEFAULT.get(tid, TEMAS_FONTES_DEFAULT["dark"])
+                _font_titulo_name = _FT.get(_fdef["titulo"], {}).get("nome", "—")
+                _font_ui_name     = _FU.get(_fdef["ui"],     {}).get("nome", "—")
+                _font_data_name   = _FD.get(_fdef["data"],   {}).get("nome", "—")
 
                 col.markdown(
                     f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
@@ -772,11 +773,12 @@ with tab_aparencia:
                             <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--amber']};"
                                 title="alerta"></div>
                         </div>
-                        <div style="font-family:'Inter',system-ui;font-size:.58rem;
+                        <div style="font-family:'Inter',system-ui;font-size:.57rem;
                             color:{_vars['--text-muted']};border-top:1px solid {_brd};
                             padding-top:8px;display:flex;flex-direction:column;gap:2px;">
+                            <span>H · <em>{_font_titulo_name}</em></span>
                             <span>UI · <em>{_font_ui_name}</em></span>
-                            <span>DATA · <em>{_font_data_name}</em></span>
+                            <span>## · <em>{_font_data_name}</em></span>
                         </div>
                     </div>''',
                     unsafe_allow_html=True,
@@ -789,6 +791,131 @@ with tab_aparencia:
                 ):
                     set_tema(tid)
                     st.rerun()
+
+        # ── Tipografia personalizável ─────────────────────────────────────────
+        st.markdown("---")
+        section_title("🔤 tipografia")
+
+        from utils.themes import (FONTES_TITULO, FONTES_UI, FONTES_DATA,
+                                   get_fontes_ativas, resetar_fontes,
+                                   TEMAS_FONTES_DEFAULT)
+
+        fontes_ativas = get_fontes_ativas()
+        defaults_tema = TEMAS_FONTES_DEFAULT.get(ativo, TEMAS_FONTES_DEFAULT["dark"])
+
+        st.markdown(
+            '<div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:16px;">'
+            'Escolha as fontes independentemente das cores do tema. '
+            'Fontes de <strong>título</strong> aplicam em h1/h2/h3 e no logotipo. '
+            'Fontes de <strong>interface</strong> aplicam em labels, botões e texto corrido. '
+            'Fontes de <strong>dados</strong> aplicam em números, preços e código monospace.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        col_ft, col_fu, col_fd = st.columns(3)
+
+        with col_ft:
+            st.markdown(
+                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                'color:var(--text-muted);margin-bottom:4px;">Títulos / Display</div>',
+                unsafe_allow_html=True,
+            )
+            keys_titulo = list(FONTES_TITULO.keys())
+            idx_t = keys_titulo.index(fontes_ativas["titulo"]) if fontes_ativas["titulo"] in keys_titulo else 0
+            st.selectbox(
+                "Fonte de títulos",
+                options=keys_titulo,
+                format_func=lambda k: FONTES_TITULO[k]["nome"],
+                index=idx_t,
+                label_visibility="collapsed",
+                key="_font_titulo",
+            )
+            st.markdown(
+                f'<div style="font-family:{FONTES_TITULO.get(st.session_state.get("_font_titulo", fontes_ativas["titulo"]), FONTES_TITULO[fontes_ativas["titulo"]])["css"]};'
+                f'font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-top:6px;">'
+                f'Terminal Financeiro</div>'
+                f'<div style="font-family:{FONTES_TITULO.get(st.session_state.get("_font_titulo", fontes_ativas["titulo"]), FONTES_TITULO[fontes_ativas["titulo"]])["css"]};'
+                f'font-size:.72rem;color:var(--text-muted);">Preview do título</div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_fu:
+            st.markdown(
+                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                'color:var(--text-muted);margin-bottom:4px;">Interface / Corpo</div>',
+                unsafe_allow_html=True,
+            )
+            keys_ui = list(FONTES_UI.keys())
+            idx_u = keys_ui.index(fontes_ativas["ui"]) if fontes_ativas["ui"] in keys_ui else 0
+            st.selectbox(
+                "Fonte de interface",
+                options=keys_ui,
+                format_func=lambda k: FONTES_UI[k]["nome"],
+                index=idx_u,
+                label_visibility="collapsed",
+                key="_font_ui",
+            )
+            st.markdown(
+                f'<div style="font-family:{FONTES_UI.get(st.session_state.get("_font_ui", fontes_ativas["ui"]), FONTES_UI[fontes_ativas["ui"]])["css"]};'
+                f'font-size:.85rem;color:var(--text-secondary);margin-top:6px;">'
+                f'Labels, botões e texto corrido</div>'
+                f'<div style="font-family:{FONTES_UI.get(st.session_state.get("_font_ui", fontes_ativas["ui"]), FONTES_UI[fontes_ativas["ui"]])["css"]};'
+                f'font-size:.70rem;text-transform:uppercase;letter-spacing:.06em;'
+                f'color:var(--text-muted);">Preview de label</div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_fd:
+            st.markdown(
+                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                'color:var(--text-muted);margin-bottom:4px;">Dados / Números</div>',
+                unsafe_allow_html=True,
+            )
+            keys_data = list(FONTES_DATA.keys())
+            idx_d = keys_data.index(fontes_ativas["data"]) if fontes_ativas["data"] in keys_data else 0
+            st.selectbox(
+                "Fonte de dados",
+                options=keys_data,
+                format_func=lambda k: FONTES_DATA[k]["nome"],
+                index=idx_d,
+                label_visibility="collapsed",
+                key="_font_data",
+            )
+            st.markdown(
+                f'<div style="font-family:{FONTES_DATA.get(st.session_state.get("_font_data", fontes_ativas["data"]), FONTES_DATA[fontes_ativas["data"]])["css"]};'
+                f'font-size:1.1rem;font-weight:700;color:var(--text-primary);margin-top:6px;">'
+                f'+12.48%  R$38,90</div>'
+                f'<div style="font-family:{FONTES_DATA.get(st.session_state.get("_font_data", fontes_ativas["data"]), FONTES_DATA[fontes_ativas["data"]])["css"]};'
+                f'font-size:.72rem;color:var(--text-muted);">Preview de número</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Botão reset
+        st.markdown("<br>", unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("↺ padrão do tema", key="_reset_fonts", use_container_width=True):
+                resetar_fontes()
+                st.rerun()
+        with c2:
+            ft_nome = FONTES_TITULO.get(fontes_ativas["titulo"], {}).get("nome", "—")
+            fu_nome = FONTES_UI.get(fontes_ativas["ui"],         {}).get("nome", "—")
+            fd_nome = FONTES_DATA.get(fontes_ativas["data"],     {}).get("nome", "—")
+            padroes = defaults_tema
+            eh_padrao = (
+                fontes_ativas["titulo"] == padroes["titulo"] and
+                fontes_ativas["ui"]     == padroes["ui"]     and
+                fontes_ativas["data"]   == padroes["data"]
+            )
+            cor_status = "var(--bull)" if eh_padrao else "var(--accent)"
+            icone = "✓" if eh_padrao else "✎"
+            st.markdown(
+                f'<div style="font-size:.72rem;color:{cor_status};padding:6px 0;">'
+                f'{icone}  {ft_nome} · {fu_nome} · {fd_nome}'
+                f'{"  (padrão do tema)" if eh_padrao else ""}</div>',
+                unsafe_allow_html=True,
+            )
 
     except Exception as e:
         st.error(f"erro ao carregar temas: {e}")

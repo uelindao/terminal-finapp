@@ -1,9 +1,9 @@
 """
-utils/themes.py — v2.0
-Sistema de temas visuais do Finterminal.
+utils/themes.py — v3.0
+Sistema de temas visuais + tipografia personalizável do Finterminal.
 
-Cada tema define paleta de cores completa, par tipográfico e personalidade visual.
-O tema ativo persiste via st.query_params["theme"] + st.session_state["_theme"].
+Cada tema tem paleta de cores, par tipográfico padrão e personalidade visual.
+O usuário pode sobrescrever fontes de títulos, interface e dados independentemente.
 """
 
 import streamlit as st
@@ -11,21 +11,66 @@ import streamlit as st
 _GF = "https://fonts.googleapis.com/css2?"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TEMAS
+# CATÁLOGOS DE FONTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Fontes para títulos / display (h1, h2, logotipo, page-title)
+FONTES_TITULO: dict[str, dict] = {
+    "space_grotesk":    {"nome": "Space Grotesk",    "css": "'Space Grotesk', 'Inter', sans-serif",         "gf": "Space+Grotesk:wght@500;600;700"},
+    "syne":             {"nome": "Syne",              "css": "'Syne', 'Inter', sans-serif",                  "gf": "Syne:wght@600;700;800"},
+    "barlow_condensed": {"nome": "Barlow Condensed",  "css": "'Barlow Condensed', sans-serif",               "gf": "Barlow+Condensed:wght@500;600;700"},
+    "rajdhani":         {"nome": "Rajdhani",          "css": "'Rajdhani', sans-serif",                       "gf": "Rajdhani:wght@500;600;700"},
+    "inter":            {"nome": "Inter",             "css": "'Inter', system-ui, sans-serif",               "gf": "Inter:wght@500;600;700"},
+    "ibm_plex_sans":    {"nome": "IBM Plex Sans",     "css": "'IBM Plex Sans', 'Inter', sans-serif",         "gf": "IBM+Plex+Sans:wght@500;600;700"},
+    "plus_jakarta":     {"nome": "Plus Jakarta Sans", "css": "'Plus Jakarta Sans', 'Inter', sans-serif",     "gf": "Plus+Jakarta+Sans:wght@500;600;700"},
+    "dm_sans":          {"nome": "DM Sans",           "css": "'DM Sans', 'Inter', sans-serif",               "gf": "DM+Sans:wght@500;600;700"},
+    "outfit":           {"nome": "Outfit",            "css": "'Outfit', 'Inter', sans-serif",                "gf": "Outfit:wght@500;600;700"},
+}
+
+# Fontes para interface / corpo (labels, botões, parágrafos)
+FONTES_UI: dict[str, dict] = {
+    "inter":         {"nome": "Inter",             "css": "'Inter', system-ui, -apple-system, sans-serif",  "gf": "Inter:wght@300;400;500;600"},
+    "ibm_plex_sans": {"nome": "IBM Plex Sans",     "css": "'IBM Plex Sans', 'Inter', sans-serif",           "gf": "IBM+Plex+Sans:wght@300;400;500;600"},
+    "dm_sans":       {"nome": "DM Sans",           "css": "'DM Sans', 'Inter', sans-serif",                 "gf": "DM+Sans:wght@300;400;500;600"},
+    "outfit":        {"nome": "Outfit",            "css": "'Outfit', 'Inter', sans-serif",                  "gf": "Outfit:wght@300;400;500;600"},
+    "plus_jakarta":  {"nome": "Plus Jakarta Sans", "css": "'Plus Jakarta Sans', 'Inter', sans-serif",       "gf": "Plus+Jakarta+Sans:wght@400;500;600"},
+    "nunito_sans":   {"nome": "Nunito Sans",       "css": "'Nunito Sans', 'Inter', sans-serif",             "gf": "Nunito+Sans:wght@300;400;500;600"},
+    "space_grotesk": {"nome": "Space Grotesk",     "css": "'Space Grotesk', 'Inter', sans-serif",           "gf": "Space+Grotesk:wght@300;400;500;600"},
+}
+
+# Fontes para dados / números / código (monospace)
+FONTES_DATA: dict[str, dict] = {
+    "jetbrains_mono":  {"nome": "JetBrains Mono",  "css": "'JetBrains Mono', 'Consolas', monospace",  "gf": "JetBrains+Mono:wght@400;500;600"},
+    "ibm_plex_mono":   {"nome": "IBM Plex Mono",   "css": "'IBM Plex Mono', 'Consolas', monospace",   "gf": "IBM+Plex+Mono:wght@400;500"},
+    "fira_code":       {"nome": "Fira Code",        "css": "'Fira Code', 'Consolas', monospace",       "gf": "Fira+Code:wght@400;500"},
+    "dm_mono":         {"nome": "DM Mono",          "css": "'DM Mono', 'Consolas', monospace",         "gf": "DM+Mono:wght@400;500"},
+    "space_mono":      {"nome": "Space Mono",       "css": "'Space Mono', 'Consolas', monospace",      "gf": "Space+Mono:wght@400;700"},
+    "roboto_mono":     {"nome": "Roboto Mono",      "css": "'Roboto Mono', 'Consolas', monospace",     "gf": "Roboto+Mono:wght@400;500"},
+    "source_code_pro": {"nome": "Source Code Pro",  "css": "'Source Code Pro', 'Consolas', monospace", "gf": "Source+Code+Pro:wght@400;500"},
+}
+
+# Padrões tipográficos por tema (chaves nos catálogos acima)
+TEMAS_FONTES_DEFAULT: dict[str, dict] = {
+    "dark":     {"titulo": "space_grotesk", "ui": "inter",        "data": "jetbrains_mono"},
+    "navy":     {"titulo": "ibm_plex_sans", "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
+    "emerald":  {"titulo": "plus_jakarta",  "ui": "plus_jakarta", "data": "fira_code"},
+    "graphite": {"titulo": "dm_sans",       "ui": "dm_sans",      "data": "dm_mono"},
+    "cyber":    {"titulo": "syne",          "ui": "outfit",       "data": "space_mono"},
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TEMAS DE CORES
 # ══════════════════════════════════════════════════════════════════════════════
 
 TEMAS: dict[str, dict] = {
 
-    # ── 1. Dark Terminal — Inter + JetBrains Mono ─────────────────────────────
+    # ── 1. Dark Terminal ──────────────────────────────────────────────────────
     "dark": {
-        "nome":  "Dark Terminal",
-        "emoji": "🖤",
-        "desc":  "azul-escuro clássico · acento laranja",
+        "nome":    "Dark Terminal",
+        "emoji":   "🖤",
+        "desc":    "azul-escuro clássico · acento laranja",
         "sidebar": "#0B0C15",
-        "font_import": (
-            f"@import url('{_GF}family=Inter:wght@300;400;500;600;700"
-            "&family=JetBrains+Mono:wght@400;500;600&display=swap');"
-        ),
         "vars": {
             "--sidebar-bg":     "#0B0C15",
             "--bg-base":        "#13141E",
@@ -52,21 +97,15 @@ TEMAS: dict[str, dict] = {
             "--radius-sm":      "6px",
             "--radius-md":      "10px",
             "--radius-lg":      "14px",
-            "--font-ui":        "'Inter', system-ui, -apple-system, sans-serif",
-            "--font-data":      "'JetBrains Mono', 'Consolas', monospace",
         },
     },
 
-    # ── 2. Bloomberg — IBM Plex Sans + IBM Plex Mono ──────────────────────────
+    # ── 2. Bloomberg ──────────────────────────────────────────────────────────
     "navy": {
-        "nome":  "Bloomberg",
-        "emoji": "🔵",
-        "desc":  "navy profundo · IBM Plex · laranja vivo",
+        "nome":    "Bloomberg",
+        "emoji":   "🔵",
+        "desc":    "navy profundo · IBM Plex · laranja vivo",
         "sidebar": "#060A13",
-        "font_import": (
-            f"@import url('{_GF}family=IBM+Plex+Sans:wght@300;400;500;600;700"
-            "&family=IBM+Plex+Mono:wght@400;500&display=swap');"
-        ),
         "vars": {
             "--sidebar-bg":     "#060A13",
             "--bg-base":        "#0A0E1A",
@@ -93,21 +132,15 @@ TEMAS: dict[str, dict] = {
             "--radius-sm":      "4px",
             "--radius-md":      "8px",
             "--radius-lg":      "12px",
-            "--font-ui":        "'IBM Plex Sans', 'Inter', system-ui, sans-serif",
-            "--font-data":      "'IBM Plex Mono', 'Consolas', monospace",
         },
     },
 
-    # ── 3. Emerald — Plus Jakarta Sans + Fira Code ────────────────────────────
+    # ── 3. Emerald ────────────────────────────────────────────────────────────
     "emerald": {
-        "nome":  "Emerald",
-        "emoji": "💚",
-        "desc":  "verde escuro · Jakarta · acento esmeralda",
+        "nome":    "Emerald",
+        "emoji":   "💚",
+        "desc":    "verde escuro · Jakarta · acento esmeralda",
         "sidebar": "#060E09",
-        "font_import": (
-            f"@import url('{_GF}family=Plus+Jakarta+Sans:wght@400;500;600;700"
-            "&family=Fira+Code:wght@400;500&display=swap');"
-        ),
         "vars": {
             "--sidebar-bg":     "#060E09",
             "--bg-base":        "#0A1612",
@@ -134,21 +167,15 @@ TEMAS: dict[str, dict] = {
             "--radius-sm":      "8px",
             "--radius-md":      "12px",
             "--radius-lg":      "18px",
-            "--font-ui":        "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif",
-            "--font-data":      "'Fira Code', 'Consolas', monospace",
         },
     },
 
-    # ── 4. Graphite — DM Sans + DM Mono ──────────────────────────────────────
+    # ── 4. Graphite ───────────────────────────────────────────────────────────
     "graphite": {
-        "nome":  "Graphite",
-        "emoji": "⚫",
-        "desc":  "cinza neutro · DM Sans · azul aço",
+        "nome":    "Graphite",
+        "emoji":   "⚫",
+        "desc":    "cinza neutro · DM Sans · azul aço",
         "sidebar": "#0A0A0A",
-        "font_import": (
-            f"@import url('{_GF}family=DM+Sans:wght@300;400;500;700"
-            "&family=DM+Mono:wght@400;500&display=swap');"
-        ),
         "vars": {
             "--sidebar-bg":     "#0A0A0A",
             "--bg-base":        "#111111",
@@ -175,21 +202,15 @@ TEMAS: dict[str, dict] = {
             "--radius-sm":      "4px",
             "--radius-md":      "8px",
             "--radius-lg":      "10px",
-            "--font-ui":        "'DM Sans', 'Inter', system-ui, sans-serif",
-            "--font-data":      "'DM Mono', 'Consolas', monospace",
         },
     },
 
-    # ── 5. Cyber — Outfit + Space Mono ───────────────────────────────────────
+    # ── 5. Cyber ──────────────────────────────────────────────────────────────
     "cyber": {
-        "nome":  "Cyber",
-        "emoji": "🟣",
-        "desc":  "violeta escuro · Outfit · roxo neon",
+        "nome":    "Cyber",
+        "emoji":   "🟣",
+        "desc":    "violeta escuro · Outfit · roxo neon",
         "sidebar": "#080514",
-        "font_import": (
-            f"@import url('{_GF}family=Outfit:wght@300;400;500;600;700"
-            "&family=Space+Mono:wght@400;700&display=swap');"
-        ),
         "vars": {
             "--sidebar-bg":     "#080514",
             "--bg-base":        "#0D0A1A",
@@ -216,8 +237,6 @@ TEMAS: dict[str, dict] = {
             "--radius-sm":      "6px",
             "--radius-md":      "12px",
             "--radius-lg":      "18px",
-            "--font-ui":        "'Outfit', 'Inter', system-ui, sans-serif",
-            "--font-data":      "'Space Mono', 'Consolas', monospace",
         },
     },
 }
@@ -228,7 +247,7 @@ TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPERS
+# HELPERS — TEMA
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_tema_ativo() -> str:
@@ -246,31 +265,6 @@ def set_tema(tema_id: str) -> None:
         st.query_params["theme"] = tema_id
     except Exception:
         pass
-
-
-def get_tema_css() -> str:
-    """
-    Bloco <style> injetado APÓS o CSS principal para sobrescrever as variáveis
-    :root com os valores do tema ativo (fonte, cores, sidebar bg).
-    Também importa o par tipográfico do tema via Google Fonts.
-    """
-    tema_id    = get_tema_ativo()
-    tema       = TEMAS.get(tema_id, TEMAS["dark"])
-    font_imp   = tema.get("font_import", "")
-    sidebar_bg = tema["vars"].get("--sidebar-bg", tema.get("sidebar", "#0B0C15"))
-    vars_str   = "\n".join(f"        {k}: {v};" for k, v in tema["vars"].items())
-
-    return f"""<style>
-    {font_imp}
-    :root {{
-{vars_str}
-    }}
-    /* Sidebar — background do tema (ambos os seletores que o Streamlit usa) */
-    [data-testid="stSidebar"],
-    [data-testid="stSidebar"] > div:first-child {{
-        background-color: {sidebar_bg} !important;
-    }}
-</style>"""
 
 
 def get_accent_color() -> str:
@@ -291,6 +285,91 @@ def get_chart_colors() -> dict:
         "elevated": t["--bg-elevated"],
         "border":   t["--border-subtle"],
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPERS — FONTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_fontes_ativas() -> dict[str, str]:
+    """
+    Retorna as chaves das fontes ativas para {titulo, ui, data}.
+    Prioridade: session_state (picker) > padrão do tema ativo.
+    """
+    tema_id  = get_tema_ativo()
+    defaults = TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+
+    ft = st.session_state.get("_font_titulo", "")
+    fu = st.session_state.get("_font_ui",     "")
+    fd = st.session_state.get("_font_data",   "")
+
+    return {
+        "titulo": ft if ft in FONTES_TITULO else defaults["titulo"],
+        "ui":     fu if fu in FONTES_UI     else defaults["ui"],
+        "data":   fd if fd in FONTES_DATA   else defaults["data"],
+    }
+
+
+def resetar_fontes() -> None:
+    """Remove overrides de fonte, voltando ao padrão do tema ativo."""
+    for k in ("_font_titulo", "_font_ui", "_font_data"):
+        st.session_state.pop(k, None)
+
+
+def _build_gf_import(f_titulo: dict, f_ui: dict, f_data: dict) -> str:
+    """Constrói URL única do Google Fonts combinando as 3 fontes (sem duplicatas)."""
+    seen: set[str] = set()
+    families: list[str] = []
+    for f in (f_titulo, f_ui, f_data):
+        family_name = f["gf"].split(":")[0]
+        if family_name not in seen:
+            families.append(f["gf"])
+            seen.add(family_name)
+    url = _GF + "&".join(f"family={fam}" for fam in families) + "&display=swap"
+    return f"@import url('{url}');"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CSS DO TEMA
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_tema_css() -> str:
+    """
+    Bloco <style> injetado APÓS o CSS principal — sobrescreve variáveis :root
+    com as cores do tema + as fontes escolhidas (ou padrões do tema).
+    """
+    tema_id    = get_tema_ativo()
+    tema       = TEMAS.get(tema_id, TEMAS["dark"])
+    sidebar_bg = tema["vars"]["--sidebar-bg"]
+
+    # Fontes ativas
+    fontes   = get_fontes_ativas()
+    f_titulo = FONTES_TITULO.get(fontes["titulo"], FONTES_TITULO["space_grotesk"])
+    f_ui     = FONTES_UI.get(fontes["ui"],         FONTES_UI["inter"])
+    f_data   = FONTES_DATA.get(fontes["data"],      FONTES_DATA["jetbrains_mono"])
+
+    font_import = _build_gf_import(f_titulo, f_ui, f_data)
+
+    # Variáveis de fonte sobrescrevem o :root
+    font_vars = {
+        "--font-title": f_titulo["css"],
+        "--font-ui":    f_ui["css"],
+        "--font-data":  f_data["css"],
+    }
+
+    all_vars = {**tema["vars"], **font_vars}
+    vars_str = "\n".join(f"        {k}: {v};" for k, v in all_vars.items())
+
+    return f"""<style>
+    {font_import}
+    :root {{
+{vars_str}
+    }}
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div:first-child {{
+        background-color: {sidebar_bg} !important;
+    }}
+</style>"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -322,18 +401,17 @@ def render_theme_switcher_sidebar() -> None:
         set_tema(escolha)
         st.rerun()
 
-    # Dots de preview das cores do tema ativo
+    # Preview de cores do tema ativo
     v = TEMAS[ativo]["vars"]
     dots = "".join(
-        f'<div style="width:7px;height:7px;border-radius:50%;background:{v[c]};">'
-        f'</div>'
+        f'<div style="width:7px;height:7px;border-radius:50%;background:{v[c]};flex-shrink:0;"></div>'
         for c in ("--accent", "--bull", "--bear", "--info")
     )
     st.sidebar.markdown(
         f'<div style="display:flex;align-items:center;gap:5px;padding:2px 4px 10px;">'
         f'{dots}'
-        f'<span style="font-size:.58rem;color:var(--text-muted);'
-        f'font-family:var(--font-ui);margin-left:2px;white-space:nowrap;overflow:hidden;'
-        f'text-overflow:ellipsis;">{TEMAS[ativo]["desc"]}</span></div>',
+        f'<span style="font-size:.58rem;color:var(--text-muted);font-family:var(--font-ui);'
+        f'margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+        f'{TEMAS[ativo]["desc"]}</span></div>',
         unsafe_allow_html=True,
     )
