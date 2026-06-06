@@ -852,8 +852,62 @@ with tab_global:
             with c4: metric_card("desemprego", fmt_pct(v_desemp, sinal=False))
             
             st.markdown(tooltip_info("Selic — taxa básica de juros definida pelo Copom. Impacta diretamente renda fixa, crédito e atividade econômica."), unsafe_allow_html=True)
+            # ── SELIC REAL (ex-post) ──────────────────────────────────────────
+            _selic_real = None
+            if v_selic is not None and _ipca_12m is not None:
+                _sr = float(v_selic) - float(_ipca_12m)
+                if abs(_sr) < 30:
+                    _selic_real = round(_sr, 2)
+
+            # Adiciona coluna de SELIC real no df para uso nos gráficos
+            if 'Selic' in df_br.columns and 'IPCA_12M' in df_br.columns:
+                df_br['Selic_Real'] = (df_br['Selic'] - df_br['IPCA_12M']).clip(-10, 25)
+
+            # Linha extra de métricas
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                if _selic_real is not None:
+                    metric_card(
+                        "selic real (ex-post)",
+                        fmt_pct(_selic_real, sinal=True),
+                        "selic − ipca 12m acum.",
+                        "bear" if _selic_real > 8 else "amber" if _selic_real > 5 else "bull",
+                    )
+                else:
+                    metric_card("selic real", "n/d", "dados insuficientes")
+            with m2:
+                if _selic_real is not None:
+                    _regr = (
+                        "juros reais restritivos — crédito caro, consumo/investimento pressionados"
+                        if _selic_real > 8
+                        else "zona neutra — política monetária equilibrada"
+                        if _selic_real > 4
+                        else "estimulativo — favorece consumo e ações domésticas"
+                    )
+                    metric_card("regime monetário", "restritivo" if _selic_real > 8 else "neutro" if _selic_real > 4 else "estimulativo", _regr, "bear" if _selic_real > 8 else "amber" if _selic_real > 4 else "bull")
+            with m3:
+                # Prêmio de risco implícito: quanto a renda fixa paga vs o risco
+                if v_selic is not None:
+                    metric_card(
+                        "carry brasil",
+                        fmt_pct(v_selic, sinal=False),
+                        "taxa bruta que o brasil paga ao mundo",
+                        "amber",
+                    )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", _chart_cores()["bull"], _macro_tipo), use_container_width=True, config={'responsive': True})
+            with g1:
+                st.plotly_chart(criar_grafico_macro(df_br, 'Selic', "taxa selic histórica (%)", _chart_cores()["bull"], _macro_tipo), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "selic é a taxa básica de juros definida pelo copom (banco central do brasil). "
+                    "impacta diretamente o custo do crédito, a rentabilidade da renda fixa e o "
+                    "valuation das ações. quando a selic real (selic − ipca) supera 8%, os múltiplos "
+                    "p/l do ibovespa tendem a comprimir — renda fixa concorre com equities. "
+                    "leitura: a trajetória importa mais do que o nível absoluto — ciclo de corte = "
+                    "vento favorável para bolsa; ciclo de alta = rotação para crédito e renda fixa."
+                )
             with g2:
                 if 'IPCA_12M' in df_br.columns and not df_br['IPCA_12M'].dropna().empty:
                     _fig_ipca = go.Figure()
@@ -874,8 +928,27 @@ with tab_global:
                     st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
             st.markdown(tooltip_info("Dólar Ptax — taxa de câmbio oficial calculada pelo BCB. Referência para contratos de derivativos e ajuste de ativos dolarizados."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
-            with g3: st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
-            with g4: st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
+            with g3:
+                st.plotly_chart(criar_grafico_macro(df_br, 'Dolar', "dólar comercial (r$)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "dólar ptax: taxa de câmbio oficial calculada pelo bcb. "
+                    "dólar forte = pressão inflacionária via importados e combustíveis, mas "
+                    "beneficia exportadoras (VALE3, PETR3, agro, papel&celulose). "
+                    "r$5.50-r$6.00 é a zona de equilíbrio no cenário atual; acima de r$6.50 "
+                    "o bcb tende a postura mais hawkish para conter passthrough para o ipca. "
+                    "leitura: dólar subindo + commodities subindo = proteção para carteiras "
+                    "com exportadoras. dólar subindo isolado = risco de recessão global."
+                )
+            with g4:
+                st.plotly_chart(criar_grafico_macro(df_br, 'Desemprego', "taxa de desemprego pnadc (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "desemprego pnad contínua (ibge): lagged em 1-2 trimestres. "
+                    "queda do desemprego → maior massa salarial → consumo e inflação. "
+                    "abaixo de 8% favorece setor de consumo doméstico e varejo (LREN3, AMER3, RENT3). "
+                    "mercado informal (~40% da pea) não capturado — desemprego real é maior. "
+                    "leitura: desemprego caindo + copom cortando = janela positiva para small caps "
+                    "de consumo."
+                )
             st.markdown(tooltip_info("Desemprego PNAD Contínua — taxa de desemprego calculada pelo IBGE. Indicador defasado de atividade econômica."), unsafe_allow_html=True)
 
             # ── FISCAL BRASILEIRO ──────────────────────────────────────────────
@@ -996,7 +1069,16 @@ with tab_global:
             st.markdown(tooltip_info("Fed Funds Rate — taxa de juros básica americana definida pelo FOMC. Referência global para custo do dinheiro."), unsafe_allow_html=True)
             st.markdown(tooltip_info("CPI YoY — variação anual do índice de preços ao consumidor americano. Principal referência de inflação nos EUA, acompanhada de perto pelo Fed."), unsafe_allow_html=True)
             g1, g2 = st.columns(2)
-            with g1: st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", _chart_cores()["bull"], _macro_us_tipo), use_container_width=True, config={'responsive': True})
+            with g1:
+                st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", _chart_cores()["bull"], _macro_us_tipo), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "fed funds rate: taxa básica americana definida pelo fomc (fed). "
+                    "referência global para o custo do dinheiro — juros altos nos eua "
+                    "valorizam o dólar, drenam capital de emergentes e pressionam o real. "
+                    "leitura: cada +0.25pp de fed funds = saída de fluxo de emergentes. "
+                    "ciclo de cortes do fed = vento favorável para ibovespa e reais. "
+                    "ciclo de alta = pressão no câmbio e juros no brasil via carry trade."
+                )
 
             # Gráfico CPI YoY
             with g2:
@@ -1048,8 +1130,24 @@ with tab_global:
             st.markdown(tooltip_info("Treasury 10y — rendimento do título público americano de 10 anos. Referência para taxas de juros globais e custo de financiamento de longo prazo."), unsafe_allow_html=True)
             st.markdown(tooltip_info("UNRATE — taxa de desemprego americana (U-3). Indicador-chave de saúde do mercado de trabalho, monitorado pelo Fed."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
-            with g3: st.plotly_chart(criar_grafico_macro(df_global, 'DGS10', "treasury yield 10y (%)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
-            with g4: st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
+            with g3:
+                st.plotly_chart(criar_grafico_macro(df_global, 'DGS10', "treasury yield 10y (%)", "#FFFFFF"), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "treasury 10y: título público americano de 10 anos — referência global de "
+                    "custo do capital. acima de 4.5% comprime múltiplos de growth e pressiona "
+                    "emergentes via fortalecimento do dólar. inversão com o 2y (treasury 2y > 10y) "
+                    "sinaliza expectativa de desaceleração econômica. leitura: treasuries acima de "
+                    "5% historicamente precedem estresse em high yield e ações de alto crescimento."
+                )
+            with g4:
+                st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "taxa de desemprego americana u-3 (bureau of labor statistics). "
+                    "abaixo de 4% = mercado de trabalho aquecido → risco inflacionário → fed hawkish. "
+                    "acima de 5% = desaceleração → fed pode cortar juros. "
+                    "leitura: desemprego subindo rapidamente ('sahm rule') é sinal recessivo clássico — "
+                    "alta de 0.5pp em 3 meses ativa o sinal historicamente."
+                )
 
             # ── FISCAL EUA ──────────────────────────────────────────────────────
             st.markdown("---")
@@ -1598,27 +1696,224 @@ with tab_global:
             fig_t10.add_hline(y=0, line_color="#FF1744", line_dash="dash", line_width=1)
             fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color="#FF1744", size=10, family="Courier New"), showarrow=False, yshift=-14)
             st.plotly_chart(fig_t10, use_container_width=True, config={'responsive': True})
-            
+            st.caption(
+                "spread 10y−2y (fred: t10y2y): diferença entre o rendimento do treasury 10 anos e o de "
+                "2 anos. quando negativo (curva invertida), historicamente precede recessão em "
+                "12-18 meses com ~80% de acerto desde 1970. a inversão ocorre quando o fed sobe "
+                "muito os juros curtos enquanto o mercado antecipa desaceleração futura. "
+                "leitura: curva invertida há >6 meses = cautela máxima com risco. "
+                "desinversão (spread voltando a positivo) pode sinalizar piora iminente, "
+                "não melhora — é quando a recessão costuma chegar."
+            )
+
             st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", "#FF1744"), use_container_width=True, config={'responsive': True})
-            st.info("o vix mede a volatilidade esperada do s&p 500.")
-            
+            st.caption(
+                "vix (cboe volatility index): mede a volatilidade implícita das opções do s&p500 "
+                "para os próximos 30 dias. apelidado de 'índice do medo'. "
+                "abaixo de 15 = mercado complacente, risco de surpresa negativa. "
+                "15-25 = zona normal de atenção. 25-35 = stress elevado. acima de 35 = pânico — "
+                "historicamente zonas de compra de risco com horizonte 12m+. "
+                "leitura: vix subindo junto com queda de bolsa = risco sistêmico. "
+                "vix alto com bolsa estável = ruído. pico do vix com reversão = sinal de fundo."
+            )
+
             st.plotly_chart(criar_grafico_macro(df_global, 'BAMLH0A0HYM2', "spread crédito high yield (%)", "#E040FB"), use_container_width=True, config={'responsive': True})
+            st.caption(
+                "spread high yield (ice bofa us hy index — fred: bamlh0a0hym2): diferença de rendimento "
+                "entre títulos corporativos de alto risco (high yield / junk) e o treasury equivalente. "
+                "spread baixo (<300 bps) = apetite a risco elevado, crédito fácil. "
+                "spread alto (>600 bps) = stress de crédito, aperto financeiro. "
+                "leitura: spread de hy subindo rapidamente (+150 bps em 30d) é um dos sinais mais "
+                "antecedentes de recessão e de stress em mercados emergentes — precede quedas de bolsa."
+            )
 
         elif aba_sel == "🛢️ commodities":
             _commodities_config = [
-                ("CL=F",  "petróleo wti",    "#8B00FF", "us$/barril", "^GSPC",   "s&p500"),
-                ("GC=F",  "ouro",            "#FFD700", "us$/onça",   "^TNX",    "treasury 10y"),
-                ("SI=F",  "prata",           "#C0C0C0", "us$/onça",   "GC=F",    "ouro"),
-                ("HG=F",  "cobre",           "#B87333", "us$/libra",  "^GSPC",   "s&p500"),
-                ("NG=F",  "gás natural",     "#00BFFF", "us$/mmbtu",  "CL=F",    "petróleo"),
-                ("ZC=F",  "milho",           "#FFD700", "us$/bushel", "BOVA11.SA","ibov"),
-                ("ZS=F",  "soja",            "#90EE90", "us$/bushel", "BOVA11.SA","ibov"),
-                ("ZW=F",  "trigo",           "#DEB887", "us$/bushel", "ZC=F",    "milho"),
-                ("KC=F",  "café",            "#6F4E37", "us$/libra",  "BRL=X",   "usd/brl"),
-                ("SB=F",  "açúcar",          "#FF69B4", "us$/libra",  "BRL=X",   "usd/brl"),
-                ("CT=F",  "algodão",         "#F5F5DC", "us$/libra",  "^GSPC",   "s&p500"),
-                ("PL=F",  "platina",         "#E5E4E2", "us$/onça",   "GC=F",    "ouro"),
+                # minério de ferro — driver #1 do ibovespa via VALE3
+                ("TIO=F",  "minério de ferro", "#FF6B35", "us$/ton",    "VALE3.SA", "vale3"),
+                ("CL=F",   "petróleo wti",     "#8B00FF", "us$/barril", "^GSPC",    "s&p500"),
+                ("GC=F",   "ouro",             "#FFD700", "us$/onça",   "^TNX",     "treasury 10y"),
+                ("SI=F",   "prata",            "#C0C0C0", "us$/onça",   "GC=F",     "ouro"),
+                ("HG=F",   "cobre",            "#B87333", "us$/libra",  "^GSPC",    "s&p500"),
+                ("NG=F",   "gás natural",      "#00BFFF", "us$/mmbtu",  "CL=F",     "petróleo"),
+                ("ZC=F",   "milho",            "#F5C518", "us$/bushel", "BOVA11.SA", "ibov"),
+                ("ZS=F",   "soja",             "#90EE90", "us$/bushel", "BOVA11.SA", "ibov"),
+                ("ZW=F",   "trigo",            "#DEB887", "us$/bushel", "ZC=F",     "milho"),
+                ("KC=F",   "café",             "#6F4E37", "us$/libra",  "BRL=X",    "usd/brl"),
+                ("SB=F",   "açúcar",           "#FF69B4", "us$/libra",  "BRL=X",    "usd/brl"),
+                ("CT=F",   "algodão",          "#F5F5DC", "us$/libra",  "^GSPC",    "s&p500"),
+                ("PL=F",   "platina",          "#E5E4E2", "us$/onça",   "GC=F",     "ouro"),
             ]
+
+            # Análise interpretativa por commodity (contexto macro + impacto Brasil)
+            _COMM_ANALISE = {
+                "TIO=F": (
+                    "minério de ferro: driver #1 do ibovespa. vale3 representa ~10% do índice e "
+                    "sua receita é quase inteiramente em ferro para a china (~70% do consumo global). "
+                    "acima de us$100/t: vale distribui dividendos generosos e sustenta o ibovespa. "
+                    "abaixo de us$80/t: pressão nos lucros da vale e impacto direto no índice. "
+                    "leitura: minério + pmi industrial chinês = indicador conjunto mais importante "
+                    "para quem investe em brasil via ibovespa."
+                ),
+                "CL=F": (
+                    "petróleo wti: referência americana. impacto duplo no brasil — "
+                    "receitas da petrobras (60% dolarizadas) vs custo de combustíveis para a economia. "
+                    "acima de us$80/barril: petr3/petr4 se valorizam e a arrecadação federal cresce. "
+                    "abaixo de us$60/barril: modelo de dividendos da petrobras fica sob pressão. "
+                    "leitura: petróleo + dólar = rentabilidade da petrobras (o maior peso do ibov junto com vale)."
+                ),
+                "GC=F": (
+                    "ouro: proteção clássica contra inflação, crises e desvalorização monetária. "
+                    "correlação negativa com dólar forte (dxy) e positiva com incerteza geopolítica. "
+                    "leitura: ouro subindo enquanto s&p500 cai = flight to safety (risk-off global). "
+                    "ouro + bolsa subindo juntos = excesso de liquidez. ratio ouro/prata>80x = "
+                    "prata historicamente barata. acima de us$2.500/onça: novo regime de alta."
+                ),
+                "HG=F": (
+                    "cobre ('dr. cobre'): leading indicator de atividade industrial global. "
+                    "correlação direta com pmi industrial chinês e americano. "
+                    "queda >10% em 30 dias historicamente precede desaceleração do pib global em 3-6 meses. "
+                    "leitura: cobre caindo = sinal antecedente de desaceleração. "
+                    "para o brasil: impacto indireto via sentimento sobre emergentes e exportadoras. "
+                    "high copper + high iron ore = super ciclo de commodities industriais."
+                ),
+                "NG=F": (
+                    "gás natural henry hub (eua): impacto no brasil principalmente via custo industrial "
+                    "e inflação global de energia. gás caro = desvantagem competitiva para indústria "
+                    "e pressão inflacionária. para o brasil: relevante nos períodos de escassez hídrica "
+                    "quando as termelétricas são acionadas (custo da energia elétrica sobe). "
+                    "leitura: gás natural + petróleo alto = stagflação energética global."
+                ),
+                "ZS=F": (
+                    "soja: brasil é o maior exportador mundial (~55% do mercado global). "
+                    "preço alto gera superávit comercial, aprecia o real e beneficia agro (agro3, slce3, slc5). "
+                    "drivers: demanda chinesa por ração animal + clima na safra br (set-jan) e eua (mai-ago). "
+                    "leitura: acima de us$1.300/bushel, exportadores br ampliam margens. "
+                    "safra recorde de soja + milho = pressão de baixa nos preços (lei da oferta)."
+                ),
+                "ZC=F": (
+                    "milho: segunda maior commodity agrícola brasileira. "
+                    "correlação com soja via rotação de culturas (produtor escolhe entre as duas). "
+                    "demanda americana para etanol é variável crítica (renewable fuel standard). "
+                    "leitura: milho + soja altos juntos = super ciclo agrícola — favorece real e ibov. "
+                    "milho caro + soja cara = pressão nos custos de proteína animal (inflação alimentar)."
+                ),
+                "ZW=F": (
+                    "trigo: brasil é importador líquido (sul do brasil produz, mas insuficiente). "
+                    "alta de trigo → pressão no ipca via alimentos industrializados e panificação. "
+                    "geopolítica: ucrânia + rússia respondem por 30% das exportações mundiais. "
+                    "leitura: guerra no leste europeu = diretamente inflacionária via trigo para o brasil. "
+                    "trigo acima de us$7/bushel = sinal de atenção para inflação de alimentos."
+                ),
+                "KC=F": (
+                    "café arábica: brasil produz ~35% do café mundial. "
+                    "exportações geram us$8-10bi/ano em divisas. "
+                    "sensível a eventos climáticos no cerrado e sul de minas (geadas em jul-ago). "
+                    "leitura: café acima de us$2/libra = exportadores brasileiros ampliam receita. "
+                    "pico de preço pós-geada tende a normalizar em 12-18 meses via replantio. "
+                    "brasil café3 (b3) e cooperativas do sul de minas são os principais beneficiários."
+                ),
+                "SB=F": (
+                    "açúcar: brasil responde por ~30% da produção mundial. "
+                    "correlação com petróleo: usinas alternam entre açúcar e etanol de cana-de-açúcar — "
+                    "petróleo alto → mais etanol → menos açúcar → preço do açúcar sobe. "
+                    "leitura: petróleo + açúcar subindo juntos = ambiente positivo para raiz4, smto3. "
+                    "acima de us$0.25/libra: margens das usinas ficam muito favoráveis."
+                ),
+                "CT=F": (
+                    "algodão: brasil é o 5º maior produtor mundial, concentrado no cerrado (mt, go, ba). "
+                    "exportações cresceram fortemente na última década. "
+                    "demanda ligada ao setor têxtil global — desaceleração da china impacta. "
+                    "leitura: algodão acima de us$0.90/libra beneficia exportadores brasileiros. "
+                    "correlação com pmi manufatura global — queda do algodão pode sinalizar "
+                    "desaceleração do consumo de vestuário em mercados desenvolvidos."
+                ),
+                "PL=F": (
+                    "platina: metal do grupo pgm (platinum group metals). "
+                    "uso principal em catalisadores automotivos (carros a combustão). "
+                    "risco estrutural: transição para veículos elétricos reduz demanda por pgm. "
+                    "ratio platina/ouro abaixo de 0.5x = platina historicamente barata vs ouro. "
+                    "leitura: platina vs ouro é um proxy de otimismo para o ciclo industrial e "
+                    "combustão interna. alta = aposta em ciclo industrial. queda = transição energética."
+                ),
+            }
+
+            # ── CESTA DE EXPORTAÇÃO BRASILEIRA ───────────────────────────────────
+            section_title("🇧🇷 cesta de exportação brasileira")
+            st.caption(
+                "índice ponderado das principais commodities exportadas pelo brasil, "
+                "refletindo aproximadamente a pauta exportadora nacional. "
+                "sobe quando o brasil ganha poder de compra no mercado externo → "
+                "favorece o real, reduz risco fiscal e cria ambiente para corte de juros."
+            )
+
+            _CESTA_PESOS = {
+                "TIO=F": 0.28,   # minério de ferro ~28% da pauta
+                "CL=F":  0.24,   # petróleo ~24%
+                "ZS=F":  0.22,   # soja ~22%
+                "SB=F":  0.08,   # açúcar ~8%
+                "KC=F":  0.08,   # café ~8%
+                "HG=F":  0.05,   # cobre/metais ~5%
+                "CT=F":  0.05,   # algodão ~5%
+            }
+            _periodo_cesta = st.radio(
+                "período cesta:", ["6mo", "1y", "2y"],
+                format_func=lambda x: {"6mo": "6 meses", "1y": "1 ano", "2y": "2 anos"}[x],
+                horizontal=True, key="radio_cesta_exp",
+            )
+            with st.spinner("calculando cesta de exportação..."):
+                _series_cesta = {}
+                for _tk_c, _w_c in _CESTA_PESOS.items():
+                    try:
+                        _h = yf.Ticker(_tk_c).history(period=_periodo_cesta, auto_adjust=True)['Close'].dropna()
+                        if not _h.empty:
+                            _series_cesta[_tk_c] = (_h / _h.iloc[0]) * 100  # base 100
+                    except Exception:
+                        pass
+
+            if _series_cesta:
+                _df_cesta = pd.DataFrame(_series_cesta).dropna()
+                # índice ponderado
+                _pesos_disp = {k: _CESTA_PESOS[k] for k in _df_cesta.columns if k in _CESTA_PESOS}
+                _soma_pesos = sum(_pesos_disp.values())
+                _cesta_idx = sum(_df_cesta[k] * v for k, v in _pesos_disp.items()) / _soma_pesos
+
+                _fig_cesta = go.Figure()
+                _fig_cesta.add_trace(go.Scatter(
+                    x=_cesta_idx.index, y=_cesta_idx.values,
+                    name="cesta exportação br", fill="tozeroy",
+                    fillcolor="rgba(255,107,53,0.10)",
+                    line=dict(color="#FF6B35", width=2.5),
+                    hovertemplate="cesta: %{y:.1f}<extra></extra>",
+                ))
+                # Adiciona linhas individuais com baixa opacidade
+                _NOMES_CESTA = {"TIO=F":"minério","CL=F":"petróleo","ZS=F":"soja",
+                                "SB=F":"açúcar","KC=F":"café","HG=F":"cobre","CT=F":"algodão"}
+                _CORES_CESTA = {"TIO=F":"#FF6B35","CL=F":"#8B00FF","ZS=F":"#90EE90",
+                                "SB=F":"#FF69B4","KC=F":"#6F4E37","HG=F":"#B87333","CT=F":"#F5F5DC"}
+                for _k, _s in _df_cesta.items():
+                    _fig_cesta.add_trace(go.Scatter(
+                        x=_s.index, y=_s.values,
+                        name=_NOMES_CESTA.get(_k, _k), opacity=0.35,
+                        line=dict(color=_CORES_CESTA.get(_k, "#888"), width=1, dash="dot"),
+                        hovertemplate=f"{_NOMES_CESTA.get(_k,'?')}: %{{y:.1f}}<extra></extra>",
+                    ))
+                _fig_cesta.add_hline(y=100, line_color="#333", line_dash="dash", line_width=1)
+                _fig_cesta.update_layout(**base_layout(height=280, title="cesta de exportação brasileira (base 100)"))
+                st.plotly_chart(_fig_cesta, use_container_width=True, config={'responsive': True})
+                _ret_cesta = float(_cesta_idx.iloc[-1]) - 100
+                _nm_disp = [_NOMES_CESTA.get(k, k) for k in _df_cesta.columns]
+                st.caption(
+                    f"retorno da cesta no período: {_ret_cesta:+.1f}% (base 100 no início). "
+                    f"componentes com dados: {', '.join(_nm_disp)}. "
+                    f"pesos: minério 28% · petróleo 24% · soja 22% · açúcar 8% · café 8% · cobre 5% · algodão 5%. "
+                    "cesta acima de 100 → pauta exportadora valorizada → câmbio e balança comercial favoráveis."
+                )
+            else:
+                st.caption("cesta de exportação: dados temporariamente indisponíveis.")
+
+            st.markdown("---")
+            section_title("📊 commodities individuais")
 
             _col_com_sel = st.columns(4)
             _selected_comms = []
@@ -1671,12 +1966,16 @@ with tab_global:
                             _fig_c.update_layout(**base_layout(height=220, title=f"{_nm} vs {_bn} (base 100)"))
                             st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
                             _ret_b = (float(_hist_b.iloc[-1]) / float(_hist_b.iloc[0]) - 1) * 100
-                            st.caption(f"{_nm}: {_ret_c:+.1f}% | {_bn}: {_ret_b:+.1f}% no período. correlação empírica no horizonte selecionado.")
+                            st.caption(f"retorno no período: {_nm} {_ret_c:+.1f}% | {_bn} {_ret_b:+.1f}%.")
+                            if _tk in _COMM_ANALISE:
+                                st.caption(_COMM_ANALISE[_tk])
                             continue
 
                     _fig_c = go.Figure(go.Scatter(x=_hist_c.index, y=_hist_c.values, line=dict(color=_cor, width=2), fill='tozeroy', fillcolor=_hex_to_rgba(_cor), hovertemplate=f'%{{x}}<br>{_nm}: %{{y:,.2f}} {_un}<extra></extra>'))
                     _fig_c.update_layout(**base_layout(height=200, title=f"{_nm} ({_un})"))
                     st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
+                    if _tk in _COMM_ANALISE:
+                        st.caption(_COMM_ANALISE[_tk])
 
                 except Exception:
                     st.caption(f"{_nm}: dados indisponíveis")
