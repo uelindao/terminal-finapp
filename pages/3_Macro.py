@@ -230,6 +230,162 @@ def tooltip_info(texto):
     _texto_escaped = texto.replace('"', '&quot;')
     return f"""<span style="cursor:help; border-bottom:1px dashed #666; font-size:0.85em; color:#aaa;" title="{_texto_escaped}">&#9432;</span>"""
 
+
+# ── Calendário COPOM oficial (atualizar anualmente) ───────────────────────────
+_COPOM_CALENDAR = {
+    # 2025 — datas publicadas pelo BCB
+    "1/2025": datetime.date(2025, 1, 29),
+    "2/2025": datetime.date(2025, 3, 19),
+    "3/2025": datetime.date(2025, 5,  7),
+    "4/2025": datetime.date(2025, 6, 18),
+    "5/2025": datetime.date(2025, 7, 30),
+    "6/2025": datetime.date(2025, 9, 17),
+    "7/2025": datetime.date(2025, 10, 29),
+    "8/2025": datetime.date(2025, 12, 10),
+    # 2026 — estimados pela cadência histórica (~6-8 semanas de intervalo)
+    "1/2026": datetime.date(2026, 1, 28),
+    "2/2026": datetime.date(2026, 3, 18),
+    "3/2026": datetime.date(2026, 5,  6),
+    "4/2026": datetime.date(2026, 6, 17),
+    "5/2026": datetime.date(2026, 7, 29),
+    "6/2026": datetime.date(2026, 9, 16),
+    "7/2026": datetime.date(2026, 10, 28),
+    "8/2026": datetime.date(2026, 12,  9),
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def puxar_curva_di():
+    """
+    Constrói a curva DI brasileira (implied forward SELIC) via Focus/BCB.
+
+    Abordagem 1 (preferida): ExpectativasMercadoSelic por reunião COPOM
+      → cada ponto da curva = expectativa de SELIC na reunião N do COPOM
+      → mapeia o número da reunião para a data aproximada via _COPOM_CALENDAR
+      → retorna a curva com a granularidade de cada decisão do BCB
+
+    Abordagem 2 (fallback): ExpectativasMercadoAnuais
+      → pontos anuais (dez/2025, dez/2026...) via consensus do Focus
+
+    Retorna:
+      (df_curve, tipo, df_historico) onde:
+        df_curve: DataFrame com [tenor_dias, tenor_label, selic_mediana, selic_media]
+        tipo: 'copom' | 'anual' | None
+        df_historico: DataFrame com curvas históricas [data, tenor_label, selic_mediana]
+    """
+    try:
+        from bcb import Expectativas
+
+        em      = Expectativas()
+        hoje    = datetime.date.today()
+        cutoff  = (hoje - datetime.timedelta(days=10)).isoformat()
+        cutoff_hist = (hoje - datetime.timedelta(days=180)).isoformat()
+
+        # ── Abordagem 1: por reunião COPOM ────────────────────────────────
+        try:
+            ep_sel = em.get_endpoint('ExpectativasMercadoSelic')
+            df_sel = (
+                ep_sel.query()
+                .filter(ep_sel.baseCalculo == 0)   # % ao ano
+                .filter(ep_sel.Data >= cutoff)
+                .collect()
+            )
+            if df_sel is not None and not df_sel.empty:
+                latest_date = df_sel['Data'].max()
+                df_latest   = df_sel[df_sel['Data'] == latest_date].copy()
+
+                # Curva do dia mais recente
+                pontos = []
+                for _, row in df_latest.iterrows():
+                    reuniao = str(row.get('reuniao', '')).strip()
+                    if reuniao in _COPOM_CALENDAR:
+                        dt_cop = _COPOM_CALENDAR[reuniao]
+                        dias   = (dt_cop - hoje).days
+                        if dias > 0:
+                            pontos.append({
+                                'tenor_dias':    dias,
+                                'tenor_label':   reuniao,
+                                'selic_mediana': row.get('Mediana'),
+                                'selic_media':   row.get('Media'),
+                                'n_respondentes': row.get('numeroRespondentes', 0),
+                            })
+
+                if len(pontos) >= 3:
+                    df_curve = pd.DataFrame(pontos).sort_values('tenor_dias').reset_index(drop=True)
+
+                    # Histórico: curvas de 30d e 90d atrás para comparação
+                    df_hist_list = []
+                    for lookback_days, lbl in [(30, "30d atrás"), (90, "90d atrás")]:
+                        _dt = (hoje - datetime.timedelta(days=lookback_days)).isoformat()
+                        _dt_from = (hoje - datetime.timedelta(days=lookback_days + 10)).isoformat()
+                        try:
+                            _df_lb = (
+                                ep_sel.query()
+                                .filter(ep_sel.baseCalculo == 0)
+                                .filter(ep_sel.Data >= _dt_from)
+                                .filter(ep_sel.Data <= _dt)
+                                .collect()
+                            )
+                            if _df_lb is not None and not _df_lb.empty:
+                                _ld = _df_lb['Data'].max()
+                                _df_lb = _df_lb[_df_lb['Data'] == _ld]
+                                for _, _r in _df_lb.iterrows():
+                                    _reun = str(_r.get('reuniao', '')).strip()
+                                    if _reun in _COPOM_CALENDAR:
+                                        _dt_c = _COPOM_CALENDAR[_reun]
+                                        _d = (hoje - _dt_c).days  # dias desde então
+                                        df_hist_list.append({
+                                            'curva':         lbl,
+                                            'tenor_label':   _reun,
+                                            'selic_mediana': _r.get('Mediana'),
+                                            'tenor_dias_orig': (_dt_c - hoje).days,
+                                        })
+                        except Exception:
+                            pass
+
+                    df_historico = pd.DataFrame(df_hist_list) if df_hist_list else pd.DataFrame()
+                    return df_curve, 'copom', df_historico
+
+        except Exception as _e:
+            logger.warning(f"[curva_di] ExpectativasMercadoSelic falhou: {_e}")
+
+        # ── Abordagem 2: expectativas anuais ──────────────────────────────
+        ep_anual = em.get_endpoint('ExpectativasMercadoAnuais')
+        df_anual = (
+            ep_anual.query()
+            .filter(ep_anual.Indicador == 'Selic')
+            .filter(ep_anual.Data >= cutoff)
+            .collect()
+        )
+        if df_anual is not None and not df_anual.empty:
+            latest_date = df_anual['Data'].max()
+            df_l = df_anual[df_anual['Data'] == latest_date].sort_values('DataReferencia').copy()
+            pontos = []
+            for _, row in df_l.iterrows():
+                try:
+                    ano = int(str(row.get('DataReferencia', ''))[:4])
+                    dt_ref = datetime.date(ano, 12, 31)
+                    dias = (dt_ref - hoje).days
+                    if dias > 0:
+                        pontos.append({
+                            'tenor_dias':    dias,
+                            'tenor_label':   f"dez/{ano}",
+                            'selic_mediana': row.get('Mediana'),
+                            'selic_media':   row.get('Media'),
+                            'n_respondentes': row.get('numeroRespondentes', 0),
+                        })
+                except Exception:
+                    pass
+            if len(pontos) >= 2:
+                df_curve = pd.DataFrame(pontos).sort_values('tenor_dias').reset_index(drop=True)
+                return df_curve, 'anual', pd.DataFrame()
+
+        return None, None, pd.DataFrame()
+
+    except Exception as e:
+        logger.error(f"[curva_di] Erro geral: {e}")
+        return None, None, pd.DataFrame()
+
 def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
     """
     Avalia o risco fiscal brasileiro com base em dívida/PIB, tendência
@@ -987,6 +1143,190 @@ with tab_global:
                     st.caption("ipca acumulado dos últimos 12 meses (produto das taxas mensais). meta bcb: 3% ± 1.5pp. fonte: bcb sgs série 433.")
                 else:
                     st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+            # ── CURVA DI BRASILEIRA ───────────────────────────────────────────
+            st.markdown("---")
+            section_title("📈 curva di — expectativas de selic pelo mercado (focus/bcb)")
+
+            with st.spinner("carregando expectativas de selic..."):
+                _di_curve, _di_tipo, _di_hist = puxar_curva_di()
+
+            if _di_curve is not None and not _di_curve.empty and v_selic is not None:
+                # ── métricas da curva ─────────────────────────────────────────
+                _di_spot       = float(v_selic)
+                _di_ultimo     = float(_di_curve['selic_mediana'].dropna().iloc[-1])
+                _di_primeiro   = float(_di_curve['selic_mediana'].dropna().iloc[0])
+                _di_slope      = _di_ultimo - _di_spot   # inclinação total curva
+                _di_next       = float(_di_curve['selic_mediana'].dropna().iloc[0])
+                _di_next_lbl   = _di_curve['tenor_label'].iloc[0]
+
+                _implied_move  = _di_next - _di_spot
+                _move_str      = f"{_implied_move:+.2f}pp" if abs(_implied_move) > 0.05 else "sem movimento esperado"
+                _move_cor      = "bear" if _implied_move > 0.1 else "bull" if _implied_move < -0.1 else "amber"
+
+                _shape = (
+                    "📉 curva inclinada p/ baixo — mercado precifica ciclo de cortes"
+                    if _di_slope < -0.5
+                    else "📈 curva inclinada p/ cima — mercado precifica aperto monetário"
+                    if _di_slope > 0.5
+                    else "➡️ curva flat — selic esperada estável no horizonte"
+                )
+                _shape_cor = "bull" if _di_slope < -0.5 else "bear" if _di_slope > 0.5 else "amber"
+
+                _cd1, _cd2, _cd3, _cd4 = st.columns(4)
+                with _cd1: metric_card("selic spot", fmt_pct(_di_spot), "taxa atual")
+                with _cd2: metric_card(
+                    f"próxima reunião ({_di_next_lbl})",
+                    fmt_pct(_di_next),
+                    _move_str, _move_cor,
+                )
+                with _cd3: metric_card(
+                    "selic terminal (curva)",
+                    fmt_pct(_di_ultimo),
+                    f"último nó da curva · inclinação {_di_slope:+.2f}pp",
+                    _shape_cor,
+                )
+                with _cd4: metric_card(
+                    "formato da curva",
+                    "cortes" if _di_slope < -0.5 else "altas" if _di_slope > 0.5 else "flat",
+                    _shape, _shape_cor,
+                )
+
+                # ── gráfico da curva ──────────────────────────────────────────
+                _fig_di = go.Figure()
+
+                # Spot SELIC (ponto zero)
+                _fig_di.add_trace(go.Scatter(
+                    x=[0], y=[_di_spot],
+                    mode='markers',
+                    name='selic spot',
+                    marker=dict(color='#FF6B35', size=12, symbol='diamond'),
+                    hovertemplate=f'spot: {_di_spot:.2f}%<extra></extra>',
+                ))
+
+                # Curva atual — mediana Focus
+                _x_cur = _di_curve['tenor_dias'].tolist()
+                _y_med = _di_curve['selic_mediana'].tolist()
+                _y_med_avg = _di_curve['selic_media'].tolist()
+                _lbl_cur = _di_curve['tenor_label'].tolist()
+
+                _fig_di.add_trace(go.Scatter(
+                    x=[0] + _x_cur,
+                    y=[_di_spot] + _y_med,
+                    mode='lines+markers',
+                    name='curva di (mediana)',
+                    line=dict(color='#00E5FF', width=2.5),
+                    marker=dict(size=7, color='#00E5FF'),
+                    hovertemplate='%{text}<br>selic mediana: %{y:.2f}%<extra></extra>',
+                    text=['spot'] + _lbl_cur,
+                ))
+
+                # Média Focus (linha suave por baixo)
+                if any(v is not None for v in _y_med_avg):
+                    _fig_di.add_trace(go.Scatter(
+                        x=[0] + _x_cur,
+                        y=[_di_spot] + _y_med_avg,
+                        mode='lines',
+                        name='curva di (média)',
+                        line=dict(color='#00E5FF', width=1, dash='dot'),
+                        opacity=0.4,
+                        hovertemplate='%{text}<br>selic média: %{y:.2f}%<extra></extra>',
+                        text=['spot'] + _lbl_cur,
+                    ))
+
+                # Curvas históricas — 30d e 90d atrás
+                if _di_hist is not None and not _di_hist.empty:
+                    _hist_cores = {"30d atrás": "#FFAA00", "90d atrás": "#888888"}
+                    for _lbl_h in _di_hist['curva'].unique():
+                        _dh = _di_hist[_di_hist['curva'] == _lbl_h].sort_values('tenor_dias_orig')
+                        if not _dh.empty:
+                            _fig_di.add_trace(go.Scatter(
+                                x=_dh['tenor_dias_orig'].tolist(),
+                                y=_dh['selic_mediana'].tolist(),
+                                mode='lines',
+                                name=_lbl_h,
+                                line=dict(color=_hist_cores.get(_lbl_h, '#666'), width=1.5, dash='dot'),
+                                opacity=0.6,
+                                hovertemplate=f"{_lbl_h}: %{{y:.2f}}%<extra></extra>",
+                            ))
+
+                # Linha horizontal — taxa neutra nominal (IPCA meta 4.5% + neutro real 4.5%)
+                _taxa_neutra = 9.0
+                _fig_di.add_hline(
+                    y=_taxa_neutra, line_color='#00C853', line_dash='dash', line_width=1,
+                    annotation_text=f'taxa neutra ~{_taxa_neutra:.0f}%',
+                    annotation_font_color='#00C853', annotation_font_size=9,
+                )
+
+                _fig_di.update_layout(**base_layout(
+                    height=320,
+                    title=f"curva di implícita — expectativas de selic por reunião copom (focus/bcb · {_di_tipo})"
+                ))
+                _fig_di.update_xaxes(
+                    title_text="dias corridos",
+                    tickvals=[0, 90, 180, 270, 365, 540, 730],
+                    ticktext=['spot', '3m', '6m', '9m', '1a', '18m', '2a'],
+                )
+                _fig_di.update_yaxes(title_text="selic implícita (% ao ano)")
+
+                st.plotly_chart(_fig_di, use_container_width=True, config={'responsive': True})
+
+                # ── caption analítico dinâmico ────────────────────────────────
+                if _di_slope < -1.0:
+                    _di_caption_regime = (
+                        "curva fortemente inclinada p/ baixo: o mercado precifica ciclo de cortes "
+                        f"de {abs(_di_slope):.1f}pp da selic no horizonte da curva. "
+                        "ambiente favorável para: ações domésticas (consumo, construção, finanças), "
+                        "fundos imobiliários de papel (high yield), duration longa em renda fixa. "
+                        "risco: surpresa altista de inflação pode reprecificar a curva."
+                    )
+                elif _di_slope < -0.25:
+                    _di_caption_regime = (
+                        "curva levemente inclinada p/ baixo: mercado espera cortes graduais de selic. "
+                        f"recuo esperado de ~{abs(_di_slope):.1f}pp no horizonte. "
+                        "ambiente moderadamente favorável para equities e renda fixa de duration média."
+                    )
+                elif _di_slope > 1.0:
+                    _di_caption_regime = (
+                        "curva inclinada p/ cima: mercado precifica aperto monetário adicional de "
+                        f"+{_di_slope:.1f}pp. "
+                        "ambiente desfavorável para ações domésticas — renda fixa é mais competitiva. "
+                        "favorece: exportadoras, bancos (spread maior), setores defensivos."
+                    )
+                elif _di_slope > 0.25:
+                    _di_caption_regime = (
+                        "curva levemente ascendente: mercado antecipa possível alta de selic. "
+                        "posicionamento defensivo em equities recomendado — preferência por empresas "
+                        "com baixa alavancagem e geração de caixa robusta."
+                    )
+                else:
+                    _di_caption_regime = (
+                        "curva flat: mercado não vê movimento relevante de selic no horizonte. "
+                        "selic estrutural (terminal rate) próxima ao nível atual. "
+                        "ambiente neutro — foco em seleção setorial, não na direcionalidade de juros."
+                    )
+
+                st.caption(
+                    f"curva di implícita (focus/bcb · fonte: {_di_tipo}): cada ponto representa a "
+                    "mediana das expectativas do mercado para a selic ao final de cada reunião copom. "
+                    f"taxa neutra nominal estimada: ~9% (ipca meta 4.5% + neutro real ~4.5%). "
+                    f"{_di_caption_regime}"
+                )
+
+                # Tipo de dado mostrado
+                _fonte_str = (
+                    "📍 fonte: bcb focus — expectativas por reunião copom (granularidade máxima)"
+                    if _di_tipo == 'copom'
+                    else "📍 fonte: bcb focus — expectativas anuais (projeções dez/ano)"
+                )
+                st.caption(_fonte_str)
+
+            else:
+                st.info(
+                    "curva di: dados do focus bcb temporariamente indisponíveis. "
+                    "verifique a conexão com a api do banco central."
+                )
+
+            st.markdown("---")
             st.markdown(tooltip_info("Dólar Ptax — taxa de câmbio oficial calculada pelo BCB. Referência para contratos de derivativos e ajuste de ativos dolarizados."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
             with g3:
