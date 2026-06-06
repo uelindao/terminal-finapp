@@ -259,11 +259,13 @@ def _processar_ticker_st(
 ) -> tuple[int, int]:
     """
     Processa um ticker dentro do contexto Streamlit.
+    Estratégia de dados FMP:
+      1. Tenta /ratios?period=quarter (EUA sempre; BR raramente)
+      2. Fallback: /ratios sem period (anual — 10 pontos, cobre BR)
     Retorna (n_inseridos, n_skipped).
     """
     import yfinance as yf
-    import numpy as np
-    from utils.fmp_client import get_ratios_trimestrais, get_key_metrics_trimestrais
+    from utils.fmp_client import get_ratios_trimestrais, get_key_metrics_trimestrais, _get
     from database.db import registrar_historico_score_batch, get_datas_historico_score
 
     is_br  = ticker_yf.endswith(".SA")
@@ -271,34 +273,51 @@ def _processar_ticker_st(
 
     status_placeholder.write(f"🔄 `{tk_fmp}` — buscando FMP…")
 
-    # FMP
+    # ── 1. Tenta dados TRIMESTRAIS (funciona bem para EUA) ────────────────────
     ratios_list = get_ratios_trimestrais(tk_fmp, limit=40)
     time.sleep(0.4)
     km_list     = get_key_metrics_trimestrais(tk_fmp, limit=40)
     time.sleep(0.4)
+    yoy_offset  = 4   # trimestral: 4 trimestres = 1 ano
+
+    # ── 2. Fallback ANUAL (cobre ações BR e internacionais) ───────────────────
+    if not ratios_list:
+        status_placeholder.write(
+            f"🔄 `{tk_fmp}` — sem dados trimestrais, tentando anuais…"
+        )
+        ratios_list = _get(f"ratios/{tk_fmp}", {"limit": 10}) or []
+        time.sleep(0.4)
+        km_list     = _get(f"key-metrics/{tk_fmp}", {"limit": 10}) or []
+        time.sleep(0.4)
+        yoy_offset  = 1   # anual: 1 posição = 1 ano atrás
 
     if not ratios_list:
         status_placeholder.write(f"⚠️ `{tk_fmp}` — sem dados FMP (ativo não coberto)")
         return 0, 0
 
+    granularidade = "trimestral" if yoy_offset == 4 else "anual"
+    status_placeholder.write(
+        f"🔄 `{tk_fmp}` — {len(ratios_list)} períodos ({granularidade})"
+    )
+
     km_by_date       = {item.get("date", ""): item for item in km_list}
     datas_existentes = get_datas_historico_score(ticker_yf) | get_datas_historico_score(tk_fmp)
 
-    # Preços
-    status_placeholder.write(f"🔄 `{tk_fmp}` — baixando preços (yfinance)…")
+    # ── Preços históricos ─────────────────────────────────────────────────────
+    precos = pd.Series(dtype=float)
     try:
-        inicio_preco = (datetime.date.today() - datetime.timedelta(days=11 * 365)).strftime("%Y-%m-%d")
+        inicio_preco = (
+            datetime.date.today() - datetime.timedelta(days=11 * 365)
+        ).strftime("%Y-%m-%d")
         hist = yf.Ticker(ticker_yf).history(start=inicio_preco, auto_adjust=True)
         if not hist.empty:
             precos = hist["Close"].dropna()
             if getattr(precos.index, "tz", None) is not None:
                 precos.index = precos.index.tz_localize(None)
-        else:
-            precos = pd.Series(dtype=float)
     except Exception:
-        precos = pd.Series(dtype=float)
+        pass   # sem preços — momentum ficará None (não bloqueia o cálculo)
 
-    # Calcula scores por trimestre
+    # ── Calcula score para cada período ───────────────────────────────────────
     registros: list[dict] = []
     skipped = 0
 
@@ -311,8 +330,8 @@ def _processar_ticker_st(
             continue
 
         km          = km_by_date.get(data_str, {})
-        ratios_yoy  = ratios_list[i + 4] if i + 4 < len(ratios_list) else None
-        km_yoy      = km_by_date.get(ratios_yoy.get("date", ""), {}) if ratios_yoy else None
+        ratios_yoy  = ratios_list[i + yoy_offset] if i + yoy_offset < len(ratios_list) else None
+        km_yoy      = km_by_date.get((ratios_yoy or {}).get("date", ""), {})
         macro       = _macro_na_data(macro_tl, data_str)
 
         try:
@@ -332,9 +351,9 @@ def _processar_ticker_st(
 
     if registros:
         status_placeholder.write(f"💾 `{tk_fmp}` — salvando {len(registros)} pontos…")
-        from database.db import registrar_historico_score_batch
         n = registrar_historico_score_batch(registros, ignorar_existentes=False)
         return n, skipped
+
     return 0, skipped
 
 
@@ -372,33 +391,44 @@ def _cobertura_atual() -> pd.DataFrame:
 section_title("📊 cobertura atual")
 
 cob = _cobertura_atual()
-total_eua = len(SCREENER_US)
-total_br  = len(SCREENER_B3)
 
-cob_eua = cob[~cob["ticker"].str.endswith(".SA")]
-cob_br  = cob[cob["ticker"].str.endswith(".SA")]
+# Universos de referência (deduplicados)
+_us_set = set(SCREENER_US)
+_br_set = set(SCREENER_B3)
+total_eua = len(_us_set)
+total_br  = len(_br_set)
+
+# Interseção com listas canônicas — evita contar FIIs/watchlist fora dos screeners
+cob_eua = cob[cob["ticker"].isin(_us_set)]
+cob_br  = cob[cob["ticker"].isin(_br_set)]
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
-    st.metric("tickers EUA cobertos", f"{len(cob_eua)} / {total_eua}",
-              f"{len(cob_eua)/total_eua*100:.0f}%" if total_eua else "—")
+    n_eua = len(cob_eua)
+    st.metric("tickers EUA cobertos", f"{n_eua} / {total_eua}",
+              f"{n_eua/total_eua*100:.0f}%" if total_eua else "—")
 with m2:
-    st.metric("tickers BR cobertos", f"{len(cob_br)} / {total_br}",
-              f"{len(cob_br)/total_br*100:.0f}%" if total_br else "—")
+    n_br = len(cob_br)
+    st.metric("tickers BR cobertos", f"{n_br} / {total_br}",
+              f"{n_br/total_br*100:.0f}%" if total_br else "—")
 with m3:
     total_pts = int(cob["pontos"].sum()) if not cob.empty else 0
     st.metric("total de pontos no banco", f"{total_pts:,}")
 with m4:
-    med_pts = int(cob["pontos"].median()) if not cob.empty else 0
-    st.metric("mediana pontos/ticker", med_pts,
-              help="meta: ~40 pontos = 10 anos de trimestrais")
+    # Mediana só dos tickers com backfill real (≥ 5 pontos)
+    cob_real = cob[cob["pontos"] >= 5]
+    med_pts  = int(cob_real["pontos"].median()) if not cob_real.empty else 0
+    st.metric("mediana pontos/ticker (≥5)", med_pts,
+              help="meta: ~10 pontos = 10 anos anuais | ~40 = 10 anos trimestrais")
 
 # Barra de progresso global
+cobertos      = n_eua + n_br
 total_tickers = total_eua + total_br
-cobertos      = len(cob_eua) + len(cob_br)
 if total_tickers:
-    st.progress(cobertos / total_tickers,
-                text=f"{cobertos}/{total_tickers} tickers com dados históricos")
+    st.progress(
+        min(cobertos / total_tickers, 1.0),
+        text=f"{cobertos}/{total_tickers} tickers do screener com dados históricos",
+    )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -547,8 +577,10 @@ if btn_run and lote:
             logger.error(f"[backfill] {ticker}: {e}", exc_info=True)
 
         # Atualiza resumo corrente
-        elapsed = time.time() - inicio_run
-        eta_s   = (elapsed / idx) * (len(lote) - idx) if idx > 0 else 0
+        elapsed       = time.time() - inicio_run
+        restantes_lote = len(lote) - idx
+        eta_s          = max(0, (elapsed / idx) * restantes_lote) if idx > 0 else 0
+        eta_str        = f"~{int(eta_s)}s" if restantes_lote > 0 else "concluído"
         resumo.markdown(
             f'<div style="font-family:Courier New; font-size:0.78rem; '
             f'color:#555; padding:4px 0;">'
@@ -556,7 +588,7 @@ if btn_run and lote:
             f'já existiam: {total_skipped} | '
             f'erros: <b style="color:#FF1744;">{len(erros)}</b> | '
             f'decorrido: {int(elapsed)}s | '
-            f'eta: ~{int(eta_s)}s'
+            f'eta: {eta_str}'
             f'</div>',
             unsafe_allow_html=True,
         )
