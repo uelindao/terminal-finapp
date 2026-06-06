@@ -24,6 +24,11 @@ if not require_auth():
 
 aplicar_tema()
 render_user_badge()
+try:
+    from utils.themes import render_theme_switcher_sidebar
+    render_theme_switcher_sidebar()
+except Exception:
+    pass
 
 user          = get_current_user()
 user_id_atual = get_user_id()
@@ -34,12 +39,13 @@ page_header("⚙️ configurações", "conta · watchlists · portfólios · ia 
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
-tab_conta, tab_wl, tab_pf, tab_alertas, tab_ia, tab_admin = st.tabs([
+tab_conta, tab_wl, tab_pf, tab_alertas, tab_ia, tab_aparencia, tab_admin = st.tabs([
     "👤 minha conta",
     "⭐ watchlists",
     "💼 portfólios",
     "🔔 alertas",
     "🤖 minha ia",
+    "🎨 aparência",
     "👑 administração",
 ])
 
@@ -698,7 +704,107 @@ with tab_ia:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — ADMINISTRAÇÃO (apenas admins)
+# TAB 6 — APARÊNCIA / TEMAS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_aparencia:
+    section_title("🎨 tema visual")
+
+    try:
+        from utils.themes import TEMAS, TEMAS_ORDER, TEMAS_META, get_tema_ativo, set_tema
+
+        ativo = get_tema_ativo()
+
+        st.markdown(
+            '<div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:20px;">'
+            'Escolha a paleta de cores do terminal. A escolha persiste enquanto a sessão estiver ativa '
+            'e pode ser salva via URL (<code>?theme=nome</code>).'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Grade de cartões de tema — 2 por linha na primeira, 3 na segunda
+        for row_tids in [TEMAS_ORDER[:2], TEMAS_ORDER[2:]]:
+            cols = st.columns(len(row_tids))
+            for col, tid in zip(cols, row_tids):
+                tema = TEMAS[tid]
+                _vars = tema["vars"]
+                _bg   = _vars["--bg-surface"]
+                _acc  = _vars["--accent"]
+                _bull = _vars["--bull"]
+                _bear = _vars["--bear"]
+                _txt  = _vars["--text-primary"]
+                _brd  = _vars["--border-normal"]
+                _is_active = (tid == ativo)
+                _border_w  = "2px" if _is_active else "1px"
+                _border_c  = _acc if _is_active else _brd
+                _selected_badge = (
+                    f'<span style="font-size:.55rem;background:{_acc};color:#000;'
+                    f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
+                    if _is_active else ""
+                )
+                col.markdown(
+                    f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
+                        border-radius:12px;padding:16px;margin-bottom:8px;
+                        box-shadow:0 4px 16px rgba(0,0,0,.3);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                            <span style="font-size:1.2rem">{tema['emoji']}</span>
+                            {_selected_badge}
+                        </div>
+                        <div style="font-family:'Inter',system-ui;font-size:.78rem;
+                            font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
+                        <div style="font-family:'Inter',system-ui;font-size:.62rem;
+                            color:{_vars['--text-muted']};margin-bottom:12px;">{tema['desc']}</div>
+                        <div style="display:flex;gap:5px;margin-bottom:2px;">
+                            <div style="width:20px;height:20px;border-radius:50%;background:{_acc};
+                                title='acento'"></div>
+                            <div style="width:20px;height:20px;border-radius:50%;background:{_bull};"></div>
+                            <div style="width:20px;height:20px;border-radius:50%;background:{_bear};"></div>
+                            <div style="width:20px;height:20px;border-radius:50%;
+                                background:{_vars['--info']};"></div>
+                        </div>
+                    </div>''',
+                    unsafe_allow_html=True,
+                )
+                if col.button(
+                    "✓ aplicar" if _is_active else "aplicar",
+                    key=f"_tema_cfg_{tid}",
+                    type="primary" if _is_active else "secondary",
+                    use_container_width=True,
+                ):
+                    set_tema(tid)
+                    st.rerun()
+
+    except Exception as e:
+        st.error(f"erro ao carregar temas: {e}")
+
+    st.markdown("---")
+    section_title("⌨️ atalhos de teclado")
+    st.markdown("""
+| Atalho | Ação |
+|--------|------|
+| `Ctrl+K` | Abre o command palette (busca tickers e páginas) |
+| `Alt+1` | Portfolio |
+| `Alt+2` | Research |
+| `Alt+3` | Discovery |
+| `Alt+4` | Macro |
+| `Alt+5` | Configurações |
+| `Alt+6` | Backfill |
+| `↑ ↓` | Navegar no command palette |
+| `Enter` | Selecionar item / confirmar |
+| `Esc` | Fechar command palette |
+""")
+
+    st.markdown("---")
+    section_title("📊 tipo de gráfico padrão")
+    st.info(
+        "O toggle de linha/barras aparece acima de cada gráfico compatível. "
+        "A escolha é por seção e persiste durante a sessão atual.",
+        icon="ℹ️",
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — ADMINISTRAÇÃO (apenas admins)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
     if not is_admin:

@@ -41,7 +41,7 @@ from utils.components import (
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
-from utils.charts import base_layout
+from utils.charts import base_layout, _cores as _chart_cores
 from utils.notificacoes import (solicitar_permissao_notificacao,
                                  verificar_e_disparar_alertas)
 from utils.macro_context import garantir_macro_context
@@ -1254,9 +1254,10 @@ with col_gauge_mac:
     ))
 
     layout_mac = base_layout(height=230)
+    _cc_home = _chart_cores()
     layout_mac.update({
         'margin':       {'l': 10, 'r': 10, 't': 50, 'b': 10},
-        'paper_bgcolor': '#13141E',
+        'paper_bgcolor': _cc_home["surface"],
     })
     fig_mac.update_layout(**layout_mac)
     st.plotly_chart(fig_mac, use_container_width=True, config={'responsive': True})
