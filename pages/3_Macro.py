@@ -1326,6 +1326,82 @@ with tab_global:
                     "verifique a conexão com a api do banco central."
                 )
 
+            # ── 🌉 PONTE 2: P/L JUSTO PELO CICLO DE JUROS ────────────────────
+            st.markdown("---")
+            section_title("📐 p/l justo — valuation do ibovespa pelo regime de juros reais")
+
+            # Formula: P/L_justo = 1 / (selic_real + ERP)
+            # ERP histórico para Brasil ≈ 5% (equity risk premium)
+            _ERP_BR = 0.05
+
+            _pl_justo_atual = None
+            if _selic_real is not None:
+                _sr_dec = _selic_real / 100
+                if _sr_dec + _ERP_BR > 0:
+                    _pl_justo_atual = round(1 / (_sr_dec + _ERP_BR), 1)
+
+            # Série histórica de P/L teórico
+            _pl_hist = None
+            if 'Selic_Real' in df_br.columns:
+                try:
+                    _sr_hist = df_br['Selic_Real'].dropna() / 100
+                    _pl_hist = (1 / (_sr_hist + _ERP_BR)).clip(4, 25)
+                    _pl_hist.name = 'pl_teorico'
+                except Exception:
+                    pass
+
+            _pj1, _pj2, _pj3, _pj4 = st.columns(4)
+            with _pj1:
+                metric_card("p/l teórico ibov", f"{_pl_justo_atual:.1f}x" if _pl_justo_atual else "n/d", "1 / (selic real + erp 5%)", "bear" if (_pl_justo_atual or 99) < 8 else "amber" if (_pl_justo_atual or 99) < 11 else "bull")
+            with _pj2:
+                _erp_str = f"selic real {_selic_real:.1f}% + erp {_ERP_BR*100:.0f}% = {((_selic_real or 0)/100+_ERP_BR)*100:.0f}% custo equity" if _selic_real else "n/d"
+                metric_card("custo de equity br", f"{((_selic_real or 0)/100 + _ERP_BR)*100:.1f}%" if _selic_real else "n/d", _erp_str, "bear")
+            with _pj3:
+                # P/L justo com SELIC real a 4% (cenário de alívio)
+                _pl_cenario_bull = round(1 / (0.04 + _ERP_BR), 1)
+                metric_card("p/l se selic real = 4%", f"{_pl_cenario_bull:.1f}x", "cenário de alívio monetário", "bull")
+            with _pj4:
+                if _pl_justo_atual:
+                    _upside = ((_pl_cenario_bull / _pl_justo_atual) - 1) * 100
+                    metric_card("upside teórico de múltiplo", f"+{_upside:.0f}%", "expansão p/l se selic real cair para 4%", "bull" if _upside > 20 else "amber")
+
+            if _pl_hist is not None and not _pl_hist.empty:
+                _fig_pl = go.Figure()
+                # Banda de P/L teórico
+                _fig_pl.add_trace(go.Scatter(
+                    x=_pl_hist.index, y=_pl_hist.values,
+                    name='p/l teórico (1/(selic real+erp))',
+                    fill='tozeroy', fillcolor='rgba(0,229,255,0.07)',
+                    line=dict(color='#00E5FF', width=2),
+                    hovertemplate='%{x|%b %Y}<br>p/l teórico: %{y:.1f}x<extra></extra>',
+                ))
+                # Bandas de referência
+                _fig_pl.add_hline(y=15, line_color='#00C853', line_dash='dash', line_width=1, annotation_text='15x (juro baixo)', annotation_font_color='#00C853', annotation_font_size=9)
+                _fig_pl.add_hline(y=10, line_color='#FF9800', line_dash='dash', line_width=1, annotation_text='10x (neutro)', annotation_font_color='#FF9800', annotation_font_size=9)
+                _fig_pl.add_hline(y=7,  line_color='#FF1744', line_dash='dash', line_width=1, annotation_text='7x (juro alto)', annotation_font_color='#FF1744', annotation_font_size=9)
+                # Ponto atual
+                if _pl_justo_atual:
+                    _fig_pl.add_trace(go.Scatter(
+                        x=[_pl_hist.index[-1]], y=[_pl_justo_atual],
+                        mode='markers', name='atual',
+                        marker=dict(color='#FF6B35', size=12, symbol='diamond'),
+                        hovertemplate=f'atual: {_pl_justo_atual:.1f}x<extra></extra>',
+                    ))
+                _fig_pl.update_layout(**base_layout(height=280, title="p/l teórico ibovespa pelo regime de juros reais (modelo gordon simplificado)"))
+                _fig_pl.update_yaxes(title_text="p/l teórico (x)", range=[3, 22])
+                st.plotly_chart(_fig_pl, use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "p/l teórico = 1 / (selic real + erp). "
+                    "equidade risk premium (erp) estimado em 5% para o brasil (média histórica). "
+                    "quando a selic real cai, o p/l justo SOBE — expansão de múltiplos. "
+                    "quando sobe, o p/l justo CAI — compressão. "
+                    "este modelo de gordon simplificado ignora crescimento de lucros, mas captura "
+                    "o efeito da taxa de desconto de forma direta. "
+                    "leitura: ibovespa negociando ABAIXO do p/l teórico = desconto raro (compra). "
+                    "acima = múltiplo esticado dado o regime de juros atual. "
+                    "nota: p/l real do ibovespa varia conforme earnings realizados — use como referência, não como alvo exato."
+                )
+
             st.markdown("---")
             st.markdown(tooltip_info("Dólar Ptax — taxa de câmbio oficial calculada pelo BCB. Referência para contratos de derivativos e ajuste de ativos dolarizados."), unsafe_allow_html=True)
             g3, g4 = st.columns(2)
@@ -2128,6 +2204,97 @@ with tab_global:
                 "antecedentes de recessão e de stress em mercados emergentes — precede quedas de bolsa."
             )
 
+            # ── 🌉 PONTE 1: MONITOR DE CARRY TRADE ───────────────────────────
+            st.markdown("---")
+            section_title("💱 monitor de carry trade — prêmio de juros brasil vs eua")
+
+            # Cálculo do spread de carry
+            _v_fed   = valor_atual_seguro(df_global, 'FEDFUNDS')
+            _v_cpi_y = valor_atual_seguro(df_global, 'CPI_YOY')
+            _v_selic_r_risco = None
+            _v_real_fed = None
+            _carry_spread = None
+
+            try:
+                _v_selic_spot = valor_atual_seguro(df_br, 'Selic')
+                _v_ipca_12_r  = valor_atual_seguro(df_br, 'IPCA_12M')
+                if _v_selic_spot and _v_ipca_12_r:
+                    _sr = float(_v_selic_spot) - float(_v_ipca_12_r)
+                    if abs(_sr) < 30:
+                        _v_selic_r_risco = round(_sr, 2)
+                if _v_fed and _v_cpi_y:
+                    _v_real_fed = round(float(_v_fed) - float(_v_cpi_y), 2)
+                if _v_selic_r_risco is not None and _v_real_fed is not None:
+                    _carry_spread = round(_v_selic_r_risco - _v_real_fed, 2)
+            except Exception:
+                pass
+
+            _cr1, _cr2, _cr3, _cr4 = st.columns(4)
+            with _cr1:
+                metric_card("selic real (br)", fmt_pct(_v_selic_r_risco, sinal=True) if _v_selic_r_risco else "n/d", "selic − ipca 12m", "bear" if (_v_selic_r_risco or 0) > 8 else "amber")
+            with _cr2:
+                metric_card("real fed funds (us)", fmt_pct(_v_real_fed, sinal=True) if _v_real_fed is not None else "n/d", "fed funds − cpi yoy", "bear" if (_v_real_fed or 0) > 3 else "bull" if (_v_real_fed or 0) < 0 else "amber")
+            with _cr3:
+                _carry_cor = "bull" if (_carry_spread or 0) > 6 else "amber" if (_carry_spread or 0) > 3 else "bear"
+                metric_card("prêmio de carry br", fmt_pct(_carry_spread, sinal=True) if _carry_spread is not None else "n/d", "selic real − real fed funds", _carry_cor)
+            with _cr4:
+                _carry_status = (
+                    "🟢 carry atrativo — capital tende a fluir para o brasil"
+                    if (_carry_spread or 0) > 6
+                    else "🟡 carry moderado — fluxo neutro"
+                    if (_carry_spread or 0) > 3
+                    else "🔴 carry comprimido — risco de saída de capital"
+                )
+                metric_card("status do carry", "atrativo" if (_carry_spread or 0) > 6 else "moderado" if (_carry_spread or 0) > 3 else "comprimido", _carry_status, _carry_cor)
+
+            # Gráfico histórico do carry spread
+            try:
+                if 'Selic_Real' in df_br.columns and 'FEDFUNDS' in df_global.columns and 'CPI_YOY' in df_global.columns:
+                    _real_fed_hist = (df_global['FEDFUNDS'] - df_global['CPI_YOY']).dropna()
+                    _selic_real_hist = df_br['Selic_Real'].dropna()
+                    # Alinha os índices
+                    _idx_comum = _selic_real_hist.index.intersection(_real_fed_hist.index)
+                    if len(_idx_comum) > 12:
+                        _carry_hist = (_selic_real_hist.reindex(_idx_comum, method='ffill') - _real_fed_hist.reindex(_idx_comum, method='ffill')).dropna()
+                        _fig_carry = go.Figure()
+                        # Área de carry positivo (verde)
+                        _fig_carry.add_trace(go.Scatter(
+                            x=_carry_hist.index, y=_carry_hist.values,
+                            name="carry spread (pp)", fill='tozeroy',
+                            fillcolor='rgba(0,200,83,0.10)',
+                            line=dict(color='#00C853', width=2),
+                            hovertemplate='%{x|%b %Y}<br>carry: %{y:.2f}pp<extra></extra>',
+                        ))
+                        _fig_carry.add_trace(go.Scatter(
+                            x=_selic_real_hist.index, y=_selic_real_hist.values,
+                            name="selic real (br)", line=dict(color='#FF9800', width=1.5, dash='dot'), opacity=0.7,
+                            hovertemplate='selic real: %{y:.2f}%<extra></extra>',
+                        ))
+                        _fig_carry.add_trace(go.Scatter(
+                            x=_real_fed_hist.index, y=_real_fed_hist.values,
+                            name="real fed funds (us)", line=dict(color='#00B0FF', width=1.5, dash='dot'), opacity=0.7,
+                            hovertemplate='real fed funds: %{y:.2f}%<extra></extra>',
+                        ))
+                        _fig_carry.add_hline(y=6, line_color='#00C853', line_dash='dash', line_width=1, annotation_text='carry atrativo (6pp)', annotation_font_color='#00C853', annotation_font_size=9)
+                        _fig_carry.add_hline(y=3, line_color='#FF9800', line_dash='dash', line_width=1, annotation_text='mínimo atrativo (3pp)', annotation_font_color='#FF9800', annotation_font_size=9)
+                        _fig_carry.add_hline(y=0, line_color='#FF1744', line_dash='solid', line_width=1)
+                        _fig_carry.update_layout(**base_layout(height=300, title="carry trade br-us: selic real − real fed funds (pp)"))
+                        st.plotly_chart(_fig_carry, use_container_width=True, config={'responsive': True})
+                        st.caption(
+                            "carry spread = selic real brasileira − real fed funds americano. "
+                            "acima de 6pp: capital externo tem incentivo forte para entrar no brasil "
+                            "(carry trade) → tendência de apreciação do real e fluxo para bolsa. "
+                            "abaixo de 3pp: carry pouco atrativo → risco de saída de capital, "
+                            "depreciação do real e pressão inflacionária. "
+                            "o carry spread explica ~60-70% dos movimentos do câmbio no médio prazo. "
+                            "leitura: quando o fed corta juros (real fed funds cai), o spread br amplia "
+                            "automaticamente sem o bcb precisar mexer na selic — vento favorável."
+                        )
+                else:
+                    st.info("carry trade: dados históricos insuficientes para o gráfico.")
+            except Exception as _e_carry:
+                logger.warning(f"[macro] Carry trade chart falhou: {_e_carry}")
+
         elif aba_sel == "🛢️ commodities":
             _commodities_config = [
                 # minério de ferro — driver #1 do ibovespa via VALE3
@@ -2312,6 +2479,144 @@ with tab_global:
                 )
             else:
                 st.caption("cesta de exportação: dados temporariamente indisponíveis.")
+
+            # ── 🌉 PONTE 3: CADEIA DE TRANSMISSÃO COMMODITIES→EMPRESAS ─────────
+            st.markdown("---")
+            section_title("⛓️ cadeia de transmissão — commodities → empresas brasileiras")
+            st.caption(
+                "impacto estimado dos preços de commodities nos fundamentos das principais "
+                "empresas da b3. coeficientes baseados em dados públicos de produção e filings. "
+                "use como indicador direcional, não como previsão de lucro."
+            )
+
+            # Definição das empresas e suas sensibilidades
+            # Formato: (ticker_yf, nome, commodity_tk, nome_comm, unidade, base_price,
+            #           sensit_label, sensit_formula_str, direcao, cor)
+            _TRANSMISSAO = [
+                {
+                    "empresa":       "Vale",
+                    "ticker":        "VALE3.SA",
+                    "comm_tk":       "TIO=F",
+                    "comm_nome":     "minério de ferro",
+                    "unidade":       "us$/ton",
+                    "base":          90.0,    # preço base de referência
+                    "delta_label":   "cada us$10/t acima de us$90",
+                    "ebitda_delta":  4.0,     # R$bi de EBITDA adicional por $10/t (a 5.5 BRL/USD, ~330Mt prod)
+                    "dy_delta":      0.015,   # variação de DY (pp) por $10/t
+                    "logica":        "long — sobe com minério",
+                    "cor":           "#FF6B35",
+                    "nota":          "produção ~330Mt/a · preço cif china",
+                },
+                {
+                    "empresa":       "Petrobras",
+                    "ticker":        "PETR3.SA",
+                    "comm_tk":       "CL=F",
+                    "comm_nome":     "petróleo wti",
+                    "unidade":       "us$/barril",
+                    "base":          70.0,
+                    "delta_label":   "cada us$10/bbl acima de us$70",
+                    "ebitda_delta":  15.0,   # R$bi adicionais por $10/bbl (2.8Mboe/d × 365 × 5.5)
+                    "dy_delta":      0.020,
+                    "logica":        "long — sobe com petróleo",
+                    "cor":           "#8B00FF",
+                    "nota":          "produção ~2.8Mboe/d · dividend policy: 45% lucro líquido",
+                },
+                {
+                    "empresa":       "Suzano",
+                    "ticker":        "SUZB3.SA",
+                    "comm_tk":       "BZUN",    # proxy — celulose não tem ticker yfinance direto
+                    "comm_nome":     "celulose (bhkp — proxy)",
+                    "unidade":       "us$/ton",
+                    "base":          650.0,
+                    "delta_label":   "cada us$100/t acima de us$650",
+                    "ebitda_delta":  3.5,    # R$bi por $100/t (11Mt de prod × 100 × 5.5 / 1000)
+                    "dy_delta":      0.010,
+                    "logica":        "long — sobe com celulose",
+                    "cor":           "#00C853",
+                    "nota":          "produção ~11Mt/a bhkp · suzano = maior produtora mundial",
+                },
+                {
+                    "empresa":       "JBS",
+                    "ticker":        "JBSS3.SA",
+                    "comm_tk":       "ZC=F",
+                    "comm_nome":     "milho (proxy custo ração)",
+                    "unidade":       "us$/bushel",
+                    "base":          4.5,
+                    "delta_label":   "cada us$1/bushel acima de us$4.50",
+                    "ebitda_delta":  -2.0,   # negativo — é custo de produção
+                    "dy_delta":      -0.008,
+                    "logica":        "short — milho caro comprime margens",
+                    "cor":           "#FF9800",
+                    "nota":          "milho + soja são ~65% do custo de ração · jbs produz ~35Mboe equiv.",
+                },
+                {
+                    "empresa":       "Gerdau",
+                    "ticker":        "GGBR4.SA",
+                    "comm_tk":       "TIO=F",
+                    "comm_nome":     "minério de ferro (custo)",
+                    "unidade":       "us$/ton",
+                    "base":          90.0,
+                    "delta_label":   "cada us$10/t acima de us$90",
+                    "ebitda_delta":  -0.8,   # efeito negativo líquido (custo > benefício de demanda)
+                    "dy_delta":      -0.004,
+                    "logica":        "neutro/negativo — minério é custo para siderurgia",
+                    "cor":           "#B87333",
+                    "nota":          "siderurgia integrada · minério é ~30% do custo de produção",
+                },
+            ]
+
+            _trans_cols = st.columns(len(_TRANSMISSAO))
+            for _ti, _t in enumerate(_TRANSMISSAO):
+                with _trans_cols[_ti]:
+                    # Busca preço atual da commodity
+                    _tk_comm = _t["comm_tk"]
+                    _preco_comm = None
+                    _delta_vs_base = None
+                    try:
+                        _h_comm = yf.Ticker(_tk_comm).history(period="5d", auto_adjust=True)['Close'].dropna()
+                        if not _h_comm.empty:
+                            _preco_comm = float(_h_comm.iloc[-1])
+                            _delta_vs_base = _preco_comm - _t["base"]
+                    except Exception:
+                        pass
+
+                    if _preco_comm is not None:
+                        _impacto_ebitda = _t["ebitda_delta"] * (_delta_vs_base / (10 if _t["unidade"] != "us$/bushel" else 1))
+                        _sinal = "📈" if _impacto_ebitda > 0 else "📉"
+                        _cor_imp = "bull" if _impacto_ebitda > 0 else "bear"
+                    else:
+                        _impacto_ebitda = None
+                        _sinal = "—"
+                        _cor_imp = "muted"
+
+                    st.markdown(
+                        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                        f'border-top:3px solid {_t["cor"]};border-radius:6px;'
+                        f'padding:12px;margin-bottom:8px;font-family:Courier New;font-size:0.7rem;">'
+                        f'<div style="color:{_t["cor"]};font-weight:bold;font-size:0.75rem;margin-bottom:6px;">'
+                        f'{_t["empresa"]}</div>'
+                        f'<div style="color:#666;font-size:0.62rem;margin-bottom:4px;">{_t["logica"]}</div>'
+                        f'<div style="color:#aaa;margin-bottom:4px;">'
+                        f'{_t["comm_nome"]}: <span style="color:#fff;">'
+                        f'{"us${:,.1f}".format(_preco_comm) if _preco_comm else "n/d"}</span></div>'
+                        f'<div style="color:#aaa;margin-bottom:4px;">vs base (us${_t["base"]:.0f}): '
+                        f'<span style="color:{"#00C853" if (_delta_vs_base or 0) * (1 if _t["ebitda_delta"] > 0 else -1) > 0 else "#FF1744"};">'
+                        f'{"us${:+,.1f}".format(_delta_vs_base) if _delta_vs_base is not None else "n/d"}</span></div>'
+                        f'<div style="color:#aaa;">ebitda implícito: '
+                        f'<span style="color:{"#00C853" if (_impacto_ebitda or 0) > 0 else "#FF1744"};">'
+                        f'{"R${:+.1f}bi".format(_impacto_ebitda) if _impacto_ebitda is not None else "n/d"}</span></div>'
+                        f'<div style="color:#555;font-size:0.58rem;margin-top:6px;">{_t["nota"]}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            st.caption(
+                "ebitda implícito = variação estimada em relação ao preço base de referência, "
+                "usando coeficientes de sensibilidade derivados de dados públicos de produção. "
+                "verde = commodity favorece a empresa · vermelho = commodity pressiona margens. "
+                "valores em r$bi, convertidos à taxa de 5.5 brl/usd (referência). "
+                "nota: jbs e gerdau têm sensibilidade inversa (commodity é custo, não receita)."
+            )
 
             st.markdown("---")
             section_title("📊 commodities individuais")

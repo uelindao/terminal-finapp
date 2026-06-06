@@ -802,6 +802,51 @@ with tab_mom:
 with tab_screen:
     section_title("🕵️ screener quantitativo — filtros paramétricos")
 
+    # ── 🌉 PONTE 4: CONTEXTO MACRO PARA O SCREENER ───────────────────────────
+    try:
+        from utils.macro_regime import classificar_regime
+        _mc = st.session_state.get("macro_context", {})
+        _regime_scr = classificar_regime(
+            selic=_mc.get("selic"), vix=_mc.get("vix"),
+            ipca=_mc.get("ipca"), treasury_10y=_mc.get("treasury_10y"),
+        )
+        _fav_scr  = _regime_scr.get("setores_favorecidos", [])
+        _prej_scr = _regime_scr.get("setores_prejudicados", [])
+        _lbl_scr  = _regime_scr.get("label", "neutro")
+        _pos_scr  = _regime_scr.get("posicionamento", "")
+        _scr_amb  = _regime_scr.get("score_ambiente", 50)
+        _cor_amb  = "#00C853" if _scr_amb >= 60 else ("#FF9800" if _scr_amb >= 35 else "#FF1744")
+
+        _selic_val = _mc.get("selic")
+        _ipca_val  = _mc.get("ipca")
+        _selic_r_scr = round(_selic_val - (_ipca_val * 12 if _ipca_val and _ipca_val < 5 else _ipca_val or 0), 1) if _selic_val and _ipca_val else None
+
+        st.markdown(
+            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+            f'border-left:4px solid {_cor_amb};border-radius:6px;'
+            f'padding:12px 16px;margin-bottom:12px;font-family:Courier New;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
+            f'<div>'
+            f'<span style="color:#555;font-size:0.65rem;text-transform:uppercase;">regime macro atual</span><br>'
+            f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
+            f'<span style="color:#555;font-size:0.7rem;margin-left:8px;">score {_scr_amb}/100</span>'
+            f'</div>'
+            + (f'<div><span style="color:#555;font-size:0.65rem;">selic real</span><br>'
+               f'<span style="color:#{"FF1744" if (_selic_r_scr or 0) > 8 else "FF9800" if (_selic_r_scr or 0) > 4 else "00C853"};font-size:0.8rem;">'
+               f'{_selic_r_scr:+.1f}%aa</span></div>' if _selic_r_scr else '')
+            + (f'<div><span style="color:#555;font-size:0.65rem;">setores favorecidos</span><br>'
+               f'<span style="color:#00C853;font-size:0.7rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
+               if _fav_scr else '')
+            + (f'<div><span style="color:#555;font-size:0.65rem;">setores em cautela</span><br>'
+               f'<span style="color:#FF1744;font-size:0.7rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
+               if _prej_scr else '')
+            + f'<div style="color:#555;font-size:0.68rem;max-width:280px;">{_pos_scr}</div>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
+
     # ── seleção de universo ──────────────────────────────────────────────────
     col_univ, col_info_scr = st.columns([2, 3])
     with col_univ:
