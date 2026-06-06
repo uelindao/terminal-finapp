@@ -26,7 +26,7 @@ from utils.tickers import (
 from utils.health_engine import calcular_health_score
 from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
-from utils.charts import base_layout
+from utils.charts import base_layout, chart_type_toggle, barras_verticais, _cores as _chart_cores
 from utils.macro_regime import classificar_regime
 from utils.api_cache import get_tickers_cached_av, get_av_rotator, _get_supabase_client
 
@@ -721,22 +721,40 @@ with tab_mom:
 
         section_title("📊 mapa de retornos por janela temporal")
 
+        _mom_tipo = chart_type_toggle(key="mom_retornos", default="linha")
+        _cc_mom   = _chart_cores()
+        _cores_seq = [_cc_mom["accent"], _cc_mom["info"], _cc_mom["bull"],
+                      _cc_mom["amber"], _cc_mom["bear"], "#8B5CF6", "#06B6D4", "#EC4899",
+                      "#A78BFA", "#34D399"]
+
         fig_mom = go.Figure()
         janelas = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)']
-        labels = ['1 mês', '3 meses', '6 meses', '1 ano']
+        labels  = ['1 mês', '3 meses', '6 meses', '1 ano']
 
-        for _, row in df_m.head(10).iterrows():
-            fig_mom.add_trace(go.Scatter(
-                x=labels,
-                y=[row[j] for j in janelas],
-                mode='lines+markers',
-                name=row['ticker'],
-                line=dict(width=1.5),
-                hovertemplate=f"{row['ticker']}<br>%{{x}}: %{{y:+.1f}}%<extra></extra>"
-            ))
+        for i, (_, row) in enumerate(df_m.head(10).iterrows()):
+            cor_i = _cores_seq[i % len(_cores_seq)]
+            if _mom_tipo == "barras":
+                fig_mom.add_trace(go.Bar(
+                    name=row['ticker'],
+                    x=labels,
+                    y=[row[j] for j in janelas],
+                    marker_color=cor_i,
+                    hovertemplate=f"{row['ticker']}<br>%{{x}}: %{{y:+.1f}}%<extra></extra>",
+                ))
+            else:
+                fig_mom.add_trace(go.Scatter(
+                    x=labels, y=[row[j] for j in janelas],
+                    mode='lines+markers', name=row['ticker'],
+                    line=dict(color=cor_i, width=1.8),
+                    marker=dict(size=6),
+                    hovertemplate=f"{row['ticker']}<br>%{{x}}: %{{y:+.1f}}%<extra></extra>",
+                ))
 
-        fig_mom.add_hline(y=0, line_color="#333", line_dash="dash", line_width=1)
-        fig_mom.update_layout(**base_layout(height=400, title="retorno acumulado por janela — top 10 ativos"))
+        fig_mom.add_hline(y=0, line_color=_cc_mom["border"], line_dash="dash", line_width=1)
+        _lay_mom = base_layout(height=400, title="retorno acumulado por janela — top 10 ativos")
+        if _mom_tipo == "barras":
+            _lay_mom["barmode"] = "group"
+        fig_mom.update_layout(**_lay_mom)
         st.plotly_chart(fig_mom, use_container_width=True, config={'responsive': True})
 
         st.markdown("---")
@@ -1486,10 +1504,17 @@ with tab_setorial:
 
         import plotly.graph_objects as go
 
+        _cc_set = _chart_cores()
+
+        # Mapeamento de cor de sinal → cor do tema
+        def _cor_sinal(sinal):
+            if sinal == "acumulação": return _cc_set["bull"]
+            if sinal == "cautela":   return _cc_set["bear"]
+            return _cc_set["amber"]
 
         _setores_nomes  = [d['setor'] for d in _dados_set]
         _scores_medios  = [d['score_medio'] for d in _dados_set]
-        _cores_barras   = [d['cor'] for d in _dados_set]
+        _cores_barras   = [_cor_sinal(d['sinal']) for d in _dados_set]
         _hover_texts    = [
             f"<b>{d['setor']}</b><br>"
             f"score médio: {d['score_medio']}<br>"
@@ -1501,42 +1526,33 @@ with tab_setorial:
         ]
 
         _fig_set = go.Figure()
-
         _fig_set.add_trace(go.Bar(
-            x=_scores_medios,
-            y=_setores_nomes,
+            x=_scores_medios, y=_setores_nomes,
             orientation='h',
             marker_color=_cores_barras,
-            marker_opacity=0.85,
+            marker_opacity=0.88,
             text=[f"{s:.0f}" for s in _scores_medios],
             textposition='outside',
-            textfont=dict(size=10, color='#aaa', family='Courier New'),
-            hovertext=_hover_texts,
-            hoverinfo='text',
+            textfont=dict(size=10, color=_cc_set["muted"], family='Courier New'),
+            hovertext=_hover_texts, hoverinfo='text',
             name='score médio',
         ))
-
         _fig_set.add_vline(
-            x=65, line_color="#00C853", line_dash="dash",
+            x=65, line_color=_cc_set["bull"], line_dash="dash",
             line_width=1, annotation_text="acumulação",
-            annotation_font_color="#00C853",
-            annotation_font_size=9,
+            annotation_font_color=_cc_set["bull"], annotation_font_size=9,
         )
         _fig_set.add_vline(
-            x=40, line_color="#FF1744", line_dash="dash",
+            x=40, line_color=_cc_set["bear"], line_dash="dash",
             line_width=1, annotation_text="cautela",
-            annotation_font_color="#FF1744",
-            annotation_font_size=9,
+            annotation_font_color=_cc_set["bear"], annotation_font_size=9,
         )
 
-        _h_set = max(300, len(_dados_set) * 38)
-        _lay_set = base_layout(
-            height=_h_set,
-            title=f"health score médio por setor — {_univ_set}"
-        )
+        _h_set = max(300, len(_dados_set) * 40)
+        _lay_set = base_layout(height=_h_set, title=f"health score médio por setor — {_univ_set}")
         _lay_set.update(
-            xaxis=dict(range=[0, 110], showgrid=True,
-                       gridcolor='#2A2C3E', title='score médio'),
+            xaxis=dict(range=[0, 115], showgrid=True,
+                       gridcolor=_cc_set["border"], title='score médio'),
             yaxis=dict(showgrid=False, title=''),
             margin=dict(l=180, r=60, t=40, b=20),
         )

@@ -962,6 +962,204 @@ def aplicar_tema():
     }
 
     /* ═══════════════════════════════════════════════════
+       REFINAMENTOS PROFISSIONAIS — v6.0
+       ═══════════════════════════════════════════════════ */
+
+    /* Renderização de texto premium */
+    * {
+        text-rendering: optimizeLegibility !important;
+        -webkit-font-smoothing: antialiased !important;
+    }
+
+    /* Cor de seleção de texto seguindo o tema */
+    ::selection {
+        background: var(--accent-soft) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* Scrollbar global refinada */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-normal) transparent;
+    }
+    *::-webkit-scrollbar { width: 5px; height: 5px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb {
+        background: var(--border-normal);
+        border-radius: 3px;
+    }
+    *::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+    /* Sidebar — versão / status no rodapé */
+    [data-testid="stSidebar"]::after {
+        content: "⚡ v2.0  ·  finterminal";
+        position: fixed;
+        bottom: 10px;
+        left: 0;
+        width: 220px;
+        text-align: center;
+        font-family: 'Courier New', monospace;
+        font-size: 0.50rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        opacity: 0.45;
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    /* Sidebar — logo mais premium com linha brilhante */
+    [data-testid="stSidebar"] > div:first-child::before {
+        content: "⚡  FINTERMINAL";
+        background: linear-gradient(135deg,
+            var(--accent) 0%,
+            color-mix(in srgb, var(--accent) 60%, white) 100%);
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        background-clip: text !important;
+    }
+
+    /* Linha divisória com gradiente */
+    hr, .stDivider, [data-testid="stDivider"] {
+        border: none !important;
+        height: 1px !important;
+        background: linear-gradient(90deg,
+            transparent,
+            var(--border-normal) 20%,
+            var(--border-normal) 80%,
+            transparent) !important;
+        margin: 16px 0 !important;
+        opacity: 0.6 !important;
+    }
+
+    /* Headings do markdown mais legíveis */
+    .stMarkdown h1 {
+        font-size: 1.4rem !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+        border-bottom: 1px solid var(--border-subtle) !important;
+        padding-bottom: 8px !important;
+        margin-bottom: 16px !important;
+    }
+    .stMarkdown h2 {
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.01em !important;
+    }
+    .stMarkdown h3 {
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+        color: var(--text-secondary) !important;
+    }
+
+    /* Code blocks com destaque premium */
+    .stMarkdown pre {
+        background: var(--bg-elevated) !important;
+        border: 1px solid var(--border-subtle) !important;
+        border-left: 3px solid var(--accent) !important;
+        border-radius: var(--radius-md) !important;
+        padding: 12px 16px !important;
+    }
+    .stMarkdown pre code {
+        background: transparent !important;
+        padding: 0 !important;
+        font-size: 0.78rem !important;
+        color: var(--text-secondary) !important;
+    }
+
+    /* Captions mais elegantes */
+    [data-testid="stCaptionContainer"] p {
+        font-size: 0.65rem !important;
+        font-style: italic !important;
+        opacity: 0.7 !important;
+    }
+
+    /* Tabs — barra inferior animada */
+    [data-testid="stTabs"] [role="tablist"] {
+        border-bottom: 1px solid var(--border-subtle) !important;
+        gap: 0 !important;
+    }
+    [data-testid="stTabs"] [role="tab"] {
+        border-radius: 0 !important;
+        padding: 8px 16px !important;
+        font-size: 0.78rem !important;
+        font-weight: 500 !important;
+        border-bottom: 2px solid transparent !important;
+        margin-bottom: -1px !important;
+    }
+    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+        border-bottom-color: var(--accent) !important;
+        color: var(--text-primary) !important;
+        background: transparent !important;
+    }
+
+    /* Número de métricas com Courier New para monospace */
+    [data-testid="stMetricValue"] {
+        font-family: var(--font-data) !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.65rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.06em !important;
+        font-family: var(--font-ui) !important;
+    }
+
+    /* Selectbox refinado */
+    [data-testid="stSelectbox"] > div[data-baseweb="select"] > div {
+        border-color: var(--border-normal) !important;
+        border-radius: var(--radius-sm) !important;
+        background: var(--bg-surface) !important;
+        font-size: 0.82rem !important;
+        transition: border-color 0.12s !important;
+    }
+    [data-testid="stSelectbox"] > div[data-baseweb="select"] > div:focus-within {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 2px var(--accent-soft) !important;
+    }
+
+    /* Checkbox estilizado */
+    [data-testid="stCheckbox"] label {
+        font-size: 0.82rem !important;
+        font-family: var(--font-ui) !important;
+        color: var(--text-secondary) !important;
+        gap: 8px !important;
+    }
+
+    /* Tooltips nativos mais sutis */
+    [title]:hover::after {
+        font-size: 0.68rem;
+        max-width: 220px;
+    }
+
+    /* Badges para o screener — melhor visual */
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-family: var(--font-data);
+        font-size: 0.62rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .badge-bull   { background: var(--bull-soft);  color: var(--bull);  }
+    .badge-bear   { background: var(--bear-soft);  color: var(--bear);  }
+    .badge-amber  { background: rgba(245,158,11,.12); color: var(--amber); }
+    .badge-info   { background: rgba(59,130,246,.12); color: var(--info);  }
+    .badge-muted  { background: var(--bg-elevated);   color: var(--text-muted); }
+
+    /* Focus rings acessíveis */
+    button:focus-visible,
+    [data-testid="stBaseButton-primary"]:focus-visible,
+    [data-testid="stBaseButton-secondary"]:focus-visible {
+        outline: 2px solid var(--accent) !important;
+        outline-offset: 2px !important;
+    }
+
+    /* ═══════════════════════════════════════════════════
        ANIMAÇÕES E DINAMISMO — v6.0
        ═══════════════════════════════════════════════════ */
 

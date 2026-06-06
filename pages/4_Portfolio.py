@@ -22,7 +22,7 @@ from utils.components import page_header, section_title, metric_card, status_car
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout
+from utils.charts import base_layout, _cores as _chart_cores
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -1734,8 +1734,14 @@ with tab_posicoes:
 
         with col_g2:
             section_title("📈 p&l por ativo")
-            df_pnl = df_portfolio.sort_values(by='p&l ($)', ascending=True)
-            fig_bar = go.Figure(go.Bar(x=df_pnl['p&l ($)'], y=df_pnl['ativo'], orientation='h', marker_color=['#FF1744' if val < 0 else '#00C853' for val in df_pnl['p&l ($)']]))
+            _cc_pnl = _chart_cores()
+            df_pnl  = df_portfolio.sort_values(by='p&l ($)', ascending=True)
+            fig_bar = go.Figure(go.Bar(
+                x=df_pnl['p&l ($)'], y=df_pnl['ativo'], orientation='h',
+                marker_color=[_cc_pnl["bear"] if val < 0 else _cc_pnl["bull"]
+                              for val in df_pnl['p&l ($)']],
+                hovertemplate="%{y}<br>P&L: <b>%{x:+,.2f}</b><extra></extra>",
+            ))
             layout_bar = base_layout(height=350)
             if 'yaxis' in layout_bar:
                 layout_bar['yaxis']['showgrid'] = False
@@ -2645,14 +2651,16 @@ with tab_stress:
                 hide_index=True
             )
 
+            _cc_stress = _chart_cores()
             fig_stress = go.Figure(go.Bar(
                 x=df_s['impacto (R$)'],
                 y=df_s['ticker'],
                 orientation='h',
-                marker_color=['#FF1744' if v < 0 else '#00C853' for v in df_s['impacto (R$)']],
-                hovertemplate='%{y}<br>impacto: R$ %{x:+,.2f}<extra></extra>'
+                marker_color=[_cc_stress["bear"] if v < 0 else _cc_stress["bull"]
+                              for v in df_s['impacto (R$)']],
+                hovertemplate='%{y}<br>impacto: R$ %{x:+,.2f}<extra></extra>',
             ))
-            fig_stress.add_vline(x=0, line_color="#333", line_width=1)
+            fig_stress.add_vline(x=0, line_color=_cc_stress["border"], line_width=1)
             fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
             st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
 

@@ -809,12 +809,18 @@ if len(historico) >= 3:
     df_hist_score = pd.DataFrame(historico)
     df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'])
     df_hist_score = df_hist_score.set_index('calculado_em')
-    fig_score = linha(df_hist_score, x_col=None, y_col='score',
-                      titulo=f"health score — {ticker} (180 dias)",
-                      cor="#FF9900", height=220)
-    fig_score.add_hline(y=65, line_color="#00C853", line_dash="dash",
+    _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
+    _cc_hs    = _chart_cores()
+    from utils.charts import linha_ou_barras as _linha_ou_barras
+    fig_score = _linha_ou_barras(
+        df_hist_score, x_col=None, y_col='score',
+        tipo=_hs_tipo,
+        titulo=f"health score — {ticker} (180 dias)",
+        cor=_cc_hs["accent"], cor_negativo=_cc_hs["bear"], height=220,
+    )
+    fig_score.add_hline(y=65, line_color=_cc_hs["bull"], line_dash="dash",
                         line_width=1, annotation_text="acumulação")
-    fig_score.add_hline(y=40, line_color="#FF1744", line_dash="dash",
+    fig_score.add_hline(y=40, line_color=_cc_hs["bear"], line_dash="dash",
                         line_width=1, annotation_text="reduzir")
     fig_score.update_yaxes(range=[0, 100])
     st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
