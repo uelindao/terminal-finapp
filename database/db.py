@@ -11,7 +11,21 @@ import sqlite3 as _sqlite3
 import os as _os
 from datetime import datetime
 import hashlib
-import streamlit as st
+try:
+    import streamlit as st
+    _ST_AVAILABLE = True
+except ImportError:
+    st = None
+    _ST_AVAILABLE = False
+
+def _st_cache(ttl=3600, show_spinner=False):
+    """Decorador condicional — no-op quando streamlit não está instalado (CI/scripts)."""
+    def _wrap(fn):
+        if _ST_AVAILABLE and st is not None:
+            return st.cache_data(ttl=ttl, show_spinner=show_spinner)(fn)
+        return fn
+    return _wrap
+
 from database.supabase_client import get_supabase
 from utils.logger import get_logger
 
@@ -1315,7 +1329,7 @@ def get_user_setting(user_id: int, chave: str, default: str = '') -> str:
 # ==========================================
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@_st_cache(ttl=3600, show_spinner=False)
 def get_price_cache(ticker: str) -> dict | None:
     """Retorna dados de preco da price_cache (se frescos)."""
     try:
@@ -1334,7 +1348,7 @@ def get_price_cache(ticker: str) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@_st_cache(ttl=3600, show_spinner=False)
 def get_all_price_cache() -> dict:
     """Retorna dict {ticker: price_data} de todo o cache de precos."""
     try:
@@ -1364,7 +1378,7 @@ def get_macro_cache(indicator: str) -> float | None:
         return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@_st_cache(ttl=900, show_spinner=False)
 def get_all_macro_cache() -> dict:
     """Retorna dict {indicator: {value, label, unit}} de todos indicadores macro."""
     try:
