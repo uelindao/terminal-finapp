@@ -17,7 +17,7 @@ import datetime
 
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
-from utils.components import page_header, section_title
+from utils.components import page_header, section_title, inject_ui_enhancements, show_toast
 from utils.logger import get_logger
 from utils.tickers import SCREENER_US, SCREENER_B3
 
@@ -42,6 +42,7 @@ st.set_page_config(
 )
 
 page_header("🕐 backfill histórico", "popula 10 anos de health scores históricos via FMP.")
+inject_ui_enhancements()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FUNÇÕES CORE (sem dependência de arquivo local — tudo via banco)
@@ -531,7 +532,7 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
                 _log_b3.caption(f"→ {_tk_b3} {'✅' if _fut.result() else '❌'}")
 
         st.session_state["run_backfill_sync_b3"] = False
-        st.success(f"✅ sync B3 concluído — {_total_b3} ativos processados.")
+        show_toast(f"sync B3 concluído — {_total_b3} ativos processados", "success", 5000)
         st.cache_data.clear()
         st.rerun()
 
@@ -579,7 +580,7 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
                 _log_us.caption(f"→ {_tk_us} {'✅' if _fut.result() else '❌'}")
 
         st.session_state["run_backfill_sync_us"] = False
-        st.success(f"✅ sync EUA concluído — {_total_us} ativos processados.")
+        show_toast(f"sync EUA concluído — {_total_us} ativos processados", "success", 5000)
         st.cache_data.clear()
         st.rerun()
 

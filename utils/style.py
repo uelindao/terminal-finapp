@@ -954,6 +954,121 @@ def aplicar_tema():
         color: var(--accent) !important;
     }
 
+    /* ═══════════════════════════════════════════════════
+       ANIMAÇÕES E DINAMISMO — v6.0
+       ═══════════════════════════════════════════════════ */
+
+    /* Fade-in suave ao carregar qualquer página */
+    .main .block-container {
+        animation: ft-page-in 0.25s ease both !important;
+    }
+    @keyframes ft-page-in {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0);   }
+    }
+
+    /* Cards com elevação real no hover */
+    .card:hover {
+        border-color: var(--border-normal) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.3) !important;
+        transition: all 0.15s ease !important;
+    }
+    .card { transition: all 0.15s ease !important; }
+
+    .metric-card:hover {
+        border-color: var(--accent-border) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3) !important;
+    }
+
+    /* Expanders com animação de abertura mais suave */
+    [data-testid="stExpander"] {
+        transition: box-shadow 0.15s ease !important;
+    }
+    [data-testid="stExpander"]:hover {
+        box-shadow: 0 2px 12px rgba(0,0,0,0.2) !important;
+    }
+
+    /* Sidebar links com borda lateral animada */
+    [data-testid="stSidebarNavLink"] {
+        position: relative !important;
+        transition: all 0.12s ease !important;
+        border-radius: var(--radius-sm) !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stSidebarNavLink"]::before {
+        content: '' !important;
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        bottom: 0 !important;
+        width: 0 !important;
+        background: var(--accent) !important;
+        transition: width 0.12s ease !important;
+        border-radius: 0 2px 2px 0 !important;
+    }
+    [data-testid="stSidebarNavLink"]:hover::before,
+    [data-testid="stSidebarNavLink"][aria-current="page"]::before {
+        width: 3px !important;
+    }
+
+    /* Métricas nativas com micro-animação de valor */
+    [data-testid="stMetricValue"] {
+        transition: color 0.2s ease !important;
+    }
+
+    /* Tabs com slide indicator suave */
+    [data-testid="stTabs"] [role="tab"] {
+        transition: all 0.15s ease !important;
+        position: relative !important;
+    }
+    [data-testid="stTabs"] [role="tab"]:hover {
+        color: var(--text-primary) !important;
+        background: var(--accent-soft) !important;
+    }
+
+    /* Botão primário com pulse sutil no hover */
+    [data-testid="stBaseButton-primary"]:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 16px rgba(255,140,0,0.35) !important;
+    }
+    [data-testid="stBaseButton-primary"]:active {
+        transform: translateY(0) !important;
+        box-shadow: 0 2px 8px rgba(255,140,0,0.2) !important;
+    }
+    [data-testid="stBaseButton-primary"] {
+        transition: all 0.12s ease !important;
+    }
+
+    /* DataFrame rows hover mais vívido */
+    [data-testid="stDataFrame"] tbody tr:hover td {
+        background: var(--bg-overlay) !important;
+    }
+
+    /* Inputs com glow no focus */
+    [data-testid="stTextInput"] input:focus,
+    [data-testid="stNumberInput"] input:focus {
+        box-shadow: 0 0 0 3px rgba(255,140,0,0.15) !important;
+    }
+
+    /* Spinner animado mais elegante */
+    [data-testid="stSpinner"] > div {
+        border-top-color: var(--accent) !important;
+    }
+
+    /* Progress bar animada */
+    [data-testid="stProgressBar"] > div > div {
+        background: linear-gradient(90deg,
+            var(--accent), #FFB347, var(--accent)) !important;
+        background-size: 200% 100% !important;
+        animation: ft-progress-shimmer 1.5s linear infinite !important;
+    }
+    @keyframes ft-progress-shimmer {
+        0%   { background-position: 100% 0; }
+        100% { background-position: -100% 0; }
+    }
+
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)

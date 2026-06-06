@@ -606,18 +606,440 @@ def auto_refresh_indicator(minutos_cache: int = 5):
     )
 
 
+def inject_ui_enhancements():
+    """
+    Injeta melhorias de UX globais em todas as páginas:
+
+    • Command palette  (Ctrl+K / ⌘K) — busca tickers B3/FII/EUA e navega entre
+      páginas sem sair do teclado.  Fuzzy-match, seleção por ↑↓ e Enter.
+    • Toast notifications — window.parent._fintermToast(msg, type, ms)
+      Chame show_toast() no Python para acionar.
+    • Keyboard shortcuts:
+        Alt+1 → Portfolio      Alt+2 → Research
+        Alt+3 → Discovery      Alt+4 → Macro
+        Alt+5 → Configurações  Alt+6 → Backfill
+        Enter → clica botão primário (comportamento legado)
+    """
+    import json
+    from utils.tickers import SCREENER_B3, SCREENER_US, FII_TODOS
+
+    # Tickers para o command palette (limpa sufixo .SA para exibição)
+    tickers_b3  = [{"t": t.replace(".SA", ""), "f": "🇧🇷", "full": t} for t in SCREENER_B3]
+    tickers_fii = [{"t": t.replace(".SA", ""), "f": "🏢",  "full": t} for t in FII_TODOS]
+    tickers_us  = [{"t": t,                    "f": "🇺🇸", "full": t} for t in SCREENER_US]
+    tickers_json = json.dumps(tickers_b3 + tickers_fii + tickers_us)
+
+    pages_json = json.dumps([
+        {"label": "Portfolio",     "icon": "📊", "nav": "Portfolio",     "key": "1"},
+        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "2"},
+        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "3"},
+        {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "4"},
+        {"label": "Configurações", "icon": "⚙️", "nav": "Configuracoes", "key": "5"},
+        {"label": "Backfill",      "icon": "🗄️", "nav": "Backfill",      "key": "6"},
+    ])
+
+    st.markdown(f"""
+<script>
+(function() {{
+    var doc = window.parent.document;
+    if (window.parent._fintermInit) return;
+    window.parent._fintermInit = true;
+
+    var TICKERS = {tickers_json};
+    var PAGES   = {pages_json};
+
+    /* ── CSS ── */
+    if (!doc.getElementById('finterm-ux-css')) {{
+        var css = doc.createElement('style');
+        css.id  = 'finterm-ux-css';
+        css.textContent = `
+        #finterm-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);
+            z-index:99998;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);}}
+        #finterm-overlay.active{{display:flex;align-items:flex-start;
+            justify-content:center;padding-top:14vh;animation:ft-fade .12s ease;}}
+        #finterm-palette{{background:#1C1D2B;border:1px solid #353755;border-radius:14px;
+            width:min(620px,92vw);box-shadow:0 24px 64px rgba(0,0,0,.65),
+            0 0 0 1px rgba(255,140,0,.18);overflow:hidden;
+            animation:ft-slide .16s cubic-bezier(.16,1,.3,1);}}
+        #finterm-input{{width:100%;background:transparent;border:none;
+            border-bottom:1px solid #2A2C3E;padding:16px 20px;
+            color:#F0F2FF;font-size:1rem;font-family:'Inter',system-ui;
+            outline:none;box-sizing:border-box;}}
+        #finterm-input::placeholder{{color:#6B7280;}}
+        #finterm-hint{{padding:5px 20px;font-size:.62rem;color:#6B7280;
+            font-family:'Inter',system-ui;border-bottom:1px solid #2A2C3E;
+            display:flex;gap:14px;align-items:center;}}
+        .ft-k{{background:#23243A;border:1px solid #353755;border-radius:4px;
+            padding:1px 5px;font-family:'Courier New',monospace;
+            font-size:.6rem;color:#9CA3B8;margin-right:2px;}}
+        #finterm-results{{max-height:340px;overflow-y:auto;padding:6px;}}
+        #finterm-results::-webkit-scrollbar{{width:4px;}}
+        #finterm-results::-webkit-scrollbar-thumb{{background:#353755;border-radius:2px;}}
+        .ft-section{{font-size:.58rem;color:#6B7280;padding:6px 14px 2px;
+            text-transform:uppercase;letter-spacing:.1em;
+            font-family:'Inter',system-ui;}}
+        .ft-item{{display:flex;align-items:center;gap:12px;padding:10px 14px;
+            border-radius:8px;cursor:pointer;transition:background .08s;
+            font-family:'Inter',system-ui;}}
+        .ft-item:hover,.ft-item.sel{{background:#23243A;}}
+        .ft-icon{{font-size:.95rem;width:22px;text-align:center;flex-shrink:0;}}
+        .ft-main{{flex:1;min-width:0;}}
+        .ft-ticker{{font-family:'Courier New',monospace;font-size:.88rem;
+            font-weight:600;color:#F0F2FF;}}
+        .ft-desc{{font-size:.68rem;color:#6B7280;margin-top:1px;}}
+        .ft-badge{{font-size:.6rem;padding:2px 7px;border-radius:4px;
+            background:#2A2C3E;color:#9CA3B8;flex-shrink:0;
+            font-family:'Courier New',monospace;}}
+        .ft-badge.page{{background:rgba(255,140,0,.12);color:#FF8C00;}}
+        #finterm-footer{{padding:8px 20px;border-top:1px solid #2A2C3E;
+            display:flex;gap:16px;align-items:center;font-size:.62rem;
+            color:#6B7280;font-family:'Inter',system-ui;}}
+        #finterm-toasts{{position:fixed;top:20px;right:20px;z-index:99999;
+            display:flex;flex-direction:column;gap:8px;pointer-events:none;}}
+        .ft-toast{{background:#1C1D2B;border:1px solid #353755;border-radius:10px;
+            padding:12px 16px;min-width:240px;max-width:340px;
+            box-shadow:0 8px 32px rgba(0,0,0,.4);display:flex;
+            align-items:flex-start;gap:10px;animation:ft-tin .22s ease;
+            pointer-events:all;overflow:hidden;position:relative;
+            font-family:'Inter',system-ui;}}
+        .ft-toast.out{{animation:ft-tout .18s ease forwards;}}
+        .ft-toast-icon{{font-size:.95rem;flex-shrink:0;margin-top:1px;}}
+        .ft-toast-msg{{font-size:.8rem;color:#F0F2FF;line-height:1.4;}}
+        .ft-bar-wrap{{position:absolute;bottom:0;left:0;right:0;height:2px;
+            background:rgba(255,255,255,.08);}}
+        .ft-bar{{height:100%;transition:width linear;width:100%;}}
+        .ft-toast.success{{border-left:3px solid #10B981;}}
+        .ft-toast.success .ft-bar{{background:#10B981;}}
+        .ft-toast.error{{border-left:3px solid #EF4444;}}
+        .ft-toast.error .ft-bar{{background:#EF4444;}}
+        .ft-toast.warning{{border-left:3px solid #F59E0B;}}
+        .ft-toast.warning .ft-bar{{background:#F59E0B;}}
+        .ft-toast.info{{border-left:3px solid #3B82F6;}}
+        .ft-toast.info .ft-bar{{background:#3B82F6;}}
+        .ft-hint-badge{{position:fixed;bottom:76px;right:20px;z-index:9998;
+            background:#1C1D2B;border:1px solid #353755;border-radius:8px;
+            padding:8px 12px;font-size:.65rem;color:#9CA3B8;
+            font-family:'Inter',system-ui;pointer-events:none;
+            box-shadow:0 4px 16px rgba(0,0,0,.3);
+            animation:ft-badge-show 4s ease 1.5s both;}}
+        @keyframes ft-fade  {{from{{opacity:0}}to{{opacity:1}}}}
+        @keyframes ft-slide {{from{{opacity:0;transform:translateY(-14px) scale(.97)}}
+                               to{{opacity:1;transform:translateY(0) scale(1)}}}}
+        @keyframes ft-tin   {{from{{opacity:0;transform:translateX(20px)}}
+                               to{{opacity:1;transform:translateX(0)}}}}
+        @keyframes ft-tout  {{from{{opacity:1;transform:translateX(0)}}
+                               to{{opacity:0;transform:translateX(20px)}}}}
+        @keyframes ft-badge-show{{
+            0%{{opacity:0;transform:translateY(6px)}}
+            10%{{opacity:1;transform:translateY(0)}}
+            80%{{opacity:1}}100%{{opacity:0}}}}
+        `;
+        doc.head.appendChild(css);
+    }}
+
+    /* ── DOM ── */
+    if (!doc.getElementById('finterm-overlay')) {{
+        var ov = doc.createElement('div');
+        ov.id  = 'finterm-overlay';
+        ov.innerHTML =
+            '<div id="finterm-palette">' +
+            '  <input id="finterm-input" type="text"' +
+            '   placeholder="🔍  buscar ticker ou página..." autocomplete="off"/>' +
+            '  <div id="finterm-hint">' +
+            '    <span><span class="ft-k">↑↓</span> navegar</span>' +
+            '    <span><span class="ft-k">↵</span> selecionar</span>' +
+            '    <span><span class="ft-k">Esc</span> fechar</span>' +
+            '    <span style="margin-left:auto;"><span class="ft-k">Ctrl</span>+<span class="ft-k">K</span> abre</span>' +
+            '  </div>' +
+            '  <div id="finterm-results"></div>' +
+            '  <div id="finterm-footer">' +
+            '    <span style="color:#FF8C00;font-weight:600;">⚡ FINTERMINAL</span>' +
+            '    <span style="margin-left:auto;">Alt+1–6 navegação rápida de páginas</span>' +
+            '  </div>' +
+            '</div>';
+        doc.body.appendChild(ov);
+
+        var tc = doc.createElement('div');
+        tc.id  = 'finterm-toasts';
+        doc.body.appendChild(tc);
+
+        var hb = doc.createElement('div');
+        hb.className = 'ft-hint-badge';
+        hb.innerHTML = '<span style="color:#FF8C00">Ctrl+K</span> command palette';
+        doc.body.appendChild(hb);
+    }}
+
+    /* ── VARS ── */
+    var ov      = doc.getElementById('finterm-overlay');
+    var inp     = doc.getElementById('finterm-input');
+    var res     = doc.getElementById('finterm-results');
+    var selIdx  = -1;
+    var items   = [];
+
+    /* ── NAVIGATION ── */
+    function navPage(navLabel) {{
+        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"]');
+        for (var i = 0; i < links.length; i++) {{
+            if (links[i].textContent.trim().indexOf(navLabel) !== -1) {{
+                links[i].click(); return;
+            }}
+        }}
+        window.parent.location.href =
+            window.parent.location.origin + '/' + navLabel;
+    }}
+
+    function navTicker(ticker) {{
+        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"]');
+        var researchHref = '';
+        for (var i = 0; i < links.length; i++) {{
+            if (links[i].textContent.trim().indexOf('Research') !== -1) {{
+                researchHref = links[i].href || ''; break;
+            }}
+        }}
+        var base = researchHref ||
+            (window.parent.location.origin + '/Research');
+        // Strip query params from base before adding ours
+        base = base.split('?')[0];
+        window.parent.location.href =
+            base + '?research_ticker=' + encodeURIComponent(ticker);
+    }}
+
+    /* ── FUZZY MATCH ── */
+    function fuzzy(q, text) {{
+        q = q.toLowerCase(); text = text.toLowerCase();
+        if (text.startsWith(q)) return 200;
+        if (text.includes(q))  return 100;
+        var qi = 0;
+        for (var i = 0; i < text.length && qi < q.length; i++)
+            if (text[i] === q[qi]) qi++;
+        return qi === q.length ? 10 : 0;
+    }}
+
+    /* ── RENDER ── */
+    var POPULAR = ['PETR4','VALE3','ITUB4','BBAS3','WEGE3','ELET3','AAPL','NVDA','MSFT','TSLA'];
+
+    function renderResults(q) {{
+        q = q.trim();
+        items = [];
+        var html = '';
+
+        if (!q) {{
+            html += '<div class="ft-section">páginas</div>';
+            PAGES.forEach(function(p) {{
+                html += '<div class="ft-item" data-i="' + items.length + '">' +
+                    '<span class="ft-icon">' + p.icon + '</span>' +
+                    '<span class="ft-main"><span class="ft-ticker">' + p.label + '</span></span>' +
+                    '<span class="ft-badge page">Alt+' + p.key + '</span></div>';
+                items.push({{type:'page', nav:p.nav}});
+            }});
+            html += '<div class="ft-section" style="margin-top:6px">tickers recentes</div>';
+            POPULAR.forEach(function(t) {{
+                var found = null;
+                for (var i = 0; i < TICKERS.length; i++)
+                    if (TICKERS[i].t === t) {{ found = TICKERS[i]; break; }}
+                if (!found) return;
+                html += '<div class="ft-item" data-i="' + items.length + '">' +
+                    '<span class="ft-icon">' + found.f + '</span>' +
+                    '<span class="ft-main"><span class="ft-ticker">' + found.t + '</span>' +
+                    '<span class="ft-desc">abrir em Research</span></span>' +
+                    '<span class="ft-badge">ticker</span></div>';
+                items.push({{type:'ticker', ticker:found.full}});
+            }});
+        }} else {{
+            var pageHits = PAGES.filter(function(p) {{ return fuzzy(q, p.label) > 0; }});
+            var tickerHits = TICKERS
+                .map(function(tk) {{ return {{tk:tk, score:fuzzy(q, tk.t)}}; }})
+                .filter(function(x) {{ return x.score > 0; }})
+                .sort(function(a,b) {{ return b.score - a.score; }})
+                .slice(0, 9)
+                .map(function(x) {{ return x.tk; }});
+
+            if (pageHits.length) {{
+                html += '<div class="ft-section">páginas</div>';
+                pageHits.forEach(function(p) {{
+                    html += '<div class="ft-item" data-i="' + items.length + '">' +
+                        '<span class="ft-icon">' + p.icon + '</span>' +
+                        '<span class="ft-main"><span class="ft-ticker">' + p.label + '</span></span>' +
+                        '<span class="ft-badge page">página</span></div>';
+                    items.push({{type:'page', nav:p.nav}});
+                }});
+            }}
+            if (tickerHits.length) {{
+                if (pageHits.length) html += '<div class="ft-section" style="margin-top:6px">tickers</div>';
+                tickerHits.forEach(function(tk) {{
+                    html += '<div class="ft-item" data-i="' + items.length + '">' +
+                        '<span class="ft-icon">' + tk.f + '</span>' +
+                        '<span class="ft-main"><span class="ft-ticker">' + tk.t + '</span>' +
+                        '<span class="ft-desc">abrir em Research</span></span>' +
+                        '<span class="ft-badge">ticker</span></div>';
+                    items.push({{type:'ticker', ticker:tk.full}});
+                }});
+            }}
+            if (!pageHits.length && !tickerHits.length) {{
+                html = '<div style="padding:24px;text-align:center;color:#6B7280;' +
+                    'font-size:.8rem;font-family:Inter,system-ui;">nenhum resultado para \\"' + q + '\\"</div>';
+            }}
+        }}
+
+        res.innerHTML = html;
+        selIdx = -1;
+
+        res.querySelectorAll('.ft-item').forEach(function(el) {{
+            el.addEventListener('click', function() {{
+                var i = parseInt(el.getAttribute('data-i'));
+                selectItem(i);
+            }});
+            el.addEventListener('mouseenter', function() {{
+                setSelected(parseInt(el.getAttribute('data-i')));
+            }});
+        }});
+    }}
+
+    function setSelected(idx) {{
+        res.querySelectorAll('.ft-item').forEach(function(el, i) {{
+            el.classList.toggle('sel', i === idx);
+        }});
+        selIdx = idx;
+        // Scroll into view
+        var els = res.querySelectorAll('.ft-item');
+        if (els[idx]) els[idx].scrollIntoView({{block:'nearest'}});
+    }}
+
+    function selectItem(idx) {{
+        if (idx < 0 || idx >= items.length) return;
+        var item = items[idx];
+        closePalette();
+        if (item.type === 'page')   navPage(item.nav);
+        if (item.type === 'ticker') navTicker(item.ticker);
+    }}
+
+    function openPalette() {{
+        ov.classList.add('active');
+        inp.value = ''; renderResults('');
+        setTimeout(function() {{ inp.focus(); }}, 60);
+    }}
+    function closePalette() {{
+        ov.classList.remove('active');
+        selIdx = -1;
+    }}
+
+    inp.addEventListener('input', function() {{ renderResults(inp.value); }});
+    ov.addEventListener('click', function(e) {{
+        if (e.target === ov) closePalette();
+    }});
+
+    /* ── TOAST SYSTEM ── */
+    var ICONS = {{success:'✅', error:'❌', warning:'⚠️', info:'ℹ️'}};
+    window.parent._fintermToast = function(msg, type, duration) {{
+        type     = type     || 'info';
+        duration = duration || 3000;
+        var cont = doc.getElementById('finterm-toasts');
+        if (!cont) return;
+        var t = doc.createElement('div');
+        t.className = 'ft-toast ' + type;
+        t.innerHTML =
+            '<span class="ft-toast-icon">' + (ICONS[type]||'ℹ️') + '</span>' +
+            '<div class="ft-toast-msg">' + msg + '</div>' +
+            '<div class="ft-bar-wrap"><div class="ft-bar"></div></div>';
+        cont.appendChild(t);
+        var bar = t.querySelector('.ft-bar');
+        requestAnimationFrame(function() {{
+            bar.style.transition = 'width ' + duration + 'ms linear';
+            bar.style.width = '0%';
+        }});
+        setTimeout(function() {{
+            t.classList.add('out');
+            setTimeout(function() {{ t.remove(); }}, 200);
+        }}, duration);
+    }};
+
+    /* ── KEYBOARD SHORTCUTS ── */
+    doc.addEventListener('keydown', function(e) {{
+        var open = ov.classList.contains('active');
+
+        // Ctrl+K / ⌘K
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {{
+            e.preventDefault();
+            open ? closePalette() : openPalette();
+            return;
+        }}
+
+        if (open) {{
+            if (e.key === 'Escape')    {{ e.preventDefault(); closePalette(); return; }}
+            if (e.key === 'ArrowDown') {{
+                e.preventDefault();
+                setSelected(Math.min(selIdx + 1, items.length - 1));
+                return;
+            }}
+            if (e.key === 'ArrowUp') {{
+                e.preventDefault();
+                setSelected(Math.max(selIdx - 1, 0));
+                return;
+            }}
+            if (e.key === 'Enter') {{
+                e.preventDefault();
+                selectItem(selIdx >= 0 ? selIdx : 0);
+                return;
+            }}
+            return;
+        }}
+
+        // Alt+1-6 → page shortcuts
+        if (e.altKey && !e.ctrlKey && !e.shiftKey) {{
+            var pi = parseInt(e.key) - 1;
+            if (pi >= 0 && pi < PAGES.length) {{
+                e.preventDefault();
+                navPage(PAGES[pi].nav);
+                return;
+            }}
+        }}
+
+        // Enter → primary button (legado)
+        if (e.key === 'Enter' && !e.ctrlKey && !e.altKey) {{
+            var focused = doc.activeElement;
+            var isInput = focused && (focused.tagName==='INPUT' ||
+                focused.tagName==='TEXTAREA' || focused.tagName==='SELECT');
+            if (!isInput) {{
+                var btns = doc.querySelectorAll('[data-testid="stBaseButton-primary"]');
+                if (btns.length > 0) btns[0].click();
+            }}
+        }}
+    }});
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+
 def inject_keyboard_shortcuts():
-    """Atalho Enter → clica no botão primário da página."""
+    """Retrocompatibilidade — chama inject_ui_enhancements()."""
+    inject_ui_enhancements()
+
+
+def show_toast(message: str, type: str = "success", duration: int = 3000) -> None:
+    """
+    Exibe uma notificação toast animada no canto superior direito.
+
+    Parâmetros
+    ----------
+    message  : texto da notificação (HTML básico permitido).
+    type     : 'success' | 'error' | 'warning' | 'info'
+    duration : tempo em ms antes de auto-fechar (padrão 3 000 ms).
+
+    Requer que inject_ui_enhancements() (ou inject_keyboard_shortcuts())
+    tenha sido chamado na mesma página antes de show_toast().
+    """
+    msg_safe = (
+        message
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace("\n", " ")
+    )
     st.markdown(
-        "<script>"
-        "const doc = window.parent.document;"
-        "doc.addEventListener('keydown', function(e) {"
-        "  if (e.key === 'Enter') {"
-        "    const btns = doc.querySelectorAll('[data-testid=\"stBaseButton-primary\"]');"
-        "    if (btns.length > 0) btns[0].click();"
-        "  }"
-        "});"
-        "</script>",
+        f"<script>(function(){{"
+        f"  if (window.parent._fintermToast)"
+        f"    window.parent._fintermToast('{msg_safe}','{type}',{duration});"
+        f"}})();</script>",
         unsafe_allow_html=True,
     )
 
