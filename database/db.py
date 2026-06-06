@@ -816,6 +816,74 @@ def registrar_historico_score(ticker: str, score: int) -> None:
         logger.warning(f"[db] falha ao registrar histórico de score para {ticker}: {e}")
 
 
+def registrar_historico_score_batch(
+    registros: list[dict],
+    ignorar_existentes: bool = True,
+) -> int:
+    """
+    Insere múltiplos pontos históricos de health score em lote.
+    Cada registro: {'ticker': str, 'score': int, 'calculado_em': str ISO-8601}
+
+    ignorar_existentes=True: busca datas já presentes e pula duplicatas.
+    Retorna o número de registros efetivamente inseridos.
+    """
+    if not registros:
+        return 0
+    sb = get_supabase()
+    try:
+        if ignorar_existentes:
+            # Descobre datas já existentes para o ticker (assumindo 1 ticker por lote)
+            ticker = registros[0]['ticker']
+            datas_existentes: set[str] = set()
+            try:
+                rows_ex = (
+                    sb.table('health_score_history')
+                    .select('calculado_em')
+                    .eq('ticker', ticker)
+                    .execute()
+                    .data
+                ) or []
+                for r in rows_ex:
+                    # Normaliza para date-only para comparação
+                    datas_existentes.add(str(r['calculado_em'])[:10])
+            except Exception:
+                pass
+
+            registros = [
+                r for r in registros
+                if str(r['calculado_em'])[:10] not in datas_existentes
+            ]
+
+        if not registros:
+            return 0
+
+        sb.table('health_score_history').insert(registros).execute()
+        return len(registros)
+    except Exception as e:
+        logger.error(f"[db] falha no insert batch de histórico: {e}")
+        return 0
+
+
+def get_datas_historico_score(ticker: str) -> set[str]:
+    """
+    Retorna o conjunto de datas (YYYY-MM-DD) já presentes no histórico
+    para o ticker. Usado pelo backfill para evitar duplicatas.
+    """
+    sb = get_supabase()
+    try:
+        rows = (
+            sb.table('health_score_history')
+            .select('calculado_em')
+            .eq('ticker', ticker)
+            .execute()
+            .data
+        ) or []
+        return {str(r['calculado_em'])[:10] for r in rows}
+    except Exception as e:
+        logger.warning(f"[db] falha ao buscar datas históricas para {ticker}: {e}")
+        return set()
+
+
 def get_historico_score(ticker: str, dias: int = 180) -> list[dict]:
     """
     Retorna os registros de health score dos últimos `dias` dias para o ticker,

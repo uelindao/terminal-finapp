@@ -26,25 +26,34 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-FMP_BASE = "https://financialmodelingprep.com/api/v3"
+FMP_BASE    = "https://financialmodelingprep.com/api/v3"
+FMP_TIMEOUT = 15  # segundos
 
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
 def _get_keys() -> list[str]:
-    """Retorna lista de FMP_API_KEYs configuradas (ordem de tentativa)."""
+    """
+    Retorna lista de FMP_API_KEYs configuradas.
+    Suporta tanto contexto Streamlit (st.secrets) quanto ETL (os.environ).
+    """
+    import os
     keys = []
     try:
-        k1 = st.secrets.get("FMP_API_KEY", "")
+        k1 = st.secrets.get("FMP_API_KEY", "") or os.environ.get("FMP_API_KEY", "")
         if k1: keys.append(k1)
-        k2 = st.secrets.get("FMP_API_KEY_2", "")
+        k2 = st.secrets.get("FMP_API_KEY_2", "") or os.environ.get("FMP_API_KEY_2", "")
         if k2: keys.append(k2)
     except Exception:
-        pass
+        # Contexto ETL sem streamlit
+        k1 = os.environ.get("FMP_API_KEY", "")
+        k2 = os.environ.get("FMP_API_KEY_2", "")
+        if k1: keys.append(k1)
+        if k2: keys.append(k2)
     if keys:
-        logger.debug(f"{len(keys)} FMP_API_KEY(s) configurada(s)")
+        logger.debug(f"[fmp] {len(keys)} FMP_API_KEY(s) configurada(s)")
     else:
-        logger.warning("[fmp] nenhuma FMP_API_KEY configurada em secrets.toml")
+        logger.warning("[fmp] nenhuma FMP_API_KEY configurada (secrets.toml ou env var)")
     return keys
 
 
@@ -317,6 +326,39 @@ def get_earnings_calendar(
             continue
 
     return sorted(eventos, key=lambda x: x["data"])
+
+
+# ── Funções para backfill histórico (sem @st.cache_data — uso em ETL) ─────────
+
+def get_ratios_trimestrais(ticker: str, limit: int = 40) -> list[dict]:
+    """
+    Busca múltiplos trimestrais históricos via /ratios/{ticker}?period=quarter.
+    limit=40 = 10 anos de trimestres. Sem cache — uso em scripts ETL.
+
+    Campos retornados por trimestre:
+      date, returnOnAssets, returnOnEquity, netProfitMargin, grossProfitMargin,
+      priceEarningsRatio, priceToBookRatio, enterpriseValueMultiple,
+      dividendYield, debtEquityRatio, currentRatio, interestCoverage,
+      assetTurnover, freeCashFlowOperatingCashFlowRatio, returnOnCapitalEmployed
+    """
+    t    = ticker.replace(".SA", "").upper()
+    data = _get(f"ratios/{t}", {"period": "quarter", "limit": limit})
+    return data if isinstance(data, list) else []
+
+
+def get_key_metrics_trimestrais(ticker: str, limit: int = 40) -> list[dict]:
+    """
+    Busca métricas-chave trimestrais via /key-metrics/{ticker}?period=quarter.
+    limit=40 = 10 anos. Sem cache — uso em scripts ETL.
+
+    Campos retornados por trimestre:
+      date, roic, netDebtToEBITDA, debtToEquity, currentRatio,
+      revenueGrowth, epsgrowth, freeCashFlowYield, enterpriseValueOverEBITDA,
+      pbRatio, peRatio
+    """
+    t    = ticker.replace(".SA", "").upper()
+    data = _get(f"key-metrics/{t}", {"period": "quarter", "limit": limit})
+    return data if isinstance(data, list) else []
 
 
 # ── Perfil da empresa ─────────────────────────────────────────────────────────
