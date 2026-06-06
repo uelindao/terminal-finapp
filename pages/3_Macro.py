@@ -49,30 +49,44 @@ if "FRED_API_KEY" not in st.secrets:
 # ==========================================
 # funções globais de cache e apoio
 # ==========================================
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def puxar_historico_mestre():
-    hoje = datetime.datetime.today()
-    inicio_10a = hoje - datetime.timedelta(days=365 * 10) 
-    
-    # 1. brasil (sgs)
+    """
+    Busca séries históricas macro (BCB Brasil + FRED Global + yfinance Commodities).
+
+    Padrão cache-aside com fallback Supabase:
+      1. Tenta APIs ao vivo (BCB SGS + FRED)
+      2. Se dados OK → salva snapshot no Supabase (para uso futuro)
+      3. Se dados vazios/falha → carrega último snapshot do Supabase
+         (resolve "sem dados" em fins de semana, cold-start, manutenção BCB/FRED)
+
+    TTL: 1h — retenta APIs a cada hora. Fins de semana servem do Supabase.
+    """
+    from utils.macro_supabase import salvar_snapshot, carregar_snapshot
+
+    hoje      = datetime.datetime.today()
+    inicio_10a = hoje - datetime.timedelta(days=365 * 10)
+
+    # ── 1. Brasil — BCB SGS ───────────────────────────────────────────────────
     series_bcb = {
         'Selic':            432,
         'IPCA':             433,
         'Dolar':            1,
         'Desemprego':       24369,
-        # séries fiscais
-        'Divida_Bruta_PIB': 13762,   # Dívida Bruta do Governo Geral % PIB
-        'Result_Primario':  5793,    # Resultado primário do setor público (% PIB)
-        'Result_Nominal':   4192,    # Resultado nominal do setor público
+        'Divida_Bruta_PIB': 13762,
+        'Result_Primario':  5793,
+        'Result_Nominal':   4192,
     }
     dfs_br_dict = {}
     for nome, codigo in series_bcb.items():
         try:
             df_temp = sgs.get({nome: codigo}, start=inicio_10a)
-            if not df_temp.empty: dfs_br_dict[nome] = df_temp[nome]
+            if not df_temp.empty:
+                dfs_br_dict[nome] = df_temp[nome]
         except Exception as e:
             logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
-    # Fallback Selic: se série 432 falhou, tenta série 439 (Selic Over anualizada base 252)
+
+    # Fallback Selic: série 432 → 439
     if 'Selic' not in dfs_br_dict:
         try:
             _selic_fb = sgs.get({'Selic': 439}, start=inicio_10a)
@@ -80,56 +94,103 @@ def puxar_historico_mestre():
                 dfs_br_dict['Selic'] = _selic_fb['Selic']
         except Exception as e:
             logger.error(f"[macro] BCB Selic fallback (série 439) falhou: {e}")
-            
+
     df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
-    if df_br.empty:
-        logger.warning("[macro] Nenhum dado do BCB foi carregado.")
-    
-    # 2. global (fred)
+
+    # Calcula IPCA acumulado 12m
+    if not df_br.empty and 'IPCA' in df_br.columns:
+        try:
+            _ipca_raw = df_br['IPCA'].dropna()
+            df_br['IPCA_12M'] = ((1 + _ipca_raw / 100)
+                                 .rolling(12)
+                                 .apply(lambda x: x.prod(), raw=True) - 1) * 100
+        except Exception:
+            pass
+
+    if not df_br.empty:
+        # Sucesso → salva snapshot para uso posterior
+        salvar_snapshot("bcb_br", df_br)
+        logger.info("[macro] BCB: dados ao vivo OK, snapshot Supabase atualizado.")
+    else:
+        # Falha → tenta carregar snapshot do Supabase (últimos 7 dias)
+        logger.warning("[macro] BCB: nenhum dado ao vivo. Tentando fallback Supabase...")
+        _fb = carregar_snapshot("bcb_br", max_age_days=7)
+        if _fb is not None and not _fb.empty:
+            df_br = _fb
+            logger.info("[macro] BCB: servindo dados do Supabase (snapshot anterior).")
+        else:
+            logger.error("[macro] BCB: sem dados ao vivo e sem snapshot Supabase disponível.")
+
+    # ── 2. Global — FRED ─────────────────────────────────────────────────────
     df_global = pd.DataFrame()
     if "FRED_API_KEY" in st.secrets:
         try:
             fred = Fred(api_key=st.secrets["FRED_API_KEY"])
-            # Validação rápida da chave antes do loop
             try:
                 fred.get_series_info('FEDFUNDS')
             except Exception as e:
                 logger.error(f"[macro] Chave FRED API parece inválida: {e}")
+                # Tenta fallback imediatamente
+                _fb_g = carregar_snapshot("fred_global", max_age_days=7)
+                if _fb_g is not None:
+                    df_global = _fb_g
                 return df_br, df_global, pd.DataFrame()
+
             series_fred = {
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
                 'DGS10': 'DGS10', 'DGS2': 'DGS2', 'VIXCLS': 'VIXCLS',
-                'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N', 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
+                'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N',
+                'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
                 'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2',
                 'GFDEGDQ188S': 'GFDEGDQ188S', 'MTSDS133FMS': 'MTSDS133FMS',
-                'CP0000EZ19M086NEST': 'CP0000EZ19M086NEST', 'LRHUTTTTEZM156S': 'LRHUTTTTEZM156S',
+                'CP0000EZ19M086NEST': 'CP0000EZ19M086NEST',
+                'LRHUTTTTEZM156S': 'LRHUTTTTEZM156S',
                 'IRLTLT01DEM156N': 'IRLTLT01DEM156N', 'IRLTLT01ITM156N': 'IRLTLT01ITM156N',
                 'IRSTCB01JPM156N': 'IRSTCB01JPM156N', 'CHNCPIALLMINMEI': 'CHNCPIALLMINMEI',
             }
             dfs_global_dict = {}
             for nome, serie_id in series_fred.items():
                 try:
-                    dfs_global_dict[nome] = fred.get_series(serie_id, observation_start=inicio_10a)
+                    dfs_global_dict[nome] = fred.get_series(
+                        serie_id, observation_start=inicio_10a
+                    )
                 except Exception as e:
                     logger.error(f"[macro] FRED série '{serie_id}' ({nome}) falhou: {e}")
                 time.sleep(1)
+
             df_global = pd.DataFrame(dfs_global_dict)
             if 'CPIAUCSL' in df_global.columns:
                 df_global['CPI_MoM'] = df_global['CPIAUCSL'].pct_change() * 100
                 df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
-            if df_global.empty:
-                logger.warning("[macro] Nenhuma série FRED foi carregada.")
+
+            if not df_global.empty:
+                salvar_snapshot("fred_global", df_global)
+                logger.info("[macro] FRED: dados ao vivo OK, snapshot Supabase atualizado.")
+            else:
+                logger.warning("[macro] FRED: nenhuma série carregada. Tentando fallback Supabase...")
+                _fb_g = carregar_snapshot("fred_global", max_age_days=7)
+                if _fb_g is not None and not _fb_g.empty:
+                    df_global = _fb_g
+                    logger.info("[macro] FRED: servindo dados do Supabase (snapshot anterior).")
+
         except Exception as e:
-            logger.exception(f"[macro] Bloco FRED inteiro falhou: {e}") 
-    
-    # 3. commodities
+            logger.exception(f"[macro] Bloco FRED inteiro falhou: {e}")
+            _fb_g = carregar_snapshot("fred_global", max_age_days=7)
+            if _fb_g is not None and not _fb_g.empty:
+                df_global = _fb_g
+                logger.info("[macro] FRED: fallback Supabase após exceção.")
+
+    # ── 3. Commodities — yfinance ─────────────────────────────────────────────
     df_commodities = pd.DataFrame()
     try:
-        df_commodities = yf.download(['CL=F', 'GC=F'], start=inicio_10a, progress=False)['Close']
-        if isinstance(df_commodities, pd.Series): df_commodities = df_commodities.to_frame()
+        df_commodities = yf.download(
+            ['CL=F', 'GC=F'], start=inicio_10a, progress=False
+        )['Close']
+        if isinstance(df_commodities, pd.Series):
+            df_commodities = df_commodities.to_frame()
     except Exception as e:
-        logger.error(f"[macro] Download de commodities falhou: {e}") 
-        
+        logger.error(f"[macro] Download de commodities falhou: {e}")
+
     return df_br, df_global, df_commodities
 
 def valor_atual_seguro(df, coluna):
