@@ -2,14 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import json
 import plotly.graph_objects as go
 import datetime
 import time
-from fredapi import Fred
-from bcb import sgs
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from utils.formatters import traduzir_setor
 
 # ── silenciar alertas vermelhos do yahoo finance no terminal ──
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -20,7 +17,7 @@ from utils.style import aplicar_tema
 from database.db import (
     listar_watchlist, get_health_scores, adicionar_ativo,
     listar_watchlists, criar_watchlist, get_watchlist_padrao,
-    get_todos_fundamentos_cache, salvar_fundamento_cache, init_db
+    get_todos_fundamentos_cache, init_db
 )
 from utils.tickers import (
     SCREENER_B3, SCREENER_US, XSTOCKS_INDICES, FII_TODOS,
@@ -75,17 +72,7 @@ if st.session_state.get("_av_auto_sync_date") != _hoje_sync:
 init_db()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
-c_head1, c_head2, c_head3 = st.columns([6, 2, 2])
-with c_head1:
-    page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
-with c_head2:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 sync cache b3 / fii", use_container_width=True, type="primary", help="sincroniza ações e fiis brasileiros."):
-        st.session_state['run_sync_b3'] = True
-with c_head3:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 sync cache eua", use_container_width=True, type="primary", help="sincroniza ativos do mercado americano."):
-        st.session_state['run_sync_us'] = True
+page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
 
 _n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
 _n_cache_us = sum(1 for t in CACHE_FUNDAMENTOS if not str(t).endswith('.SA'))
@@ -293,88 +280,6 @@ with st.expander("🔄 sincronização de fundamentos (AV + yfinance)", expanded
             st.rerun()
 
 st.markdown("---")
-
-def traduzir_setor(setor_raw: str) -> str:
-    mapa_setores = {
-        'Energy': '⛽ energia', 'Financial Services': '🏦 financeiro',
-        'Technology': '💻 tecnologia', 'Healthcare': '🏥 saúde',
-        'Consumer Cyclical': '🛒 consumo cíclico', 'Consumer Defensive': '🛒 consumo def.',
-        'Industrials': '🏭 indústria', 'Basic Materials': '⛏️ materiais',
-        'Real Estate': '🏢 imobiliário', 'Utilities': '⚡ utilities',
-        'Communication Services': '📡 telecom', 'Financeiro': '🏦 financeiro',
-    }
-    return mapa_setores.get(setor_raw, setor_raw.lower() if setor_raw else '—')
-
-# ==========================================
-# ROTINAS DE SINCRONIZAÇÃO ASSÍNCRONA
-# ==========================================
-if st.session_state.get('run_sync_b3'):
-    st.info("A iniciar sincronização massiva B3 (Ações + FIIs) em background...")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    from utils.scrapers import buscar_dados_b3
-    
-    def fetch_and_save_b3(t):
-        try:
-            dados = buscar_dados_b3(t)
-            salvar_fundamento_cache(t, dados)
-            return True
-        except: return False
-
-    lista_completa = SCREENER_B3 + FII_TODOS
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(fetch_and_save_b3, t): t for t in lista_completa}
-        total = len(lista_completa)
-        concluidos = 0
-        for future in as_completed(futures):
-            concluidos += 1
-            progress_bar.progress(concluidos / total)
-            status_text.text(f"Sincronizando: {futures[future]} ({concluidos}/{total})...")
-            
-    st.session_state['run_sync_b3'] = False
-    st.success("✅ Cache Nacional atualizada! Recarregando...")
-    time.sleep(1.5)
-    st.rerun()
-
-if st.session_state.get('run_sync_us'):
-    st.info("A iniciar extração massiva EUA em background...")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    def fetch_and_save_us(t_base):
-        try:
-            info = yf.Ticker(t_base).info
-            dados = {
-                'nome': info.get('shortName', t_base),
-                'setor': traduzir_setor(info.get('sector', '—')),
-                'p/l': info.get('trailingPE', info.get('forwardPE', None)),
-                'p/vp': info.get('priceToBook', None),
-                'roe%': (info.get('returnOnEquity') * 100) if info.get('returnOnEquity') is not None else None,
-                'dy%': (info.get('dividendYield') * 100) if info.get('dividendYield') is not None else 0,
-                'market_cap': info.get('marketCap', 0),
-                'ev/ebitda': info.get('enterpriseToEbitda', None),
-                'margem%': (info.get('profitMargins') * 100) if info.get('profitMargins') is not None else None,
-                'beta': info.get('beta', None)
-            }
-            salvar_fundamento_cache(t_base, dados)
-            return True
-        except: return False
-
-    us_tickers_unicos = list(set([mapear_ticker_base(t) for t in SCREENER_US + XSTOCKS_INDICES]))
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(fetch_and_save_us, t): t for t in us_tickers_unicos}
-        total = len(us_tickers_unicos)
-        concluidos = 0
-        for future in as_completed(futures):
-            concluidos += 1
-            progress_bar.progress(concluidos / total)
-            status_text.text(f"Sincronizando EUA: {futures[future]} ({concluidos}/{total})...")
-            
-    st.session_state['run_sync_us'] = False
-    st.success("✅ Cache EUA atualizada! Recarregando...")
-    time.sleep(1.5)
-    st.rerun()
 
 @st.dialog("➕ salvar na watchlist")
 def modal_salvar_screener(ticker: str, nome: str, mercado: str):

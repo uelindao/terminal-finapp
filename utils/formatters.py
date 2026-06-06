@@ -51,3 +51,22 @@ def fmt_preco(n, moeda="R$"):
         return f"{moeda} {n:,.2f}"
     except Exception:
         return "N/D"
+
+
+def traduzir_setor(setor_raw: str) -> str:
+    """Traduz nome de setor em inglês (yfinance / FMP) para label PT-BR com emoji."""
+    mapa = {
+        "Energy":                 "⛽ energia",
+        "Financial Services":     "🏦 financeiro",
+        "Technology":             "💻 tecnologia",
+        "Healthcare":             "🏥 saúde",
+        "Consumer Cyclical":      "🛒 consumo cíclico",
+        "Consumer Defensive":     "🛒 consumo def.",
+        "Industrials":            "🏭 indústria",
+        "Basic Materials":        "⛏️ materiais",
+        "Real Estate":            "🏢 imobiliário",
+        "Utilities":              "⚡ utilities",
+        "Communication Services": "📡 telecom",
+        "Financeiro":             "🏦 financeiro",
+    }
+    return mapa.get(setor_raw, setor_raw.lower() if setor_raw else "—")

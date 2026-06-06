@@ -21,6 +21,7 @@ from utils.api_cache import (
     get_from_cache,
     _periodo_from_date,
 )
+import datetime as _dt
 
 logger = get_logger(__name__)
 
@@ -193,12 +194,21 @@ def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
     """
     Busca dados fundamentalistas trimestrais completos.
     Estrategia de cache por trimestre:
-    1. Le todos os trimestres ja no Supabase
-    2. Busca AV apenas para trimestres ausentes ou recentes
-    3. Salva novos trimestres no Supabase
+    1. Verifica sentinel "NO_COVERAGE" (30 dias) — se existir, usa yfinance direto
+    2. Le todos os trimestres ja no Supabase (AV)
+    3. Busca AV apenas para trimestres ausentes ou recentes
+    4. Salva novos trimestres no Supabase
+    5. Fallback yfinance se AV sem cobertura; salva sentinel para evitar re-tentativas
 
     Retorna lista de dicts por trimestre, do mais recente ao mais antigo.
     """
+    # Passo 0: Verifica sentinel "sem cobertura AV" (TTL 30 dias).
+    # Evita 3 req AV por sessão para tickers que AV não cobre (comum em B3).
+    _no_cov = get_from_cache(ticker, "alpha_vantage", "NO_COVERAGE", None, max_age_days=30)
+    if _no_cov is not None:
+        logger.debug(f"[av] {ticker} sem cobertura AV (sentinel 30d) — yfinance direto")
+        return get_quarterly_fundamentals_yfinance(ticker)
+
     av_symbol = _ticker_av(ticker)
 
     # -- Passo 1: Carrega o que ja esta no cache -------------------------
@@ -281,7 +291,17 @@ def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
         return av_result
 
     # -- Passo 4: Fallback yfinance (AV sem quota ou sem cobertura) ----------
-    motivo = "sem quota" if not key_ok else "sem cobertura AV ou resposta vazia"
+    if key_ok and not cached_income and not cached_balance and not cached_cashflow:
+        # Havia quota mas AV retornou vazio → ausência de cobertura (não quota esgotada).
+        # Salva sentinel para evitar 3 req AV desnecessárias por sessão nos próximos 30 dias.
+        save_to_cache(
+            ticker, "alpha_vantage", "NO_COVERAGE",
+            {"sem_cobertura_desde": str(_dt.date.today())},
+            None,
+        )
+        logger.info(f"[av] {ticker} — sem cobertura AV — sentinel NO_COVERAGE salvo (30d)")
+
+    motivo = "sem quota" if not key_ok else "sem cobertura AV"
     logger.info(f"[av] {ticker} — {motivo} — usando yfinance como fallback")
     yf_result = get_quarterly_fundamentals_yfinance(ticker)
     return yf_result

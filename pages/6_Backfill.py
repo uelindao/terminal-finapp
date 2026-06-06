@@ -479,6 +479,113 @@ with st.expander("🔍 detalhe por ticker", expanded=False):
 st.markdown("---")
 
 # ──────────────────────────────────────────────────────────────────────────────
+# SYNC RÁPIDO — SCREENER / RESEARCH  (fundamentais atuais → api_cache)
+# ──────────────────────────────────────────────────────────────────────────────
+
+with st.expander("🔄 sincronização de fundamentos — screener / research", expanded=False):
+    st.info(
+        "Sincroniza dados atuais (P/L, ROE, DY, setor…) usados pelo Discovery e Screener.\n\n"
+        "**B3:** Fundamentus scraper + yfinance como fallback.  \n"
+        "**EUA:** yfinance.  \n"
+        "Não consome quota FMP nem AV.",
+        icon="ℹ️",
+    )
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        if st.button("🇧🇷 sync B3 + FIIs", type="primary",
+                     use_container_width=True, key="btn_backfill_sync_b3"):
+            st.session_state["run_backfill_sync_b3"] = True
+    with _sc2:
+        if st.button("🇺🇸 sync EUA", type="primary",
+                     use_container_width=True, key="btn_backfill_sync_us"):
+            st.session_state["run_backfill_sync_us"] = True
+
+    # ── Handler: sync B3 + FIIs ───────────────────────────────────────────────
+    if st.session_state.get("run_backfill_sync_b3"):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from utils.scrapers import buscar_dados_b3
+        from database.db import salvar_fundamento_cache
+        from utils.tickers import FII_TODOS
+
+        _b3_lista = list(dict.fromkeys(SCREENER_B3 + FII_TODOS))
+        _bar_b3   = st.progress(0, text="iniciando sync B3…")
+        _log_b3   = st.empty()
+
+        def _sync_b3_item(t):
+            try:
+                dados = buscar_dados_b3(t)
+                salvar_fundamento_cache(t, dados)
+                return True
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(max_workers=8) as _ex_b3:
+            _futs_b3 = {_ex_b3.submit(_sync_b3_item, t): t for t in _b3_lista}
+            _total_b3 = len(_b3_lista)
+            _done_b3  = 0
+            for _fut in as_completed(_futs_b3):
+                _done_b3 += 1
+                _pct_b3 = _done_b3 / _total_b3
+                _tk_b3  = _futs_b3[_fut]
+                _bar_b3.progress(_pct_b3, text=f"b3: {_tk_b3} ({_done_b3}/{_total_b3})")
+                _log_b3.caption(f"→ {_tk_b3} {'✅' if _fut.result() else '❌'}")
+
+        st.session_state["run_backfill_sync_b3"] = False
+        st.success(f"✅ sync B3 concluído — {_total_b3} ativos processados.")
+        st.cache_data.clear()
+        st.rerun()
+
+    # ── Handler: sync EUA ─────────────────────────────────────────────────────
+    if st.session_state.get("run_backfill_sync_us"):
+        import yfinance as yf
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from database.db import salvar_fundamento_cache
+        from utils.formatters import traduzir_setor
+        from utils.tickers import SCREENER_US, XSTOCKS_INDICES, mapear_ticker_base
+
+        _us_lista = list({mapear_ticker_base(t) for t in SCREENER_US + XSTOCKS_INDICES})
+        _bar_us   = st.progress(0, text="iniciando sync EUA…")
+        _log_us   = st.empty()
+
+        def _sync_us_item(t_base):
+            try:
+                info = yf.Ticker(t_base).info
+                dados = {
+                    "nome":       info.get("shortName", t_base),
+                    "setor":      traduzir_setor(info.get("sector", "—")),
+                    "p/l":        info.get("trailingPE", info.get("forwardPE")),
+                    "p/vp":       info.get("priceToBook"),
+                    "roe%":       (info["returnOnEquity"] * 100) if info.get("returnOnEquity") is not None else None,
+                    "dy%":        (info["dividendYield"]  * 100) if info.get("dividendYield")  is not None else 0,
+                    "market_cap": info.get("marketCap", 0),
+                    "ev/ebitda":  info.get("enterpriseToEbitda"),
+                    "margem%":    (info["profitMargins"]  * 100) if info.get("profitMargins")  is not None else None,
+                    "beta":       info.get("beta"),
+                }
+                salvar_fundamento_cache(t_base, dados)
+                return True
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(max_workers=5) as _ex_us:
+            _futs_us  = {_ex_us.submit(_sync_us_item, t): t for t in _us_lista}
+            _total_us = len(_us_lista)
+            _done_us  = 0
+            for _fut in as_completed(_futs_us):
+                _done_us += 1
+                _pct_us  = _done_us / _total_us
+                _tk_us   = _futs_us[_fut]
+                _bar_us.progress(_pct_us, text=f"eua: {_tk_us} ({_done_us}/{_total_us})")
+                _log_us.caption(f"→ {_tk_us} {'✅' if _fut.result() else '❌'}")
+
+        st.session_state["run_backfill_sync_us"] = False
+        st.success(f"✅ sync EUA concluído — {_total_us} ativos processados.")
+        st.cache_data.clear()
+        st.rerun()
+
+st.markdown("---")
+
+# ──────────────────────────────────────────────────────────────────────────────
 # CONTROLES DE BACKFILL
 # ──────────────────────────────────────────────────────────────────────────────
 section_title("🚀 executar backfill")
