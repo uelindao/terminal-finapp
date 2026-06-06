@@ -22,7 +22,7 @@ from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
 from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores, get_user_settings
 from utils.scrapers import buscar_dados_b3, buscar_dados_us
-from utils.fmp_client import get_multiplos_medios, get_peers
+from utils.fmp_client import get_multiplos_medios, get_peers, get_multiplos_historicos
 
 # componentes do design system
 from utils.components import (
@@ -1188,47 +1188,99 @@ with tab_val:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── COMPARAÇÃO COM PEERS (FMP) ────────────────────────────────────
-    with st.spinner("buscando peers do setor (fmp)..."):
+    # ── COMPARAÇÃO COM PEERS ─────────────────────────────────────────────
+    with st.spinner("buscando peers do setor..."):
         _peers_list = get_peers(t_base)
+
+    # Fallback local: FMP não retornou peers → busca tickers do mesmo setor no cache
+    _peers_fonte = "fmp"
+    if not _peers_list and setor_raw:
+        _stop_words_p = {"e", "de", "do", "da", "dos", "das", "o", "a", "em", "por"}
+        _setor_norm_p = str(setor_raw).lower().strip()
+        _setor_kws_p  = set(_setor_norm_p.replace(",", " ").split()) - _stop_words_p
+        _candidatos_p = []
+        for _tk_p, _fd_p in CACHE_FUNDAMENTOS.items():
+            if _tk_p == t_base:
+                continue
+            _s_p = str(_fd_p.get('setor') or '').lower().strip()
+            if not _s_p:
+                continue
+            _s_kws_p = set(_s_p.replace(",", " ").split()) - _stop_words_p
+            if _setor_kws_p & _s_kws_p:
+                _candidatos_p.append(_tk_p)
+        if _candidatos_p:
+            _candidatos_p.sort(
+                key=lambda x: -(float(CACHE_FUNDAMENTOS[x].get('roe%') or 0))
+            )
+            _peers_list  = _candidatos_p[:6]
+            _peers_fonte = "local"
+
+    def _fmt_num(v, dec=1):
+        try:    return f"{float(v):.{dec}f}" if v is not None else "—"
+        except: return "—"
+
     if _peers_list:
-        section_title("👥 comparação com peers")
+        _fonte_tag = (
+            '<span style="font-size:0.6rem;color:var(--text-muted);'
+            'font-family:var(--font-ui,sans-serif);margin-left:6px;">'
+            + ("via fmp" if _peers_fonte == "fmp" else "base local · mesmo setor")
+            + '</span>'
+        )
+        section_title(f"👥 comparação com peers {_fonte_tag}")
 
         _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1, 1, 1, 1], gap="small")
-        for _hcol, _htxt in zip([_h1, _h2, _h3, _h4, _h5, _h6], ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"]):
-            _hcol.markdown(f'<div style="font-size:0.65rem;color:#888;text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>', unsafe_allow_html=True)
+        for _hcol, _htxt in zip(
+            [_h1, _h2, _h3, _h4, _h5, _h6],
+            ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"],
+        ):
+            _hcol.markdown(
+                f'<div style="font-size:0.65rem;color:var(--text-muted);'
+                f'text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>',
+                unsafe_allow_html=True,
+            )
 
-        st.markdown('<div style="border-top:1px solid #333;margin-bottom:6px;"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="border-top:1px solid var(--border-subtle);margin-bottom:6px;"></div>',
+            unsafe_allow_html=True,
+        )
 
-        _tickers_peers = [t_base] + [p for p in _peers_list[:5] if p != t_base]
+        _tickers_peers = [t_base] + [p for p in _peers_list if p != t_base][:5]
         for _pt in _tickers_peers:
-            _pd = CACHE_FUNDAMENTOS.get(_pt, {})
-            _is_atual = (_pt == t_base)
-            _cor_t    = "#FF9900" if _is_atual else "#ccc"
-            _nome_peer = _pd.get('nome') or _pt
-            _pe_peer   = _pd.get('p/l')
-            _roe_peer  = _pd.get('roe%')
-            _dy_peer   = _pd.get('dy%')
-            _mrg_peer  = _pd.get('margem_liq%') or _pd.get('mrg_liq%')
-
-            def _fmt_num(v, dec=1):
-                try:    return f"{float(v):.{dec}f}" if v is not None else "—"
-                except: return "—"
+            _pd_peer    = CACHE_FUNDAMENTOS.get(_pt, {})
+            _is_atual   = (_pt == t_base)
+            _fw_peer    = "600" if _is_atual else "400"
+            _cor_t_css  = "var(--accent)" if _is_atual else "var(--text-secondary)"
+            _nome_peer  = _pd_peer.get('nome') or _pt
+            _pe_peer    = _pd_peer.get('p/l')
+            _roe_peer   = _pd_peer.get('roe%')
+            _dy_peer    = _pd_peer.get('dy%')
+            _mrg_peer   = _pd_peer.get('margem_liq%') or _pd_peer.get('mrg_liq%')
 
             _p1, _p2, _p3, _p4, _p5, _p6 = st.columns([2, 3, 1, 1, 1, 1], gap="small")
-            _p1.markdown(f'<span style="color:{_cor_t};font-weight:{"600" if _is_atual else "400"};font-size:0.85rem;">{_pt}</span>', unsafe_allow_html=True)
-            _p2.markdown(f'<span style="font-size:0.8rem;color:#aaa;">{_nome_peer[:22]}</span>', unsafe_allow_html=True)
-            _p3.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_pe_peer)}</span>', unsafe_allow_html=True)
-            _p4.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_roe_peer)}</span>', unsafe_allow_html=True)
-            _p5.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_dy_peer)}</span>', unsafe_allow_html=True)
-            _p6.markdown(f'<span style="font-size:0.85rem;color:#ccc;">{_fmt_num(_mrg_peer)}</span>', unsafe_allow_html=True)
-            st.markdown('<div style="border-top:1px solid #222;margin:3px 0 3px 0;"></div>', unsafe_allow_html=True)
+            _p1.markdown(
+                f'<span style="color:{_cor_t_css};font-weight:{_fw_peer};'
+                f'font-size:0.85rem;font-family:var(--font-data,monospace);">{_pt}</span>',
+                unsafe_allow_html=True,
+            )
+            _p2.markdown(
+                f'<span style="font-size:0.8rem;color:var(--text-secondary);">'
+                f'{_nome_peer[:22]}</span>',
+                unsafe_allow_html=True,
+            )
+            for _pc, _pv in zip([_p3, _p4, _p5, _p6], [_pe_peer, _roe_peer, _dy_peer, _mrg_peer]):
+                _pc.markdown(
+                    f'<span style="font-size:0.85rem;color:var(--text-primary);">'
+                    f'{_fmt_num(_pv)}</span>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                '<div style="border-top:1px solid var(--border-subtle);margin:3px 0;"></div>',
+                unsafe_allow_html=True,
+            )
     else:
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.68rem; '
-            'color:#333; padding:8px 0;">'
-            'comparação com peers não disponível via FMP '
-            'para este ticker.'
+            '<div style="font-size:0.72rem;color:var(--text-muted);padding:8px 0;">'
+            'comparação com peers não disponível — sem setor definido para este ativo.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -1623,17 +1675,18 @@ with tab_fund:
                         _media_2h = float(_divs.iloc[_meio:].mean()) if _meio > 0 else _media_div
                         _var_tend  = (_media_2h / _media_1h - 1) * 100 if _media_1h > 0 else 0
 
+                        _cc_div_tend = _chart_cores()
                         if _var_tend >= 5:
                             _tend_label = "📈 crescendo"
-                            _tend_cor   = "#00C853"
+                            _tend_cor   = _cc_div_tend["bull"]
                             _tend_tipo  = "bull"
                         elif _var_tend <= -5:
                             _tend_label = "📉 caindo"
-                            _tend_cor   = "#FF1744"
+                            _tend_cor   = _cc_div_tend["bear"]
                             _tend_tipo  = "bear"
                         else:
                             _tend_label = "➡️ estável"
-                            _tend_cor   = "#FF9900"
+                            _tend_cor   = _cc_div_tend["amber"]
                             _tend_tipo  = "amber"
 
                         _dv1, _dv2, _dv3, _dv4 = st.columns(4)
@@ -1738,6 +1791,83 @@ with tab_fund:
             _descricao_texto[:800] + "..."
             if _descricao_texto and len(str(_descricao_texto)) > 10
             else '_descrição não disponível para este ativo._'
+        )
+
+    # ── EVOLUÇÃO HISTÓRICA DE FUNDAMENTOS (FMP) ──────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("📈 evolução de fundamentos (5 anos — fmp)")
+
+    with st.spinner("carregando histórico de fundamentos..."):
+        _hist_fund = get_multiplos_historicos(t_base, anos=5)
+
+    if _hist_fund:
+        _df_hf = (
+            pd.DataFrame(_hist_fund)
+              .dropna(subset=["data"])
+              .sort_values("data")
+              .reset_index(drop=True)
+        )
+
+        _cc_hf = _chart_cores()
+
+        _metricas_evo = [
+            ("P/L — price to earnings",      "pe",        _cc_hf["accent"]),
+            ("ROE % — retorno s/ patrimônio", "roe",       _cc_hf["bull"]),
+            ("Margem Líquida %",              "margem",    _cc_hf["info"]),
+            ("EV/EBITDA",                     "ev_ebitda", _cc_hf["amber"]),
+        ]
+
+        _evcol1, _evcol2 = st.columns(2)
+        _evcol3, _evcol4 = st.columns(2)
+        _ev_cols = [_evcol1, _evcol2, _evcol3, _evcol4]
+
+        for _evcol, (_evlbl, _evcampo, _evcor) in zip(_ev_cols, _metricas_evo):
+            with _evcol:
+                _df_ev = _df_hf[["data", _evcampo]].dropna()
+                if _df_ev.empty:
+                    st.markdown(
+                        f'<div style="font-size:0.75rem;color:var(--text-muted);'
+                        f'padding:8px 0;">{_evlbl} — sem dados</div>',
+                        unsafe_allow_html=True,
+                    )
+                    continue
+
+                _fig_ev = go.Figure()
+                _fig_ev.add_trace(go.Scatter(
+                    x=_df_ev["data"].tolist(),
+                    y=_df_ev[_evcampo].tolist(),
+                    mode="lines+markers",
+                    line=dict(color=_evcor, width=2),
+                    marker=dict(size=4, color=_evcor),
+                    fill="tozeroy",
+                    fillcolor=f"{_evcor}18",
+                    hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
+                    name=_evlbl,
+                ))
+                _lay_ev = base_layout(height=220, title=_evlbl)
+                _lay_ev.update(
+                    xaxis=dict(
+                        showgrid=False,
+                        tickangle=-30,
+                        tickfont=dict(size=8, color=_cc_hf["muted"]),
+                        linecolor=_cc_hf["border"],
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor=_cc_hf["border"],
+                        tickfont=dict(size=9, color=_cc_hf["muted"]),
+                        zeroline=False,
+                    ),
+                    margin=dict(l=44, r=8, t=36, b=44),
+                )
+                _fig_ev.update_layout(**_lay_ev)
+                st.plotly_chart(_fig_ev, use_container_width=True, config={"responsive": True})
+    else:
+        st.markdown(
+            '<div style="font-size:0.75rem;color:var(--text-muted);padding:12px 0;">'
+            'histórico de fundamentos não disponível via FMP para este ativo.'
+            '</div>',
+            unsafe_allow_html=True,
         )
 
 with tab_dcf:
