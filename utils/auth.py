@@ -101,7 +101,7 @@ def _render_tela_login():
     with col:
         st.markdown('''
             <div style="text-align:center; margin-bottom:32px;">
-                <div style="font-family:Courier New; font-size:2rem; color:#FF9900; font-weight:bold; letter-spacing:0.15em;">
+                <div style="font-family:var(--font-title,'Courier New',monospace); font-size:2rem; color:var(--accent); font-weight:bold; letter-spacing:0.15em;">
                     ⚡ finterminal
                 </div>
                 <div style="font-family:Courier New; font-size:0.78rem; color:#333; text-transform:uppercase; letter-spacing:0.2em; margin-top:4px;">
@@ -112,7 +112,7 @@ def _render_tela_login():
 
         with st.container():
             st.markdown('''
-                <div style="background:#0d0d0d; border:1px solid #1e1e1e; border-top:2px solid #FF9900; border-radius:6px; padding:24px 28px; margin-bottom:16px;">
+                <div style="background:var(--bg-surface); border:1px solid var(--border-normal); border-top:2px solid var(--accent); border-radius:var(--radius-md); padding:24px 28px; margin-bottom:16px;">
                     <div style="font-family:Courier New; font-size:0.75rem; color:#555; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:16px;">
                         🔒 acesso restrito
                     </div>

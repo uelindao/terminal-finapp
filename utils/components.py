@@ -39,10 +39,10 @@ def page_header(titulo: str, subtitulo: str = ""):
     st.markdown(
         f'<div style="margin-bottom: 16px;">'
         f'<div style="'
-        f'font-family: Courier New, monospace; '
+        f'font-family: var(--font-title, "Courier New", monospace); '
         f'font-size: 1.3rem; '
         f'font-weight: 700; '
-        f'color: #FF9900; '
+        f'color: var(--accent); '
         f'letter-spacing: 0.05em;">'
         f'{titulo}</div>'
         + (
@@ -66,11 +66,11 @@ def section_title(titulo: str):
         f'<div style="'
         f'font-family: Courier New, monospace; '
         f'font-size: 0.72rem; '
-        f'color: #FF9900; '
+        f'color: var(--accent); '
         f'text-transform: uppercase; '
         f'letter-spacing: 0.12em; '
         f'font-weight: 600; '
-        f'border-left: 2px solid #FF9900; '
+        f'border-left: 2px solid var(--accent); '
         f'padding-left: 8px; '
         f'margin: 16px 0 8px 0;">'
         f'{titulo}'
@@ -83,7 +83,7 @@ def _fonte_badge(fonte: str = "") -> str:
     if not fonte:
         return ""
     icone = "📦" if fonte == "cache" else "📡"
-    cor = "#4CAF50" if fonte == "cache" else "#FF9900"
+    cor = "var(--bull)" if fonte == "cache" else "var(--accent)"
     return f'<span style="font-size:0.55rem; color:{cor}; margin-left:5px; font-weight:400; opacity:0.7;">{icone} {fonte}</span>'
 
 
@@ -111,21 +111,21 @@ def metric_card(
     data_source: "cache" | "api" → mostra badge de origem
     """
     _cores = {
-        "bull":  {"borda": "#00C853", "valor": "#00C853",
-                  "bg": "#001a0a", "bg_dest": "#002a10",
-                  "sublabel": "#2d6e42"},
-        "bear":  {"borda": "#FF1744", "valor": "#FF1744",
-                  "bg": "#1a0005", "bg_dest": "#2a000a",
-                  "sublabel": "#7a2030"},
-        "amber": {"borda": "#FF9900", "valor": "#FF9900",
-                  "bg": "#0d0d0d", "bg_dest": "#1a0f00",
-                  "sublabel": "#7a5500"},
-        "info":  {"borda": "#00B0FF", "valor": "#00B0FF",
-                  "bg": "#00080d", "bg_dest": "#00101a",
-                  "sublabel": "#005580"},
-        "muted": {"borda": "#2a2a2a", "valor": "#C0C0C0",
-                  "bg": "#0d0d0d", "bg_dest": "#141414",
-                  "sublabel": "#444"},
+        "bull":  {"borda": "var(--bull)",  "valor": "var(--bull)",
+                  "bg": "var(--bull-soft)", "bg_dest": "var(--bull-soft)",
+                  "sublabel": "var(--bull)"},
+        "bear":  {"borda": "var(--bear)",  "valor": "var(--bear)",
+                  "bg": "var(--bear-soft)", "bg_dest": "var(--bear-soft)",
+                  "sublabel": "var(--bear)"},
+        "amber": {"borda": "var(--amber)", "valor": "var(--amber)",
+                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
+                  "sublabel": "var(--amber)"},
+        "info":  {"borda": "var(--info)",  "valor": "var(--info)",
+                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
+                  "sublabel": "var(--info)"},
+        "muted": {"borda": "var(--border-subtle)", "valor": "var(--text-secondary)",
+                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
+                  "sublabel": "var(--text-muted)"},
     }
     _c = _cores.get(cor_delta, _cores["muted"])
 
@@ -142,17 +142,17 @@ def metric_card(
     st.markdown(
         f'<div style="'
         f'background:{_bg}; '
-        f'border:1px solid #1e1e1e; '
+        f'border:1px solid var(--border-subtle); '
         f'border-left:3px solid {_c["borda"]}; '
-        f'border-radius:6px; '
+        f'border-radius:var(--radius-sm); '
         f'padding:{_pad}; '
         f'margin-bottom:4px; '
         f'transition:border-color .2s;">'
 
         f'<div style="'
-        f'font-family:Courier New; '
+        f'font-family:var(--font-ui); '
         f'font-size:{_sz_label}; '
-        f'color:#555; '
+        f'color:var(--text-muted); '
         f'text-transform:uppercase; '
         f'letter-spacing:.08em; '
         f'margin-bottom:4px;">'
@@ -198,11 +198,11 @@ def status_card(
       "muted" → fundo cinza
     """
     _mapa_status = {
-        "bull":  ("#00C853", "#001a0a", "✅"),
-        "bear":  ("#FF1744", "#1a0005", "⚠️"),
-        "amber": ("#FF9900", "#0d0800", "💡"),
-        "info":  ("#00B0FF", "#00080d", "ℹ️"),
-        "muted": ("#444444", "#0d0d0d", "📋"),
+        "bull":  ("var(--bull)",  "var(--bull-soft)",  "✅"),
+        "bear":  ("var(--bear)",  "var(--bear-soft)",  "⚠️"),
+        "amber": ("var(--amber)", "var(--bg-elevated)", "💡"),
+        "info":  ("var(--info)",  "var(--bg-elevated)", "ℹ️"),
+        "muted": ("var(--text-muted)", "var(--bg-surface)", "📋"),
     }
     _cor, _bg, _icone_def = _mapa_status.get(tipo, _mapa_status["amber"])
     _ic = icone or _icone_def
@@ -210,14 +210,14 @@ def status_card(
     st.markdown(
         f'<div style="'
         f'background:{_bg}; '
-        f'border:1px solid {_cor}33; '
+        f'border:1px solid var(--border-subtle); '
         f'border-left:4px solid {_cor}; '
-        f'border-radius:6px; '
+        f'border-radius:var(--radius-sm); '
         f'padding:14px 18px; '
         f'margin:8px 0;">'
 
         f'<div style="'
-        f'font-family:Courier New; '
+        f'font-family:var(--font-ui); '
         f'font-size:0.75rem; '
         f'color:{_cor}; '
         f'font-weight:700; '
@@ -227,9 +227,9 @@ def status_card(
         f'{_ic} {titulo}</div>'
 
         f'<div style="'
-        f'font-family:Courier New; '
+        f'font-family:var(--font-ui); '
         f'font-size:0.80rem; '
-        f'color:#aaa; '
+        f'color:var(--text-secondary); '
         f'line-height:1.7;">'
         f'{corpo}</div>'
 

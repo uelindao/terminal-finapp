@@ -381,23 +381,23 @@ with st.sidebar:
     _pos = _regime_dict.get("posicionamento", "")
 
     _cor_regime = (
-        "#FF1744" if "stress" in _regime_label
-        else "#FF9900" if "altos" in _regime_label
-        else "#00C853"
+        "var(--bear)" if "stress" in _regime_label
+        else "var(--amber)" if "altos" in _regime_label
+        else "var(--bull)"
     )
     _vix_val = _regime_dict.get("vix", 15.0)
     _icone_vix = "🔴" if _vix_val > 25 else ("🟡" if _vix_val > 18 else "🟢")
-    _cor_score = "#00C853" if _score_amb >= 60 else ("#FF9900" if _score_amb >= 35 else "#FF1744")
+    _cor_score = "var(--bull)" if _score_amb >= 60 else ("var(--amber)" if _score_amb >= 35 else "var(--bear)")
 
     _html = [
-        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};border-radius:6px;padding:12px 20px;margin-bottom:20px;">',
+        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-left:3px solid {_cor_regime};border-radius:var(--radius-md);padding:12px 20px;margin-bottom:20px;">',
         f'<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">',
-        f'<div style="font-family:Courier New;font-size:0.68rem;color:#555;text-transform:uppercase;letter-spacing:.1em;min-width:80px;">regime macro</div>',
-        f'<div style="font-family:Courier New;font-size:0.82rem;color:{_cor_regime};font-weight:600;">{_regime_label}</div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">score amb.</div><div style="font-size:0.9rem;color:{_cor_score};font-family:Courier New;font-weight:600;">{_score_amb}</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">selic</div><div style="font-size:0.9rem;color:#FF9900;font-family:Courier New;font-weight:600;">{_regime_dict.get("selic", 10.75):.2f}%</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">ipca</div><div style="font-size:0.9rem;color:#ccc;font-family:Courier New;">{_regime_dict.get("ipca", 4.5):.1f}%</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:#444;text-transform:uppercase;">vix {_icone_vix}</div><div style="font-size:0.9rem;color:#ccc;font-family:Courier New;">{_regime_dict.get("vix", 15.0):.1f}</div></div>',
+        f'<div style="font-family:var(--font-ui);font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;min-width:80px;">regime macro</div>',
+        f'<div style="font-family:var(--font-ui);font-size:0.82rem;color:{_cor_regime};font-weight:600;">{_regime_label}</div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">score amb.</div><div style="font-size:0.9rem;color:{_cor_score};font-family:var(--font-data);font-weight:600;">{_score_amb}</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">selic</div><div style="font-size:0.9rem;color:var(--accent);font-family:var(--font-data);font-weight:600;">{_regime_dict.get("selic", 10.75):.2f}%</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">ipca</div><div style="font-size:0.9rem;color:var(--text-secondary);font-family:var(--font-data);">{_regime_dict.get("ipca", 4.5):.1f}%</div></div>',
+        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">vix {_icone_vix}</div><div style="font-size:0.9rem;color:var(--text-secondary);font-family:var(--font-data);">{_regime_dict.get("vix", 15.0):.1f}</div></div>',
         '</div>',
     ]
 
@@ -406,24 +406,24 @@ with st.sidebar:
 
         if _fav:
             fav_spans = ''.join(
-                f'<span style="background:#003300;color:#00C853;font-family:Courier New;font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
+                f'<span style="background:var(--bull-soft);color:var(--bull);font-family:var(--font-ui);font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
                 for s in _fav
             )
             _html.append(
                 f'<div style="flex:1;min-width:120px;">'
-                f'<div style="font-size:0.62rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos</div>'
+                f'<div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{fav_spans}</div>'
                 f'</div>'
             )
 
         if _prej:
             prej_spans = ''.join(
-                f'<span style="background:#330000;color:#FF1744;font-family:Courier New;font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
+                f'<span style="background:var(--bear-soft);color:var(--bear);font-family:var(--font-ui);font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
                 for s in _prej
             )
             _html.append(
                 f'<div style="flex:1;min-width:120px;">'
-                f'<div style="font-size:0.62rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados</div>'
+                f'<div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{prej_spans}</div>'
                 f'</div>'
             )
@@ -432,7 +432,7 @@ with st.sidebar:
 
     if _pos:
         _html.append(
-            f'<div style="font-family:Courier New;font-size:0.65rem;color:#666;margin-top:8px;border-top:1px solid #1e1e1e;padding-top:6px;">{_pos}</div>'
+            f'<div style="font-family:var(--font-ui);font-size:0.65rem;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:6px;">{_pos}</div>'
         )
 
     _html.append('</div>')
@@ -462,8 +462,8 @@ if _tickers_earn:
 
         with _earn_cols[0]:
             st.markdown(
-                '<div style="font-family:Courier New;'
-                'font-size:0.68rem;color:#FF9900;'
+                '<div style="font-family:var(--font-ui);'
+                'font-size:0.68rem;color:var(--accent);'
                 'margin-bottom:8px;font-weight:600;">'
                 '📅 próximos 14 dias</div>',
                 unsafe_allow_html=True,
@@ -473,9 +473,9 @@ if _tickers_earn:
                 for _ep in _earn_prox:
                     _dias_ep = _ep['dias']
                     _cor_ep  = (
-                        "#FF1744" if _dias_ep <= 2
-                        else "#FF9900" if _dias_ep <= 7
-                        else "#888"
+                        "var(--bear)" if _dias_ep <= 2
+                        else "var(--amber)" if _dias_ep <= 7
+                        else "var(--text-muted)"
                     )
                     _urgencia = (
                         "HOJE" if _dias_ep == 0
@@ -484,9 +484,9 @@ if _tickers_earn:
                     )
                     _hs_ep  = _ep['score_hs']
                     _cor_hs = (
-                        "#00C853" if _hs_ep >= 65
-                        else "#FF9900" if _hs_ep >= 40
-                        else "#FF1744"
+                        "var(--bull)" if _hs_ep >= 65
+                        else "var(--amber)" if _hs_ep >= 40
+                        else "var(--bear)"
                     )
 
                     st.markdown(
@@ -502,8 +502,8 @@ if _tickers_earn:
                         f'<a href="{ticker_nav_url(_ep["ticker"])}" class="ticker-nav" '
                         f'style="font-size:0.82rem;" title="abrir research">'
                         f'{_ep["ticker"].replace(".SA","")}</a>'
-                        f'<div style="font-family:Courier New;'
-                        f'font-size:0.65rem;color:#555;">'
+                        f'<div style="font-family:var(--font-ui);'
+                        f'font-size:0.65rem;color:var(--text-muted);">'
                         f'{_ep["data_str"]}</div>'
                         f'</div>'
 
@@ -549,34 +549,34 @@ if _tickers_earn:
                 for _er in _earn_rec[:5]:
                     _hs_er  = _er['score_hs']
                     _cor_hs = (
-                        "#00C853" if _hs_er >= 65
-                        else "#FF9900" if _hs_er >= 40
-                        else "#FF1744"
+                        "var(--bull)" if _hs_er >= 65
+                        else "var(--amber)" if _hs_er >= 40
+                        else "var(--bear)"
                     )
                     st.markdown(
-                        f'<div style="background:#0d0d0d;'
-                        f'border:1px solid #1e1e1e;'
-                        f'border-left:3px solid #333;'
-                        f'border-radius:4px;padding:8px 12px;'
+                        f'<div style="background:var(--bg-surface);'
+                        f'border:1px solid var(--border-subtle);'
+                        f'border-left:3px solid var(--border-normal);'
+                        f'border-radius:var(--radius-sm);padding:8px 12px;'
                         f'margin-bottom:6px;display:flex;'
                         f'justify-content:space-between;'
                         f'align-items:center;">'
 
                         f'<div>'
-                        f'<div style="font-family:Courier New;'
+                        f'<div style="font-family:var(--font-data);'
                         f'font-size:0.82rem;font-weight:700;'
-                        f'color:#ccc;">'
+                        f'color:var(--text-primary);">'
                         f'{_er["ticker"].replace(".SA","")}</div>'
-                        f'<div style="font-family:Courier New;'
-                        f'font-size:0.65rem;color:#555;">'
+                        f'<div style="font-family:var(--font-ui);'
+                        f'font-size:0.65rem;color:var(--text-muted);">'
                         f'{_er["data_str"]}</div>'
                         f'</div>'
 
                         f'<div style="text-align:right;">'
-                        f'<div style="font-family:Courier New;'
-                        f'font-size:0.65rem;color:#555;">'
+                        f'<div style="font-family:var(--font-ui);'
+                        f'font-size:0.65rem;color:var(--text-muted);">'
                         f'há {_er["dias_atras"]} dias</div>'
-                        f'<div style="font-family:Courier New;'
+                        f'<div style="font-family:var(--font-ui);'
                         f'font-size:0.65rem;color:{_cor_hs};">'
                         f'hs: {_hs_er}/100</div>'
                         f'</div>'
@@ -586,8 +586,8 @@ if _tickers_earn:
                     )
             else:
                 st.markdown(
-                    '<div style="font-family:Courier New;'
-                    'font-size:0.72rem;color:#333;padding:8px 0;">'
+                    '<div style="font-family:var(--font-ui);'
+                    'font-size:0.72rem;color:var(--text-muted);padding:8px 0;">'
                     'nenhum resultado recente.'
                     '</div>',
                     unsafe_allow_html=True,
@@ -654,7 +654,7 @@ if _tickers_wl_home:
         label_com_tooltip(
             "⚡ OPORTUNIDADES DO MOMENTO — SUA WATCHLIST",
             chave="score_assimetria",
-            cor="#FF9900",
+            cor="var(--accent)",
             tamanho="0.72rem",
         )
 
@@ -663,22 +663,22 @@ if _tickers_wl_home:
             _badge  = _badges[_rank] if _rank < 5 else ""
 
             st.markdown(
-                f'<div style="background:#0d0d0d; '
-                f'border:1px solid #1e1e1e; '
-                f'border-top:2px solid #FF9900; '
-                f'border-radius:6px; padding:16px; '
+                f'<div style="background:var(--bg-surface); '
+                f'border:1px solid var(--border-subtle); '
+                f'border-top:2px solid var(--accent); '
+                f'border-radius:var(--radius-md); padding:16px; '
                 f'height:100%;">'
 
                 f'<div style="display:flex; justify-content:space-between; '
                 f'align-items:center; margin-bottom:6px;">'
-                f'<span style="font-family:Courier New; font-size:1rem; '
-                f'font-weight:700; color:#FF9900;">'
+                f'<span style="font-family:var(--font-data); font-size:1rem; '
+                f'font-weight:700; color:var(--accent);">'
                 f'{_opp["ticker"].replace(".SA","")}</span>'
                 f'<span style="font-size:1.1rem;">{_badge}</span>'
                 f'</div>'
 
-                f'<div style="font-family:Courier New; font-size:0.68rem; '
-                f'color:#444; margin-bottom:12px; line-height:1.4;">'
+                f'<div style="font-family:var(--font-ui); font-size:0.68rem; '
+                f'color:var(--text-muted); margin-bottom:12px; line-height:1.4;">'
                 f'{_opp["nome"].lower()}<br>'
                 f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
                 f'</div>'
@@ -695,21 +695,21 @@ if _tickers_wl_home:
                 f'<div style="text-align:center;">'
                 f'<div style="font-size:0.58rem;color:#444;">RSI</div>'
                 f'<div style="font-family:Courier New;font-size:0.75rem;'
-                f'color:{"#00C853" if 35 <= _opp["rsi"] <= 55 else "#FF9900"};">'
+                f'color:{"var(--bull)" if 35 <= _opp["rsi"] <= 55 else "var(--amber)"};">'
                 f'{_opp["rsi"]:.0f}</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
                 f'<div style="font-size:0.58rem;color:#444;">5d</div>'
                 f'<div style="font-family:Courier New;font-size:0.75rem;'
-                f'color:{"#00C853" if _opp["ret_5d"] >= 0 else "#FF1744"};">'
+                f'color:{"var(--bull)" if _opp["ret_5d"] >= 0 else "var(--bear)"};">'
                 f'{_opp["ret_5d"]:+.1f}%</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
                 f'<div style="font-size:0.58rem;color:#444;">3m</div>'
                 f'<div style="font-family:Courier New;font-size:0.75rem;'
-                f'color:{"#00C853" if _opp["ret_3m"] >= 0 else "#FF1744"};">'
+                f'color:{"var(--bull)" if _opp["ret_3m"] >= 0 else "var(--bear)"};">'
                 f'{_opp["ret_3m"]:+.1f}%</div>'
                 f'</div>'
 
@@ -746,17 +746,17 @@ if _tickers_wl_home:
             for _bl, _bv, _bmax, _bstr in _items:
                 _bpct = min(100, int(_bv / _bmax * 100)) if _bmax > 0 else 0
                 _bcor = (
-                    "#00C853" if _bpct >= 70
-                    else "#FF9900" if _bpct >= 40
-                    else "#555"
+                    "var(--bull)" if _bpct >= 70
+                    else "var(--amber)" if _bpct >= 40
+                    else "var(--text-muted)"
                 )
                 _html += (
                     f'<div style="display:flex;justify-content:space-between;'
                     f'margin-bottom:3px;">'
-                    f'<span style="font-size:0.62rem;color:#444;'
-                    f'font-family:Courier New;">{_bl}</span>'
+                    f'<span style="font-size:0.62rem;color:var(--text-muted);'
+                    f'font-family:var(--font-ui);">{_bl}</span>'
                     f'<span style="font-size:0.68rem;color:{_bcor};'
-                    f'font-family:Courier New;font-weight:600;">{_bstr}</span>'
+                    f'font-family:var(--font-data);font-weight:600;">{_bstr}</span>'
                     f'</div>'
                     f'<div style="background:#111;border-radius:2px;'
                     f'height:2px;margin-bottom:5px;">'
@@ -1154,27 +1154,34 @@ def calcular_ambiente_macro(selic, vix, t10y2y, hy_spread,
 
     score = min(max(int(score), 0), 100)
 
+    try:
+        from utils.themes import get_chart_colors as _gcc
+        _tc = _gcc()
+        _cor_bull, _cor_amber, _cor_bear = _tc["bull"], _tc["amber"], _tc["bear"]
+    except Exception:
+        _cor_bull, _cor_amber, _cor_bear = "#4ADE80", "#FBBF24", "#F87171"
+
     if score >= 70:
         label = "RISK ON"
-        cor   = "#00C853"
+        cor   = _cor_bull
         tipo  = "bull"
         descr = ("ambiente favorável ao risco. indicadores macro "
                  "alinhados para ativos de crescimento.")
     elif score >= 50:
         label = "NEUTRO"
-        cor   = "#FF9900"
+        cor   = _cor_amber
         tipo  = "amber"
         descr = ("ambiente misto. seletividade é essencial. "
                  "prefira ativos de qualidade comprovada.")
     elif score >= 35:
         label = "CAUTELOSO"
-        cor   = "#FF9900"
+        cor   = _cor_amber
         tipo  = "amber"
         descr = ("sinais de alerta presentes. reduza exposição "
                  "especulativa e eleve qualidade da carteira.")
     else:
         label = "RISK OFF"
-        cor   = "#FF1744"
+        cor   = _cor_bear
         tipo  = "bear"
         descr = ("ambiente hostil ao risco. priorize caixa, "
                  "renda fixa curta e ativos defensivos.")
@@ -1273,19 +1280,19 @@ with col_sinais_mac:
     section_title("sinais individuais")
 
     for nome, status, tipo_s, valor in ambiente['sinais']:
-        cor_s  = ("#00C853" if tipo_s == "bull" else
-                  "#FF1744" if tipo_s == "bear" else "#FF9900")
+        cor_s  = ("var(--bull)" if tipo_s == "bull" else
+                  "var(--bear)" if tipo_s == "bear" else "var(--amber)")
         icone  = ("✅" if tipo_s == "bull" else
                   "🚨" if tipo_s == "bear" else "⚠️")
         st.markdown(
             f'<div style="display:flex; justify-content:space-between; align-items:center; '
-            f'padding:6px 0; border-bottom:1px solid #111;">'
-            f'<span style="font-family:Courier New; font-size:0.75rem; color:#555; '
+            f'padding:6px 0; border-bottom:1px solid var(--border-subtle);">'
+            f'<span style="font-family:var(--font-ui); font-size:0.75rem; color:var(--text-muted); '
             f'text-transform:uppercase; letter-spacing:0.06em;">{nome}</span>'
-            f'<span style="font-family:Courier New; font-size:0.78rem; '
+            f'<span style="font-family:var(--font-ui); font-size:0.78rem; '
             f'color:{cor_s};">{icone} {status}</span>'
-            f'<span style="font-family:Courier New; font-size:0.75rem; '
-            f'color:#333;">{valor}</span>'
+            f'<span style="font-family:var(--font-data); font-size:0.75rem; '
+            f'color:var(--text-muted);">{valor}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1350,15 +1357,15 @@ if proximos_eventos:
     hoje_home = dt_module.date.today()
     for i, ev in enumerate(proximos_eventos):
         dias = (ev['data'] - hoje_home).days
-        cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E"}.get(ev['categoria'], "#555")
-        cor_dias = "#FF1744" if dias <= 3 else ("#FF9900" if dias <= 7 else "#555")
+        cor_cat = {"brasil": "#22C55E", "eua": "#60A5FA"}.get(ev['categoria'], "var(--text-muted)")
+        cor_dias = "var(--bear)" if dias <= 3 else ("var(--amber)" if dias <= 7 else "var(--text-muted)")
         icone_imp = "🔴" if ev['impacto'] == 'alto' else "🟡"
         with ev_cols[i]:
-            st.markdown(f'''<div style="background:#0d0d0d; border:1px solid #1e1e1e; border-top:2px solid {cor_cat}; border-radius:6px; padding:12px; text-align:center;">
-            <div style="font-family:Courier New; font-size:0.68rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{ev['categoria']}</div>
-            <div style="font-family:Courier New; font-size:0.85rem; color:#E0E0E0; margin:6px 0;">{icone_imp} {ev['evento']}</div>
-            <div style="font-family:Courier New; font-size:0.75rem; color:{cor_dias};">{ev['data'].strftime('%d/%m/%Y')}</div>
-            <div style="font-family:Courier New; font-size:0.68rem; color:#555; margin-top:2px;">em {dias} dias</div>
+            st.markdown(f'''<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-top:2px solid {cor_cat}; border-radius:var(--radius-md); padding:12px; text-align:center;">
+            <div style="font-family:var(--font-ui); font-size:0.68rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{ev['categoria']}</div>
+            <div style="font-family:var(--font-ui); font-size:0.85rem; color:var(--text-primary); margin:6px 0;">{icone_imp} {ev['evento']}</div>
+            <div style="font-family:var(--font-data); font-size:0.75rem; color:{cor_dias};">{ev['data'].strftime('%d/%m/%Y')}</div>
+            <div style="font-family:var(--font-ui); font-size:0.68rem; color:var(--text-muted); margin-top:2px;">em {dias} dias</div>
             </div>''', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -1550,7 +1557,7 @@ def _dialog_remover_ativo(ticker: str, watchlist_id: int):
     _label = ticker.replace('.SA', '').upper()
     st.markdown(
         f'<div style="font-family:Courier New; font-size:0.9rem; color:#ccc; padding:8px 0;">'
-        f'remover <strong style="color:#FF9900;">{_label}</strong> da watchlist?</div>',
+        f'remover <strong style="color:var(--amber);">{_label}</strong> da watchlist?</div>',
         unsafe_allow_html=True,
     )
     c1, c2 = st.columns(2)
@@ -1567,11 +1574,11 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
 
     st.markdown(f"#### ativo: {ticker_nome.lower()}")
 
-    cor_score = "#00C853" if score_final >= 65 else ("#FF9900" if score_final >= 40 else "#FF1744")
+    cor_score = "var(--bull)" if score_final >= 65 else ("var(--amber)" if score_final >= 40 else "var(--bear)")
     st.markdown(
-        f"<div style='font-size:2rem; font-family:Courier New; font-weight:bold; "
-        f"color:{cor_score}; text-align:center; padding:10px; background:#111; "
-        f"border-radius:8px; margin-bottom:20px;'>{score_final:.0f} / 100</div>",
+        f"<div style='font-size:2rem; font-family:var(--font-data); font-weight:bold; "
+        f"color:{cor_score}; text-align:center; padding:10px; background:var(--bg-surface); "
+        f"border-radius:var(--radius-md); margin-bottom:20px;'>{score_final:.0f} / 100</div>",
         unsafe_allow_html=True,
     )
 
@@ -1595,18 +1602,18 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
             if eh_pilar and pts_num is not None:
                 if pts_num == 0 and "penalidade" in pilar.lower():
                     continue
-                cor_pts = "#00C853" if pts_num > 0 else ("#FF1744" if pts_num < 0 else "#666")
+                cor_pts = "var(--bull)" if pts_num > 0 else ("var(--bear)" if pts_num < 0 else "var(--text-muted)")
                 sinal   = "+" if pts_num > 0 else ""
                 st.markdown(
                     f"<div style='display:flex; justify-content:space-between; "
-                    f"border-bottom:1px solid #222; padding:4px 0;'>"
-                    f"<span style='color:#ccc;'>{pilar.lower()}</span> "
-                    f"<span style='color:{cor_pts}; font-family:Courier New; font-weight:bold;'>"
+                    f"border-bottom:1px solid var(--border-subtle); padding:4px 0;'>"
+                    f"<span style='color:var(--text-secondary);'>{pilar.lower()}</span> "
+                    f"<span style='color:{cor_pts}; font-family:var(--font-data); font-weight:bold;'>"
                     f"{sinal}{pts_num:.0f} pts</span></div>",
                     unsafe_allow_html=True,
                 )
             elif isinstance(v, str) and v not in ('n/d', '—', 'None', '', 'nan'):
-                cor_v = "#00C853" if v.startswith('+') else ("#FF1744" if v.startswith('-') else "#555")
+                cor_v = "var(--bull)" if v.startswith('+') else ("var(--bear)" if v.startswith('-') else "var(--text-muted)")
                 st.markdown(
                     f"<div style='display:flex; justify-content:space-between; "
                     f"padding:3px 0; font-family:Courier New; font-size:0.72rem;'>"

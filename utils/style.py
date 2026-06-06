@@ -26,37 +26,39 @@ def aplicar_tema():
 
     import streamlit.components.v1 as _comp_topo
     _comp_topo.html("""
-    <style>
-    #btn-topo {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        background: #FF9900;
-        color: #000;
-        border: none;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        font-size: 1.1rem;
-        cursor: pointer;
-        display: none;
-        z-index: 9999;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-        transition: opacity 0.2s;
-    }
-    #btn-topo:hover { background: #ffb300; }
-    </style>
-
-    <button id="btn-topo" onclick="window.scrollTo({top:0,behavior:'smooth'})"
-            title="voltar ao topo">↑</button>
-
     <script>
-    window.addEventListener('scroll', function() {
-        var btn = document.getElementById('btn-topo');
-        if (btn) {
-            btn.style.display = window.scrollY > 400 ? 'block' : 'none';
-        }
-    });
+    (function() {
+        // Injeta botão scroll-to-top no documento pai (mesma origem)
+        var parent = window.parent || window;
+        if (parent.document.getElementById('ft-btn-topo')) return;
+
+        var style = parent.document.createElement('style');
+        style.textContent = [
+            '#ft-btn-topo{',
+            '  position:fixed; bottom:24px; right:24px;',
+            '  width:38px; height:38px; border-radius:50%;',
+            '  border:1px solid var(--accent-border,rgba(255,140,0,.3));',
+            '  background:var(--bg-elevated,#242424);',
+            '  color:var(--accent,#FF8C00);',
+            '  font-size:1rem; cursor:pointer; display:none;',
+            '  z-index:9999; box-shadow:0 2px 10px rgba(0,0,0,.5);',
+            '  transition:all .18s ease; align-items:center; justify-content:center;',
+            '}',
+            '#ft-btn-topo:hover{background:var(--accent-soft);transform:translateY(-2px);}',
+        ].join('');
+        parent.document.head.appendChild(style);
+
+        var btn = parent.document.createElement('button');
+        btn.id = 'ft-btn-topo';
+        btn.title = 'voltar ao topo';
+        btn.textContent = '↑';
+        btn.onclick = function(){ parent.window.scrollTo({top:0, behavior:'smooth'}); };
+        parent.document.body.appendChild(btn);
+
+        parent.window.addEventListener('scroll', function(){
+            btn.style.display = parent.window.scrollY > 400 ? 'flex' : 'none';
+        });
+    })();
     </script>
     """, height=0)
 

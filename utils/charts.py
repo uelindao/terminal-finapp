@@ -10,8 +10,8 @@ import streamlit as st
 
 # ── Paleta fallback (quando tema não disponível) ──────────────────────────────
 CORES_SERIES = [
-    "#FF8C00", "#3B82F6", "#10B981", "#EF4444",
-    "#8B5CF6", "#06B6D4", "#F59E0B", "#EC4899",
+    "#60A5FA", "#10B981", "#F59E0B", "#EF4444",
+    "#8B5CF6", "#06B6D4", "#FB923C", "#EC4899",
 ]
 
 
@@ -22,7 +22,7 @@ def _cores() -> dict:
         return get_chart_colors()
     except Exception:
         return {
-            "accent":   "#FF8C00",
+            "accent":   "#60A5FA",
             "bull":     "#10B981",
             "bear":     "#EF4444",
             "amber":    "#F59E0B",

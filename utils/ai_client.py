@@ -356,8 +356,8 @@ def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
     if tier == 'pro':
         tier_badge = (
             '<span style="font-family:var(--font-ui,Inter,sans-serif);'
-            ' font-size:0.58rem; font-weight:700; color:#FF8C00;'
-            ' border:1px solid rgba(255,140,0,0.35);'
+            ' font-size:0.58rem; font-weight:700; color:var(--accent);'
+            ' border:1px solid var(--accent-border);'
             ' padding:1px 7px; border-radius:10px;'
             ' margin-right:8px; vertical-align:middle;">PRO</span>'
         )
@@ -390,7 +390,7 @@ def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
         st.markdown(
             '<style>'
             '@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}'
-            '.ft-cursor{animation:blink 1s infinite;color:#FF9900;}'
+            '.ft-cursor{animation:blink 1s infinite;color:var(--accent);}'
             '</style>',
             unsafe_allow_html=True,
         )
@@ -401,7 +401,7 @@ def _stream_para_ui(client, kwargs: dict, tier: str = 'free') -> str:
             placeholder.markdown(
                 f'<div style="margin-top:4px;">{tier_badge}'
                 f'<span class="ft-cursor" style="font-family:\'Courier New\','
-                f'monospace; font-size:0.83rem; color:#FF9900;">▋</span></div>',
+                f'monospace; font-size:0.83rem; color:var(--accent);">▋</span></div>',
                 unsafe_allow_html=True,
             )
 
