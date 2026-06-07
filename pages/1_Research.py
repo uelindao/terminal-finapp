@@ -1915,7 +1915,7 @@ with tab_dcf:
         with _fv1:
             _ntnb_input = st.number_input(
                 "yield ntn-b real (% a.a.)",
-                value=float(_ntnb_dcf),
+                value=float(max(2.0, min(12.0, _ntnb_dcf or 6.5))),
                 min_value=2.0,
                 max_value=12.0,
                 step=0.1,
@@ -1942,7 +1942,7 @@ with tab_dcf:
         with _fv4:
             _ipca_input = st.number_input(
                 "ipca esperado (%)",
-                value=float(_ipca_dcf),
+                value=float(max(1.0, min(12.0, _ipca_dcf or 4.5))),
                 min_value=1.0,
                 max_value=12.0,
                 step=0.1,
