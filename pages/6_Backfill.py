@@ -638,7 +638,7 @@ def _cobertura_atual() -> pd.DataFrame:
         if not rows:
             return pd.DataFrame(columns=["ticker", "pontos", "inicio", "fim"])
         df = pd.DataFrame(rows)
-        df["calculado_em"] = pd.to_datetime(df["calculado_em"], utc=True)
+        df["calculado_em"] = pd.to_datetime(df["calculado_em"], format="ISO8601", utc=True)
         agg = df.groupby("ticker")["calculado_em"].agg(
             pontos="count",
             inicio="min",
