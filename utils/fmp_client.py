@@ -126,6 +126,152 @@ def _safe_float(val) -> float | None:
 
 # ── Múltiplos históricos ──────────────────────────────────────────────────────
 
+def _row(df, *nomes):
+    """Retorna a primeira linha de df cujo nome (case-insensitive) está em nomes."""
+    for nome in nomes:
+        for idx in df.index:
+            if str(idx).lower().replace(" ", "") == nome.lower().replace(" ", ""):
+                return df.loc[idx]
+    return None
+
+
+def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
+    """
+    Fallback yfinance para histórico de fundamentos quando FMP retorna vazio.
+    Computa P/L, ROE, Margem e EV/EBITDA a partir de demonstrações anuais + preços históricos.
+    Funciona bem para ativos .SA onde FMP free-tier é limitado.
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        tk   = yf.Ticker(ticker)
+        info = tk.info or {}
+
+        fin = tk.financials    # colunas = datas fiscais anuais, linhas = métricas
+        bal = tk.balance_sheet
+
+        if fin is None or fin.empty:
+            return []
+
+        shares = (
+            info.get("sharesOutstanding")
+            or info.get("impliedSharesOutstanding")
+            or info.get("floatShares")
+        )
+        if not shares or shares <= 0:
+            shares = None
+
+        # Preços mensais para estimar market cap na data fiscal
+        try:
+            hist_px = tk.history(period=f"{anos + 1}y", interval="1mo")["Close"].dropna()
+            if hasattr(hist_px.index, "tz") and hist_px.index.tz is not None:
+                hist_px.index = hist_px.index.tz_localize(None)
+        except Exception:
+            hist_px = pd.Series(dtype=float)
+
+        resultados = []
+        colunas = list(fin.columns)[:anos]  # mais recentes primeiro
+
+        for col in colunas:
+            try:
+                dt_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)[:10]
+
+                # ── Demonstração de resultado ──────────────────────────
+                net_income = None
+                for row_name in ("Net Income", "Net Income Common Stockholders",
+                                 "Net Income Including Noncontrolling Interests"):
+                    s = _row(fin, row_name)
+                    if s is not None and col in s.index:
+                        net_income = s[col]
+                        break
+
+                revenue = None
+                for row_name in ("Total Revenue", "Revenue"):
+                    s = _row(fin, row_name)
+                    if s is not None and col in s.index:
+                        revenue = s[col]
+                        break
+
+                ebitda = None
+                s_ebitda = _row(fin, "EBITDA")
+                if s_ebitda is not None and col in s_ebitda.index:
+                    ebitda = s_ebitda[col]
+
+                # ── Balanço patrimonial ────────────────────────────────
+                equity = total_debt = cash = None
+                if bal is not None and not bal.empty and col in bal.columns:
+                    for row_name in ("Stockholders Equity", "Common Stock Equity",
+                                     "Total Stockholder Equity"):
+                        s = _row(bal, row_name)
+                        if s is not None and col in s.index:
+                            equity = s[col]
+                            break
+                    for row_name in ("Total Debt", "Long Term Debt"):
+                        s = _row(bal, row_name)
+                        if s is not None and col in s.index:
+                            total_debt = s[col]
+                            break
+                    for row_name in ("Cash And Cash Equivalents", "Cash",
+                                     "Cash And Short Term Investments"):
+                        s = _row(bal, row_name)
+                        if s is not None and col in s.index:
+                            cash = s[col]
+                            break
+
+                # ── Preço próximo à data fiscal ───────────────────────
+                price = None
+                if not hist_px.empty:
+                    target = pd.Timestamp(dt_str)
+                    diffs  = (hist_px.index - target).map(abs)
+                    price  = float(hist_px.iloc[diffs.argmin()])
+
+                # ── Cálculo dos múltiplos ─────────────────────────────
+                pe = pb = ev_ebitda = roe = margem = None
+
+                if net_income and revenue and revenue != 0:
+                    margem = round((net_income / revenue) * 100, 2)
+
+                if net_income and equity and equity > 0:
+                    roe = round((net_income / equity) * 100, 2)
+
+                if price and shares and net_income and net_income > 0:
+                    mktcap = price * shares
+                    pe = round(mktcap / net_income, 2)
+                    if equity and equity > 0:
+                        pb = round(mktcap / equity, 2)
+                    if ebitda and ebitda > 0:
+                        ev = mktcap + (total_debt or 0) - (cash or 0)
+                        ev_ebitda = round(ev / ebitda, 2)
+
+                # sanidade: descarta valores absurdos
+                pe        = pe        if pe        and 0 < pe        < 500 else None
+                pb        = pb        if pb        and 0 < pb        < 100 else None
+                ev_ebitda = ev_ebitda if ev_ebitda and 0 < ev_ebitda < 300 else None
+                roe       = roe       if roe       and -200 < roe    < 500 else None
+
+                resultados.append({
+                    "data":      dt_str,
+                    "pe":        pe,
+                    "pb":        pb,
+                    "ps":        None,
+                    "ev_ebitda": ev_ebitda,
+                    "dy":        None,
+                    "roe":       roe,
+                    "roic":      None,
+                    "margem":    margem,
+                    "_fonte":    "yfinance",
+                })
+            except Exception:
+                continue
+
+        return resultados
+
+    except Exception as e:
+        logger.warning(f"[fmp] fallback yfinance falhou para {ticker}: {e}")
+        return []
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
     """
@@ -140,6 +286,9 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
     data = _get(f"ratios/{t}", {"limit": anos * 4})
 
     if not data or not isinstance(data, list):
+        # FMP sem dados → fallback yfinance para ativos BR
+        if ticker.upper().endswith(".SA"):
+            return _get_multiplos_historicos_yf(ticker, min(anos, 3))
         return []
 
     resultados = []
@@ -167,6 +316,10 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
             })
         except Exception:
             continue
+
+    # FMP retornou lista mas sem dados úteis → fallback yfinance para BR
+    if not resultados and ticker.upper().endswith(".SA"):
+        return _get_multiplos_historicos_yf(ticker, min(anos, 3))
 
     return resultados
 

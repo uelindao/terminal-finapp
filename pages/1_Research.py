@@ -1802,7 +1802,7 @@ with tab_fund:
 
     # ── EVOLUÇÃO HISTÓRICA DE FUNDAMENTOS (FMP) ──────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    section_title("📈 evolução de fundamentos (5 anos — fmp)")
+    section_title("📈 evolução de fundamentos (histórico — fmp / yfinance)")
 
     with st.spinner("carregando histórico de fundamentos..."):
         _hist_fund = get_multiplos_historicos(t_base, anos=5)
@@ -1872,7 +1872,7 @@ with tab_fund:
     else:
         st.markdown(
             '<div style="font-size:0.75rem;color:var(--text-muted);padding:12px 0;">'
-            'histórico de fundamentos não disponível via FMP para este ativo.'
+            'histórico de fundamentos não disponível (FMP sem dados e yfinance sem demonstrações para este ativo).'
             '</div>',
             unsafe_allow_html=True,
         )
