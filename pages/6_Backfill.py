@@ -503,13 +503,13 @@ def _processar_ticker_st(
 
     # ── 3. CVM — fonte oficial para ativos BR (10 anos de DFP/ITR) ──────────────
     if not ratios_list and is_br:
+        cvm_nota = ""
         try:
             from utils.cvm_client import get_historico_cvm, get_cvm_code
             cd_cvm = get_cvm_code(ticker_yf)
             if cd_cvm:
                 status_placeholder.write(
-                    f"🏛️ `{tk_fmp}` — CVM CD={cd_cvm}, baixando DFP/ITR "
-                    f"(primeiro acesso baixa ZIPs de ~10 anos, aguarde)…"
+                    f"🏛️ `{tk_fmp}` — CVM CD={cd_cvm}, baixando ZIPs…"
                 )
                 cvm_data, cvm_yoy, cvm_gran = get_historico_cvm(ticker_yf, anos=10)
                 if cvm_data:
@@ -518,20 +518,16 @@ def _processar_ticker_st(
                     yoy_offset  = cvm_yoy
                     granular    = cvm_gran
                     fonte_usada = "CVM/ITR" if "itr" in cvm_gran.lower() else "CVM/DFP"
-                    status_placeholder.write(
-                        f"✅ `{tk_fmp}` — CVM: {len(ratios_list)} períodos ({cvm_gran})"
-                    )
+                    cvm_nota    = f"CVM OK: {len(ratios_list)}p"
                 else:
-                    status_placeholder.write(
-                        f"⚠️ `{tk_fmp}` — CVM: CD_CVM={cd_cvm} encontrado mas sem dados nos ZIPs"
-                    )
+                    cvm_nota = f"CVM CD={cd_cvm} sem dados"
             else:
-                status_placeholder.write(
-                    f"⚠️ `{tk_fmp}` — CVM: ticker não mapeado, tentando yfinance…"
-                )
+                cvm_nota = "CVM: sem mapeamento"
         except Exception as _e:
             logger.warning(f"[backfill] CVM falhou para {tk_fmp}: {_e}")
-            status_placeholder.write(f"⚠️ `{tk_fmp}` — CVM erro: {_e}")
+            cvm_nota = f"CVM err: {str(_e)[:35]}"
+        if cvm_nota and not ratios_list:
+            diag = cvm_nota  # mostra motivo na coluna "nota" da tabela
 
     # ── 4. Fallback yfinance para BR sem cobertura FMP nem CVM ───────────────
     if not ratios_list and is_br:
@@ -943,6 +939,52 @@ with st.expander("🔍 diagnóstico (testar FMP + Supabase antes de rodar)", exp
                 st.success("✅ insert + delete OK — Supabase funcionando")
             except Exception as e:
                 st.error(f"❌ insert falhou: {e}")
+
+    st.markdown("---")
+    st.markdown("**🏛️ Diagnóstico CVM** — testa acesso aos ZIPs e resolução de ticker BR")
+    ticker_cvm_teste = st.text_input(
+        "ticker BR para testar CVM:", value="BBAS3",
+        help="sem sufixo .SA",
+        key="diag_cvm_tk",
+    )
+    if st.button("🏛️ testar CVM agora", key="btn_diag_cvm"):
+        import datetime as _dt
+        from utils.cvm_client import probe_url, get_cvm_code, _DFP_URL, _ITR_URL, _parse_zip
+
+        tk_cvm = ticker_cvm_teste.strip().upper().replace(".SA", "")
+        ano_ref = _dt.date.today().year - 1  # ano anterior — mais provável de existir
+
+        # 1. CD_CVM
+        cd = get_cvm_code(tk_cvm)
+        if cd:
+            st.success(f"✅ CD_CVM = **{cd}** para {tk_cvm}")
+        else:
+            st.error(f"❌ CD_CVM não encontrado para {tk_cvm}")
+
+        # 2. Probe URLs
+        for tipo, tmpl in [("DFP", _DFP_URL), ("ITR", _ITR_URL)]:
+            url = tmpl.format(year=ano_ref)
+            ok, msg = probe_url(url)
+            if ok:
+                st.success(f"✅ {tipo} {ano_ref}: {msg}  \n`{url}`")
+            else:
+                st.error(f"❌ {tipo} {ano_ref}: {msg}  \n`{url}`")
+
+        # 3. Tenta parsear DFP (lento — baixa o ZIP)
+        if cd:
+            with st.spinner(f"baixando DFP {ano_ref} (~60s)…"):
+                dfs = _parse_zip(_DFP_URL, ano_ref)
+            if dfs:
+                st.success(f"✅ DFP {ano_ref} parseado: {list(dfs.keys())}")
+                for tipo, df in dfs.items():
+                    n_emp = df["CD_CVM"].nunique() if "CD_CVM" in df.columns else "?"
+                    n_lin_emp = len(df[df["CD_CVM"].str.strip() == cd]) if "CD_CVM" in df.columns else 0
+                    st.info(
+                        f"  **{tipo}**: {len(df):,} linhas, {n_emp} empresas | "
+                        f"linhas p/ CD_CVM={cd}: **{n_lin_emp}**"
+                    )
+            else:
+                st.error(f"❌ DFP {ano_ref}: download/parse falhou — veja logs do servidor")
 
 st.markdown("<br>", unsafe_allow_html=True)
 

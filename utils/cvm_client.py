@@ -128,12 +128,22 @@ _HEADERS = {
 
 
 def _get(url: str, timeout: int = 90) -> bytes | None:
-    """HTTP GET com retry (3×) e User-Agent adequado para portais gov.br."""
+    """
+    HTTP GET com streaming (evita timeout em ZIPs grandes) e retry (3×).
+    timeout=(connect_s, read_s): 30s para conectar, 300s para ler.
+    """
     for tentativa in range(3):
         try:
-            r = requests.get(url, headers=_HEADERS, timeout=timeout)
+            r = requests.get(
+                url, headers=_HEADERS,
+                timeout=(30, 300),   # connect / read separados
+                stream=True,
+            )
             r.raise_for_status()
-            return r.content
+            buf = io.BytesIO()
+            for chunk in r.iter_content(chunk_size=1024 * 512):  # 512 KB por chunk
+                buf.write(chunk)
+            return buf.getvalue()
         except Exception as e:
             if tentativa == 2:
                 logger.warning(f"[cvm] falha ao baixar {url}: {e}")
@@ -141,6 +151,18 @@ def _get(url: str, timeout: int = 90) -> bytes | None:
                 import time as _t
                 _t.sleep(2 ** tentativa)
     return None
+
+
+def probe_url(url: str) -> tuple[bool, str]:
+    """
+    Testa se uma URL está acessível. Retorna (ok, mensagem).
+    Usado pelo diagnóstico da página de backfill.
+    """
+    try:
+        r = requests.head(url, headers=_HEADERS, timeout=(10, 30))
+        return r.ok, f"HTTP {r.status_code} ({r.headers.get('Content-Type','?')})"
+    except Exception as e:
+        return False, str(e)
 
 
 # Cache em memória de módulo (não usa st.cache_data para evitar cacheamento de
