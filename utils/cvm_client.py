@@ -237,6 +237,14 @@ def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
                             usecols=lambda c: c.strip() in _USECOLS,
                         )
                         df.columns = [c.strip() for c in df.columns]
+                        # Normaliza CD_CVM: remove zeros à esquerda
+                        # CVM armazena como "001023"; nosso mapa usa "1023"
+                        if "CD_CVM" in df.columns:
+                            df["CD_CVM"] = (
+                                df["CD_CVM"].str.strip()
+                                            .str.lstrip("0")
+                                            .replace("", "0")
+                            )
                         dfs[tipo] = df
                         logger.info(f"[cvm] {tipo} {year}: {len(df)} linhas")
                         break
