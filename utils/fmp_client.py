@@ -138,7 +138,8 @@ def _row(df, *nomes):
 def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
     """
     Fallback yfinance para histórico de fundamentos quando FMP retorna vazio.
-    Computa P/L, ROE, Margem e EV/EBITDA a partir de demonstrações anuais + preços históricos.
+    Tenta dados trimestrais primeiro (mais pontos para o gráfico); cai para anuais.
+    Dados de fluxo trimestrais são anualizados (×4) para PE/ROE ficarem na escala correta.
     Funciona bem para ativos .SA onde FMP free-tier é limitado.
     """
     try:
@@ -148,8 +149,14 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
         tk   = yf.Ticker(ticker)
         info = tk.info or {}
 
-        fin = tk.financials    # colunas = datas fiscais anuais, linhas = métricas
-        bal = tk.balance_sheet
+        # Tenta trimestral primeiro (até anos*4 períodos ≈ 12 trimestres)
+        fin = tk.quarterly_financials
+        bal = tk.quarterly_balance_sheet
+        is_quarterly = fin is not None and not fin.empty
+
+        if not is_quarterly:
+            fin = tk.financials
+            bal = tk.balance_sheet
 
         if fin is None or fin.empty:
             return []
@@ -162,6 +169,10 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
         if not shares or shares <= 0:
             shares = None
 
+        ann    = 4.0 if is_quarterly else 1.0
+        n_per  = anos * 4 if is_quarterly else anos
+        fonte  = "yfinance-q" if is_quarterly else "yfinance"
+
         # Preços mensais para estimar market cap na data fiscal
         try:
             hist_px = tk.history(period=f"{anos + 1}y", interval="1mo")["Close"].dropna()
@@ -171,34 +182,49 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
             hist_px = pd.Series(dtype=float)
 
         resultados = []
-        colunas = list(fin.columns)[:anos]  # mais recentes primeiro
+        colunas = list(fin.columns)[:n_per]  # mais recentes primeiro
 
         for col in colunas:
             try:
                 dt_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)[:10]
 
-                # ── Demonstração de resultado ──────────────────────────
+                # ── Demonstração de resultado (anualizado se trimestral) ─
                 net_income = None
                 for row_name in ("Net Income", "Net Income Common Stockholders",
                                  "Net Income Including Noncontrolling Interests"):
                     s = _row(fin, row_name)
                     if s is not None and col in s.index:
-                        net_income = s[col]
+                        v = s[col]
+                        try:
+                            import numpy as np
+                            net_income = float(v) * ann if not np.isnan(float(v)) else None
+                        except Exception:
+                            pass
                         break
 
                 revenue = None
                 for row_name in ("Total Revenue", "Revenue"):
                     s = _row(fin, row_name)
                     if s is not None and col in s.index:
-                        revenue = s[col]
+                        v = s[col]
+                        try:
+                            import numpy as np
+                            revenue = float(v) * ann if not np.isnan(float(v)) else None
+                        except Exception:
+                            pass
                         break
 
                 ebitda = None
                 s_ebitda = _row(fin, "EBITDA")
                 if s_ebitda is not None and col in s_ebitda.index:
-                    ebitda = s_ebitda[col]
+                    v = s_ebitda[col]
+                    try:
+                        import numpy as np
+                        ebitda = float(v) * ann if not np.isnan(float(v)) else None
+                    except Exception:
+                        pass
 
-                # ── Balanço patrimonial ────────────────────────────────
+                # ── Balanço patrimonial (ponto no tempo — não anualizar) ─
                 equity = total_debt = cash = None
                 if bal is not None and not bal.empty and col in bal.columns:
                     for row_name in ("Stockholders Equity", "Common Stock Equity",
@@ -227,6 +253,7 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
                     price  = float(hist_px.iloc[diffs.argmin()])
 
                 # ── Cálculo dos múltiplos ─────────────────────────────
+                # margens: razão de fluxos anualizados → anualização cancela
                 pe = pb = ev_ebitda = roe = margem = None
 
                 if net_income and revenue and revenue != 0:
@@ -260,7 +287,7 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
                     "roe":       roe,
                     "roic":      None,
                     "margem":    margem,
-                    "_fonte":    "yfinance",
+                    "_fonte":    fonte,
                 })
             except Exception:
                 continue

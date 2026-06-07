@@ -135,32 +135,49 @@ def _calcular_momentum(precos: pd.Series, data_ref: str):
         return None, None
 
 
-def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
+def _ratios_yf(
+    ticker_yf: str, anos: int = 4
+) -> tuple[list[tuple[str, dict, dict]], int, str]:
     """
     Fallback para tickers BR sem cobertura FMP.
-    Monta dicts de ratios e key-metrics no mesmo formato que _score_offline espera,
-    a partir de demonstrações anuais do yfinance.
-    Retorna lista de (data_str, ratios_dict, km_dict), mais recente primeiro.
+    Tenta dados trimestrais primeiro (até anos*4 períodos, ~12 trimestres),
+    depois cai para anuais (até anos períodos).
+    Dados de fluxo trimestrais são anualizados (×4) para compatibilidade com _score_offline.
+    Retorna (list[(data_str, ratios_dict, km_dict)], yoy_offset, granular_str).
     """
     import yfinance as yf
 
     try:
         tk   = yf.Ticker(ticker_yf)
         info = tk.info or {}
-        fin  = tk.financials
-        bal  = tk.balance_sheet
-        cf   = tk.cashflow
+
+        # Tenta trimestral primeiro
+        fin = tk.quarterly_financials
+        bal = tk.quarterly_balance_sheet
+        cf  = tk.quarterly_cashflow
+        is_quarterly = fin is not None and not fin.empty
+
+        if not is_quarterly:
+            fin = tk.financials
+            bal = tk.balance_sheet
+            cf  = tk.cashflow
     except Exception:
-        return []
+        return [], 1, "anual (yfinance)"
 
     if fin is None or fin.empty:
-        return []
+        return [], 1, "anual (yfinance)"
 
     shares = (
         info.get("sharesOutstanding")
         or info.get("impliedSharesOutstanding")
         or info.get("floatShares") or 0
     )
+
+    # Fator de anualização: dados trimestrais precisam de ×4 para ROE/PE ficarem na escala certa
+    ann   = 4.0 if is_quarterly else 1.0
+    n_per = anos * 4 if is_quarterly else anos   # períodos a ler
+    yoy_offset  = 4 if is_quarterly else 1
+    granular    = "trimestral (yfinance)" if is_quarterly else "anual (yfinance)"
 
     # Preços mensais para calcular PE/PB na data fiscal
     hist_px = pd.Series(dtype=float)
@@ -192,14 +209,14 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
         except Exception:
             return None
 
-    cols       = list(fin.columns)[:anos]   # mais recentes primeiro
+    cols       = list(fin.columns)[:n_per]   # mais recentes primeiro
     resultados = []
 
     for i, col in enumerate(cols):
         try:
             dt_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)[:10]
 
-            # ── Demonstração de resultado ─────────────────────────────
+            # ── Demonstração de resultado (anualizado se trimestral) ──
             net_income  = _v(_r(fin, "Net Income", "Net Income Common Stockholders"), col)
             revenue     = _v(_r(fin, "Total Revenue", "Revenue"), col)
             gross_pft   = _v(_r(fin, "Gross Profit"), col)
@@ -207,7 +224,15 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
             ebit        = _v(_r(fin, "EBIT", "Operating Income"), col)
             interest_ex = _v(_r(fin, "Interest Expense"), col)
 
-            # ── Balanço ───────────────────────────────────────────────
+            if ann != 1.0:
+                net_income  = net_income  * ann if net_income  is not None else None
+                revenue     = revenue     * ann if revenue     is not None else None
+                gross_pft   = gross_pft   * ann if gross_pft   is not None else None
+                ebitda_v    = ebitda_v    * ann if ebitda_v    is not None else None
+                ebit        = ebit        * ann if ebit        is not None else None
+                interest_ex = interest_ex * ann if interest_ex is not None else None
+
+            # ── Balanço (ponto no tempo — não anualizar) ──────────────
             equity = tot_assets = tot_debt = cash = None
             cur_assets = cur_liab = None
             if bal is not None and not bal.empty and col in bal.columns:
@@ -219,14 +244,16 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
                 cur_assets = _v(_r(bal, "Current Assets", "Total Current Assets"), col)
                 cur_liab   = _v(_r(bal, "Current Liabilities", "Total Current Liabilities"), col)
 
-            # ── Fluxo de caixa ────────────────────────────────────────
+            # ── Fluxo de caixa (anualizado se trimestral) ─────────────
             fcf = op_cf = None
             if cf is not None and not cf.empty and col in cf.columns:
-                op_cf = _v(_r(cf, "Operating Cash Flow",
-                                  "Total Cash From Operating Activities"), col)
-                capex = _v(_r(cf, "Capital Expenditure", "Capital Expenditures"), col)
-                if op_cf and capex:
-                    fcf = op_cf + capex   # capex é negativo no yfinance
+                op_cf_raw = _v(_r(cf, "Operating Cash Flow",
+                                      "Total Cash From Operating Activities"), col)
+                capex_raw = _v(_r(cf, "Capital Expenditure", "Capital Expenditures"), col)
+                if op_cf_raw is not None:
+                    op_cf = op_cf_raw * ann
+                if op_cf_raw and capex_raw:
+                    fcf = (op_cf_raw + capex_raw) * ann   # capex é negativo no yfinance
 
             # ── Preço na data fiscal ──────────────────────────────────
             price = None
@@ -236,6 +263,7 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
                 price  = float(hist_px.iloc[diffs.argmin()])
 
             # ── Ratios derivados (formato decimal FMP) ────────────────
+            # margens: razão entre fluxos → anualização cancela, está correto
             roe        = (net_income / equity)     if (net_income and equity and equity > 0)        else None
             roa        = (net_income / tot_assets) if (net_income and tot_assets and tot_assets > 0) else None
             net_margin = (net_income / revenue)    if (net_income and revenue and revenue != 0)      else None
@@ -255,20 +283,20 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
                 evm = ev / ebitda_v
 
             # ── KM fields ─────────────────────────────────────────────
-            roic = (ebit / (tot_debt + equity)) if (ebit and tot_debt is not None and equity and (tot_debt + equity) > 0) else None
-            nd_eb = ((tot_debt - cash) / ebitda_v) if (tot_debt is not None and cash is not None and ebitda_v and ebitda_v > 0) else None
+            roic      = (ebit / (tot_debt + equity)) if (ebit and tot_debt is not None and equity and (tot_debt + equity) > 0) else None
+            nd_eb     = ((tot_debt - cash) / ebitda_v) if (tot_debt is not None and cash is not None and ebitda_v and ebitda_v > 0) else None
             fcf_yield = (fcf / mktcap) if (fcf and mktcap and mktcap > 0) else None
 
-            # YoY crescimento (período seguinte = ano anterior)
+            # YoY: comparar com mesmo período há yoy_offset períodos atrás
             rev_growth = eps_growth = None
-            if i + 1 < len(cols):
-                col_prev = cols[i + 1]
-                rev_prev = _v(_r(fin, "Total Revenue", "Revenue"), col_prev)
-                ni_prev  = _v(_r(fin, "Net Income", "Net Income Common Stockholders"), col_prev)
+            if i + yoy_offset < len(cols):
+                col_prev  = cols[i + yoy_offset]
+                rev_prev  = _v(_r(fin, "Total Revenue", "Revenue"), col_prev)
+                ni_prev   = _v(_r(fin, "Net Income", "Net Income Common Stockholders"), col_prev)
                 if revenue and rev_prev and rev_prev != 0:
-                    rev_growth = (revenue - rev_prev) / abs(rev_prev)
+                    rev_growth = (revenue - rev_prev * ann) / abs(rev_prev * ann)
                 if net_income and ni_prev and ni_prev != 0:
-                    eps_growth = (net_income - ni_prev) / abs(ni_prev)
+                    eps_growth = (net_income - ni_prev * ann) / abs(ni_prev * ann)
 
             # Sanidade
             if pe  and (pe  <= 0 or pe  > 500): pe  = None
@@ -304,7 +332,7 @@ def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
         except Exception:
             continue
 
-    return resultados
+    return resultados, yoy_offset, granular
 
 
 def _score_offline(
@@ -469,13 +497,13 @@ def _processar_ticker_st(
 
     # ── 3. Fallback yfinance para BR sem cobertura FMP ────────────────────────
     if not ratios_list and is_br:
-        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando yfinance…")
-        yf_data = _ratios_yf(ticker_yf, anos=4)
+        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando yfinance (trimestral → anual)…")
+        yf_data, yf_yoy, yf_gran = _ratios_yf(ticker_yf, anos=4)
         if yf_data:
             ratios_list = [r for _, r, _ in yf_data]
             km_list     = [k for _, _, k in yf_data]
-            yoy_offset  = 1
-            granular    = "anual (yfinance)"
+            yoy_offset  = yf_yoy
+            granular    = yf_gran
 
     if not ratios_list:
         diag = "FMP: sem dados (ativo não coberto ou quota esgotada)"
