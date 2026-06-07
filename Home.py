@@ -924,10 +924,18 @@ def buscar_dados_semaforo():
                     dados["selic"] = float(selic_serie['selic'].iloc[-1])
                     fontes["selic"] = "api"
             if dados["ipca"] is None:
-                ipca_serie = sgs.get({'ipca': 433}, last=1)
-                if not ipca_serie.empty:
-                    dados["ipca"] = float(ipca_serie['ipca'].iloc[-1])
-                    fontes["ipca"] = "api"
+                # 13522 = IPCA acumulado 12 meses (anualizado) — mais preciso para Selic real
+                try:
+                    ipca12_serie = sgs.get({'ipca': 13522}, last=1)
+                    if not ipca12_serie.empty:
+                        dados["ipca"] = float(ipca12_serie['ipca'].iloc[-1])
+                        fontes["ipca"] = "api_12m"
+                except Exception:
+                    ipca_serie = sgs.get({'ipca': 433}, last=1)
+                    if not ipca_serie.empty:
+                        # série 433 = mensal; acumular simplesmente por 12
+                        dados["ipca"] = round(float(ipca_serie['ipca'].iloc[-1]) * 12, 2)
+                        fontes["ipca"] = "api"
             if dados["divida_pib"] is None or dados["result_primario"] is None:
                 divida_serie = sgs.get({'divida': 13762}, last=7)
                 if not divida_serie.empty:
@@ -1159,7 +1167,7 @@ st.session_state['selic']         = dados_sem.get('selic') or 10.75
 st.session_state['macro_context'] = {
     'selic': dados_sem.get('selic') or 10.75,
     'vix':   dados_sem.get('vix')   or 15.0,
-    'ipca':  dados_sem.get('ipca')  or 4.5,
+    'ipca':  dados_sem.get('ipca_12m') or dados_sem.get('ipca') or 4.5,
 }
 
 # ── renderização: gauge + sinais individuais ─────────────────────────────────

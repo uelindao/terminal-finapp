@@ -588,7 +588,7 @@ with tab_screen:
 
         _selic_val = _mc.get("selic")
         _ipca_val  = _mc.get("ipca")
-        _selic_r_scr = round(_selic_val - (_ipca_val * 12 if _ipca_val and _ipca_val < 5 else _ipca_val or 0), 1) if _selic_val and _ipca_val else None
+        _selic_r_scr = round(_selic_val - (_ipca_val or 0), 1) if _selic_val and _ipca_val else None
         _cor_selic_r = "var(--bear)" if (_selic_r_scr or 0) > 8 else ("var(--amber)" if (_selic_r_scr or 0) > 4 else "var(--bull)")
 
         st.markdown(
