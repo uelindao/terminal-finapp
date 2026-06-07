@@ -821,12 +821,6 @@ for _col, (_page, _icon, _titulo, _desc) in zip(_nav_cols, _nav_items):
 
 st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
-# ==========================================
-# FAIXA 1 — PULSO DO MERCADO
-# ==========================================
-section_title("⚡ pulso do mercado")
-auto_refresh_indicator(5)
-
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_indices_completo():
     tickers = {
@@ -875,39 +869,8 @@ def buscar_indices_completo():
         pass
     return resultados
 
-def render_pulso_card(label: str, valor: str, var_pct: float):
-    """Card de índice com badge-pill de variação colorido."""
-    positivo = var_pct >= 0
-    seta      = "▲" if positivo else "▼"
-    cor_bg    = "rgba(16,185,129,0.10)"  if positivo else "rgba(239,68,68,0.10)"
-    cor_borda = "rgba(16,185,129,0.25)"  if positivo else "rgba(239,68,68,0.25)"
-    cor_txt   = "#10B981" if positivo else "#EF4444"
-    st.markdown(
-        f'<div style="background:var(--bg-surface);'
-        f' border:1px solid var(--border-subtle);'
-        f' border-radius:var(--radius-md);'
-        f' padding:12px 14px; margin-bottom:6px;'
-        f' transition:border-color 0.15s;">'
-        f'<div style="font-family:var(--font-ui); font-size:0.62rem;'
-        f' font-weight:600; color:var(--text-muted);'
-        f' text-transform:uppercase; letter-spacing:0.08em;'
-        f' margin-bottom:6px;">{label}</div>'
-        f'<div style="font-family:var(--font-data); font-size:1.05rem;'
-        f' font-weight:700; color:var(--text-primary);'
-        f' line-height:1.2; margin-bottom:7px;">{valor}</div>'
-        f'<span style="display:inline-flex; align-items:center;'
-        f' gap:3px; padding:2px 8px; border-radius:20px;'
-        f' background:{cor_bg}; border:1px solid {cor_borda};'
-        f' font-family:var(--font-data); font-size:0.68rem;'
-        f' font-weight:700; color:{cor_txt};">'
-        f'{seta} {abs(var_pct):.2f}%</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
 indices = buscar_indices_completo()
 if indices:
-    # Pulse bar no topo — somente metade esquerda da página
     try:
         from utils.components import market_pulse_bar as _mpb
         _pulse_data = {
@@ -920,29 +883,6 @@ if indices:
                 _mpb(_pulse_data)
     except Exception:
         pass
-
-    # Cards macro — exclui spread e ticker interno
-    _CARDS_SKIP = {"curva 10y-3m"}
-    _cards_indices = {k: v for k, v in indices.items() if k not in _CARDS_SKIP}
-    cols = st.columns(len(_cards_indices))
-    for i, (nome, dados) in enumerate(_cards_indices.items()):
-        tk = dados['ticker']
-        if tk == "BRL=X":
-            valor_fmt = f"R$ {dados['preco']:.4f}"
-        elif tk in ["^VIX", "^TNX"]:
-            valor_fmt = f"{dados['preco']:.2f}"
-        elif tk == "GC=F":
-            valor_fmt = f"$ {dados['preco']:,.2f}"
-        elif tk in ["CL=F"]:
-            valor_fmt = f"$ {dados['preco']:,.2f}"
-        elif tk == "BTC-USD":
-            valor_fmt = f"$ {dados['preco']:,.0f}"
-        else:
-            valor_fmt = f"{dados['preco']:,.2f}"
-        with cols[i]:
-            render_pulso_card(nome, valor_fmt, dados['var'])
-
-st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # FAIXA 2 — SEMÁFORO MACRO

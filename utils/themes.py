@@ -317,7 +317,6 @@ TEMAS: dict[str, dict] = {
             "--radius-lg":      "12px",
         },
     },
-}
 
     # ── 8. Retro Âmbar (Grafite + laranja) ───────────────────────────────────
     "amber": {
