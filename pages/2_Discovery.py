@@ -770,9 +770,9 @@ with tab_mom:
                     unsafe_allow_html=True,
                 )
                 score = row['score momentum']
-                cor_score = "#00C853" if score >= 70 else ("#FF9900" if score >= 40 else "#FF1744")
+                cor_score = "var(--bull)" if score >= 70 else ("var(--amber)" if score >= 40 else "var(--bear)")
                 barra = "█" * int(score // 10) + "░" * int(10 - score // 10)
-                c2.markdown(f'<span style="font-family:Courier New; font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
+                c2.markdown(f'<span style="font-family:var(--font-data,monospace); font-size:0.8rem; color:{cor_score};">{barra}</span>', unsafe_allow_html=True)
                 if c3.button("＋ watchlist", key=f"btn_wl_mom_{row['ticker']}", use_container_width=True):
                     mercado = "brasil" if mapear_ticker_base(row['ticker']).endswith('.SA') else "eua"
                     modal_salvar_screener(row['ticker'], row['nome'], mercado)
@@ -815,32 +815,33 @@ with tab_screen:
         _lbl_scr  = _regime_scr.get("label", "neutro")
         _pos_scr  = _regime_scr.get("posicionamento", "")
         _scr_amb  = _regime_scr.get("score_ambiente", 50)
-        _cor_amb  = "#00C853" if _scr_amb >= 60 else ("#FF9800" if _scr_amb >= 35 else "#FF1744")
+        _cor_amb  = "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
 
         _selic_val = _mc.get("selic")
         _ipca_val  = _mc.get("ipca")
         _selic_r_scr = round(_selic_val - (_ipca_val * 12 if _ipca_val and _ipca_val < 5 else _ipca_val or 0), 1) if _selic_val and _ipca_val else None
+        _cor_selic_r = "var(--bear)" if (_selic_r_scr or 0) > 8 else ("var(--amber)" if (_selic_r_scr or 0) > 4 else "var(--bull)")
 
         st.markdown(
-            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+            f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
             f'border-left:4px solid {_cor_amb};border-radius:6px;'
-            f'padding:12px 16px;margin-bottom:12px;font-family:Courier New;">'
+            f'padding:12px 16px;margin-bottom:12px;font-family:var(--font-ui,sans-serif);">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
             f'<div>'
-            f'<span style="color:#555;font-size:0.65rem;text-transform:uppercase;">regime macro atual</span><br>'
+            f'<span style="color:var(--text-muted);font-size:0.65rem;text-transform:uppercase;">regime macro atual</span><br>'
             f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
-            f'<span style="color:#555;font-size:0.7rem;margin-left:8px;">score {_scr_amb}/100</span>'
+            f'<span style="color:var(--text-muted);font-size:0.7rem;margin-left:8px;">score {_scr_amb}/100</span>'
             f'</div>'
-            + (f'<div><span style="color:#555;font-size:0.65rem;">selic real</span><br>'
-               f'<span style="color:#{"FF1744" if (_selic_r_scr or 0) > 8 else "FF9800" if (_selic_r_scr or 0) > 4 else "00C853"};font-size:0.8rem;">'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">selic real</span><br>'
+               f'<span style="color:{_cor_selic_r};font-size:0.8rem;">'
                f'{_selic_r_scr:+.1f}%aa</span></div>' if _selic_r_scr else '')
-            + (f'<div><span style="color:#555;font-size:0.65rem;">setores favorecidos</span><br>'
-               f'<span style="color:#00C853;font-size:0.7rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">setores favorecidos</span><br>'
+               f'<span style="color:var(--bull);font-size:0.7rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
                if _fav_scr else '')
-            + (f'<div><span style="color:#555;font-size:0.65rem;">setores em cautela</span><br>'
-               f'<span style="color:#FF1744;font-size:0.7rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">setores em cautela</span><br>'
+               f'<span style="color:var(--bear);font-size:0.7rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
                if _prej_scr else '')
-            + f'<div style="color:#555;font-size:0.68rem;max-width:280px;">{_pos_scr}</div>'
+            + f'<div style="color:var(--text-muted);font-size:0.68rem;max-width:280px;">{_pos_scr}</div>'
             f'</div></div>',
             unsafe_allow_html=True,
         )
@@ -910,7 +911,7 @@ with tab_screen:
 
     with f1:
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.72rem; color:#555; '
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); '
             'text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">p/l (faixa)</div>',
             unsafe_allow_html=True,
         )
@@ -1136,8 +1137,8 @@ with tab_ia:
     section_title("🧠 ia: oportunidades do dia")
 
     st.markdown(
-        '<div style="font-family:Courier New;font-size:0.75rem;'
-        'color:#555;margin-bottom:16px;line-height:1.7;">'
+        '<div style="font-family:var(--font-ui,sans-serif);font-size:0.75rem;'
+        'color:var(--text-muted);margin-bottom:16px;line-height:1.7;">'
         'análise de ia do universo completo de ativos. '
         'identifica os top 5 com maior assimetria '
         'risco/retorno no momento, considerando health score, '
@@ -1273,10 +1274,10 @@ with tab_ia:
 
             if st.session_state.get(_cache_key_analise):
                 st.markdown(
-                    f'<div style="font-family:Courier New;'
-                    f'font-size:0.82rem;color:#C0C0C0;'
-                    f'line-height:1.8;background:#0a0a0a;'
-                    f'border:1px solid #1a1a1a;'
+                    f'<div style="font-family:var(--font-data,monospace);'
+                    f'font-size:0.82rem;color:var(--text-primary);'
+                    f'line-height:1.8;background:var(--bg-surface);'
+                    f'border:1px solid var(--border-subtle);'
                     f'border-radius:6px;padding:16px;">'
                     f'{st.session_state[_cache_key_analise]}'
                     f'</div>',
@@ -1418,13 +1419,13 @@ with tab_setorial:
     label_com_tooltip(
         "🗺️ ROTAÇÃO SETORIAL — HEALTH SCORE MÉDIO POR SETOR",
         chave="health_score",
-        cor="#FF9900",
+        cor="var(--accent)",
         tamanho="0.72rem",
     )
 
     st.markdown(
-        '<div style="font-family:Courier New; font-size:0.75rem; '
-        'color:#555; margin-bottom:16px; line-height:1.6;">'
+        '<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; '
+        'color:var(--text-muted); margin-bottom:16px; line-height:1.6;">'
         'score médio dos ativos de cada setor no universo analisado. '
         'setores verdes (≥65) em fase de acumulação. '
         'vermelhos (<40) em cautela. dados baseados nos health scores '
@@ -1489,20 +1490,20 @@ with tab_setorial:
         _posicionamento = _regime_disc.get("posicionamento", "")
 
         _cor_regime = (
-            "#FF1744" if "stress" in _regime_label
-            else "#FF9900" if "altos" in _regime_label
-            else "#00C853"
+            "var(--bear)" if "stress" in _regime_label
+            else "var(--amber)" if "altos" in _regime_label
+            else "var(--bull)"
         )
-        _cor_score = "#00C853" if _score_amb >= 60 else ("#FF9900" if _score_amb >= 35 else "#FF1744")
+        _cor_score = "var(--bull)" if _score_amb >= 60 else ("var(--amber)" if _score_amb >= 35 else "var(--bear)")
 
         _html_parts = [
-            f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-left:3px solid {_cor_regime};border-radius:6px;padding:10px 16px;margin-bottom:16px;">',
+            f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-left:3px solid {_cor_regime};border-radius:6px;padding:10px 16px;margin-bottom:16px;">',
             f'<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">',
-            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">regime atual</span>',
-            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>',
-            f'<span style="font-family:Courier New;font-size:0.72rem;color:#666;">{_regime_desc[:60]}</span>',
-            f'<span style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">score amb.</span>',
-            f'<span style="font-family:Courier New;font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>',
+            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">regime atual</span>',
+            f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>',
+            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;color:var(--text-muted);">{_regime_desc[:60]}</span>',
+            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">score amb.</span>',
+            f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>',
             '</div>',
         ]
 
@@ -1514,10 +1515,10 @@ with tab_setorial:
                 _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
                 _score_val = _match[0]['score_medio'] if _match else None
                 _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
-                fav_spans += f'<span style="background:#003300;color:#00C853;font-family:Courier New;font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+                fav_spans += f'<span style="background:var(--bull-soft,#003300);color:var(--bull);font-family:var(--font-data,monospace);font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
             _html_parts.append(
                 f'<div style="flex:1;min-width:140px;">'
-                f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos pelo regime</div>'
+                f'<div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos pelo regime</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{fav_spans}</div>'
                 f'</div>'
             )
@@ -1528,10 +1529,10 @@ with tab_setorial:
                 _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
                 _score_val = _match[0]['score_medio'] if _match else None
                 _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
-                prej_spans += f'<span style="background:#330000;color:#FF1744;font-family:Courier New;font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+                prej_spans += f'<span style="background:var(--bear-soft,#330000);color:var(--bear);font-family:var(--font-data,monospace);font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
             _html_parts.append(
                 f'<div style="flex:1;min-width:140px;">'
-                f'<div style="font-size:0.6rem;color:#555;text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados pelo regime</div>'
+                f'<div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados pelo regime</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{prej_spans}</div>'
                 f'</div>'
             )
@@ -1540,7 +1541,7 @@ with tab_setorial:
 
         if _posicionamento:
             _html_parts.append(
-                f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;margin-top:6px;border-top:1px solid #1e1e1e;padding-top:4px;">{_posicionamento}</div>'
+                f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);margin-top:6px;border-top:1px solid var(--border-subtle);padding-top:4px;">{_posicionamento}</div>'
             )
 
         _html_parts.append('</div>')
@@ -1578,7 +1579,7 @@ with tab_setorial:
             marker_opacity=0.88,
             text=[f"{s:.0f}" for s in _scores_medios],
             textposition='outside',
-            textfont=dict(size=10, color=_cc_set["muted"], family='Courier New'),
+            textfont=dict(size=10, color=_cc_set["muted"], family='Inter, system-ui, sans-serif'),
             hovertext=_hover_texts, hoverinfo='text',
             name='score médio',
         ))
@@ -1636,8 +1637,8 @@ with tab_radar:
     tooltip("score_assimetria")
 
     st.markdown(
-        '<div style="font-family:Courier New;font-size:0.75rem;'
-        'color:#555;margin-bottom:16px;line-height:1.6;">'
+        '<div style="font-family:var(--font-ui,sans-serif);font-size:0.75rem;'
+        'color:var(--text-muted);margin-bottom:16px;line-height:1.6;">'
         'scan em todo o universo de ativos (não só sua watchlist). '
         'filtra por qualidade mínima (health ≥ 55) antes de '
         'calcular o score de assimetria — economiza tempo e foca '
@@ -1721,8 +1722,8 @@ with tab_radar:
             )
         else:
             st.markdown(
-                f'<div style="font-family:Courier New;'
-                f'font-size:0.72rem;color:#555;margin-bottom:12px;">'
+                f'<div style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.72rem;color:var(--text-muted);margin-bottom:12px;">'
                 f'top {len(_resultado_radar)} ativos do universo '
                 f'{_univ_radar} no modo '
                 f'{st.session_state.get("radar_modo_last","—")}'

@@ -168,7 +168,7 @@ with st.sidebar:
 
     # ── HEALTH SCORE DO ATIVO ATUAL (sidebar) ──────────────────────────────
     st.markdown(
-        '<div style="height:1px;background:#1e1e1e;margin:12px 0;"></div>',
+        '<div style="height:1px;background:var(--border-subtle);margin:12px 0;"></div>',
         unsafe_allow_html=True,
     )
     _tk_sidebar = st.session_state.get('research_ticker', '')
@@ -177,9 +177,9 @@ with st.sidebar:
         _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
         _hs_score = _hs_all_sb.get(_tk_base_sb) or _hs_all_sb.get(_tk_sidebar) or 50
         _cor_sb = (
-            "#00C853" if _hs_score >= 65
-            else "#FF9900" if _hs_score >= 40
-            else "#FF1744"
+            "var(--bull)" if _hs_score >= 65
+            else "var(--amber)" if _hs_score >= 40
+            else "var(--bear)"
         )
         _label_sb = (
             "acumulação" if _hs_score >= 65
@@ -187,17 +187,17 @@ with st.sidebar:
             else "reduzir"
         )
         st.markdown(
-            f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
+            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
             f'border-left:3px solid {_cor_sb}; border-radius:4px; '
             f'padding:10px 12px; margin-bottom:8px;">'
-            f'<div style="font-size:0.62rem; color:#555; '
+            f'<div style="font-size:0.62rem; color:var(--text-muted); '
             f'text-transform:uppercase; letter-spacing:.08em; '
             f'margin-bottom:4px;">health score</div>'
-            f'<div style="font-family:Courier New; font-size:1.6rem; '
+            f'<div style="font-family:var(--font-data,monospace); font-size:1.6rem; '
             f'font-weight:700; color:{_cor_sb}; line-height:1;">'
-            f'{_hs_score}<span style="font-size:0.8rem;color:#555;">/100</span>'
+            f'{_hs_score}<span style="font-size:0.8rem;color:var(--text-muted);">/100</span>'
             f'</div>'
-            f'<div style="font-family:Courier New; font-size:0.7rem; '
+            f'<div style="font-family:var(--font-data,monospace); font-size:0.7rem; '
             f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
             f'</div>',
             unsafe_allow_html=True,
@@ -205,7 +205,7 @@ with st.sidebar:
 
     # ── ADICIONAR À WATCHLIST ─────────────────────────────────────────────
     st.markdown(
-        '<div style="height:1px;background:#1e1e1e;margin:8px 0;"></div>',
+        '<div style="height:1px;background:var(--border-subtle);margin:8px 0;"></div>',
         unsafe_allow_html=True,
     )
     section_title("+ watchlist")
@@ -235,7 +235,7 @@ with st.sidebar:
     _hist_exibir = [t for t in _hist_sb if t != _tk_sidebar][:4]
     if _hist_exibir:
         st.markdown(
-            '<div style="height:1px;background:#1e1e1e;margin:8px 0;"></div>',
+            '<div style="height:1px;background:var(--border-subtle);margin:8px 0;"></div>',
             unsafe_allow_html=True,
         )
         section_title("visitados recentemente")
@@ -243,7 +243,7 @@ with st.sidebar:
         for _ht in _hist_exibir:
             _hs_ht  = _hs_all_sb.get(_ht, 50)
             _cor_ht = (
-                "#00C853" if _hs_ht >= 65 else "#FF9900" if _hs_ht >= 40 else "#FF1744"
+                "var(--bull)" if _hs_ht >= 65 else "var(--amber)" if _hs_ht >= 40 else "var(--bear)"
             )
             _col_ht1, _col_ht2 = st.columns([3, 1])
             with _col_ht1:
@@ -255,7 +255,7 @@ with st.sidebar:
                     st.rerun()
             with _col_ht2:
                 st.markdown(
-                    f'<div style="font-family:Courier New; font-size:0.75rem; '
+                    f'<div style="font-family:var(--font-data,monospace); font-size:0.75rem; '
                     f'color:{_cor_ht}; text-align:right; padding-top:6px;">{_hs_ht}</div>',
                     unsafe_allow_html=True,
                 )
@@ -447,9 +447,9 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
         with _col_hs:
             if _score_hs is not None:
                 _cor_hs_c = (
-                    "#00C853" if _score_hs >= 65
-                    else "#FF9900" if _score_hs >= 40
-                    else "#FF1744"
+                    "var(--bull)" if _score_hs >= 65
+                    else "var(--amber)" if _score_hs >= 40
+                    else "var(--bear)"
                 )
                 _label_hs_c = (
                     "acumulação" if _score_hs >= 65
@@ -457,25 +457,25 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                     else "reduzir"
                 )
                 st.markdown(
-                    f'<div style="background:#0d0d0d; '
-                    f'border:1px solid #1e1e1e; '
+                    f'<div style="background:var(--bg-surface); '
+                    f'border:1px solid var(--border-subtle); '
                     f'border-top:3px solid {_cor_hs_c}; '
                     f'border-radius:6px; padding:16px; '
                     f'text-align:center;">'
 
-                    f'<div style="font-family:Courier New; '
-                    f'font-size:0.82rem; color:#FF9900; '
+                    f'<div style="font-family:var(--font-data,monospace); '
+                    f'font-size:0.82rem; color:var(--accent); '
                     f'font-weight:700; margin-bottom:8px;">'
                     f'{_tk_hs.replace(".SA","")}</div>'
 
-                    f'<div style="font-family:Courier New; '
+                    f'<div style="font-family:var(--font-data,monospace); '
                     f'font-size:2.2rem; font-weight:700; '
                     f'color:{_cor_hs_c}; line-height:1;">'
                     f'{_score_hs}'
-                    f'<span style="font-size:1rem;color:#555;">/100</span>'
+                    f'<span style="font-size:1rem;color:var(--text-muted);">/100</span>'
                     f'</div>'
 
-                    f'<div style="font-family:Courier New; '
+                    f'<div style="font-family:var(--font-data,monospace); '
                     f'font-size:0.72rem; color:{_cor_hs_c}; '
                     f'margin-top:4px;">{_label_hs_c}</div>'
 
@@ -497,27 +497,27 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                     for _kb, _vb in _top_pos:
                         _label_bk = _kb.replace('_', ' ')[:22]
                         st.markdown(
-                            f'<div style="font-family:Courier New; '
-                            f'font-size:0.65rem; color:#00C853; '
+                            f'<div style="font-family:var(--font-data,monospace); '
+                            f'font-size:0.65rem; color:var(--bull); '
                             f'padding:1px 0;">✓ {_label_bk}</div>',
                             unsafe_allow_html=True,
                         )
                     for _kb, _vb in _top_neg:
                         _label_bk = _kb.replace('_', ' ')[:22]
                         st.markdown(
-                            f'<div style="font-family:Courier New; '
-                            f'font-size:0.65rem; color:#FF1744; '
+                            f'<div style="font-family:var(--font-data,monospace); '
+                            f'font-size:0.65rem; color:var(--bear); '
                             f'padding:1px 0;">✗ {_label_bk}</div>',
                             unsafe_allow_html=True,
                         )
             else:
                 st.markdown(
-                    f'<div style="background:#0d0d0d; '
-                    f'border:1px solid #1e1e1e; border-radius:6px; '
+                    f'<div style="background:var(--bg-surface); '
+                    f'border:1px solid var(--border-subtle); border-radius:6px; '
                     f'padding:16px; text-align:center;">'
-                    f'<div style="color:#FF9900; font-weight:700;">'
+                    f'<div style="color:var(--accent); font-weight:700;">'
                     f'{_tk_hs.replace(".SA","")}</div>'
-                    f'<div style="color:#555; font-size:0.75rem; '
+                    f'<div style="color:var(--text-muted); font-size:0.75rem; '
                     f'margin-top:8px;">score não calculado</div>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -697,34 +697,34 @@ if is_fii:
     _spread   = _dy_real - _ntnb_yield
 
     _cor_spread = (
-        "#00C853" if _spread >= 2.5
-        else "#FF9900" if _spread >= 0
-        else "#FF1744"
+        "var(--bull)" if _spread >= 2.5
+        else "var(--amber)" if _spread >= 0
+        else "var(--bear)"
     )
 
     st.markdown(
-        f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; '
+        f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
         f'border-radius:6px; padding:10px 16px; margin-top:8px; '
         f'display:flex; gap:32px; align-items:center; flex-wrap:wrap;">'
 
-        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
         f'text-transform:uppercase;">segmento</span><br>'
-        f'<span style="font-family:Courier New;color:#FF9900;'
+        f'<span style="font-family:var(--font-data,monospace);color:var(--accent);'
         f'font-size:0.85rem;">{_segmento_fii}</span></div>'
 
-        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
         f'text-transform:uppercase;">yield real</span><br>'
-        f'<span style="font-family:Courier New;color:#ccc;'
+        f'<span style="font-family:var(--font-data,monospace);color:var(--text-primary);'
         f'font-size:0.85rem;">{_dy_real:.1f}%</span></div>'
 
-        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
         f'text-transform:uppercase;">ntn-b benchmark</span><br>'
-        f'<span style="font-family:Courier New;color:#ccc;'
+        f'<span style="font-family:var(--font-data,monospace);color:var(--text-primary);'
         f'font-size:0.85rem;">{_ntnb_yield:.2f}% (ipca+)</span></div>'
 
-        f'<div><span style="font-size:0.65rem;color:#555;'
+        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
         f'text-transform:uppercase;">spread vs ntn-b</span><br>'
-        f'<span style="font-family:Courier New;color:{_cor_spread};'
+        f'<span style="font-family:var(--font-data,monospace);color:{_cor_spread};'
         f'font-weight:600;font-size:0.85rem;">{_spread:+.2f}pp</span></div>'
 
         f'</div>',
@@ -754,17 +754,17 @@ st.markdown("<br>", unsafe_allow_html=True)
 _macro_regime = classificar_regime()
 _impacto_setor = get_impacto_setor(setor_nome=setor, regime_dict=_macro_regime)
 _icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
-_cor_regime = "#FF1744" if "stress" in _macro_regime["label"] else ("#FF9900" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "#00C853")
+_cor_regime = "var(--bear)" if "stress" in _macro_regime["label"] else ("var(--amber)" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "var(--bull)")
 st.markdown(
-    f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
-    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;letter-spacing:.08em;">regime</div>'
-    f'<div style="font-family:Courier New;font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
-    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">setor</div>'
-    f'<div style="font-family:Courier New;font-size:0.82rem;color:#ccc;">{setor[:25].lower()}</div>'
-    f'<div style="font-family:Courier New;font-size:0.62rem;color:#555;text-transform:uppercase;">impacto</div>'
-    f'<div style="font-family:Courier New;font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
+    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;">regime</div>'
+    f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">setor</div>'
+    f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:var(--text-primary);">{setor[:25].lower()}</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">impacto</div>'
+    f'<div style="font-family:var(--font-data,monospace);font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
     f'{_icone_impacto[_impacto_setor["impacto"]]} {_impacto_setor["impacto"].upper()}</div>'
-    f'<div style="font-family:Courier New;font-size:0.68rem;color:#666;margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.68rem;color:var(--text-muted);margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
     f'</div>',
     unsafe_allow_html=True,
 )
@@ -803,7 +803,7 @@ if len(historico) >= 3:
     label_com_tooltip(
         "📈 EVOLUÇÃO DO HEALTH SCORE",
         chave="health_score",
-        cor="#FF9900",
+        cor="var(--accent)",
         tamanho="0.72rem",
     )
     df_hist_score = pd.DataFrame(historico)
@@ -837,7 +837,7 @@ if len(historico) >= 3:
                 "pilares: piotroski, roic vs wacc, valuation, "
                 "solvência, crescimento, momentum e dados macro."
             ),
-            cor="#FF9900",
+            cor="var(--accent)",
             tamanho="0.72rem",
         )
 
@@ -901,8 +901,9 @@ if len(historico) >= 3:
 
             _labels_bd = [i['label'] for i in _itens_bd]
             _valores_bd = [i['pontos'] for i in _itens_bd]
+            _cc_bd = _chart_cores()
             _cores_bd = [
-                "#00C853" if v > 0 else "#FF1744"
+                _cc_bd["bull"] if v > 0 else _cc_bd["bear"]
                 for v in _valores_bd
             ]
 
@@ -914,15 +915,15 @@ if len(historico) >= 3:
                 hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
                 text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
                 textposition='outside',
-                textfont=dict(size=10, color='#888'),
+                textfont=dict(size=10, color=_cc_bd["muted"]),
             ))
             _lay_bd = base_layout(
                 height=max(200, len(_itens_bd) * 28),
                 title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
             )
             _lay_bd.update(
-                xaxis={**{'showgrid': True, 'gridcolor': '#2A2C3E',
-                          'zeroline': True, 'zerolinecolor': '#444',
+                xaxis={**{'showgrid': True, 'gridcolor': _cc_bd["border"],
+                          'zeroline': True, 'zerolinecolor': _cc_bd["border"],
                           'title': 'pontos contribuídos'},
                        'range': [min(0, min(_valores_bd)) - 1,
                                  max(_valores_bd) + 2]},
@@ -936,8 +937,8 @@ if len(historico) >= 3:
             _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
             _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
             st.markdown(
-                f'<div style="font-family:Courier New; font-size:0.72rem; '
-                f'color:#555; margin-top:-8px;">'
+                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
+                f'color:var(--text-muted); margin-top:-8px;">'
                 f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
                 f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
                 f'score total: {health_result.get("score", 0)}/100'
@@ -950,10 +951,10 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
     """Renderiza card de múltiplo com barra de posição histórica e cor de sinal."""
     if stats is None or valor_atual is None:
         st.markdown(
-            f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
-            f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;">{label}</div>'
-            f'<div style="font-size:1.1rem;color:#555;">—</div>'
-            f'<div style="font-size:0.65rem;color:#555;margin-top:4px;">sem histórico FMP</div>'
+            f'<div style="background:var(--bg-surface);border-radius:var(--radius-sm,6px);padding:12px 14px;margin-bottom:8px;">'
+            f'<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">{label}</div>'
+            f'<div style="font-size:1.1rem;color:var(--text-muted);">—</div>'
+            f'<div style="font-size:0.65rem;color:var(--text-muted);margin-top:4px;">sem histórico FMP</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -972,28 +973,28 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
     if media > 0:
         desvio = (atual - media) / media
         if desvio <= -0.15:
-            cor, sinal = "#00C853", "▼ desconto"
+            cor, sinal = "var(--bull)", "▼ desconto"
         elif desvio >= 0.20:
-            cor, sinal = "#FF1744", "▲ prêmio"
+            cor, sinal = "var(--bear)", "▲ prêmio"
         else:
-            cor, sinal = "#FF9900", "≈ justo"
+            cor, sinal = "var(--amber)", "≈ justo"
     else:
-        cor, sinal = "#888888", "—"
+        cor, sinal = "var(--text-muted)", "—"
 
     bar_fill  = f"width:{round(pos * 100)}%;"
     bar_color = cor
 
     st.markdown(
-        f'<div style="background:#1a1a1a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
-        f'<div style="font-size:0.7rem;color:#888;text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
+        f'<div style="background:var(--bg-surface);border-radius:var(--radius-sm,6px);padding:12px 14px;margin-bottom:8px;">'
+        f'<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
         f'<div style="font-size:1.25rem;font-weight:600;color:{cor};">{atual:.1f}{sufixo}</div>'
-        f'<div style="font-size:0.65rem;color:#aaa;margin-top:2px;">'
+        f'<div style="font-size:0.65rem;color:var(--text-secondary);margin-top:2px;">'
         f'média 5a: {media:.1f}{sufixo} &nbsp;|&nbsp; {sinal}'
         f'</div>'
-        f'<div style="background:#333;border-radius:2px;height:4px;margin-top:6px;">'
+        f'<div style="background:var(--border-normal,#333);border-radius:2px;height:4px;margin-top:6px;">'
         f'<div style="background:{bar_color};border-radius:2px;height:4px;{bar_fill}"></div>'
         f'</div>'
-        f'<div style="display:flex;justify-content:space-between;font-size:0.58rem;color:#555;margin-top:2px;">'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.58rem;color:var(--text-muted);margin-top:2px;">'
         f'<span>{minv:.1f}</span><span>{maxv:.1f}</span>'
         f'</div>'
         f'</div>',
@@ -1167,8 +1168,8 @@ with tab_val:
     else:
         section_title("📊 múltiplos atuais")
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.68rem; '
-            'color:#444; margin-bottom:12px;">'
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.68rem; '
+            'color:var(--text-muted); margin-bottom:12px;">'
             'histórico via FMP não disponível para este ativo. '
             'exibindo múltiplos do cache local.'
             '</div>',
@@ -1340,19 +1341,19 @@ with tab_ia:
     _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
     if _cache_ia:
         st.markdown(
-            f'<div style="background:#0a0a0a; border:1px solid #1a1a1a; '
-            f'border-left:3px solid #333; border-radius:6px; '
+            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
+            f'border-left:3px solid var(--accent); border-radius:6px; '
             f'padding:12px 16px; margin-bottom:16px;">'
 
-            f'<div style="font-family:Courier New; font-size:0.65rem; '
-            f'color:#444; margin-bottom:8px;">'
+            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.65rem; '
+            f'color:var(--text-muted); margin-bottom:8px;">'
             f'📋 análise salva em {_cache_ia["timestamp"]} '
             f'| health score na época: {_cache_ia["score"]}/100 '
             f'| regime: {_cache_ia["macro"]}'
             f'</div>'
 
-            f'<div style="font-family:Courier New; font-size:0.82rem; '
-            f'color:#C0C0C0; line-height:1.8; white-space:pre-wrap;">'
+            f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
+            f'color:var(--text-primary); line-height:1.8; white-space:pre-wrap;">'
             f'{_cache_ia["texto"]}'
             f'</div>'
 
@@ -1366,7 +1367,7 @@ with tab_ia:
     _col_ia1, _col_ia2, _col_ia3 = st.columns([3, 1, 1], gap="small")
     with _col_ia1:
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.72rem; color:#333; line-height:1.5;">'
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); line-height:1.5;">'
             'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
             'não é recomendação.</div>',
             unsafe_allow_html=True,
@@ -1444,7 +1445,7 @@ with tab_ia:
     _col_pdf1, _col_pdf2 = st.columns([3, 1])
     with _col_pdf1:
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.72rem; color:#333;">'
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted);">'
             'gera um relatório profissional com fundamentos, análise ia e '
             'health score em formato pdf. o deepseek redige a tese completa '
             'antes da renderização — pode levar alguns segundos.</div>',
@@ -1875,8 +1876,8 @@ with tab_dcf:
         section_title("🏢 modelo de valuation — p/vp justo (fii)")
 
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.75rem; '
-            'color:#555; margin-bottom:16px; line-height:1.7;">'
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; '
+            'color:var(--text-muted); margin-bottom:16px; line-height:1.7;">'
             'para fiis o modelo correto não é dcf, mas sim a comparação entre '
             '<b>cap rate implícito</b> (yield real do fii) e o '
             '<b>custo de oportunidade</b> (ntn-b + spread de risco do segmento). '
@@ -1960,9 +1961,9 @@ with tab_dcf:
 
         _rc1, _rc2, _rc3, _rc4 = st.columns(4)
 
-        _cor_pvpj = "#00C853" if _pvp_justo > _pvp_atual else "#FF1744"
-        _cor_spread_ef = "#00C853" if _spread_efetivo >= 0 else "#FF1744"
-        _cor_upside = "#00C853" if _upside_pvp > 0 else "#FF1744"
+        _cor_pvpj = "var(--bull)" if _pvp_justo > _pvp_atual else "var(--bear)"
+        _cor_spread_ef = "var(--bull)" if _spread_efetivo >= 0 else "var(--bear)"
+        _cor_upside = "var(--bull)" if _upside_pvp > 0 else "var(--bear)"
 
         with _rc1:
             metric_card(
@@ -2062,7 +2063,7 @@ with tab_dcf:
             x=[_dy_real_calc],
             y=[_pvp_justo],
             mode="markers",
-            marker=dict(color="#FF9900", size=12, symbol="diamond"),
+            marker=dict(color=_chart_cores()["accent"], size=12, symbol="diamond"),
             name="posição atual",
         )
 
@@ -2229,7 +2230,7 @@ with tab_dcf:
                     
                 fig.add_trace(go.Scatter(x=cenarios_g, y=y_vals, name=f"wacc {wacc_c}%", line=dict(color=CORES_SERIES[i % len(CORES_SERIES)])))
                 
-            fig.add_hline(y=preco_input, line_color="#FF9900", line_dash="dash", annotation_text="preço atual")
+            fig.add_hline(y=preco_input, line_color=_chart_cores()["accent"], line_dash="dash", annotation_text="preço atual")
             fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
             st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
             
@@ -2308,7 +2309,7 @@ with tab_macro:
             stk_p = df_hist['Close'].copy()
             stk_p.index = pd.to_datetime(stk_p.index).tz_localize(None)
             fig_macro = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_macro.add_trace(go.Scatter(x=stk_p.index, y=stk_p, name=ticker.lower(), line=dict(color="#FF9900")), secondary_y=False)
+            fig_macro.add_trace(go.Scatter(x=stk_p.index, y=stk_p, name=ticker.lower(), line=dict(color=_chart_cores()["accent"])), secondary_y=False)
             fig_macro.add_trace(go.Scatter(x=m_data.index, y=m_data, name=m_name, line=dict(color="#00B0FF", dash="dot")), secondary_y=True)
             fig_macro.update_layout(**base_layout(height=450, title=f"{ticker.lower()} vs {ind_macro.lower()}"))
             st.plotly_chart(fig_macro, use_container_width=True, config={'responsive': True})

@@ -1144,8 +1144,8 @@ with tab_posicoes:
         col_imp1, col_imp2 = st.columns([3, 1])
         with col_imp1:
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.78rem; '
-                'color:#555; line-height:1.6;">'
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
+                'color:var(--text-muted); line-height:1.6;">'
                 '📋 <b>formato aceito:</b> CSV ou Excel com colunas '
                 '<code>ticker</code>, <code>quantidade</code>, '
                 '<code>preco_medio</code>.<br>'
@@ -1292,7 +1292,7 @@ with tab_posicoes:
         
         c_txt, c_nav, c_btn = st.columns([3, 2, 1])
         with c_txt:
-            st.markdown(f"<div style='font-family: Courier New; font-size: 0.85rem; color: #888; padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-family:var(--font-data,monospace); font-size: 0.85rem; color:var(--text-muted); padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
         with c_nav:
             _tickers_port = df_ativas['ticker'].tolist()
             _sel_nav = st.selectbox(
@@ -1525,13 +1525,14 @@ with tab_posicoes:
                 _series = _perf.get('series', {})
                 if _series:
                     _fig_perf = go.Figure()
+                    _cc_perf = _chart_cores()
                     _cores_perf = {
-                        'minha carteira': '#FF9900',
-                        'ibovespa':       '#00C853',
-                        's&p500 (br)':    '#00B0FF',
+                        'minha carteira': _cc_perf["accent"],
+                        'ibovespa':       _cc_perf["bull"],
+                        's&p500 (br)':    _cc_perf["info"],
                         'ifix (fiis)':    '#8B5CF6',
-                        'cdi':            '#555555',
-                        'cdi (aprox)':    '#444444',
+                        'cdi':            _cc_perf["muted"],
+                        'cdi (aprox)':    _cc_perf["muted"],
                     }
 
                     if 'minha carteira' in _series:
@@ -1540,7 +1541,7 @@ with tab_posicoes:
                         _fig_perf.add_trace(go.Scatter(
                             x=_s.index, y=_s.values,
                             name=f"minha carteira ({_ret_f:+.1f}%)",
-                            line=dict(color='#FF9900', width=3),
+                            line=dict(color=_cc_perf["accent"], width=3),
                             hovertemplate=(
                                 '%{x}<br>carteira: %{y:.1f}<extra></extra>'
                             ),
@@ -1862,24 +1863,24 @@ with tab_posicoes:
                 pl_br_pct     = ((total_br_val / total_br_cust) - 1) * 100 if total_br_cust > 0 else 0.0
 
                 st.markdown(
-                    f'<div style="font-family:Courier New; font-size:0.85rem; margin-bottom:8px;">'
-                    f'<span style="color:#555;">patrimônio: </span>'
-                    f'<span style="color:#E0E0E0; font-weight:bold;">R$ {total_br_val:,.2f}</span> | '
-                    f'<span style="color:#555;">p&l: </span>'
-                    f'<span style="color:{"#00C853" if pl_br >= 0 else "#FF1744"}; font-weight:bold;">'
+                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
+                    f'<span style="color:var(--text-muted);">patrimônio: </span>'
+                    f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_br_val:,.2f}</span> | '
+                    f'<span style="color:var(--text-muted);">p&l: </span>'
+                    f'<span style="color:{"var(--bull)" if pl_br >= 0 else "var(--bear)"}; font-weight:bold;">'
                     f'R$ {pl_br:+,.2f} ({pl_br_pct:+.1f}%)</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
 
                 for pos in sorted(posicoes_brl, key=lambda x: abs(x['pl_pct']), reverse=True):
-                    cor_p = "#00C853" if pos['pl_pct'] >= 0 else "#FF1744"
+                    cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
                     st.markdown(
                         f'<div style="display:flex; justify-content:space-between; '
-                        f'padding:4px 0; border-bottom:1px solid #111; '
-                        f'font-family:Courier New; font-size:0.75rem;">'
+                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
+                        f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
                         f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
-                        f'<span style="color:#555;">R$ {pos["preco_atual"]:,.2f}</span>'
+                        f'<span style="color:var(--text-muted);">R$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
                         f'</div>',
@@ -1890,24 +1891,24 @@ with tab_posicoes:
                 section_title("🇺🇸 ativos eua (usd + brl)")
 
                 st.markdown(
-                    f'<div style="font-family:Courier New; font-size:0.85rem; margin-bottom:8px;">'
-                    f'<span style="color:#555;">em usd: </span>'
-                    f'<span style="color:#E0E0E0; font-weight:bold;">$ {total_usd:,.2f}</span> | '
-                    f'<span style="color:#555;">em brl: </span>'
-                    f'<span style="color:#E0E0E0; font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
-                    f'<br><span style="color:#555; font-size:0.65rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
+                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
+                    f'<span style="color:var(--text-muted);">em usd: </span>'
+                    f'<span style="color:var(--text-primary); font-weight:bold;">$ {total_usd:,.2f}</span> | '
+                    f'<span style="color:var(--text-muted);">em brl: </span>'
+                    f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
+                    f'<br><span style="color:var(--text-muted); font-size:0.65rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
 
                 for pos in sorted(posicoes_usd, key=lambda x: abs(x['pl_pct']), reverse=True):
-                    cor_p = "#00C853" if pos['pl_pct'] >= 0 else "#FF1744"
+                    cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
                     st.markdown(
                         f'<div style="display:flex; justify-content:space-between; '
-                        f'padding:4px 0; border-bottom:1px solid #111; '
-                        f'font-family:Courier New; font-size:0.75rem;">'
+                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
+                        f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
                         f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
-                        f'<span style="color:#555;">$ {pos["preco_atual"]:,.2f}</span>'
+                        f'<span style="color:var(--text-muted);">$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
                         f'<span style="color:{cor_p}; font-size:0.68rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
                         f'</div>',
@@ -1919,7 +1920,7 @@ with tab_posicoes:
         with st.expander("⚖️ rebalanceamento inteligente", expanded=False):
 
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.78rem; color:#555; margin-bottom:16px;">'
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); margin-bottom:16px;">'
                 'defina a alocação-alvo (%) para cada ativo e veja exatamente quanto '
                 'comprar ou vender para rebalancear a carteira.</div>',
                 unsafe_allow_html=True,
@@ -1958,10 +1959,10 @@ with tab_posicoes:
                         total_alvo    += novo_alvo
 
                 # Indicador de soma dos alvos
-                cor_total = "#00C853" if abs(total_alvo - 100) < 0.1 else "#FF1744"
+                cor_total = "var(--bull)" if abs(total_alvo - 100) < 0.1 else "var(--bear)"
                 aviso_soma = "✅" if abs(total_alvo - 100) < 0.1 else "⚠️ deve somar 100%"
                 st.markdown(
-                    f'<div style="font-family:Courier New; font-size:0.85rem; '
+                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; '
                     f'color:{cor_total}; margin:8px 0;">'
                     f'total alocado: {total_alvo:.1f}% {aviso_soma}</div>',
                     unsafe_allow_html=True,
@@ -2025,35 +2026,35 @@ with tab_posicoes:
                         dados_rebal.sort(key=lambda x: abs(x['desvio']), reverse=True)
 
                         for d in dados_rebal:
-                            cor_op = "#00C853" if d['diferença R$'] > 0 else "#FF1744"
+                            cor_op = "var(--bull)" if d['diferença R$'] > 0 else "var(--bear)"
                             op_txt = "COMPRAR" if d['diferença R$'] > 0 else "VENDER"
                             seta   = "▲" if d['diferença R$'] > 0 else "▼"
 
                             r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3], gap="small")
                             with r1:
                                 st.markdown(
-                                    f'<div style="font-family:Courier New; color:#FF9900; font-weight:bold;">{d["ticker"]}</div>'
-                                    f'<div style="font-family:Courier New; font-size:0.7rem; color:#555;">{d["peso atual"]} → {d["peso alvo"]}</div>',
+                                    f'<div style="font-family:var(--font-data,monospace); color:var(--accent); font-weight:bold;">{d["ticker"]}</div>'
+                                    f'<div style="font-family:var(--font-data,monospace); font-size:0.7rem; color:var(--text-muted);">{d["peso atual"]} → {d["peso alvo"]}</div>',
                                     unsafe_allow_html=True,
                                 )
                             with r2:
-                                cor_dev = ("#FF1744" if abs(d['desvio']) > 5
-                                           else "#FF9900" if abs(d['desvio']) > 2
-                                           else "#00C853")
+                                cor_dev = ("var(--bear)" if abs(d['desvio']) > 5
+                                           else "var(--amber)" if abs(d['desvio']) > 2
+                                           else "var(--bull)")
                                 st.markdown(
-                                    f'<div style="font-family:Courier New; color:{cor_dev}; font-size:0.85rem;">'
+                                    f'<div style="font-family:var(--font-data,monospace); color:{cor_dev}; font-size:0.85rem;">'
                                     f'desvio: {d["desvio"]:+.1f}pp</div>',
                                     unsafe_allow_html=True,
                                 )
                             with r3:
                                 st.markdown(
-                                    f'<div style="font-family:Courier New; color:#888; font-size:0.8rem;">'
+                                    f'<div style="font-family:var(--font-data,monospace); color:var(--text-muted); font-size:0.8rem;">'
                                     f'R$ {d["valor atual"]:,.0f} → R$ {d["valor alvo"]:,.0f}</div>',
                                     unsafe_allow_html=True,
                                 )
                             with r4:
                                 st.markdown(
-                                    f'<div style="font-family:Courier New; color:{cor_op}; font-size:0.85rem; font-weight:bold;">'
+                                    f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.85rem; font-weight:bold;">'
                                     f'{seta} {op_txt} R$ {abs(d["diferença R$"]):,.2f}</div>',
                                     unsafe_allow_html=True,
                                 )
@@ -2065,13 +2066,13 @@ with tab_posicoes:
                                         else f"{d['ação']:+.4f} lotes"
                                     )
                                     st.markdown(
-                                        f'<div style="font-family:Courier New; color:{cor_op}; font-size:0.8rem;">'
+                                        f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.8rem;">'
                                         f'{qtd_fmt} @ R$ {d["preço"]:,.2f}</div>',
                                         unsafe_allow_html=True,
                                     )
 
                             st.markdown(
-                                '<div style="height:1px; background:#1e1e1e; margin:4px 0;"></div>',
+                                '<div style="height:1px; background:var(--border-subtle); margin:4px 0;"></div>',
                                 unsafe_allow_html=True,
                             )
 
@@ -2301,7 +2302,7 @@ with tab_concentracao:
                 values=values,
                 hole=0.45,
                 textinfo='label+percent',
-                textfont=dict(family='Courier New', size=10, color='#888'),
+                textfont=dict(family='Inter, system-ui, sans-serif', size=10, color=_chart_cores()["muted"]),
                 marker=dict(
                     colors=_cores_pizza[:len(labels)],
                     line=dict(color='#050505', width=2),
@@ -2347,7 +2348,7 @@ with tab_concentracao:
         label_com_tooltip(
             "🔗 MATRIZ DE CORRELAÇÃO ENTRE ATIVOS",
             chave="correlacao",
-            cor="#FF9900",
+            cor="var(--accent)",
             tamanho="0.72rem",
         )
 
@@ -2430,7 +2431,7 @@ with tab_concentracao:
                     y=_ticks_clean,
                     text=_text,
                     texttemplate="%{text}",
-                    textfont=dict(size=11, color='white', family='Courier New'),
+                    textfont=dict(size=11, color='white', family='Inter, system-ui, sans-serif'),
                     colorscale=[
                         [0.0,  "#1565C0"],   # azul escuro — correlação negativa
                         [0.35, "#1a1a1a"],   # neutro — correlação zero
@@ -2454,9 +2455,10 @@ with tab_concentracao:
                     height=_dim_corr,
                     title=f"correlação de retornos diários — {_periodo_corr}"
                 )
+                _cc_corr = _chart_cores()
                 _lay_corr.update(
-                    xaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
-                    yaxis=dict(tickfont=dict(size=10, color='#aaa', family='Courier New')),
+                    xaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family='Inter, system-ui, sans-serif')),
+                    yaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family='Inter, system-ui, sans-serif')),
                     margin=dict(l=80, r=40, t=40, b=80),
                     autosize=True,
                 )
@@ -2466,14 +2468,14 @@ with tab_concentracao:
                 # Alertas de correlação
                 if _alertas_corr:
                     st.markdown(
-                        '<div style="font-family:Courier New; font-size:0.72rem; '
-                        'color:#555; margin-top:4px;">⚠️ pares críticos:</div>',
+                        '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
+                        'color:var(--text-muted); margin-top:4px;">⚠️ pares críticos:</div>',
                         unsafe_allow_html=True,
                     )
                     for _ac in _alertas_corr:
-                        _cor_ac = "#FF9900" if "alta" in _ac else "#00C853"
+                        _cor_ac = "var(--amber)" if "alta" in _ac else "var(--bull)"
                         st.markdown(
-                            f'<div style="font-family:Courier New; font-size:0.75rem; '
+                            f'<div style="font-family:var(--font-data,monospace); font-size:0.75rem; '
                             f'color:{_cor_ac}; padding:2px 0;">• {_ac}</div>',
                             unsafe_allow_html=True,
                         )
@@ -2546,11 +2548,11 @@ with tab_stress:
             if cenarios_padrao[cenario_sel] is not None:
                 c = cenarios_padrao[cenario_sel]
                 st.markdown(f"""
-                <div style="font-family:Courier New; font-size:0.82rem; color:#888; padding:8px; background:#0d0d0d; border-radius:4px; border-left:3px solid #FF9900;">
-                IBOV: <span style="color:{'#FF1744' if c['ibov']<0 else '#00C853'}">{c['ibov']:+.1f}%</span> &nbsp;|&nbsp;
-                S&P500: <span style="color:{'#FF1744' if c['sp500']<0 else '#00C853'}">{c['sp500']:+.1f}%</span> &nbsp;|&nbsp;
-                Dólar: <span style="color:{'#FF1744' if c['dolar']<0 else '#00C853'}">{c['dolar']:+.1f}%</span> &nbsp;|&nbsp;
-                Selic: <span style="color:{'#FF1744' if c['selic']<0 else '#00C853'}">{c['selic']:+.2f}pp</span>
+                <div style="font-family:var(--font-data,monospace); font-size:0.82rem; color:var(--text-muted); padding:8px; background:var(--bg-surface); border-radius:4px; border-left:3px solid var(--accent);">
+                IBOV: <span style="color:{'var(--bear)' if c['ibov']<0 else 'var(--bull)'}">{c['ibov']:+.1f}%</span> &nbsp;|&nbsp;
+                S&P500: <span style="color:{'var(--bear)' if c['sp500']<0 else 'var(--bull)'}">{c['sp500']:+.1f}%</span> &nbsp;|&nbsp;
+                Dólar: <span style="color:{'var(--bear)' if c['dolar']<0 else 'var(--bull)'}">{c['dolar']:+.1f}%</span> &nbsp;|&nbsp;
+                Selic: <span style="color:{'var(--bear)' if c['selic']<0 else 'var(--bull)'}">{c['selic']:+.2f}pp</span>
                 </div>
                 """, unsafe_allow_html=True)
                 choque_ibov = c['ibov']
@@ -2705,8 +2707,8 @@ with tab_backtest:
     )
 
     st.markdown(
-        '<div style="font-family:Courier New;font-size:0.75rem;'
-        'color:#555;margin-bottom:16px;line-height:1.7;">'
+        '<div style="font-family:var(--font-ui,sans-serif);font-size:0.75rem;'
+        'color:var(--text-muted);margin-bottom:16px;line-height:1.7;">'
         'simula a estratégia de <b>comprar</b> quando o health score '
         'supera o threshold de entrada e <b>vender</b> quando cai '
         'abaixo do threshold de saída. compara com buy & hold e cdi. '
@@ -2805,34 +2807,35 @@ with tab_backtest:
             else:
                 # Badge indicando fonte dos dados de score
                 _fonte = _bt_res.get('fonte_score', 'proxy_tecnico')
+                _cc_bt_badge = _chart_cores()
                 _fonte_configs = {
                     'banco_local': (
-                        '#00C853', '✅',
+                        _cc_bt_badge["bull"], '✅',
                         'scores reais (banco local)',
                         'calculados pelo motor do app — máxima qualidade'
                     ),
                     'alpha_vantage': (
-                        '#00B0FF', '📊',
+                        _cc_bt_badge["info"], '📊',
                         'alpha vantage — dre/balanço histórico (supabase)',
                         'fundamentais trimestrais reais desde 2010 via alpha vantage + cache supabase'
                     ),
                     'fmp': (
-                        '#00B0FF', '📈',
+                        _cc_bt_badge["info"], '📈',
                         'financial modeling prep — múltiplos históricos',
                         'ratios históricos via fmp (somente ativos eua)'
                     ),
                     'proxy_calibrado': (
-                        '#FF9900', '🔧',
+                        _cc_bt_badge["amber"], '🔧',
                         'proxy técnico calibrado por fundamentos',
                         'indicadores técnicos com nível âncora nos fundamentos atuais'
                     ),
                     'proxy_tecnico': (
-                        '#FF1744', '⚠️',
+                        _cc_bt_badge["bear"], '⚠️',
                         'proxy puramente técnico',
                         'sem dados fundamentalistas — qualidade inferior'
                     ),
                     'sem_dados': (
-                        '#555', '❓',
+                        _cc_bt_badge["muted"], '❓',
                         'sem dados disponíveis',
                         'nenhuma fonte retornou dados para este ativo'
                     ),
@@ -2856,17 +2859,17 @@ with tab_backtest:
                     _f_desc += _sb_info
 
                 st.markdown(
-                    f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                     f'border-left:3px solid {_f_cor};border-radius:4px;'
                     f'padding:8px 14px;margin-bottom:12px;display:flex;'
                     f'gap:12px;align-items:center;">'
                     f'<span style="font-size:1rem;">{_f_icon}</span>'
                     f'<div>'
-                    f'<div style="font-family:Courier New;font-size:0.72rem;'
+                    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;'
                     f'color:{_f_cor};font-weight:600;">'
                     f'fonte dos dados: {_f_label}</div>'
-                    f'<div style="font-family:Courier New;font-size:0.65rem;'
-                    f'color:#555;">{_f_desc}</div>'
+                    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.65rem;'
+                    f'color:var(--text-muted);">{_f_desc}</div>'
                     f'</div>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -2942,19 +2945,19 @@ with tab_backtest:
                     _fonte_ui = _bt_res.get('fonte_score', 'proxy_tecnico')
 
                     st.markdown(
-                        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                         f'border-radius:6px;padding:12px 16px;margin-bottom:12px;">'
-                        f'<div style="font-family:Courier New;font-size:0.68rem;'
-                        f'color:#FF9900;font-weight:600;margin-bottom:8px;">'
+                        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.68rem;'
+                        f'color:var(--accent);font-weight:600;margin-bottom:8px;">'
                         f'📊 distribuição do score — {_fonte_ui.replace("_"," ")}</div>'
                         f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
                         f'gap:8px;margin-bottom:10px;">'
                         + ''.join([
                             f'<div style="text-align:center;">'
-                            f'<div style="font-size:0.58rem;color:#555;'
+                            f'<div style="font-size:0.58rem;color:var(--text-muted);'
                             f'text-transform:uppercase;margin-bottom:2px;">{lbl}</div>'
-                            f'<div style="font-family:Courier New;font-size:0.9rem;'
-                            f'color:#ccc;font-weight:600;">{val:.0f}</div>'
+                            f'<div style="font-family:var(--font-data,monospace);font-size:0.9rem;'
+                            f'color:var(--text-secondary);font-weight:600;">{val:.0f}</div>'
                             f'</div>'
                             for lbl, val in [
                                 ('p10', _p10), ('p25', _p25),
@@ -3069,16 +3072,17 @@ with tab_backtest:
                     section_title("📈 curva de capital — base 100")
 
                     _fig_bt = go.Figure()
+                    _cc_bt = _chart_cores()
                     _cores_bt = {
-                        'estratégia (score)': '#FF9900',   # laranja sólido
-                        'cdi':                '#00B0FF',   # azul claro — visível no tema escuro
-                        'cdi (aprox)':        '#4488AA',   # azul médio
+                        'estratégia (score)': _cc_bt["accent"],
+                        'cdi':                _cc_bt["info"],
+                        'cdi (aprox)':        _cc_bt["info"],
                     }
 
                     for _nm, _sr in _bt_series.items():
                         if _sr.empty:
                             continue
-                        _cor_bt = _cores_bt.get(_nm, '#00C853')
+                        _cor_bt = _cores_bt.get(_nm, _cc_bt["bull"])
                         if 'estratégia' in _nm:
                             _lw   = 2.5
                             _dash = 'solid'
@@ -3106,7 +3110,7 @@ with tab_backtest:
                             x=[t['data'] for t in _comp],
                             y=[100] * len(_comp),
                             mode='markers',
-                            marker=dict(symbol='triangle-up', size=10, color='#00C853'),
+                            marker=dict(symbol='triangle-up', size=10, color=_cc_bt["bull"]),
                             name='compra',
                             hovertemplate='compra: %{x}<br>score: %{text}<extra></extra>',
                             text=[str(t['score']) for t in _comp],
@@ -3117,7 +3121,7 @@ with tab_backtest:
                             x=[t['data'] for t in _vend],
                             y=[100] * len(_vend),
                             mode='markers',
-                            marker=dict(symbol='triangle-down', size=10, color='#FF1744'),
+                            marker=dict(symbol='triangle-down', size=10, color=_cc_bt["bear"]),
                             name='venda',
                             hovertemplate='venda: %{x}<br>score: %{text}<br>ret: %{customdata:.1f}%<extra></extra>',
                             text=[str(t['score']) for t in _vend],
@@ -3162,11 +3166,11 @@ with tab_backtest:
                         # Linha de threshold de entrada
                         _fig_score_bt.add_hline(
                             y=_bt_entrada,
-                            line_color='#00C853',
+                            line_color=_cc_bt["bull"],
                             line_dash='dash',
                             line_width=1.5,
                             annotation_text=f'entrada ≥{_bt_entrada}',
-                            annotation_font_color='#00C853',
+                            annotation_font_color=_cc_bt["bull"],
                             annotation_font_size=9,
                             annotation_position='right',
                         )
@@ -3174,11 +3178,11 @@ with tab_backtest:
                         # Linha de threshold de saída
                         _fig_score_bt.add_hline(
                             y=_bt_saida,
-                            line_color='#FF1744',
+                            line_color=_cc_bt["bear"],
                             line_dash='dash',
                             line_width=1.5,
                             annotation_text=f'saída <{_bt_saida}',
-                            annotation_font_color='#FF1744',
+                            annotation_font_color=_cc_bt["bear"],
                             annotation_font_size=9,
                             annotation_position='right',
                         )
@@ -3248,7 +3252,7 @@ with tab_backtest:
                         _fig_ocean.add_trace(go.Scatter(
                             x=_dd_est.index, y=_dd_est.values,
                             fill='tozeroy',
-                            line=dict(color='#FF1744', width=1),
+                            line=dict(color=_cc_bt["bear"], width=1),
                             name='drawdown',
                             hovertemplate='%{x}<br>drawdown: %{y:.1f}%<extra></extra>',
                         ))
@@ -3308,7 +3312,7 @@ with tab_backtest:
                                 hovertemplate='%{x}<br>sharpe: %{y:.2f}<extra></extra>',
                             ))
                         _fig_roll_sharpe.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
-                        _fig_roll_sharpe.add_hline(y=1, line_color='#00C853', line_dash='dot', line_width=1)
+                        _fig_roll_sharpe.add_hline(y=1, line_color=_cc_bt["bull"], line_dash='dot', line_width=1)
                         _lay_roll = base_layout(
                             height=180,
                             title="📉 rolling sharpe — janela 252 pregões",
@@ -3472,7 +3476,7 @@ with tab_ir:
     section_title("🧾 calculadora de imposto de renda")
 
     st.markdown(
-        '<div style="font-family:Courier New; font-size:0.78rem; color:#555; '
+        '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); '
         'margin-bottom:20px; line-height:1.6;">'
         '📋 <b>regras aplicadas:</b> ações BR (isenção R$ 20k/mês, 15% acima), '
         'FIIs (20% ganho de capital), ações EUA (15%), day trade (20%). '
@@ -3609,10 +3613,10 @@ with tab_ir:
 
         # Regra aplicada + observações
         st.markdown(
-            f'<div class="card" style="margin-top:12px; padding:14px; border-left:3px solid #00B0FF;">'
-            f'<div style="font-family:Courier New; font-size:0.7rem; color:#555; '
+            f'<div class="card" style="margin-top:12px; padding:14px; border-left:3px solid var(--info);">'
+            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:var(--text-muted); '
             f'text-transform:uppercase; margin-bottom:6px;">regra aplicada</div>'
-            f'<div style="font-family:Courier New; font-size:0.82rem; color:#E0E0E0;">'
+            f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; color:var(--text-primary);">'
             f'{resultado_ir["regra_aplicada"]}</div>'
             f'</div>',
             unsafe_allow_html=True,
@@ -3620,8 +3624,8 @@ with tab_ir:
 
         for obs in resultado_ir['observacoes']:
             st.markdown(
-                f'<div style="font-family:Courier New; font-size:0.78rem; color:#888; '
-                f'padding:5px 0; border-bottom:1px solid #1e1e1e;">{obs}</div>',
+                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); '
+                f'padding:5px 0; border-bottom:1px solid var(--border-subtle);">{obs}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3673,11 +3677,11 @@ with tab_ir:
         for titulo, descricao in regras:
             st.markdown(
                 f'<div style="margin-bottom:12px; padding:10px 14px; '
-                f'background:#0d0d0d; border:1px solid #1e1e1e; border-radius:4px;">'
-                f'<div style="font-family:Courier New; font-size:0.78rem; '
-                f'color:#FF9900; font-weight:bold; margin-bottom:4px;">{titulo}</div>'
-                f'<div style="font-family:Courier New; font-size:0.76rem; '
-                f'color:#888; line-height:1.5;">{descricao}</div>'
+                f'background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px;">'
+                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
+                f'color:var(--accent); font-weight:bold; margin-bottom:4px;">{titulo}</div>'
+                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.76rem; '
+                f'color:var(--text-muted); line-height:1.5;">{descricao}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -3690,7 +3694,7 @@ with tab_chat:
     section_title("💬 chat com sua carteira — deepseek v4 pro")
 
     st.markdown(
-        '<div style="font-family:Courier New; font-size:0.72rem; color:#333; '
+        '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); '
         'margin-bottom:16px; line-height:1.5;">'
         'faça perguntas em linguagem natural sobre sua carteira. '
         'o modelo tem acesso completo às suas posições, health scores e métricas. '
@@ -3937,8 +3941,8 @@ with tab_chat:
         _avatar = "👤" if _role == "user" else "⚡"
         with st.chat_message(_role, avatar=_avatar):
             st.markdown(
-                f'<div style="font-family:Courier New; font-size:0.83rem; '
-                f'color:#C0C0C0; line-height:1.6;">{_msg["content"]}</div>',
+                f'<div style="font-family:var(--font-data,monospace); font-size:0.83rem; '
+                f'color:var(--text-primary); line-height:1.6;">{_msg["content"]}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3959,8 +3963,8 @@ with tab_chat:
         salvar_mensagem_chat(_user_id_chat, _portfolio_id_chat, 'user', _pergunta)
         with st.chat_message("user", avatar="👤"):
             st.markdown(
-                f'<div style="font-family:Courier New; font-size:0.83rem; '
-                f'color:#E0E0E0;">{_pergunta}</div>',
+                f'<div style="font-family:var(--font-data,monospace); font-size:0.83rem; '
+                f'color:var(--text-primary);">{_pergunta}</div>',
                 unsafe_allow_html=True,
             )
 
