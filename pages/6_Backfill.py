@@ -135,6 +135,178 @@ def _calcular_momentum(precos: pd.Series, data_ref: str):
         return None, None
 
 
+def _ratios_yf(ticker_yf: str, anos: int = 4) -> list[tuple[str, dict, dict]]:
+    """
+    Fallback para tickers BR sem cobertura FMP.
+    Monta dicts de ratios e key-metrics no mesmo formato que _score_offline espera,
+    a partir de demonstrações anuais do yfinance.
+    Retorna lista de (data_str, ratios_dict, km_dict), mais recente primeiro.
+    """
+    import yfinance as yf
+
+    try:
+        tk   = yf.Ticker(ticker_yf)
+        info = tk.info or {}
+        fin  = tk.financials
+        bal  = tk.balance_sheet
+        cf   = tk.cashflow
+    except Exception:
+        return []
+
+    if fin is None or fin.empty:
+        return []
+
+    shares = (
+        info.get("sharesOutstanding")
+        or info.get("impliedSharesOutstanding")
+        or info.get("floatShares") or 0
+    )
+
+    # Preços mensais para calcular PE/PB na data fiscal
+    hist_px = pd.Series(dtype=float)
+    try:
+        hist_px = tk.history(period=f"{anos + 2}y", interval="1mo")["Close"].dropna()
+        if getattr(hist_px.index, "tz", None) is not None:
+            hist_px.index = hist_px.index.tz_localize(None)
+    except Exception:
+        pass
+
+    def _r(df, *names):
+        """Primeira linha cujo nome (sem espaço/case) coincide."""
+        if df is None or df.empty:
+            return None
+        for name in names:
+            key = name.lower().replace(" ", "").replace("_", "")
+            for idx in df.index:
+                if str(idx).lower().replace(" ", "").replace("_", "") == key:
+                    return df.loc[idx]
+        return None
+
+    def _v(series, col):
+        if series is None or col not in series.index:
+            return None
+        v = series[col]
+        try:
+            import numpy as np
+            return None if np.isnan(float(v)) else float(v)
+        except Exception:
+            return None
+
+    cols       = list(fin.columns)[:anos]   # mais recentes primeiro
+    resultados = []
+
+    for i, col in enumerate(cols):
+        try:
+            dt_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)[:10]
+
+            # ── Demonstração de resultado ─────────────────────────────
+            net_income  = _v(_r(fin, "Net Income", "Net Income Common Stockholders"), col)
+            revenue     = _v(_r(fin, "Total Revenue", "Revenue"), col)
+            gross_pft   = _v(_r(fin, "Gross Profit"), col)
+            ebitda_v    = _v(_r(fin, "EBITDA"), col)
+            ebit        = _v(_r(fin, "EBIT", "Operating Income"), col)
+            interest_ex = _v(_r(fin, "Interest Expense"), col)
+
+            # ── Balanço ───────────────────────────────────────────────
+            equity = tot_assets = tot_debt = cash = None
+            cur_assets = cur_liab = None
+            if bal is not None and not bal.empty and col in bal.columns:
+                equity     = _v(_r(bal, "Stockholders Equity", "Common Stock Equity",
+                                      "Total Stockholder Equity"), col)
+                tot_assets = _v(_r(bal, "Total Assets"), col)
+                tot_debt   = _v(_r(bal, "Total Debt", "Long Term Debt"), col) or 0
+                cash       = _v(_r(bal, "Cash And Cash Equivalents", "Cash"), col) or 0
+                cur_assets = _v(_r(bal, "Current Assets", "Total Current Assets"), col)
+                cur_liab   = _v(_r(bal, "Current Liabilities", "Total Current Liabilities"), col)
+
+            # ── Fluxo de caixa ────────────────────────────────────────
+            fcf = op_cf = None
+            if cf is not None and not cf.empty and col in cf.columns:
+                op_cf = _v(_r(cf, "Operating Cash Flow",
+                                  "Total Cash From Operating Activities"), col)
+                capex = _v(_r(cf, "Capital Expenditure", "Capital Expenditures"), col)
+                if op_cf and capex:
+                    fcf = op_cf + capex   # capex é negativo no yfinance
+
+            # ── Preço na data fiscal ──────────────────────────────────
+            price = None
+            if not hist_px.empty:
+                target = pd.Timestamp(dt_str)
+                diffs  = (hist_px.index - target).map(abs)
+                price  = float(hist_px.iloc[diffs.argmin()])
+
+            # ── Ratios derivados (formato decimal FMP) ────────────────
+            roe        = (net_income / equity)     if (net_income and equity and equity > 0)        else None
+            roa        = (net_income / tot_assets) if (net_income and tot_assets and tot_assets > 0) else None
+            net_margin = (net_income / revenue)    if (net_income and revenue and revenue != 0)      else None
+            gross_mgn  = (gross_pft  / revenue)    if (gross_pft  and revenue and revenue != 0)      else None
+            at         = (revenue    / tot_assets) if (revenue    and tot_assets and tot_assets > 0) else None
+            cr         = (cur_assets / cur_liab)   if (cur_assets and cur_liab and cur_liab > 0)     else None
+            de         = (tot_debt   / equity)     if (tot_debt   and equity and equity > 0)         else None
+            icr        = (ebit / abs(interest_ex)) if (ebit and interest_ex and interest_ex != 0)   else None
+            fcf_op     = (fcf / op_cf)             if (fcf and op_cf and op_cf != 0)                else None
+
+            mktcap = (price * shares) if (price and shares) else None
+            pe  = (mktcap / net_income) if (mktcap and net_income and net_income > 0) else None
+            pb  = (mktcap / equity)     if (mktcap and equity and equity > 0)         else None
+            evm = None
+            if mktcap and ebitda_v and ebitda_v > 0:
+                ev  = mktcap + (tot_debt or 0) - (cash or 0)
+                evm = ev / ebitda_v
+
+            # ── KM fields ─────────────────────────────────────────────
+            roic = (ebit / (tot_debt + equity)) if (ebit and tot_debt is not None and equity and (tot_debt + equity) > 0) else None
+            nd_eb = ((tot_debt - cash) / ebitda_v) if (tot_debt is not None and cash is not None and ebitda_v and ebitda_v > 0) else None
+            fcf_yield = (fcf / mktcap) if (fcf and mktcap and mktcap > 0) else None
+
+            # YoY crescimento (período seguinte = ano anterior)
+            rev_growth = eps_growth = None
+            if i + 1 < len(cols):
+                col_prev = cols[i + 1]
+                rev_prev = _v(_r(fin, "Total Revenue", "Revenue"), col_prev)
+                ni_prev  = _v(_r(fin, "Net Income", "Net Income Common Stockholders"), col_prev)
+                if revenue and rev_prev and rev_prev != 0:
+                    rev_growth = (revenue - rev_prev) / abs(rev_prev)
+                if net_income and ni_prev and ni_prev != 0:
+                    eps_growth = (net_income - ni_prev) / abs(ni_prev)
+
+            # Sanidade
+            if pe  and (pe  <= 0 or pe  > 500): pe  = None
+            if pb  and (pb  <= 0 or pb  > 100): pb  = None
+            if evm and (evm <= 0 or evm > 300): evm = None
+
+            ratios = {
+                "date":                               dt_str,
+                "returnOnEquity":                     roe,
+                "returnOnAssets":                     roa,
+                "netProfitMargin":                    net_margin,
+                "grossProfitMargin":                  gross_mgn,
+                "priceEarningsRatio":                 pe,
+                "priceToBookRatio":                   pb,
+                "enterpriseValueMultiple":            evm,
+                "debtEquityRatio":                    de,
+                "currentRatio":                       cr,
+                "interestCoverage":                   icr,
+                "freeCashFlowOperatingCashFlowRatio": fcf_op,
+                "assetTurnover":                      at,
+            }
+            km = {
+                "date":              dt_str,
+                "roic":              roic,
+                "netDebtToEBITDA":   nd_eb,
+                "freeCashFlowYield": fcf_yield,
+                "debtToEquity":      de,
+                "currentRatio":      cr,
+                "revenueGrowth":     rev_growth,
+                "epsgrowth":         eps_growth,
+            }
+            resultados.append((dt_str, ratios, km))
+        except Exception:
+            continue
+
+    return resultados
+
+
 def _score_offline(
     ratios: dict, km: dict,
     ratios_yoy, km_yoy,
@@ -294,6 +466,16 @@ def _processar_ticker_st(
         time.sleep(0.4)
         yoy_offset  = 1
         granular    = "anual"
+
+    # ── 3. Fallback yfinance para BR sem cobertura FMP ────────────────────────
+    if not ratios_list and is_br:
+        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando yfinance…")
+        yf_data = _ratios_yf(ticker_yf, anos=4)
+        if yf_data:
+            ratios_list = [r for _, r, _ in yf_data]
+            km_list     = [k for _, _, k in yf_data]
+            yoy_offset  = 1
+            granular    = "anual (yfinance)"
 
     if not ratios_list:
         diag = "FMP: sem dados (ativo não coberto ou quota esgotada)"
