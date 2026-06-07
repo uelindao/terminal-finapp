@@ -878,9 +878,7 @@ if indices:
             for nome, d in indices.items()
         }
         with _pulse_bar_ph.container():
-            _col_bar, _ = st.columns([1, 1])
-            with _col_bar:
-                _mpb(_pulse_data)
+            _mpb(_pulse_data)
     except Exception:
         pass
 
