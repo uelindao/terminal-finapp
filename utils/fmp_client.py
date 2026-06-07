@@ -302,26 +302,28 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
 @st.cache_data(ttl=86400, show_spinner=False)
 def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
     """
-    Busca P/L, P/VP, EV/EBITDA, DY, ROE e ROIC históricos (endpoint /ratios).
-    Retorna lista de dicts do mais recente ao mais antigo.
-
-    Exemplo de item:
-        {'data': '2024-12-31', 'pe': 28.5, 'pb': 6.2,
-         'ev_ebitda': 18.3, 'dy': 0.8, 'roe': 35.1, 'roic': 22.4, 'margem': 12.1}
+    Busca P/L, P/VP, EV/EBITDA, DY, ROE e ROIC históricos.
+    Para ativos BR (.SA): prefere CVM (dados oficiais) antes do FMP.
+    Para EUA: usa FMP diretamente.
     """
-    t = ticker.replace(".SA", "").upper()
+    is_br = ticker.upper().endswith(".SA")
+
+    # ── Ativos BR: CVM primeiro (dados oficiais IFRS brasileiros) ────────────
+    if is_br:
+        try:
+            from utils.cvm_client import get_multiplos_historicos_cvm
+            cvm = get_multiplos_historicos_cvm(ticker, anos=anos)
+            if cvm:
+                return cvm
+        except Exception:
+            pass
+
+    # ── FMP (EUA ou fallback para BR) ────────────────────────────────────────
+    t    = ticker.replace(".SA", "").upper()
     data = _get(f"ratios/{t}", {"limit": anos * 4})
 
     if not data or not isinstance(data, list):
-        if ticker.upper().endswith(".SA"):
-            # CVM: fonte oficial com até 10 anos para ativos BR
-            try:
-                from utils.cvm_client import get_multiplos_historicos_cvm
-                cvm = get_multiplos_historicos_cvm(ticker, anos=anos)
-                if cvm:
-                    return cvm
-            except Exception:
-                pass
+        if is_br:
             return _get_multiplos_historicos_yf(ticker, min(anos, 3))
         return []
 
@@ -351,15 +353,7 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
         except Exception:
             continue
 
-    # FMP retornou lista mas sem dados úteis → CVM → yfinance para BR
-    if not resultados and ticker.upper().endswith(".SA"):
-        try:
-            from utils.cvm_client import get_multiplos_historicos_cvm
-            cvm = get_multiplos_historicos_cvm(ticker, anos=anos)
-            if cvm:
-                return cvm
-        except Exception:
-            pass
+    if not resultados and is_br:
         return _get_multiplos_historicos_yf(ticker, min(anos, 3))
 
     return resultados

@@ -97,7 +97,7 @@ def calcular_oportunidades_watchlist(
 
             # 1ª tentativa: percentil histórico FMP (5 anos) — mais preciso
             try:
-                _medios = get_multiplos_medios(t_base, anos=5)
+                _medios = get_multiplos_medios(t_base, anos=10)
                 if _medios:
                     _stats_pe = _medios.get('pe') or _medios.get('pb')
                     if _stats_pe:

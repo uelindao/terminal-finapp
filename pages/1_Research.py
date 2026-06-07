@@ -642,7 +642,7 @@ cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
 
 # Busca múltiplos históricos FMP (escopo global — usado no prompt IA e na tab_val)
 with st.spinner("carregando histórico de múltiplos (fmp)..."):
-    _medios = get_multiplos_medios(t_base, anos=5)
+    _medios = get_multiplos_medios(t_base, anos=10)
 
 # ── Fallback: busca fundamentos diretamente quando não está no cache ──────
 # Ativos externos (buscados manualmente) não passam pelo sync do screener.
@@ -1804,7 +1804,7 @@ with tab_analise:
     section_title("📈 evolução de fundamentos (histórico — fmp / yfinance)")
 
     with st.spinner("carregando histórico de fundamentos..."):
-        _hist_fund = get_multiplos_historicos(t_base, anos=5)
+        _hist_fund = get_multiplos_historicos(t_base, anos=10)
 
     if _hist_fund:
         _df_hf = (
