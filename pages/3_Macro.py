@@ -203,7 +203,7 @@ def criar_grafico_macro(df, coluna_y, titulo, cor_linha, tipo: str = "linha"):
     layout = base_layout(height=280, title=titulo)
     if df.empty or coluna_y not in df.columns or df[coluna_y].dropna().empty:
         fig = px.line()
-        fig.add_annotation(text=f"sem dados: {titulo}", x=0.5, y=0.5, showarrow=False, font=dict(color="#FF1744", size=14))
+        fig.add_annotation(text=f"sem dados: {titulo}", x=0.5, y=0.5, showarrow=False, font=dict(color=_chart_cores()["bear"], size=14))
         layout['xaxis'] = dict(visible=False)
         layout['yaxis'] = dict(visible=False)
         fig.update_layout(**layout)
@@ -228,7 +228,7 @@ def _hex_to_rgba(hex_color: str, alpha: float = 0.08) -> str:
 def tooltip_info(texto):
     """HTML snippet for a hover-info icon. Use with st.markdown(..., unsafe_allow_html=True)."""
     _texto_escaped = texto.replace('"', '&quot;')
-    return f"""<span style="cursor:help; border-bottom:1px dashed #666; font-size:0.85em; color:#aaa;" title="{_texto_escaped}">&#9432;</span>"""
+    return f"""<span style="cursor:help; border-bottom:1px dashed var(--text-muted); font-size:0.85em; color:var(--text-muted);" title="{_texto_escaped}">&#9432;</span>"""
 
 
 # ── Calendário COPOM oficial (atualizar anualmente) ───────────────────────────
@@ -793,7 +793,7 @@ def renderizar_noticias(ticker, titulo_secao):
                 if isinstance(publisher_data, dict): publisher = publisher_data.get('displayName', 'agência internacional')
                 else: publisher = publisher_data
                 
-                st.markdown(f'<div class="card" style="padding:10px; border-left:3px solid #00B0FF; margin-bottom: 8px;"><div style="font-family:Courier New; font-size:0.7em; color:#888;">{publisher.lower()}</div><a href="{link}" target="_blank" style="text-decoration:none; color:#E0E0E0; font-family:Courier New; font-size:0.85rem;">{titulo.lower()}</a></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="card" style="padding:10px; border-left:3px solid var(--info); margin-bottom: 8px;"><div style="font-family:var(--font-ui,sans-serif); font-size:0.7em; color:var(--text-muted);">{publisher.lower()}</div><a href="{link}" target="_blank" style="text-decoration:none; color:var(--text-primary); font-family:var(--font-ui,sans-serif); font-size:0.85rem;">{titulo.lower()}</a></div>', unsafe_allow_html=True)
                 noticias_renderizadas += 1
             if noticias_renderizadas == 0: st.info("formato interno de notícias não suportado.")
         else: empty_state("🗞️", "sem notícias", "feed vazio no momento.")
@@ -840,13 +840,13 @@ def diagnosticar_ciclo(t10y2y, vix, hy_spread):
     if t10y2y is None or vix is None:
         return "dados insuficientes", "#555555", "—"
     if t10y2y < -0.2 and vix > 20:
-        return "🔴 contração / recessão", "#FF1744", "utilities (xlu), saúde (xlv), cons. básico (xlp)"
+        return "🔴 contração / recessão", "var(--bear)", "utilities (xlu), saúde (xlv), cons. básico (xlp)"
     if t10y2y < 0.3 and vix < 20 and (hy_spread is not None and hy_spread < 4.5):
-        return "🟡 recuperação (early cycle)", "#FF9900", "financeiro (xlf), indústria (xli), cons. discric. (xly)"
+        return "🟡 recuperação (early cycle)", "var(--amber)", "financeiro (xlf), indústria (xli), cons. discric. (xly)"
     if 0.3 <= t10y2y < 1.0 and vix < 18:
-        return "🟢 expansão (mid cycle)", "#00C853", "tecnologia (xlk), indústria (xli), energia (xle)"
+        return "🟢 expansão (mid cycle)", "var(--bull)", "tecnologia (xlk), indústria (xli), energia (xle)"
     if t10y2y >= 1.0 and vix < 20:
-        return "🟡 pico de ciclo (late cycle)", "#FF9900", "energia (xle), materiais (xlb), saúde (xlv)"
+        return "🟡 pico de ciclo (late cycle)", "var(--amber)", "energia (xle), materiais (xlb), saúde (xlv)"
     return "⚪ transição", "#888888", "posicionamento neutro — aguardar confirmação"
 
 def get_eventos_macro_fixos() -> list[dict]:
@@ -1134,10 +1134,11 @@ with tab_global:
                         line=dict(color='#00B0FF', width=2),
                         hovertemplate='%{x}<br>IPCA 12m: %{y:.2f}%<extra></extra>',
                     ))
-                    _fig_ipca.add_hline(y=3.0, line_color='#00C853', line_dash='dash', line_width=1,
-                                        annotation_text='meta 3%', annotation_font_color='#00C853', annotation_font_size=9)
-                    _fig_ipca.add_hline(y=4.5, line_color='#FF9900', line_dash='dot', line_width=1,
-                                        annotation_text='teto 4.5%', annotation_font_color='#FF9900', annotation_font_size=9)
+                    _cc_ipca = _chart_cores()
+                    _fig_ipca.add_hline(y=3.0, line_color=_cc_ipca["bull"], line_dash='dash', line_width=1,
+                                        annotation_text='meta 3%', annotation_font_color=_cc_ipca["bull"], annotation_font_size=9)
+                    _fig_ipca.add_hline(y=4.5, line_color=_cc_ipca["amber"], line_dash='dot', line_width=1,
+                                        annotation_text='teto 4.5%', annotation_font_color=_cc_ipca["amber"], annotation_font_size=9)
                     _fig_ipca.update_layout(**base_layout(height=300, title='inflação acumulada 12 meses — ipca (%)'))
                     st.plotly_chart(_fig_ipca, use_container_width=True, config={'responsive': True})
                     st.caption("ipca acumulado dos últimos 12 meses (produto das taxas mensais). meta bcb: 3% ± 1.5pp. fonte: bcb sgs série 433.")
@@ -1251,10 +1252,11 @@ with tab_global:
 
                 # Linha horizontal — taxa neutra nominal (IPCA meta 4.5% + neutro real 4.5%)
                 _taxa_neutra = 9.0
+                _cc_di = _chart_cores()
                 _fig_di.add_hline(
-                    y=_taxa_neutra, line_color='#00C853', line_dash='dash', line_width=1,
+                    y=_taxa_neutra, line_color=_cc_di["bull"], line_dash='dash', line_width=1,
                     annotation_text=f'taxa neutra ~{_taxa_neutra:.0f}%',
-                    annotation_font_color='#00C853', annotation_font_size=9,
+                    annotation_font_color=_cc_di["bull"], annotation_font_size=9,
                 )
 
                 _fig_di.update_layout(**base_layout(
@@ -1376,9 +1378,10 @@ with tab_global:
                     hovertemplate='%{x|%b %Y}<br>p/l teórico: %{y:.1f}x<extra></extra>',
                 ))
                 # Bandas de referência
-                _fig_pl.add_hline(y=15, line_color='#00C853', line_dash='dash', line_width=1, annotation_text='15x (juro baixo)', annotation_font_color='#00C853', annotation_font_size=9)
-                _fig_pl.add_hline(y=10, line_color='#FF9800', line_dash='dash', line_width=1, annotation_text='10x (neutro)', annotation_font_color='#FF9800', annotation_font_size=9)
-                _fig_pl.add_hline(y=7,  line_color='#FF1744', line_dash='dash', line_width=1, annotation_text='7x (juro alto)', annotation_font_color='#FF1744', annotation_font_size=9)
+                _cc_pl = _chart_cores()
+                _fig_pl.add_hline(y=15, line_color=_cc_pl["bull"],  line_dash='dash', line_width=1, annotation_text='15x (juro baixo)', annotation_font_color=_cc_pl["bull"],  annotation_font_size=9)
+                _fig_pl.add_hline(y=10, line_color=_cc_pl["amber"], line_dash='dash', line_width=1, annotation_text='10x (neutro)',    annotation_font_color=_cc_pl["amber"], annotation_font_size=9)
+                _fig_pl.add_hline(y=7,  line_color=_cc_pl["bear"],  line_dash='dash', line_width=1, annotation_text='7x (juro alto)',  annotation_font_color=_cc_pl["bear"],  annotation_font_size=9)
                 # Ponto atual
                 if _pl_justo_atual:
                     _fig_pl.add_trace(go.Scatter(
@@ -1467,12 +1470,13 @@ with tab_global:
 
             gf1, gf2 = st.columns(2)
             with gf1:
+                _cc_div = _chart_cores()
                 fig_divida = criar_grafico_macro(df_br, 'Divida_Bruta_PIB',
-                                                 "dívida bruta do governo geral (% pib)", "#FF1744")
+                                                 "dívida bruta do governo geral (% pib)", _cc_div["bear"])
                 fig_divida.add_hline(
-                    y=60, line_color="#FF9900", line_dash="dash", line_width=1,
+                    y=60, line_color=_cc_div["amber"], line_dash="dash", line_width=1,
                     annotation_text="limite prudencial 60% pib",
-                    annotation_font=dict(color="#FF9900", size=10, family="Courier New"),
+                    annotation_font=dict(color=_cc_div["amber"], size=10, family="Inter, system-ui, sans-serif"),
                 )
                 st.plotly_chart(fig_divida, use_container_width=True, config={'responsive': True})
             with gf2:
@@ -1573,18 +1577,19 @@ with tab_global:
                             'cpi yoy: %{y:.2f}%<extra></extra>'
                         ),
                     ))
+                    _cc_cpi = _chart_cores()
                     _fig_cpi.add_hline(
-                        y=2.0, line_color='#00C853',
+                        y=2.0, line_color=_cc_cpi["bull"],
                         line_dash='dash', line_width=1,
                         annotation_text='meta 2%',
-                        annotation_font_color='#00C853',
+                        annotation_font_color=_cc_cpi["bull"],
                         annotation_font_size=9,
                     )
                     _fig_cpi.add_hline(
-                        y=3.5, line_color='#FF9900',
+                        y=3.5, line_color=_cc_cpi["amber"],
                         line_dash='dot', line_width=1,
                         annotation_text='alerta 3.5%',
-                        annotation_font_color='#FF9900',
+                        annotation_font_color=_cc_cpi["amber"],
                         annotation_font_size=9,
                     )
                     _lay_cpi = base_layout(
@@ -1617,7 +1622,7 @@ with tab_global:
                     "5% historicamente precedem estresse em high yield e ações de alto crescimento."
                 )
             with g4:
-                st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", "#FF9900"), use_container_width=True, config={'responsive': True})
+                st.plotly_chart(criar_grafico_macro(df_global, 'UNRATE', "taxa de desemprego (us) (%)", _chart_cores()["amber"]), use_container_width=True, config={'responsive': True})
                 st.caption(
                     "taxa de desemprego americana u-3 (bureau of labor statistics). "
                     "abaixo de 4% = mercado de trabalho aquecido → risco inflacionário → fed hawkish. "
@@ -1657,7 +1662,8 @@ with tab_global:
                 _def_mensal_atual = float(_def_bi.dropna().iloc[-1])
                 _def_12m_atual    = float(_def_12m.dropna().iloc[-1])
                 _sinal_def        = "superávit" if _def_mensal_atual >= 0 else "déficit"
-                _cor_def          = "#00C853" if _def_mensal_atual >= 0 else "#FF1744"
+                _cc_def           = _chart_cores()
+                _cor_def          = _cc_def["bull"] if _def_mensal_atual >= 0 else _cc_def["bear"]
 
                 with f2:
                     metric_card(
@@ -1677,7 +1683,7 @@ with tab_global:
                     y=_def_bi.values,
                     name="mensal (us$ bi)",
                     marker_color=[
-                        '#00C853' if v >= 0 else '#FF1744'
+                        _cc_def["bull"] if v >= 0 else _cc_def["bear"]
                         for v in _def_bi.values
                     ],
                     opacity=0.7,
@@ -1692,7 +1698,7 @@ with tab_global:
                     x=_def_12m.index,
                     y=_def_12m.values,
                     name="acum. 12m (us$ bi)",
-                    line=dict(color='#FF9900', width=2),
+                    line=dict(color=_cc_def["amber"], width=2),
                     hovertemplate=(
                         '%{x|%b %Y}<br>'
                         'acum 12m: us$ %{y:,.0f}bi<extra></extra>'
@@ -1700,7 +1706,7 @@ with tab_global:
                 ))
 
                 _fig_def.add_hline(
-                    y=0, line_color='#555',
+                    y=0, line_color=_cc_def["muted"],
                     line_dash='dash', line_width=1,
                 )
 
@@ -1725,9 +1731,10 @@ with tab_global:
             gf1, gf2 = st.columns(2)
             with gf1:
                 if 'GFDEGDQ188S' in df_global.columns and not df_global['GFDEGDQ188S'].dropna().empty:
-                    fig_debt = criar_grafico_macro(df_global, 'GFDEGDQ188S', "dívida pública federal (% pib)", "#FF1744")
-                    fig_debt.add_hline(y=78, line_color="#FF9900", line_dash="dash", line_width=1,
-                                      annotation_text="patamar 2019 (pré-covid)", annotation_font_color="#FF9900", annotation_font_size=9)
+                    _cc_debt = _chart_cores()
+                    fig_debt = criar_grafico_macro(df_global, 'GFDEGDQ188S', "dívida pública federal (% pib)", _cc_debt["bear"])
+                    fig_debt.add_hline(y=78, line_color=_cc_debt["amber"], line_dash="dash", line_width=1,
+                                      annotation_text="patamar 2019 (pré-covid)", annotation_font_color=_cc_debt["amber"], annotation_font_size=9)
                     st.plotly_chart(fig_debt, use_container_width=True, config={'responsive': True})
 
         elif aba_sel == "🌍 europa/ásia":
@@ -1794,7 +1801,7 @@ with tab_global:
                         _fig_ecb = go.Figure(go.Scatter(
                             x=_ecb_hist.index,
                             y=_ecb_hist.values,
-                            line=dict(color='#FF9900', width=2),
+                            line=dict(color=_chart_cores()["accent"], width=2),
                             hovertemplate=(
                                 '%{x|%b %Y}<br>'
                                 'bce rate: %{y:.2f}%<extra></extra>'
@@ -1896,22 +1903,23 @@ with tab_global:
                     )
                     tooltip("spread_btp_bund")
 
+                    _cc_btp = _chart_cores()
                     _fig_spread = go.Figure(go.Scatter(
                         x=_spread_btp.index,
                         y=_spread_btp.values,
-                        line=dict(color='#FF1744', width=2),
+                        line=dict(color=_cc_btp["bear"], width=2),
                         fill='tozeroy',
-                        fillcolor='rgba(255, 23, 68, 0.08)',
+                        fillcolor=f'{_cc_btp["bear"]}14',
                         hovertemplate=(
                             '%{x|%b %Y}<br>'
                             'spread: %{y:.2f}pp<extra></extra>'
                         ),
                     ))
                     _fig_spread.add_hline(
-                        y=2.5, line_color='#FF9900',
+                        y=2.5, line_color=_cc_btp["amber"],
                         line_dash='dash', line_width=1,
                         annotation_text='alerta 2.5pp',
-                        annotation_font_color='#FF9900',
+                        annotation_font_color=_cc_btp["amber"],
                         annotation_font_size=9,
                     )
                     _lay_spread = base_layout(
@@ -2003,17 +2011,17 @@ with tab_global:
                         _fig_jpy10y = go.Figure(go.Scatter(
                             x=_jpy10y_ser.index,
                             y=_jpy10y_ser.values,
-                            line=dict(color='#FF9900', width=2),
+                            line=dict(color=_chart_cores()["accent"], width=2),
                             hovertemplate=(
                                 '%{x|%b %Y}<br>'
                                 'jp 10y: %{y:.2f}%<extra></extra>'
                             ),
                         ))
                         _fig_jpy10y.add_hline(
-                            y=1.0, line_color='#555',
+                            y=1.0, line_color=_chart_cores()["muted"],
                             line_dash='dot', line_width=1,
                             annotation_text='teto ytc histórico 1%',
-                            annotation_font_color='#555',
+                            annotation_font_color=_chart_cores()["muted"],
                             annotation_font_size=8,
                         )
                         _lay_jpy10y = base_layout(
@@ -2119,10 +2127,10 @@ with tab_global:
                             ),
                         ))
                         _fig_cn_cpi.add_hline(
-                            y=0, line_color='#FF1744',
+                            y=0, line_color=_chart_cores()["bear"],
                             line_dash='dash', line_width=1,
                             annotation_text='deflação',
-                            annotation_font_color='#FF1744',
+                            annotation_font_color=_chart_cores()["bear"],
                             annotation_font_size=9,
                         )
                         _lay_cn_cpi = base_layout(
@@ -2169,9 +2177,10 @@ with tab_global:
                 elif 0 <= v_t10y2y <= 0.5:
                     st.info("📊 spread estreito: ciclo de crédito em atenção.")
             
-            fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", "#00B0FF")
-            fig_t10.add_hline(y=0, line_color="#FF1744", line_dash="dash", line_width=1)
-            fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color="#FF1744", size=10, family="Courier New"), showarrow=False, yshift=-14)
+            _cc_t10 = _chart_cores()
+            fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", _cc_t10["info"])
+            fig_t10.add_hline(y=0, line_color=_cc_t10["bear"], line_dash="dash", line_width=1)
+            fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color=_cc_t10["bear"], size=10, family="Inter, system-ui, sans-serif"), showarrow=False, yshift=-14)
             st.plotly_chart(fig_t10, use_container_width=True, config={'responsive': True})
             st.caption(
                 "spread 10y−2y (fred: t10y2y): diferença entre o rendimento do treasury 10 anos e o de "
@@ -2183,7 +2192,7 @@ with tab_global:
                 "não melhora — é quando a recessão costuma chegar."
             )
 
-            st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", "#FF1744"), use_container_width=True, config={'responsive': True})
+            st.plotly_chart(criar_grafico_macro(df_global, 'VIXCLS', "índice vix (cboe volatility index)", _chart_cores()["bear"]), use_container_width=True, config={'responsive': True})
             st.caption(
                 "vix (cboe volatility index): mede a volatilidade implícita das opções do s&p500 "
                 "para os próximos 30 dias. apelidado de 'índice do medo'. "
@@ -2258,16 +2267,17 @@ with tab_global:
                         _carry_hist = (_selic_real_hist.reindex(_idx_comum, method='ffill') - _real_fed_hist.reindex(_idx_comum, method='ffill')).dropna()
                         _fig_carry = go.Figure()
                         # Área de carry positivo (verde)
+                        _cc_carry = _chart_cores()
                         _fig_carry.add_trace(go.Scatter(
                             x=_carry_hist.index, y=_carry_hist.values,
                             name="carry spread (pp)", fill='tozeroy',
-                            fillcolor='rgba(0,200,83,0.10)',
-                            line=dict(color='#00C853', width=2),
+                            fillcolor=f'{_cc_carry["bull"]}1a',
+                            line=dict(color=_cc_carry["bull"], width=2),
                             hovertemplate='%{x|%b %Y}<br>carry: %{y:.2f}pp<extra></extra>',
                         ))
                         _fig_carry.add_trace(go.Scatter(
                             x=_selic_real_hist.index, y=_selic_real_hist.values,
-                            name="selic real (br)", line=dict(color='#FF9800', width=1.5, dash='dot'), opacity=0.7,
+                            name="selic real (br)", line=dict(color=_cc_carry["amber"], width=1.5, dash='dot'), opacity=0.7,
                             hovertemplate='selic real: %{y:.2f}%<extra></extra>',
                         ))
                         _fig_carry.add_trace(go.Scatter(
@@ -2275,9 +2285,9 @@ with tab_global:
                             name="real fed funds (us)", line=dict(color='#00B0FF', width=1.5, dash='dot'), opacity=0.7,
                             hovertemplate='real fed funds: %{y:.2f}%<extra></extra>',
                         ))
-                        _fig_carry.add_hline(y=6, line_color='#00C853', line_dash='dash', line_width=1, annotation_text='carry atrativo (6pp)', annotation_font_color='#00C853', annotation_font_size=9)
-                        _fig_carry.add_hline(y=3, line_color='#FF9800', line_dash='dash', line_width=1, annotation_text='mínimo atrativo (3pp)', annotation_font_color='#FF9800', annotation_font_size=9)
-                        _fig_carry.add_hline(y=0, line_color='#FF1744', line_dash='solid', line_width=1)
+                        _fig_carry.add_hline(y=6, line_color=_cc_carry["bull"],  line_dash='dash', line_width=1, annotation_text='carry atrativo (6pp)', annotation_font_color=_cc_carry["bull"],  annotation_font_size=9)
+                        _fig_carry.add_hline(y=3, line_color=_cc_carry["amber"], line_dash='dash', line_width=1, annotation_text='mínimo atrativo (3pp)', annotation_font_color=_cc_carry["amber"], annotation_font_size=9)
+                        _fig_carry.add_hline(y=0, line_color=_cc_carry["bear"],  line_dash='solid', line_width=1)
                         _fig_carry.update_layout(**base_layout(height=300, title="carry trade br-us: selic real − real fed funds (pp)"))
                         st.plotly_chart(_fig_carry, use_container_width=True, config={'responsive': True})
                         st.caption(
@@ -2590,22 +2600,22 @@ with tab_global:
                         _cor_imp = "muted"
 
                     st.markdown(
-                        f'<div style="background:#0d0d0d;border:1px solid #1e1e1e;'
+                        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                         f'border-top:3px solid {_t["cor"]};border-radius:6px;'
-                        f'padding:12px;margin-bottom:8px;font-family:Courier New;font-size:0.7rem;">'
+                        f'padding:12px;margin-bottom:8px;font-family:var(--font-ui,sans-serif);font-size:0.7rem;">'
                         f'<div style="color:{_t["cor"]};font-weight:bold;font-size:0.75rem;margin-bottom:6px;">'
                         f'{_t["empresa"]}</div>'
-                        f'<div style="color:#666;font-size:0.62rem;margin-bottom:4px;">{_t["logica"]}</div>'
-                        f'<div style="color:#aaa;margin-bottom:4px;">'
-                        f'{_t["comm_nome"]}: <span style="color:#fff;">'
+                        f'<div style="color:var(--text-muted);font-size:0.62rem;margin-bottom:4px;">{_t["logica"]}</div>'
+                        f'<div style="color:var(--text-secondary);margin-bottom:4px;">'
+                        f'{_t["comm_nome"]}: <span style="color:var(--text-primary);">'
                         f'{"us${:,.1f}".format(_preco_comm) if _preco_comm else "n/d"}</span></div>'
-                        f'<div style="color:#aaa;margin-bottom:4px;">vs base (us${_t["base"]:.0f}): '
-                        f'<span style="color:{"#00C853" if (_delta_vs_base or 0) * (1 if _t["ebitda_delta"] > 0 else -1) > 0 else "#FF1744"};">'
+                        f'<div style="color:var(--text-secondary);margin-bottom:4px;">vs base (us${_t["base"]:.0f}): '
+                        f'<span style="color:{"var(--bull)" if (_delta_vs_base or 0) * (1 if _t["ebitda_delta"] > 0 else -1) > 0 else "var(--bear)"};">'
                         f'{"us${:+,.1f}".format(_delta_vs_base) if _delta_vs_base is not None else "n/d"}</span></div>'
-                        f'<div style="color:#aaa;">ebitda implícito: '
-                        f'<span style="color:{"#00C853" if (_impacto_ebitda or 0) > 0 else "#FF1744"};">'
+                        f'<div style="color:var(--text-secondary);">ebitda implícito: '
+                        f'<span style="color:{"var(--bull)" if (_impacto_ebitda or 0) > 0 else "var(--bear)"};">'
                         f'{"R${:+.1f}bi".format(_impacto_ebitda) if _impacto_ebitda is not None else "n/d"}</span></div>'
-                        f'<div style="color:#555;font-size:0.58rem;margin-top:6px;">{_t["nota"]}</div>'
+                        f'<div style="color:var(--text-muted);font-size:0.58rem;margin-top:6px;">{_t["nota"]}</div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
@@ -2648,7 +2658,7 @@ with tab_global:
                     _ret_c    = (_preco_at / _preco_in - 1) * 100
 
                     st.markdown(
-                        f'<div style="font-family:Courier New;font-size:0.75rem;color:{_cor};'
+                        f'<div style="font-family:var(--font-data,monospace);font-size:0.75rem;color:{_cor};'
                         f'margin-top:12px;margin-bottom:4px;">'
                         f'{_nm.upper()} — {_preco_at:,.2f} {_un} ({_ret_c:+.1f}% no período)'
                         f'</div>',
@@ -2725,14 +2735,14 @@ with tab_ciclo:
             _n_ind    = _ciclo.get('n_indicadores', 0)
 
             st.markdown(
-                f'<div style="background:#0d0d0d;'
-                f'border:1px solid #1e1e1e;'
+                f'<div style="background:var(--bg-surface);'
+                f'border:1px solid var(--border-subtle);'
                 f'border-top:3px solid {_cor_f};'
                 f'border-radius:6px;padding:16px;'
                 f'margin-bottom:12px;">'
 
-                f'<div style="font-family:Courier New;'
-                f'font-size:0.65rem;color:#555;'
+                f'<div style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.65rem;color:var(--text-muted);'
                 f'text-transform:uppercase;'
                 f'margin-bottom:4px;">'
                 f'{_pais} — fase do ciclo</div>'
@@ -2741,33 +2751,33 @@ with tab_ciclo:
                 f'margin-bottom:4px;">'
                 f'{_dados_f["icone"]}</div>'
 
-                f'<div style="font-family:Courier New;'
+                f'<div style="font-family:var(--font-data,monospace);'
                 f'font-size:1rem;font-weight:700;'
                 f'color:{_cor_f};margin-bottom:6px;">'
                 f'{_dados_f["label"].upper()}</div>'
 
-                f'<div style="font-family:Courier New;'
-                f'font-size:0.7rem;color:#888;'
+                f'<div style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.7rem;color:var(--text-muted);'
                 f'line-height:1.6;margin-bottom:10px;">'
                 f'{_dados_f["descricao"]}</div>'
 
                 f'<div style="display:flex;gap:16px;'
-                f'border-top:1px solid #1a1a1a;'
+                f'border-top:1px solid var(--border-subtle);'
                 f'padding-top:8px;">'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.6rem;color:#444;'
+                f'<div style="font-size:0.6rem;color:var(--text-muted);'
                 f'text-transform:uppercase;">confiança</div>'
-                f'<div style="font-family:Courier New;'
+                f'<div style="font-family:var(--font-data,monospace);'
                 f'color:{_cor_f};font-weight:600;">'
                 f'{_conf:.0f}pp</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.6rem;color:#444;'
+                f'<div style="font-size:0.6rem;color:var(--text-muted);'
                 f'text-transform:uppercase;">indicadores</div>'
-                f'<div style="font-family:Courier New;'
-                f'color:#ccc;">{_n_ind} usados</div>'
+                f'<div style="font-family:var(--font-data,monospace);'
+                f'color:var(--text-secondary);">{_n_ind} usados</div>'
                 f'</div>'
 
                 f'</div>'
@@ -2799,18 +2809,18 @@ with tab_ciclo:
                     f'<div style="display:flex;'
                     f'align-items:center;gap:8px;'
                     f'margin-bottom:4px;">'
-                    f'<div style="font-family:Courier New;'
-                    f'font-size:0.65rem;color:#555;'
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.65rem;color:var(--text-muted);'
                     f'min-width:70px;">{_fn}</div>'
-                    f'<div style="flex:1;background:#111;'
+                    f'<div style="flex:1;background:var(--bg-elevated,#111);'
                     f'border-radius:2px;height:6px;">'
                     f'<div style="background:{_fc};'
                     f'border-radius:2px;height:6px;'
                     f'width:{_sv}%;"></div>'
                     f'</div>'
-                    f'<div style="font-family:Courier New;'
+                    f'<div style="font-family:var(--font-data,monospace);'
                     f'font-size:0.65rem;'
-                    f'color:{"#FF9900" if _destaque else "#555"};'
+                    f'color:{"var(--accent)" if _destaque else "var(--text-muted)"};'
                     f'min-width:30px;text-align:right;">'
                     f'{_sv}%</div>'
                     f'</div>',
@@ -2828,9 +2838,9 @@ with tab_ciclo:
         section_title("🚨 sinais dos indicadores")
         for _al in _alertas_todos:
             st.markdown(
-                f'<div style="font-family:Courier New;'
-                f'font-size:0.75rem;color:#888;'
-                f'padding:4px 0;border-bottom:1px solid #111;">'
+                f'<div style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.75rem;color:var(--text-muted);'
+                f'padding:4px 0;border-bottom:1px solid var(--border-subtle);">'
                 f'{_al}</div>',
                 unsafe_allow_html=True,
             )
@@ -2863,8 +2873,8 @@ with tab_ciclo:
 
     with _ind_cols[0]:
         st.markdown(
-            '<div style="font-family:Courier New;'
-            'font-size:0.68rem;color:#FF9900;'
+            '<div style="font-family:var(--font-ui,sans-serif);'
+            'font-size:0.68rem;color:var(--accent);'
             'margin-bottom:8px;">🇧🇷 indicadores br</div>',
             unsafe_allow_html=True,
         )
@@ -2880,19 +2890,19 @@ with tab_ciclo:
             st.markdown(
                 f'<div style="display:flex;'
                 f'justify-content:space-between;'
-                f'padding:3px 0;border-bottom:1px solid #111;">'
-                f'<span style="font-family:Courier New;'
-                f'font-size:0.68rem;color:#555;">{_lbl}</span>'
-                f'<span style="font-family:Courier New;'
-                f'font-size:0.72rem;color:#ccc;">{_v_str}</span>'
+                f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
+                f'<span style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.68rem;color:var(--text-muted);">{_lbl}</span>'
+                f'<span style="font-family:var(--font-data,monospace);'
+                f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
     with _ind_cols[1]:
         st.markdown(
-            '<div style="font-family:Courier New;'
-            'font-size:0.68rem;color:#FF9900;'
+            '<div style="font-family:var(--font-ui,sans-serif);'
+            'font-size:0.68rem;color:var(--accent);'
             'margin-bottom:8px;">🇺🇸 indicadores eua</div>',
             unsafe_allow_html=True,
         )
@@ -2908,11 +2918,11 @@ with tab_ciclo:
             st.markdown(
                 f'<div style="display:flex;'
                 f'justify-content:space-between;'
-                f'padding:3px 0;border-bottom:1px solid #111;">'
-                f'<span style="font-family:Courier New;'
-                f'font-size:0.68rem;color:#555;">{_lbl}</span>'
-                f'<span style="font-family:Courier New;'
-                f'font-size:0.72rem;color:#ccc;">{_v_str}</span>'
+                f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
+                f'<span style="font-family:var(--font-ui,sans-serif);'
+                f'font-size:0.68rem;color:var(--text-muted);">{_lbl}</span>'
+                f'<span style="font-family:var(--font-data,monospace);'
+                f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -2929,7 +2939,7 @@ with tab_ciclo:
     ]:
         with _col_r:
             st.markdown(
-                f'<div style="font-family:Courier New;'
+                f'<div style="font-family:var(--font-ui,sans-serif);'
                 f'font-size:0.68rem;color:{_dados_f["cor"]};'
                 f'margin-bottom:6px;font-weight:600;">'
                 f'{_pais} — {_dados_f["label"]}</div>',
@@ -2942,29 +2952,29 @@ with tab_ciclo:
             )
 
             st.markdown(
-                '<div style="font-size:0.6rem;color:#00C853;'
+                '<div style="font-size:0.6rem;color:var(--bull);'
                 'text-transform:uppercase;margin-bottom:3px;">'
                 '✅ favorecidos</div>',
                 unsafe_allow_html=True,
             )
             for _sf in _dados_f[_key_set]['favorecidos']:
                 st.markdown(
-                    f'<div style="font-family:Courier New;'
-                    f'font-size:0.72rem;color:#00C853;'
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.72rem;color:var(--bull);'
                     f'padding:2px 0;">→ {_sf}</div>',
                     unsafe_allow_html=True,
                 )
 
             st.markdown(
-                '<div style="font-size:0.6rem;color:#FF1744;'
+                '<div style="font-size:0.6rem;color:var(--bear);'
                 'text-transform:uppercase;margin:8px 0 3px;">'
                 '✗ evitar</div>',
                 unsafe_allow_html=True,
             )
             for _se in _dados_f[_key_set]['evitar']:
                 st.markdown(
-                    f'<div style="font-family:Courier New;'
-                    f'font-size:0.72rem;color:#FF1744;'
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.72rem;color:var(--bear);'
                     f'padding:2px 0;">→ {_se}</div>',
                     unsafe_allow_html=True,
                 )
@@ -3158,7 +3168,7 @@ with tab_calendar:
                     label_semana = "🟡 próxima semana"
                 else:
                     label_semana = f"📆 semana de {inicio_semana.strftime('%d/%m')}"
-                st.markdown(f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; text-transform:uppercase; letter-spacing:0.1em; margin:16px 0 4px 0; border-bottom:1px solid #1e1e1e; padding-bottom:4px;">{label_semana}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.1em; margin:16px 0 4px 0; border-bottom:1px solid var(--border-subtle); padding-bottom:4px;">{label_semana}</div>', unsafe_allow_html=True)
 
             cat = evento['categoria']
             cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E", "earnings": "#FF9900"}.get(cat, "#555")
@@ -3169,13 +3179,13 @@ with tab_calendar:
             dias_evento = (evento['data'] - hoje).days
             if dias_evento == 0:
                 data_label = "hoje"
-                cor_data = "#FF1744"
+                cor_data = "var(--bear)"
             elif dias_evento == 1:
                 data_label = "amanhã"
-                cor_data = "#FF9900"
+                cor_data = "var(--accent)"
             else:
                 data_label = evento['data'].strftime('%d/%m/%Y')
-                cor_data = "#888"
+                cor_data = "var(--text-muted)"
 
             ev1, ev2 = st.columns([5, 1])
             with ev1:
@@ -3183,17 +3193,17 @@ with tab_calendar:
                 if detalhe:
                     texto_evento += f" | {detalhe}"
                 st.markdown(
-                    f'<div style="background:#0d0d0d; border:1px solid #1e1e1e; border-left:3px solid {cor_cat}; border-radius:4px; padding:10px 14px; margin-bottom:6px;">'
-                    f'<span style="font-family:Courier New; font-size:0.7rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{label_cat}</span>'
-                    f'<span style="font-family:Courier New; font-size:0.7rem; color:#333; margin:0 6px;">|</span>'
-                    f'<span style="font-family:Courier New; font-size:0.85rem; color:#E0E0E0;">{texto_evento}</span>'
+                    f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-left:3px solid {cor_cat}; border-radius:4px; padding:10px 14px; margin-bottom:6px;">'
+                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{label_cat}</span>'
+                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:var(--border-normal,#333); margin:0 6px;">|</span>'
+                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.85rem; color:var(--text-primary);">{texto_evento}</span>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
             with ev2:
                 st.markdown(
                     f'<div style="text-align:right; padding-top:12px;">'
-                    f'<span style="font-family:Courier New; font-size:0.75rem; color:{cor_data};">{data_label}</span>'
+                    f'<span style="font-family:var(--font-data,monospace); font-size:0.75rem; color:{cor_data};">{data_label}</span>'
                     f' {icone_imp}</div>',
                     unsafe_allow_html=True
                 )
@@ -3268,14 +3278,15 @@ with tab_overlay:
                         if hasattr(macro_data.index, 'tz') and macro_data.index.tz is not None: macro_data.index = macro_data.index.tz_localize(None)
 
                         fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data, name=ticker_input.lower(), line=dict(color="#FF9900", width=2)), secondary_y=False)
-                        fig.add_trace(go.Scatter(x=macro_data.index, y=macro_data, name=macro_name, line=dict(color="#00B0FF", dash="dot", width=2)), secondary_y=True)
+                        _cc_ov = _chart_cores()
+                        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data, name=ticker_input.lower(), line=dict(color=_cc_ov["accent"], width=2)), secondary_y=False)
+                        fig.add_trace(go.Scatter(x=macro_data.index, y=macro_data, name=macro_name, line=dict(color=_cc_ov["info"], dash="dot", width=2)), secondary_y=True)
 
                         layout_macro = base_layout(height=500, title=f"estudo de correlação: {ticker_input.lower()} vs {macro_name}")
                         fig.update_layout(**layout_macro)
-                        fig.update_yaxes(title_text=f"preço {ticker_input.lower()}", showgrid=True, gridcolor='#1e1e1e', secondary_y=False)
+                        fig.update_yaxes(title_text=f"preço {ticker_input.lower()}", showgrid=True, gridcolor=_cc_ov["border"], secondary_y=False)
                         fig.update_yaxes(title_text=macro_name, showgrid=False, secondary_y=True)
-                        fig.update_xaxes(showgrid=True, gridcolor='#1e1e1e')
+                        fig.update_xaxes(showgrid=True, gridcolor=_cc_ov["border"])
 
                         st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
                     else: st.warning("não foi possível obter a série de dados macroeconómicos.")
@@ -3307,21 +3318,22 @@ with tab_sentimento:
         with col:
             st.markdown(
                 f'<div style="text-align:center;margin-bottom:8px;">'
-                f'<span style="font-family:Courier New;font-size:0.72rem;'
-                f'color:#555;text-transform:uppercase;">{titulo}</span>'
+                f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;'
+                f'color:var(--text-muted);text-transform:uppercase;">{titulo}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            _cor_fg = "#00C853" if score >= 60 else ("#FF9900" if score >= 40 else "#FF1744")
+            _cc_fg = _chart_cores()
+            _cor_fg = _cc_fg["bull"] if score >= 60 else (_cc_fg["amber"] if score >= 40 else _cc_fg["bear"])
             _fig_fg = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=score,
                 domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': label.upper(), 'font': {'size': 11, 'color': _cor_fg, 'family': 'Courier New'}},
+                title={'text': label.upper(), 'font': {'size': 11, 'color': _cor_fg, 'family': 'Inter, system-ui, sans-serif'}},
                 gauge={
-                    'axis': {'range': [0, 100], 'tickfont': {'size': 9, 'color': '#555'}},
+                    'axis': {'range': [0, 100], 'tickfont': {'size': 9, 'color': _cc_fg["muted"]}},
                     'bar': {'color': _cor_fg, 'thickness': 0.25},
-                    'bgcolor': '#0d0d0d', 'bordercolor': '#1e1e1e',
+                    'bgcolor': _cc_fg["surface"], 'bordercolor': _cc_fg["border"],
                     'steps': [
                         {'range': [0, 25], 'color': '#2a0005'},
                         {'range': [25, 45], 'color': '#1a0f00'},
@@ -3331,9 +3343,9 @@ with tab_sentimento:
                     ],
                     'threshold': {'line': {'color': _cor_fg, 'width': 2}, 'thickness': 0.75, 'value': score},
                 },
-                number={'font': {'size': 32, 'color': _cor_fg, 'family': 'Courier New'}},
+                number={'font': {'size': 32, 'color': _cor_fg, 'family': 'Inter, system-ui, sans-serif'}},
             ))
-            _fig_fg.update_layout(height=220, paper_bgcolor='#0d0d0d', plot_bgcolor='#0d0d0d', margin=dict(l=20, r=20, t=30, b=10))
+            _fig_fg.update_layout(height=220, paper_bgcolor=_cc_fg["surface"], plot_bgcolor=_cc_fg["surface"], margin=dict(l=20, r=20, t=30, b=10))
             st.plotly_chart(_fig_fg, use_container_width=True, config={'responsive': True}, key=f"fg_gauge_{titulo}")
 
     _renderizar_gauge(_col_fg1, _fg_eua.get('score', 50), _fg_eua.get('label', '—'), "🇺🇸 eua")
@@ -3390,6 +3402,7 @@ with tab_correlacoes:
     if corr_data['matriz_atual'] is not None:
         matriz = corr_data['matriz_atual']
 
+        _cc_heat = _chart_cores()
         fig_heat = go.Figure(go.Heatmap(
             z=matriz.values,
             x=matriz.columns.tolist(),
@@ -3403,12 +3416,12 @@ with tab_correlacoes:
             zmin=-1, zmax=1,
             text=matriz.values.round(2),
             texttemplate="%{text}",
-            textfont={"size": 10, "color": "#E0E0E0", "family": "Courier New"},
+            textfont={"size": 10, "color": _cc_heat["text"], "family": "Inter, system-ui, sans-serif"},
             hoverongaps=False,
             showscale=True,
             colorbar=dict(
-                tickfont=dict(color='#555', family='Courier New'),
-                bordercolor='#333',
+                tickfont=dict(color=_cc_heat["muted"], family='Inter, system-ui, sans-serif'),
+                bordercolor=_cc_heat["border"],
             ),
         ))
 
@@ -3417,8 +3430,8 @@ with tab_correlacoes:
             title=f"matriz de correlação — janela {janela_corr} dias",
         )
         fig_heat.update_layout(**layout_heat)
-        fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family='Courier New'))
-        fig_heat.update_yaxes(tickfont=dict(size=9, family='Courier New'))
+        fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family='Inter, system-ui, sans-serif'))
+        fig_heat.update_yaxes(tickfont=dict(size=9, family='Inter, system-ui, sans-serif'))
 
         st.plotly_chart(fig_heat, use_container_width=True, config={'responsive': True})
         st.caption(
@@ -3500,18 +3513,19 @@ with tab_correlacoes:
                 ),
             ))
 
+        _cc_roll = _chart_cores()
         fig_roll.add_hline(
-            y=0.7,  line_color="#FF9900", line_dash="dash",  line_width=1,
+            y=0.7,  line_color=_cc_roll["amber"], line_dash="dash",  line_width=1,
             annotation_text="alta correlação (0.7)",
-            annotation_font=dict(color="#FF9900", family="Courier New", size=10),
+            annotation_font=dict(color=_cc_roll["amber"], family="Inter, system-ui, sans-serif", size=10),
         )
         fig_roll.add_hline(
-            y=0,    line_color="#333333", line_dash="dot",   line_width=1,
+            y=0,    line_color=_cc_roll["border"], line_dash="dot",   line_width=1,
         )
         fig_roll.add_hline(
-            y=-0.7, line_color="#00B0FF", line_dash="dash",  line_width=1,
+            y=-0.7, line_color=_cc_roll["info"], line_dash="dash",  line_width=1,
             annotation_text="correlação inversa (-0.7)",
-            annotation_font=dict(color="#00B0FF", family="Courier New", size=10),
+            annotation_font=dict(color=_cc_roll["info"], family="Inter, system-ui, sans-serif", size=10),
         )
 
         layout_roll = base_layout(
@@ -3520,7 +3534,7 @@ with tab_correlacoes:
         )
         layout_roll.update({
             'yaxis': {'range': [-1.1, 1.1], 'title': 'correlação',
-                      'gridcolor': '#1e1e1e', 'showgrid': True},
+                      'gridcolor': _cc_roll["border"], 'showgrid': True},
         })
         fig_roll.update_layout(**layout_roll)
         st.plotly_chart(fig_roll, use_container_width=True, config={'responsive': True})

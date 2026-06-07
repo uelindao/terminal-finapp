@@ -498,16 +498,16 @@ with tab_ia:
     _col_t1, _col_t2 = st.columns(2)
 
     with _col_t1:
-        _borda_free = "#FF9900" if _modo_atual == 'free' else "#1e1e1e"
+        _borda_free = "var(--accent)" if _modo_atual == 'free' else "var(--border-subtle)"
         st.markdown(
-            f'<div style="background:#0d0d0d;border:2px solid '
+            f'<div style="background:var(--bg-surface);border:2px solid '
             f'{_borda_free};border-radius:6px;padding:16px;'
             f'text-align:center;">'
             f'<div style="font-size:1.2rem;">🆓</div>'
-            f'<div style="font-family:Courier New;color:#FF9900;'
+            f'<div style="font-family:var(--font-ui,sans-serif);color:var(--accent);'
             f'font-weight:700;margin:4px 0;">tier gratuito</div>'
-            f'<div style="font-family:Courier New;font-size:0.7rem;'
-            f'color:#555;">gemini 2.0 flash · sem chave necessária</div>'
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.7rem;'
+            f'color:var(--text-muted);">gemini 2.0 flash · sem chave necessária</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -523,16 +523,16 @@ with tab_ia:
 
     with _col_t2:
         _tem_chave_pro = bool(settings.get('ai_api_key', '').strip())
-        _borda_pro = "#FF9900" if _modo_atual == 'pro' else "#1e1e1e"
+        _borda_pro = "var(--accent)" if _modo_atual == 'pro' else "var(--border-subtle)"
         st.markdown(
-            f'<div style="background:#0d0d0d;border:2px solid '
+            f'<div style="background:var(--bg-surface);border:2px solid '
             f'{_borda_pro};border-radius:6px;padding:16px;'
             f'text-align:center;">'
             f'<div style="font-size:1.2rem;">⚡</div>'
-            f'<div style="font-family:Courier New;color:#FF9900;'
+            f'<div style="font-family:var(--font-ui,sans-serif);color:var(--accent);'
             f'font-weight:700;margin:4px 0;">tier pro</div>'
-            f'<div style="font-family:Courier New;font-size:0.7rem;'
-            f'color:#555;">deepseek v4 / openai · chave pessoal</div>'
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.7rem;'
+            f'color:var(--text-muted);">deepseek v4 / openai · chave pessoal</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
