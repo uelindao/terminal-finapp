@@ -56,6 +56,8 @@ TEMAS_FONTES_DEFAULT: dict[str, dict] = {
     "emerald":  {"titulo": "plus_jakarta",  "ui": "plus_jakarta", "data": "fira_code"},
     "graphite": {"titulo": "dm_sans",       "ui": "dm_sans",      "data": "dm_mono"},
     "cyber":    {"titulo": "syne",          "ui": "outfit",       "data": "space_mono"},
+    "light":    {"titulo": "inter",         "ui": "inter",        "data": "jetbrains_mono"},
+    "papel":    {"titulo": "plus_jakarta",  "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
 }
 
 
@@ -239,9 +241,83 @@ TEMAS: dict[str, dict] = {
             "--radius-lg":      "18px",
         },
     },
+
+    # ── 6. Koyfin (Light Professional) ───────────────────────────────────────
+    "light": {
+        "nome":    "Koyfin",
+        "emoji":   "☀️",
+        "desc":    "claro profissional · Inter · azul cobalto",
+        "sidebar": "#E4E8F3",
+        "is_light": True,
+        "vars": {
+            "--sidebar-bg":     "#E4E8F3",
+            "--bg-base":        "#F0F2F8",
+            "--bg-surface":     "#FFFFFF",
+            "--bg-elevated":    "#E8EBF4",
+            "--bg-overlay":     "#DDE1EE",
+            "--border-subtle":  "#DDE1EE",
+            "--border-normal":  "#C8CDE0",
+            "--border-focus":   "#2563EB",
+            "--text-primary":   "#1A1D2E",
+            "--text-secondary": "#4B5068",
+            "--text-muted":     "#8890AA",
+            "--accent":         "#2563EB",
+            "--accent-rgb":     "37,99,235",
+            "--accent-hover":   "#1D4ED8",
+            "--accent-soft":    "rgba(37,99,235,0.08)",
+            "--accent-border":  "rgba(37,99,235,0.22)",
+            "--bull":           "#059669",
+            "--bull-soft":      "rgba(5,150,105,0.10)",
+            "--bear":           "#DC2626",
+            "--bear-soft":      "rgba(220,38,38,0.10)",
+            "--amber":          "#D97706",
+            "--amber-soft":     "rgba(217,119,6,0.10)",
+            "--info":           "#0891B2",
+            "--radius-sm":      "6px",
+            "--radius-md":      "10px",
+            "--radius-lg":      "14px",
+        },
+    },
+
+    # ── 7. Papel (Bloomberg Print / Apresentação) ─────────────────────────────
+    "papel": {
+        "nome":    "Papel",
+        "emoji":   "📄",
+        "desc":    "creme elegante · IBM Plex · laranja Bloomberg",
+        "sidebar": "#EDE9DF",
+        "is_light": True,
+        "vars": {
+            "--sidebar-bg":     "#EDE9DF",
+            "--bg-base":        "#FAFAF7",
+            "--bg-surface":     "#FFFFFF",
+            "--bg-elevated":    "#F2EFE6",
+            "--bg-overlay":     "#E8E4D9",
+            "--border-subtle":  "#E5E0D5",
+            "--border-normal":  "#CFC9BB",
+            "--border-focus":   "#FF6900",
+            "--text-primary":   "#1C1C1E",
+            "--text-secondary": "#3C3C3F",
+            "--text-muted":     "#8E8E93",
+            "--accent":         "#FF6900",
+            "--accent-rgb":     "255,105,0",
+            "--accent-hover":   "#E05F00",
+            "--accent-soft":    "rgba(255,105,0,0.08)",
+            "--accent-border":  "rgba(255,105,0,0.25)",
+            "--bull":           "#1A7F4B",
+            "--bull-soft":      "rgba(26,127,75,0.10)",
+            "--bear":           "#C0392B",
+            "--bear-soft":      "rgba(192,57,43,0.10)",
+            "--amber":          "#B45309",
+            "--amber-soft":     "rgba(180,83,9,0.10)",
+            "--info":           "#1D4ED8",
+            "--radius-sm":      "4px",
+            "--radius-md":      "8px",
+            "--radius-lg":      "12px",
+        },
+    },
 }
 
-TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber"]
+TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber", "light", "papel"]
 TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
                for k, v in TEMAS.items()}
 
@@ -265,6 +341,11 @@ def set_tema(tema_id: str) -> None:
         st.query_params["theme"] = tema_id
     except Exception:
         pass
+
+
+def is_tema_claro() -> bool:
+    """Retorna True se o tema ativo é de fundo claro (light mode)."""
+    return TEMAS.get(get_tema_ativo(), {}).get("is_light", False)
 
 
 def get_accent_color() -> str:
@@ -360,6 +441,84 @@ def get_tema_css() -> str:
     all_vars = {**tema["vars"], **font_vars}
     vars_str = "\n".join(f"        {k}: {v};" for k, v in all_vars.items())
 
+    light_overrides = ""
+    if tema.get("is_light"):
+        t = tema["vars"]
+        light_overrides = f"""
+    /* ── Light mode: override seletores Streamlit que ficam escuros ── */
+    html, body, .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    section.main > div {{
+        background-color: {t['--bg-base']} !important;
+        color: {t['--text-primary']} !important;
+    }}
+    .stMarkdown p, .stMarkdown li, .stMarkdown span,
+    [data-testid="stText"], [data-testid="stCaptionContainer"],
+    label, .stSelectbox label, .stTextInput label,
+    .stSlider label, .stNumberInput label, .stRadio label,
+    .stCheckbox label, .stTextarea label {{
+        color: {t['--text-secondary']} !important;
+    }}
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stTextArea"] textarea,
+    [data-testid="stSelectbox"] > div > div,
+    [data-testid="stMultiSelect"] > div > div {{
+        background-color: {t['--bg-surface']} !important;
+        border-color: {t['--border-normal']} !important;
+        color: {t['--text-primary']} !important;
+    }}
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrame"] > div,
+    [data-testid="stDataFrame"] canvas {{
+        background-color: {t['--bg-surface']} !important;
+        color: {t['--text-primary']} !important;
+    }}
+    [data-testid="stExpander"] {{
+        background-color: {t['--bg-surface']} !important;
+        border-color: {t['--border-subtle']} !important;
+    }}
+    [data-testid="stTabs"] [data-baseweb="tab-list"] {{
+        background-color: {t['--bg-elevated']} !important;
+    }}
+    [data-testid="stTabs"] [data-baseweb="tab"] {{
+        color: {t['--text-secondary']} !important;
+    }}
+    [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {{
+        color: {t['--accent']} !important;
+    }}
+    [data-testid="stMetric"] > div {{
+        background-color: {t['--bg-surface']} !important;
+    }}
+    [data-testid="stMetric"] [data-testid="stMetricValue"],
+    [data-testid="stMetric"] [data-testid="stMetricLabel"] {{
+        color: {t['--text-primary']} !important;
+    }}
+    [data-testid="stAlert"] {{
+        background-color: {t['--bg-elevated']} !important;
+    }}
+    [data-baseweb="popover"], [data-baseweb="menu"] {{
+        background-color: {t['--bg-surface']} !important;
+        border-color: {t['--border-normal']} !important;
+    }}
+    [data-baseweb="option"]:hover {{
+        background-color: {t['--bg-elevated']} !important;
+    }}
+    hr {{ border-color: {t['--border-subtle']} !important; }}
+    .stMarkdown code {{
+        background: {t['--bg-elevated']} !important;
+        color: {t['--accent']} !important;
+    }}
+    [data-testid="stSidebar"] * {{
+        color: {t['--text-secondary']};
+    }}
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3, [data-testid="stSidebar"] strong {{
+        color: {t['--text-primary']} !important;
+    }}
+    """
+
     return f"""<style>
     {font_import}
     :root {{
@@ -369,6 +528,7 @@ def get_tema_css() -> str:
     [data-testid="stSidebar"] > div:first-child {{
         background-color: {sidebar_bg} !important;
     }}
+    {light_overrides}
 </style>"""
 
 
@@ -377,7 +537,7 @@ def get_tema_css() -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_theme_switcher_sidebar() -> None:
-    """Selectbox de tema na sidebar com preview de paleta."""
+    """Selectbox de tema na sidebar com preview de paleta. Escuros e Claros agrupados."""
     ativo = get_tema_ativo()
 
     st.sidebar.markdown(
@@ -391,7 +551,10 @@ def render_theme_switcher_sidebar() -> None:
     escolha = st.sidebar.selectbox(
         "Tema",
         options=TEMAS_ORDER,
-        format_func=lambda tid: f"{TEMAS[tid]['emoji']}  {TEMAS[tid]['nome']}",
+        format_func=lambda tid: (
+            f"{TEMAS[tid]['emoji']}  {TEMAS[tid]['nome']}"
+            + ("  ·  claro" if TEMAS[tid].get("is_light") else "")
+        ),
         index=idx,
         label_visibility="collapsed",
         key="_theme_selectbox",
@@ -404,7 +567,8 @@ def render_theme_switcher_sidebar() -> None:
     # Preview de cores do tema ativo
     v = TEMAS[ativo]["vars"]
     dots = "".join(
-        f'<div style="width:7px;height:7px;border-radius:50%;background:{v[c]};flex-shrink:0;"></div>'
+        f'<div style="width:7px;height:7px;border-radius:50%;background:{v[c]};'
+        f'flex-shrink:0;border:1px solid rgba(0,0,0,0.1);"></div>'
         for c in ("--accent", "--bull", "--bear", "--info")
     )
     st.sidebar.markdown(

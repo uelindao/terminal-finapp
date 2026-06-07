@@ -1278,6 +1278,51 @@ def aplicar_tema():
         100% { background-position: -100% 0; }
     }
 
+    /* ═══════════════════════════════════════════════════
+       UTILITY CLASSES — reutilizáveis em qualquer HTML
+       ═══════════════════════════════════════════════════ */
+
+    .fin-row          { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .fin-col          { display:flex; flex-direction:column; gap:4px; }
+    .fin-spacer       { flex:1; }
+
+    .fin-badge {
+        display:inline-flex; align-items:center;
+        padding:2px 8px; border-radius:99px;
+        font-size:0.68rem; font-weight:600;
+        font-family:var(--font-ui); white-space:nowrap;
+    }
+    .fin-badge-bull   { background:var(--bull-soft);  color:var(--bull); }
+    .fin-badge-bear   { background:var(--bear-soft);  color:var(--bear); }
+    .fin-badge-amber  { background:var(--amber-soft, rgba(217,119,6,.10)); color:var(--amber); }
+    .fin-badge-info   { background:var(--accent-soft); color:var(--accent); }
+    .fin-badge-muted  { background:var(--bg-elevated); color:var(--text-muted); }
+
+    .fin-number {
+        font-family:var(--font-data);
+        font-variant-numeric:tabular-nums;
+        color:var(--text-primary);
+    }
+    .fin-number-bull { color:var(--bull) !important; }
+    .fin-number-bear { color:var(--bear) !important; }
+
+    .fin-muted  { color:var(--text-muted);     font-size:0.78rem; }
+    .fin-label  { color:var(--text-secondary); font-size:0.72rem;
+                  text-transform:uppercase; letter-spacing:.06em;
+                  font-family:var(--font-ui); }
+    .fin-divider {
+        border:none; border-top:1px solid var(--border-subtle);
+        margin:12px 0;
+    }
+    .fin-card {
+        background:var(--bg-surface); border:1px solid var(--border-subtle);
+        border-radius:var(--radius-md); padding:14px 16px;
+    }
+    .fin-card-accent {
+        background:var(--accent-soft); border:1px solid var(--accent-border);
+        border-radius:var(--radius-md); padding:14px 16px;
+    }
+
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)

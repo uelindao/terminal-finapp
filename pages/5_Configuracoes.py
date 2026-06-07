@@ -722,75 +722,98 @@ with tab_aparencia:
             unsafe_allow_html=True,
         )
 
-        # Grade de cartões de tema — 2 por linha na primeira, 3 na segunda
-        for row_tids in [TEMAS_ORDER[:2], TEMAS_ORDER[2:]]:
-            cols = st.columns(len(row_tids))
-            for col, tid in zip(cols, row_tids):
-                tema = TEMAS[tid]
-                _vars = tema["vars"]
-                _bg   = _vars["--bg-surface"]
-                _acc  = _vars["--accent"]
-                _bull = _vars["--bull"]
-                _bear = _vars["--bear"]
-                _txt  = _vars["--text-primary"]
-                _brd  = _vars["--border-normal"]
-                _is_active = (tid == ativo)
-                _border_w  = "2px" if _is_active else "1px"
-                _border_c  = _acc if _is_active else _brd
-                _selected_badge = (
-                    f'<span style="font-size:.55rem;background:{_acc};color:#000;'
-                    f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
-                    if _is_active else ""
-                )
-                # Extrai nomes das fontes padrão do tema
-                from utils.themes import TEMAS_FONTES_DEFAULT, FONTES_TITULO as _FT, FONTES_UI as _FU, FONTES_DATA as _FD
-                _fdef = TEMAS_FONTES_DEFAULT.get(tid, TEMAS_FONTES_DEFAULT["dark"])
-                _font_titulo_name = _FT.get(_fdef["titulo"], {}).get("nome", "—")
-                _font_ui_name     = _FU.get(_fdef["ui"],     {}).get("nome", "—")
-                _font_data_name   = _FD.get(_fdef["data"],   {}).get("nome", "—")
+        from utils.themes import TEMAS_FONTES_DEFAULT, FONTES_TITULO as _FT, FONTES_UI as _FU, FONTES_DATA as _FD
 
-                col.markdown(
-                    f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
-                        border-radius:12px;padding:16px;margin-bottom:8px;
-                        box-shadow:0 4px 16px rgba(0,0,0,.3);transition:all .15s ease;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                            <span style="font-size:1.2rem">{tema['emoji']}</span>
-                            {_selected_badge}
-                        </div>
-                        <div style="font-family:'Inter',system-ui;font-size:.78rem;
-                            font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
-                        <div style="font-family:'Inter',system-ui;font-size:.62rem;
-                            color:{_vars['--text-muted']};margin-bottom:10px;">{tema['desc']}</div>
-                        <div style="display:flex;gap:5px;margin-bottom:10px;">
-                            <div style="width:18px;height:18px;border-radius:50%;background:{_acc};"
-                                title="acento"></div>
-                            <div style="width:18px;height:18px;border-radius:50%;background:{_bull};"
-                                title="alta"></div>
-                            <div style="width:18px;height:18px;border-radius:50%;background:{_bear};"
-                                title="baixa"></div>
-                            <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--info']};"
-                                title="info"></div>
-                            <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--amber']};"
-                                title="alerta"></div>
-                        </div>
-                        <div style="font-family:'Inter',system-ui;font-size:.57rem;
-                            color:{_vars['--text-muted']};border-top:1px solid {_brd};
-                            padding-top:8px;display:flex;flex-direction:column;gap:2px;">
-                            <span>H · <em>{_font_titulo_name}</em></span>
-                            <span>UI · <em>{_font_ui_name}</em></span>
-                            <span>## · <em>{_font_data_name}</em></span>
-                        </div>
-                    </div>''',
-                    unsafe_allow_html=True,
-                )
-                if col.button(
-                    "✓ aplicar" if _is_active else "aplicar",
-                    key=f"_tema_cfg_{tid}",
-                    type="primary" if _is_active else "secondary",
-                    use_container_width=True,
-                ):
-                    set_tema(tid)
-                    st.rerun()
+        def _render_tema_card(col, tid, ativo):
+            tema   = TEMAS[tid]
+            _vars  = tema["vars"]
+            _bg    = _vars["--bg-surface"]
+            _acc   = _vars["--accent"]
+            _bull  = _vars["--bull"]
+            _bear  = _vars["--bear"]
+            _txt   = _vars["--text-primary"]
+            _brd   = _vars["--border-normal"]
+            _light = tema.get("is_light", False)
+            _shadow = "rgba(0,0,0,.08)" if _light else "rgba(0,0,0,.3)"
+            _is_active = (tid == ativo)
+            _border_w  = "2px" if _is_active else "1px"
+            _border_c  = _acc if _is_active else _brd
+            _selected_badge = (
+                f'<span style="font-size:.55rem;background:{_acc};'
+                f'color:{"#fff" if _light else "#000"};'
+                f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
+                if _is_active else ""
+            )
+            _fdef = TEMAS_FONTES_DEFAULT.get(tid, TEMAS_FONTES_DEFAULT["dark"])
+            _font_titulo_name = _FT.get(_fdef["titulo"], {}).get("nome", "—")
+            _font_ui_name     = _FU.get(_fdef["ui"],     {}).get("nome", "—")
+            _font_data_name   = _FD.get(_fdef["data"],   {}).get("nome", "—")
+
+            col.markdown(
+                f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
+                    border-radius:12px;padding:16px;margin-bottom:8px;
+                    box-shadow:0 4px 16px {_shadow};transition:all .15s ease;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <span style="font-size:1.2rem">{tema['emoji']}</span>
+                        {_selected_badge}
+                    </div>
+                    <div style="font-family:'Inter',system-ui;font-size:.78rem;
+                        font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
+                    <div style="font-family:'Inter',system-ui;font-size:.62rem;
+                        color:{_vars['--text-muted']};margin-bottom:10px;">{tema['desc']}</div>
+                    <div style="display:flex;gap:5px;margin-bottom:10px;">
+                        <div style="width:18px;height:18px;border-radius:50%;background:{_acc};
+                            border:1px solid rgba(0,0,0,.1);" title="acento"></div>
+                        <div style="width:18px;height:18px;border-radius:50%;background:{_bull};
+                            border:1px solid rgba(0,0,0,.1);" title="alta"></div>
+                        <div style="width:18px;height:18px;border-radius:50%;background:{_bear};
+                            border:1px solid rgba(0,0,0,.1);" title="baixa"></div>
+                        <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--info']};
+                            border:1px solid rgba(0,0,0,.1);" title="info"></div>
+                        <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--amber']};
+                            border:1px solid rgba(0,0,0,.1);" title="alerta"></div>
+                    </div>
+                    <div style="font-family:'Inter',system-ui;font-size:.57rem;
+                        color:{_vars['--text-muted']};border-top:1px solid {_brd};
+                        padding-top:8px;display:flex;flex-direction:column;gap:2px;">
+                        <span>H · <em>{_font_titulo_name}</em></span>
+                        <span>UI · <em>{_font_ui_name}</em></span>
+                        <span>## · <em>{_font_data_name}</em></span>
+                    </div>
+                </div>''',
+                unsafe_allow_html=True,
+            )
+            if col.button(
+                "✓ aplicar" if _is_active else "aplicar",
+                key=f"_tema_cfg_{tid}",
+                type="primary" if _is_active else "secondary",
+                use_container_width=True,
+            ):
+                set_tema(tid)
+                st.rerun()
+
+        # Grade agrupada — Escuros (3+2) e Claros (2)
+        _escuros = [t for t in TEMAS_ORDER if not TEMAS[t].get("is_light")]
+        _claros  = [t for t in TEMAS_ORDER if TEMAS[t].get("is_light")]
+
+        st.markdown(
+            '<div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;'
+            'color:var(--text-muted);font-family:var(--font-ui);margin:8px 0 6px;">🌙 temas escuros</div>',
+            unsafe_allow_html=True,
+        )
+        for row_tids in [_escuros[:3], _escuros[3:]]:
+            _cols = st.columns(len(row_tids))
+            for _col, tid in zip(_cols, row_tids):
+                _render_tema_card(_col, tid, ativo)
+
+        st.markdown(
+            '<div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;'
+            'color:var(--text-muted);font-family:var(--font-ui);margin:16px 0 6px;">☀️ temas claros</div>',
+            unsafe_allow_html=True,
+        )
+        _cols_claros = st.columns(len(_claros))
+        for _col, tid in zip(_cols_claros, _claros):
+            _render_tema_card(_col, tid, ativo)
 
         # ── Tipografia personalizável ─────────────────────────────────────────
         st.markdown("---")

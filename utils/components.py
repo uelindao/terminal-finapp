@@ -1356,3 +1356,99 @@ def label_com_tooltip(
         f'</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOVOS COMPONENTES — v4.0
+# ══════════════════════════════════════════════════════════════════════════════
+
+def metric_card_compact(
+    label: str,
+    valor: str,
+    delta: str | None = None,
+    cor: str = "info",
+) -> None:
+    """Card compacto (h≈64px) para linhas densas com 4-6 métricas lado a lado."""
+    _COR_MAP = {
+        "bull":  ("var(--bull)",  "var(--bull-soft)"),
+        "bear":  ("var(--bear)",  "var(--bear-soft)"),
+        "amber": ("var(--amber)", "rgba(217,119,6,.10)"),
+        "info":  ("var(--info)",  "var(--accent-soft)"),
+        "muted": ("var(--text-muted)", "transparent"),
+    }
+    cor_val, cor_bg = _COR_MAP.get(cor, _COR_MAP["info"])
+    delta_html = ""
+    if delta is not None:
+        delta_html = (
+            f'<span style="font-size:.68rem;font-family:var(--font-data);'
+            f'color:{cor_val};margin-left:6px;">{delta}</span>'
+        )
+    st.markdown(
+        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+        f'border-radius:var(--radius-md);padding:10px 14px;min-height:64px;'
+        f'display:flex;flex-direction:column;justify-content:center;">'
+        f'<div style="font-size:.65rem;font-family:var(--font-ui);color:var(--text-muted);'
+        f'text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">{label}</div>'
+        f'<div style="font-size:1.05rem;font-weight:600;font-family:var(--font-data);'
+        f'color:var(--text-primary);font-variant-numeric:tabular-nums;'
+        f'display:flex;align-items:baseline;">'
+        f'{valor}{delta_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def skeleton_loader(n_linhas: int = 3, altura_linha: str = "16px") -> None:
+    """Placeholder animado (shimmer) enquanto dados carregam."""
+    bars = "".join(
+        f'<div style="height:{altura_linha};border-radius:4px;'
+        f'background:linear-gradient(90deg,var(--bg-elevated) 25%,'
+        f'var(--bg-overlay) 50%,var(--bg-elevated) 75%);'
+        f'background-size:200% 100%;animation:_sk_shimmer 1.4s infinite;'
+        f'margin-bottom:8px;opacity:{0.9 - i * 0.12:.2f};'
+        f'width:{100 - i * 8}%;"></div>'
+        for i in range(n_linhas)
+    )
+    st.markdown(
+        f'<style>@keyframes _sk_shimmer{{0%{{background-position:200% 0}}'
+        f'100%{{background-position:-200% 0}}}}</style>'
+        f'<div style="padding:4px 0;">{bars}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def market_pulse_bar(indices: dict[str, tuple[float, float]]) -> None:
+    """
+    Barra horizontal de pulso de mercado.
+
+    indices: {nome: (preco, variacao_pct)}
+    Exemplo: {"IBOV": (125000, -0.8), "S&P500": (5200, 0.3)}
+    """
+    items = []
+    for nome, (preco, var) in indices.items():
+        cor  = "var(--bull)" if var >= 0 else "var(--bear)"
+        sinal = "▲" if var >= 0 else "▼"
+        preco_fmt = f"{preco:,.0f}" if preco >= 1000 else f"{preco:.2f}"
+        items.append(
+            f'<div style="display:flex;flex-direction:column;align-items:center;'
+            f'padding:0 14px;border-right:1px solid var(--border-subtle);'
+            f'white-space:nowrap;gap:1px;">'
+            f'<span style="font-size:.6rem;color:var(--text-muted);'
+            f'font-family:var(--font-ui);text-transform:uppercase;'
+            f'letter-spacing:.06em;">{nome}</span>'
+            f'<span style="font-size:.78rem;font-family:var(--font-data);'
+            f'font-variant-numeric:tabular-nums;color:var(--text-primary);">'
+            f'{preco_fmt}</span>'
+            f'<span style="font-size:.68rem;font-family:var(--font-data);'
+            f'color:{cor};">{sinal} {abs(var):.2f}%</span>'
+            f'</div>'
+        )
+    html = (
+        f'<div style="display:flex;align-items:center;'
+        f'background:var(--bg-surface);border:1px solid var(--border-subtle);'
+        f'border-radius:var(--radius-md);padding:8px 4px;'
+        f'overflow-x:auto;gap:0;margin-bottom:16px;">'
+        + "".join(items)
+        + '</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
