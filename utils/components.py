@@ -1417,18 +1417,34 @@ def skeleton_loader(n_linhas: int = 3, altura_linha: str = "16px") -> None:
     )
 
 
-def market_pulse_bar(indices: dict[str, tuple[float, float]]) -> None:
+def market_pulse_bar(
+    indices: dict[str, tuple[float, float]],
+    spread_keys: set | None = None,
+) -> None:
     """
     Barra horizontal de pulso de mercado.
 
     indices: {nome: (preco, variacao_pct)}
-    Exemplo: {"IBOV": (125000, -0.8), "S&P500": (5200, 0.3)}
+    spread_keys: nomes que são spreads (ex: "curva 10y-3m") — formatados em pp, sem sinal %
     """
+    spread_keys = spread_keys or {"curva 10y-3m"}
     items = []
     for nome, (preco, var) in indices.items():
-        cor  = "var(--bull)" if var >= 0 else "var(--bear)"
+        cor   = "var(--bull)" if var >= 0 else "var(--bear)"
         sinal = "▲" if var >= 0 else "▼"
-        preco_fmt = f"{preco:,.0f}" if preco >= 1000 else f"{preco:.2f}"
+        if nome in spread_keys:
+            preco_fmt   = f"{preco:+.2f}pp"
+            status_line = "normal" if preco >= 0 else "invertida"
+            var_html = (
+                f'<span style="font-size:.6rem;font-family:var(--font-data);'
+                f'color:{cor};">{status_line}</span>'
+            )
+        else:
+            preco_fmt = f"{preco:,.0f}" if preco >= 1_000 else f"{preco:.2f}"
+            var_html  = (
+                f'<span style="font-size:.68rem;font-family:var(--font-data);'
+                f'color:{cor};">{sinal} {abs(var):.2f}%</span>'
+            )
         items.append(
             f'<div style="display:flex;flex-direction:column;align-items:center;'
             f'padding:0 14px;border-right:1px solid var(--border-subtle);'
@@ -1439,15 +1455,14 @@ def market_pulse_bar(indices: dict[str, tuple[float, float]]) -> None:
             f'<span style="font-size:.78rem;font-family:var(--font-data);'
             f'font-variant-numeric:tabular-nums;color:var(--text-primary);">'
             f'{preco_fmt}</span>'
-            f'<span style="font-size:.68rem;font-family:var(--font-data);'
-            f'color:{cor};">{sinal} {abs(var):.2f}%</span>'
-            f'</div>'
+            + var_html
+            + '</div>'
         )
     html = (
-        f'<div style="display:flex;align-items:center;'
-        f'background:var(--bg-surface);border:1px solid var(--border-subtle);'
-        f'border-radius:var(--radius-md);padding:8px 4px;'
-        f'overflow-x:auto;gap:0;margin-bottom:16px;">'
+        '<div style="display:flex;align-items:center;'
+        'background:var(--bg-surface);border:1px solid var(--border-subtle);'
+        'border-radius:var(--radius-md);padding:8px 4px;'
+        'overflow-x:auto;gap:0;margin-bottom:16px;">'
         + "".join(items)
         + '</div>'
     )

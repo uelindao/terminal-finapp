@@ -92,7 +92,7 @@ def calcular_oportunidades_watchlist(
 
             pts_hs = round((score_hs / 100) * 55, 1)
 
-            pts_val = 0.0
+            pts_val = 10.0  # neutro quando sem dados históricos
             try:
                 _medios = get_multiplos_medios(t_base, anos=5)
                 if _medios:
@@ -115,6 +115,7 @@ def calcular_oportunidades_watchlist(
                                     pts_val = 5.0
                                 else:
                                     pts_val = 0.0
+                # _medios vazio = FMP sem cobertura → mantém neutro 10.0
             except Exception:
                 pts_val = 10.0
 

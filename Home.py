@@ -606,51 +606,10 @@ _tickers_wl_home = tuple([
 ])
 
 if _tickers_wl_home:
-    _col_opp_modo, _col_opp_info = st.columns([3, 5])
-    with _col_opp_modo:
-        _modo_radar = st.radio(
-            "modo:",
-            ["entrada", "realizacao", "dividendo"],
-            format_func=lambda x: {
-                "entrada":    "🎯 oportunidade de entrada",
-                "realizacao": "📤 alerta de realização",
-                "dividendo":  "💰 radar de dividendos",
-            }[x],
-            horizontal=False,
-            key="radio_modo_radar",
-            label_visibility="collapsed",
-        )
-    with _col_opp_info:
-        _descricoes_modo = {
-            "entrada": (
-                "ativos de alta qualidade com preço temporariamente "
-                "deprimido e sinais de estabilização. "
-                "score = qualidade (55%) + valuation histórico (20%) "
-                "+ timing de entrada (25%)."
-            ),
-            "realizacao": (
-                "ativos sobrecomprados onde pode fazer sentido "
-                "reduzir posição parcialmente. "
-                "útil para gestão de risco e rebalanceamento."
-            ),
-            "dividendo": (
-                "ativos com yield real acima da NTN-B + spread de risco. "
-                "foco em renda — independe de momentum de preço."
-            ),
-        }
-        st.markdown(
-            f'<div style="font-family:Courier New;font-size:0.72rem;'
-            f'color:#555;line-height:1.7;padding-top:4px;">'
-            f'{_descricoes_modo[_modo_radar]}</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     with st.spinner("calculando radar..."):
         _opps = calcular_oportunidades_watchlist(
             _tickers_wl_home,
-            modo=_modo_radar,
+            modo="entrada",
         )
 
     if _opps:
@@ -871,27 +830,47 @@ auto_refresh_indicator(5)
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_indices_completo():
     tickers = {
-        "ibovespa": "^BVSP",
-        "s&p 500": "^GSPC",
-        "nasdaq": "^IXIC",
-        "dólar (brl)": "BRL=X",
-        "bitcoin": "BTC-USD",
-        "ouro": "GC=F",
-        "vix": "^VIX",
+        "ibovespa":     "^BVSP",
+        "s&p 500":      "^GSPC",
+        "nasdaq":       "^IXIC",
+        "dólar (brl)":  "BRL=X",
+        "bitcoin":      "BTC-USD",
+        "ouro":         "GC=F",
+        "crude wti":    "CL=F",
+        "vix":          "^VIX",
         "treasury 10y": "^TNX",
+        "_irx":         "^IRX",  # 3M T-bill — usado para calcular spread curva
     }
     resultados = {}
     try:
         hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
+        raw: dict[str, pd.Series] = {}
         for nome, tk in tickers.items():
             try:
                 s = hist[tk].dropna() if isinstance(hist, pd.DataFrame) and tk in hist.columns else pd.Series()
                 if len(s) >= 2:
-                    preco = float(s.iloc[-1])
-                    var = ((preco / float(s.iloc[-2])) - 1) * 100
-                    resultados[nome] = {"preco": preco, "var": var, "ticker": tk}
+                    raw[nome] = s
             except Exception:
                 pass
+
+        for nome, s in raw.items():
+            if nome.startswith("_"):
+                continue
+            preco = float(s.iloc[-1])
+            var   = ((preco / float(s.iloc[-2])) - 1) * 100
+            resultados[nome] = {"preco": preco, "var": var, "ticker": tickers[nome]}
+
+        # Spread curva de juros: 10Y − 3M (em pp)
+        if "treasury 10y" in raw and "_irx" in raw:
+            s10 = raw["treasury 10y"]
+            s3m = raw["_irx"]
+            spread = float(s10.iloc[-1]) - float(s3m.iloc[-1])
+            # usa spread atual como "var" → positivo = curva normal (verde), negativo = invertida (vermelho)
+            resultados["curva 10y-3m"] = {
+                "preco": spread,
+                "var":   spread,
+                "ticker": "T10Y3M",
+            }
     except Exception:
         pass
     return resultados
@@ -928,7 +907,7 @@ def render_pulso_card(label: str, valor: str, var_pct: float):
 
 indices = buscar_indices_completo()
 if indices:
-    # Preenche o market pulse bar no topo da página
+    # Pulse bar no topo — somente metade esquerda da página
     try:
         from utils.components import market_pulse_bar as _mpb
         _pulse_data = {
@@ -936,18 +915,25 @@ if indices:
             for nome, d in indices.items()
         }
         with _pulse_bar_ph.container():
-            _mpb(_pulse_data)
+            _col_bar, _ = st.columns([1, 1])
+            with _col_bar:
+                _mpb(_pulse_data)
     except Exception:
         pass
 
-    cols = st.columns(len(indices))
-    for i, (nome, dados) in enumerate(indices.items()):
+    # Cards macro — exclui spread e ticker interno
+    _CARDS_SKIP = {"curva 10y-3m"}
+    _cards_indices = {k: v for k, v in indices.items() if k not in _CARDS_SKIP}
+    cols = st.columns(len(_cards_indices))
+    for i, (nome, dados) in enumerate(_cards_indices.items()):
         tk = dados['ticker']
         if tk == "BRL=X":
             valor_fmt = f"R$ {dados['preco']:.4f}"
         elif tk in ["^VIX", "^TNX"]:
             valor_fmt = f"{dados['preco']:.2f}"
         elif tk == "GC=F":
+            valor_fmt = f"$ {dados['preco']:,.2f}"
+        elif tk in ["CL=F"]:
             valor_fmt = f"$ {dados['preco']:,.2f}"
         elif tk == "BTC-USD":
             valor_fmt = f"$ {dados['preco']:,.0f}"
@@ -2125,27 +2111,30 @@ else:
                 lista_alertas = []
                 breakdown     = {}
 
-            # Checkbox de seleção para deleção múltipla
+            # Checkbox + row na mesma linha
             _chk_key = f"chk_del_{t}"
-            _selecionado = st.checkbox("", key=_chk_key, label_visibility="collapsed")
+            _col_chk, _col_row = st.columns([0.4, 11.6])
+            with _col_chk:
+                _selecionado = st.checkbox("", key=_chk_key, label_visibility="collapsed")
             _del_list = st.session_state.setdefault('del_selecionados', [])
             if _selecionado and t not in _del_list:
                 _del_list.append(t)
             elif not _selecionado and t in _del_list:
                 _del_list.remove(t)
 
-            watchlist_row(
-                ticker        = t,
-                nome          = item.get('nome', t),
-                preco         = d.get('preco', 0.0),
-                var_1d        = d.get('var_1d', 0.0),
-                var_1m        = d.get('var_1m', 0.0),
-                moeda         = "R$" if t_base.endswith(".SA") else "$",
-                health_score  = h_info.get('score'),
-                alertas       = lista_alertas,
-                earnings_info = _earnings_info_map.get(t_base),
-                data_source   = fonte_wl.get(t, ''),
-            )
+            with _col_row:
+                watchlist_row(
+                    ticker        = t,
+                    nome          = item.get('nome', t),
+                    preco         = d.get('preco', 0.0),
+                    var_1d        = d.get('var_1d', 0.0),
+                    var_1m        = d.get('var_1m', 0.0),
+                    moeda         = "R$" if t_base.endswith(".SA") else "$",
+                    health_score  = h_info.get('score'),
+                    alertas       = lista_alertas,
+                    earnings_info = _earnings_info_map.get(t_base),
+                    data_source   = fonte_wl.get(t, ''),
+                )
 
             # Coleta remoção pendente (dialog chamado fora do loop)
             if st.session_state.get(f"confirm_del_{t}"):
