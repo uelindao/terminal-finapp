@@ -1147,15 +1147,12 @@ def montar_prompt_ativo(
 
 
 # --- TABS ---
-tab_val, tab_tec, tab_earn, tab_fund, tab_dcf, tab_ia, tab_sent, tab_macro = st.tabs([
+tab_val, tab_tec, tab_fund, tab_analise, tab_macro = st.tabs([
     "📊 valuation & peers",
     "📈 técnico (10y)",
-    "📊 demonstrações (dre)",
     "💎 fundamentos",
-    "🧮 dcf reverso",
-    "🧠 ia & pdf",
-    "📰 notícias",
-    "🌍 overlay macro (10y)",
+    "🧠 análise & ia",
+    "🌍 overlay macro",
 ])
 
 with tab_val:
@@ -1303,7 +1300,8 @@ with tab_tec:
         st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True})
     except Exception as e: st.error(f"Erro gráfico técnico: {e}")
 
-with tab_earn:
+with tab_fund:
+    section_title("📊 demonstrações financeiras (dre)")
     if is_fii: st.info("💡 FIIs não possuem DRE trimestral padrão. Avalie os Rendimentos em Fundamentos.")
     else:
         _earn_tipo = chart_type_toggle(key=f"earn_{t_base}", default="barras")
@@ -1340,7 +1338,7 @@ with tab_earn:
             logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
             st.error(f"erro ao carregar demonstrações: {e}")
 
-with tab_ia:
+with tab_analise:
     section_title("🧠 análise ia — deepseek v4 pro")
 
     # Exibe análise anterior se existir
@@ -1592,7 +1590,8 @@ with tab_ia:
                 user_settings  = _user_settings,
             )
 
-with tab_fund:
+    # ── FUNDAMENTOS ──────────────────────────────────────────────────────────
+    section_title("💎 fundamentos & indicadores")
     # Busca dados complementares ausentes no cache/info_dict
     _beta_tab = None
     _de_tab = None
@@ -1877,7 +1876,8 @@ with tab_fund:
             unsafe_allow_html=True,
         )
 
-with tab_dcf:
+    # ── DCF REVERSO ──────────────────────────────────────────────────────────
+    section_title("🧮 dcf reverso & valuation implícito")
     if is_fii:
         section_title("🏢 modelo de valuation — p/vp justo (fii)")
 
@@ -2265,7 +2265,8 @@ with tab_dcf:
                         user_settings  = _user_settings,
                     )
 
-with tab_sent:
+    # ── NOTÍCIAS & SENTIMENTO ────────────────────────────────────────────────
+    section_title("📰 notícias & sentimento")
     st.subheader("sentimento via notícias")
     try:
         news = acao_obj.news

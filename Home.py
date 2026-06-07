@@ -341,6 +341,9 @@ def buscar_ativo_yahoo(query):
 # ==========================================
 page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
 
+# Placeholder para market pulse bar — preenchido após carregar índices (linha ~865)
+_pulse_bar_ph = st.empty()
+
 # ── Admin e Perfil na sidebar ───────────────────────────────────────────
 with st.sidebar:
     _user_sidebar = get_current_user()
@@ -925,6 +928,18 @@ def render_pulso_card(label: str, valor: str, var_pct: float):
 
 indices = buscar_indices_completo()
 if indices:
+    # Preenche o market pulse bar no topo da página
+    try:
+        from utils.components import market_pulse_bar as _mpb
+        _pulse_data = {
+            nome: (d["preco"], d["var"])
+            for nome, d in indices.items()
+        }
+        with _pulse_bar_ph.container():
+            _mpb(_pulse_data)
+    except Exception:
+        pass
+
     cols = st.columns(len(indices))
     for i, (nome, dados) in enumerate(indices.items()):
         tk = dados['ticker']
