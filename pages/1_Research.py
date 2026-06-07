@@ -813,7 +813,7 @@ if len(historico) >= 3:
         tamanho="0.72rem",
     )
     df_hist_score = pd.DataFrame(historico)
-    df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'])
+    df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'], format="ISO8601", utc=True)
     df_hist_score = df_hist_score.set_index('calculado_em')
     _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
     _cc_hs    = _chart_cores()
