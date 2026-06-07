@@ -655,6 +655,10 @@ def _cobertura_atual() -> pd.DataFrame:
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 
+# Se backfill acabou de rodar, força releitura de cobertura antes de montar o lote
+if st.session_state.pop("backfill_just_completed", False):
+    _cobertura_atual.clear()
+
 # Dashboard de cobertura
 section_title("📊 cobertura atual")
 
@@ -1153,12 +1157,12 @@ if btn_run and lote:
         + (f"- ⚠️ Erros: {', '.join(erros)}" if erros else "")
     )
 
-    # Marca tickers como processados nesta sessão
+    # Marca tickers como processados e sinaliza que a cobertura deve ser relida
     ja_proc = st.session_state.get("backfill_ja_processados", set())
     ja_proc.update(lote)
     ja_proc.update(t.replace(".SA", "") for t in lote)
     st.session_state["backfill_ja_processados"] = ja_proc
-    _cobertura_atual.clear()
+    st.session_state["backfill_just_completed"] = True
 
     if pendentes[batch_size:]:
         restantes = len(pendentes) - batch_size
