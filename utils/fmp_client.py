@@ -411,19 +411,36 @@ def get_multiplos_medios(ticker: str, anos: int = 5) -> dict:
         return {}
 
     def _stats(campo: str) -> dict | None:
-        vals = [
-            h[campo] for h in historico
+        raw = [
+            float(h[campo]) for h in historico
             if h.get(campo) is not None
             and float(h[campo]) > 0
             and float(h[campo]) < 999
         ]
-        if not vals:
+        if not raw:
             return None
+        atual = raw[0]  # mais recente — capturado antes de qualquer filtragem
+
+        # Filtra outliers extremos via IQR (2.5×) para não distorcer range histórico
+        # Ex: P/L ~1x durante trimestre de lucro quase-zero infla a média
+        vals = raw
+        if len(raw) >= 4:
+            arr = sorted(raw)
+            mid = len(arr) // 4
+            q1, q3 = arr[mid], arr[3 * mid]
+            iqr = q3 - q1
+            if iqr > 0:
+                lo = max(0.01, q1 - 2.5 * iqr)
+                hi = q3 + 2.5 * iqr
+                filtered = [v for v in raw if lo <= v <= hi]
+                if filtered:
+                    vals = filtered
+
         return {
             "media": round(sum(vals) / len(vals), 2),
             "min":   round(min(vals), 2),
             "max":   round(max(vals), 2),
-            "atual": round(vals[0], 2),   # mais recente primeiro
+            "atual": round(atual, 2),
         }
 
     return {
