@@ -860,9 +860,9 @@ with col_b:
     )
 with col_c:
     pular_cobertos = st.checkbox(
-        "pular tickers com ≥ 20 pontos",
+        "pular tickers já processados",
         value=True,
-        help="Evita re-processar tickers já completos.",
+        help="Evita re-processar tickers com dados no banco ou já rodados nesta sessão.",
     )
 
 # Monta lista de tickers pendentes
@@ -873,10 +873,19 @@ elif mercado_sel == "Brasil (B3)":
 else:
     todos_tickers = list(SCREENER_US) + list(SCREENER_B3)
 
-# Filtra cobertura — qualquer ticker com ≥4 pontos já está coberto
-if pular_cobertos and not cob.empty:
-    completos = set(cob[cob["pontos"] >= 4]["ticker"].tolist())
-    pendentes = [t for t in todos_tickers if t not in completos]
+# Filtra cobertura
+if pular_cobertos:
+    # 1. Tickers com ≥4 pontos no banco
+    completos_db: set[str] = set()
+    if not cob.empty:
+        completos_db = set(cob[cob["pontos"] >= 4]["ticker"].tolist())
+        # BR tickers são salvos como "PETR4.SA" no banco mas listados sem sufixo em SCREENER_B3
+        completos_db |= {t.replace(".SA", "") for t in completos_db}
+    # 2. Tickers já processados nesta sessão (persiste entre reruns)
+    ja_processados: set[str] = st.session_state.get("backfill_ja_processados", set())
+    completos = completos_db | ja_processados
+    pendentes = [t for t in todos_tickers if t not in completos
+                 and t.replace(".SA", "") not in completos]
 else:
     pendentes = todos_tickers
 
@@ -1144,7 +1153,12 @@ if btn_run and lote:
         + (f"- ⚠️ Erros: {', '.join(erros)}" if erros else "")
     )
 
-    _cobertura_atual.clear()  # força releitura na próxima rodada
+    # Marca tickers como processados nesta sessão
+    ja_proc = st.session_state.get("backfill_ja_processados", set())
+    ja_proc.update(lote)
+    ja_proc.update(t.replace(".SA", "") for t in lote)
+    st.session_state["backfill_ja_processados"] = ja_proc
+    _cobertura_atual.clear()
 
     if pendentes[batch_size:]:
         restantes = len(pendentes) - batch_size
