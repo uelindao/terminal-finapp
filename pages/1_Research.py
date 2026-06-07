@@ -1839,6 +1839,13 @@ with tab_analise:
                     continue
 
                 _fig_ev = go.Figure()
+                # Converte hex → rgba para fillcolor (Plotly não aceita hex de 8 dígitos)
+                try:
+                    _h = _evcor.lstrip("#")
+                    _r, _g, _b = int(_h[0:2],16), int(_h[2:4],16), int(_h[4:6],16)
+                    _fill_ev = f"rgba({_r},{_g},{_b},0.09)"
+                except Exception:
+                    _fill_ev = "rgba(100,100,200,0.09)"
                 _fig_ev.add_trace(go.Scatter(
                     x=_df_ev["data"].tolist(),
                     y=_df_ev[_evcampo].tolist(),
@@ -1846,7 +1853,7 @@ with tab_analise:
                     line=dict(color=_evcor, width=2),
                     marker=dict(size=4, color=_evcor),
                     fill="tozeroy",
-                    fillcolor=f"{_evcor}18",
+                    fillcolor=_fill_ev,
                     hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
                     name=_evlbl,
                 ))
