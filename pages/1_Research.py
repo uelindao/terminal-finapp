@@ -679,10 +679,12 @@ if is_fii:
     dy = safe_float(cache_d.get('dy%')) or _dy_info_fii
     mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
     assets = safe_float(info_dict.get('totalAssets'))
-    with c1: metric_card("preço / vp", f"{pvp:.2f}" if pvp is not None else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear", destaque=True)
-    tooltip("pvp")
-    with c2: metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted", icone="💵")
-    tooltip("dy")
+    with c1:
+        metric_card("preço / vp", f"{pvp:.2f}" if pvp is not None else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear", destaque=True)
+        tooltip("pvp")
+    with c2:
+        metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted", icone="💵")
+        tooltip("dy")
     with c3: metric_card("mkt cap", fmt_numero(mcap, moeda))
     with c4: metric_card("patrimônio líq.", fmt_numero(assets, moeda))
 
@@ -739,14 +741,18 @@ else:
     _dy_raw_us = safe_float(info_dict.get('dividendYield', 0))
     _dy_info_us = _dy_raw_us if _dy_raw_us and _dy_raw_us > 0.30 else (_dy_raw_us * 100 if _dy_raw_us else 0)
     dy = safe_float(cache_d.get('dy%')) or _dy_info_us
-    with c1: metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️", destaque=True)
-    tooltip("pl")
-    with c2: metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted", icone="📈")
-    tooltip("roe")
-    with c3: metric_card("margem líq.", fmt_pct(mrg), "eficiência", "bull" if mrg and mrg > 10 else "bear", icone="💰")
-    tooltip("margem_liquida")
-    with c4: metric_card("div yield", fmt_pct(dy), "12m", icone="💵")
-    tooltip("dy")
+    with c1:
+        metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️", destaque=True)
+        tooltip("pl")
+    with c2:
+        metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted", icone="📈")
+        tooltip("roe")
+    with c3:
+        metric_card("margem líq.", fmt_pct(mrg), "eficiência", "bull" if mrg and mrg > 10 else "bear", icone="💰")
+        tooltip("margem_liquida")
+    with c4:
+        metric_card("div yield", fmt_pct(dy), "12m", icone="💵")
+        tooltip("dy")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
