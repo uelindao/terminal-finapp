@@ -1158,7 +1158,7 @@ tab_val, tab_tec, tab_fund, tab_analise, tab_macro = st.tabs([
 with tab_val:
     # ── VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
     if _medios:
-        section_title("📊 valuation em contexto histórico (5 anos)")
+        section_title("📊 valuation em contexto histórico (10 anos)")
         _col_pe, _col_pb, _col_ev, _col_dy = st.columns(4)
         with _col_pe:
             _render_multiplo_card("P/L", cache_d.get('p/l'), _medios.get('pe'))

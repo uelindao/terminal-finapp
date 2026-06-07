@@ -299,7 +299,7 @@ def _get_multiplos_historicos_yf(ticker: str, anos: int = 3) -> list[dict]:
         return []
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
     """
     Busca P/L, P/VP, EV/EBITDA, DY, ROE e ROIC históricos.
