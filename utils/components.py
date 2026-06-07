@@ -1447,21 +1447,22 @@ def market_pulse_bar(
             )
         items.append(
             f'<div style="display:flex;flex-direction:column;align-items:center;'
-            f'padding:0 10px;border-right:1px solid var(--border-subtle);'
-            f'white-space:nowrap;gap:1px;flex:1;min-width:0;">'
+            f'justify-content:center;text-align:center;'
+            f'flex:1;padding:6px 8px;'
+            f'border-right:1px solid var(--border-subtle);gap:2px;">'
             f'<span style="font-size:.58rem;color:var(--text-muted);'
             f'font-family:var(--font-ui);text-transform:uppercase;'
-            f'letter-spacing:.05em;">{nome}</span>'
-            f'<span style="font-size:.76rem;font-family:var(--font-data);'
-            f'font-variant-numeric:tabular-nums;color:var(--text-primary);">'
-            f'{preco_fmt}</span>'
+            f'letter-spacing:.05em;white-space:nowrap;">{nome}</span>'
+            f'<span style="font-size:.8rem;font-family:var(--font-data);'
+            f'font-variant-numeric:tabular-nums;color:var(--text-primary);'
+            f'white-space:nowrap;">{preco_fmt}</span>'
             + var_html
             + '</div>'
         )
     html = (
-        '<div style="display:flex;align-items:stretch;'
+        '<div style="display:flex;align-items:stretch;width:100%;'
         'background:var(--bg-surface);border:1px solid var(--border-subtle);'
-        'border-radius:var(--radius-md);padding:8px 0;'
+        'border-radius:var(--radius-md);padding:0;'
         'overflow:hidden;margin-bottom:16px;">'
         + "".join(items)
         + '</div>'
