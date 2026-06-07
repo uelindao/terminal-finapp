@@ -801,7 +801,9 @@ with tab_aparencia:
             'color:var(--text-muted);font-family:var(--font-ui);margin:8px 0 6px;">🌙 temas escuros</div>',
             unsafe_allow_html=True,
         )
-        for row_tids in [_escuros[:3], _escuros[3:]]:
+        for row_tids in [_escuros[:3], _escuros[3:6], _escuros[6:]]:
+            if not row_tids:
+                continue
             _cols = st.columns(len(row_tids))
             for _col, tid in zip(_cols, row_tids):
                 _render_tema_card(_col, tid, ativo)

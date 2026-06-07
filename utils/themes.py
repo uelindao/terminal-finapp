@@ -58,6 +58,8 @@ TEMAS_FONTES_DEFAULT: dict[str, dict] = {
     "cyber":    {"titulo": "syne",          "ui": "outfit",       "data": "space_mono"},
     "light":    {"titulo": "inter",         "ui": "inter",        "data": "jetbrains_mono"},
     "papel":    {"titulo": "plus_jakarta",  "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
+    "amber":    {"titulo": "space_grotesk", "ui": "dm_sans",      "data": "jetbrains_mono"},
+    "verde":    {"titulo": "space_grotesk", "ui": "dm_sans",      "data": "jetbrains_mono"},
 }
 
 
@@ -317,7 +319,78 @@ TEMAS: dict[str, dict] = {
     },
 }
 
-TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber", "light", "papel"]
+    # ── 8. Retro Âmbar (Grafite + laranja) ───────────────────────────────────
+    "amber": {
+        "nome":    "Retro Âmbar",
+        "emoji":   "🟠",
+        "desc":    "grafite · laranja âmbar · estilo terminal retrô",
+        "sidebar": "#0A0A0A",
+        "vars": {
+            "--sidebar-bg":     "#0A0A0A",
+            "--bg-base":        "#111111",
+            "--bg-surface":     "#1A1A1A",
+            "--bg-elevated":    "#242424",
+            "--bg-overlay":     "#2E2E2E",
+            "--border-subtle":  "#2E2E2E",
+            "--border-normal":  "#3D2E00",
+            "--border-focus":   "#FF8C00",
+            "--text-primary":   "#FF8C00",
+            "--text-secondary": "#CC7000",
+            "--text-muted":     "#7A4500",
+            "--accent":         "#FF8C00",
+            "--accent-rgb":     "255,140,0",
+            "--accent-hover":   "#FF6B00",
+            "--accent-soft":    "rgba(255,140,0,0.10)",
+            "--accent-border":  "rgba(255,140,0,0.28)",
+            "--bull":           "#4ADE80",
+            "--bull-soft":      "rgba(74,222,128,0.12)",
+            "--bear":           "#F87171",
+            "--bear-soft":      "rgba(248,113,113,0.12)",
+            "--amber":          "#FBBF24",
+            "--info":           "#38BDF8",
+            "--radius-sm":      "4px",
+            "--radius-md":      "8px",
+            "--radius-lg":      "10px",
+        },
+    },
+
+    # ── 9. Retro Verde (Grafite + verde) ──────────────────────────────────────
+    "verde": {
+        "nome":    "Retro Verde",
+        "emoji":   "🟢",
+        "desc":    "grafite · verde fosforescente · estilo terminal retrô",
+        "sidebar": "#0A0A0A",
+        "vars": {
+            "--sidebar-bg":     "#0A0A0A",
+            "--bg-base":        "#111111",
+            "--bg-surface":     "#1A1A1A",
+            "--bg-elevated":    "#242424",
+            "--bg-overlay":     "#2E2E2E",
+            "--border-subtle":  "#2E2E2E",
+            "--border-normal":  "#003D1A",
+            "--border-focus":   "#00E676",
+            "--text-primary":   "#00E676",
+            "--text-secondary": "#00B85A",
+            "--text-muted":     "#006830",
+            "--accent":         "#00E676",
+            "--accent-rgb":     "0,230,118",
+            "--accent-hover":   "#00C864",
+            "--accent-soft":    "rgba(0,230,118,0.10)",
+            "--accent-border":  "rgba(0,230,118,0.28)",
+            "--bull":           "#00E676",
+            "--bull-soft":      "rgba(0,230,118,0.12)",
+            "--bear":           "#F87171",
+            "--bear-soft":      "rgba(248,113,113,0.12)",
+            "--amber":          "#FBBF24",
+            "--info":           "#38BDF8",
+            "--radius-sm":      "4px",
+            "--radius-md":      "8px",
+            "--radius-lg":      "10px",
+        },
+    },
+}
+
+TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber", "amber", "verde", "light", "papel"]
 TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
                for k, v in TEMAS.items()}
 
