@@ -41,7 +41,7 @@ st.set_page_config(
     page_icon="🕐",
 )
 
-page_header("🕐 backfill histórico", "popula 10 anos de health scores históricos via FMP.")
+page_header("🕐 backfill histórico", "popula 10 anos de health scores via FMP · CVM · yfinance.")
 inject_ui_enhancements()
 try:
     from utils.themes import render_theme_switcher_sidebar
@@ -495,9 +495,23 @@ def _processar_ticker_st(
         yoy_offset  = 1
         granular    = "anual"
 
-    # ── 3. Fallback yfinance para BR sem cobertura FMP ────────────────────────
+    # ── 3. CVM — fonte oficial para ativos BR (10 anos de DFP/ITR) ──────────────
     if not ratios_list and is_br:
-        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando yfinance (trimestral → anual)…")
+        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando CVM (ITR trimestral → DFP anual)…")
+        try:
+            from utils.cvm_client import get_historico_cvm
+            cvm_data, cvm_yoy, cvm_gran = get_historico_cvm(ticker_yf, anos=10)
+            if cvm_data:
+                ratios_list = [r for _, r, _ in cvm_data]
+                km_list     = [k for _, _, k in cvm_data]
+                yoy_offset  = cvm_yoy
+                granular    = cvm_gran
+        except Exception as _e:
+            logger.warning(f"[backfill] CVM falhou para {tk_fmp}: {_e}")
+
+    # ── 4. Fallback yfinance para BR sem cobertura FMP nem CVM ───────────────
+    if not ratios_list and is_br:
+        status_placeholder.write(f"🔄 `{tk_fmp}` — CVM sem dados, tentando yfinance (trimestral → anual)…")
         yf_data, yf_yoy, yf_gran = _ratios_yf(ticker_yf, anos=4)
         if yf_data:
             ratios_list = [r for _, r, _ in yf_data]

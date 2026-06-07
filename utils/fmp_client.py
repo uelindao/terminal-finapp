@@ -313,8 +313,15 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
     data = _get(f"ratios/{t}", {"limit": anos * 4})
 
     if not data or not isinstance(data, list):
-        # FMP sem dados → fallback yfinance para ativos BR
         if ticker.upper().endswith(".SA"):
+            # CVM: fonte oficial com até 10 anos para ativos BR
+            try:
+                from utils.cvm_client import get_multiplos_historicos_cvm
+                cvm = get_multiplos_historicos_cvm(ticker, anos=anos)
+                if cvm:
+                    return cvm
+            except Exception:
+                pass
             return _get_multiplos_historicos_yf(ticker, min(anos, 3))
         return []
 
@@ -344,8 +351,15 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
         except Exception:
             continue
 
-    # FMP retornou lista mas sem dados úteis → fallback yfinance para BR
+    # FMP retornou lista mas sem dados úteis → CVM → yfinance para BR
     if not resultados and ticker.upper().endswith(".SA"):
+        try:
+            from utils.cvm_client import get_multiplos_historicos_cvm
+            cvm = get_multiplos_historicos_cvm(ticker, anos=anos)
+            if cvm:
+                return cvm
+        except Exception:
+            pass
         return _get_multiplos_historicos_yf(ticker, min(anos, 3))
 
     return resultados
