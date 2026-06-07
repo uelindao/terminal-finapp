@@ -462,18 +462,20 @@ def _processar_ticker_st(
     ticker_yf: str,
     macro_tl:  pd.DataFrame,
     status_placeholder,
-) -> tuple[int, int, str]:
+) -> tuple[int, int, str, str]:
     """
     Processa um ticker dentro do contexto Streamlit.
-    Retorna (n_inseridos, n_skipped, diagnostico).
+    Retorna (n_inseridos, n_skipped, diagnostico, fonte_usada).
+    fonte_usada: "FMP-q" | "FMP-a" | "CVM/ITR" | "CVM/DFP" | "YF-q" | "YF-a" | "—"
     """
     import yfinance as yf
     from utils.fmp_client import get_ratios_trimestrais, get_key_metrics_trimestrais, _get
     from database.db import registrar_historico_score_batch, get_datas_historico_score
 
-    is_br  = ticker_yf.endswith(".SA")
-    tk_fmp = ticker_yf.replace(".SA", "").upper()
-    diag   = ""
+    is_br       = ticker_yf.endswith(".SA")
+    tk_fmp      = ticker_yf.replace(".SA", "").upper()
+    diag        = ""
+    fonte_usada = "—"
 
     status_placeholder.write(f"🔄 `{tk_fmp}` — buscando FMP (quarterly)…")
 
@@ -484,6 +486,8 @@ def _processar_ticker_st(
     time.sleep(0.4)
     yoy_offset  = 4
     granular    = "trimestral"
+    if ratios_list:
+        fonte_usada = "FMP-q"
 
     # ── 2. Fallback anual ─────────────────────────────────────────────────────
     if not ratios_list:
@@ -494,6 +498,8 @@ def _processar_ticker_st(
         time.sleep(0.4)
         yoy_offset  = 1
         granular    = "anual"
+        if ratios_list:
+            fonte_usada = "FMP-a"
 
     # ── 3. CVM — fonte oficial para ativos BR (10 anos de DFP/ITR) ──────────────
     if not ratios_list and is_br:
@@ -511,6 +517,7 @@ def _processar_ticker_st(
                     km_list     = [k for _, _, k in cvm_data]
                     yoy_offset  = cvm_yoy
                     granular    = cvm_gran
+                    fonte_usada = "CVM/ITR" if "itr" in cvm_gran.lower() else "CVM/DFP"
                     status_placeholder.write(
                         f"✅ `{tk_fmp}` — CVM: {len(ratios_list)} períodos ({cvm_gran})"
                     )
@@ -535,13 +542,14 @@ def _processar_ticker_st(
             km_list     = [k for _, _, k in yf_data]
             yoy_offset  = yf_yoy
             granular    = yf_gran
+            fonte_usada = "YF-q" if "trimestral" in yf_gran else "YF-a"
 
     if not ratios_list:
-        diag = "FMP: sem dados (ativo não coberto ou quota esgotada)"
+        diag = "sem dados (ativo não coberto ou quota esgotada)"
         status_placeholder.write(f"⚠️ `{tk_fmp}` — {diag}")
-        return 0, 0, diag
+        return 0, 0, diag, fonte_usada
 
-    diag = f"FMP: {len(ratios_list)} períodos ({granular}), km: {len(km_list)}"
+    diag = f"{len(ratios_list)} períodos ({granular}), km: {len(km_list)}"
     status_placeholder.write(f"🔄 `{tk_fmp}` — {diag}")
 
     km_by_date       = {item.get("date", ""): item for item in km_list}
@@ -603,7 +611,7 @@ def _processar_ticker_st(
             f"ℹ️ `{tk_fmp}` — sem registros novos "
             f"(skip={skipped}, calc_erros={calc_erros})"
         )
-        return 0, skipped, diag
+        return 0, skipped, diag, fonte_usada
 
     # ── Salva no Supabase ─────────────────────────────────────────────────────
     status_placeholder.write(
@@ -612,12 +620,12 @@ def _processar_ticker_st(
     try:
         n = registrar_historico_score_batch(registros, ignorar_existentes=False)
         diag += f" | inseridos: {n}"
-        return n, skipped, diag
+        return n, skipped, diag, fonte_usada
     except Exception as e:
         diag += f" | ERRO INSERT: {e}"
         status_placeholder.write(f"❌ `{tk_fmp}` — falha no insert: {e}")
         logger.error(f"[backfill] insert {tk_fmp}: {e}", exc_info=True)
-        return 0, skipped, diag
+        return 0, skipped, diag, fonte_usada
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -961,56 +969,119 @@ if btn_run and lote:
         macro_tl = _build_macro_timeline()
     st.success(f"✅ macro timeline: {len(macro_tl):,} dias carregados")
 
-    # Progress bar e log
-    barra    = st.progress(0, text="iniciando…")
-    log_area = st.empty()
-    resumo   = st.empty()
+    # Progress bar, status do ticker atual e log acumulativo
+    barra     = st.progress(0, text="iniciando…")
+    status_ph = st.empty()   # linha de status do ticker em processamento
+    resumo    = st.empty()   # totais rodapé
+    log_ph    = st.empty()   # tabela acumulativa de tickers processados
 
     total_inseridos = 0
     total_skipped   = 0
     erros           = []
+    log_entries: list[dict] = []
     inicio_run      = time.time()
 
+    def _render_log(entries: list[dict]) -> None:
+        """Renderiza tabela HTML dos tickers já processados (mais recente no topo)."""
+        if not entries:
+            return
+        linhas = []
+        for e in reversed(entries):
+            cor_ins = "var(--bull)" if e["n_ins"] > 0 else "var(--text-muted)"
+            cor_tic = "var(--text-primary)"
+            icone   = e["icone"]
+            linhas.append(
+                f"<tr>"
+                f"<td style='padding:3px 10px 3px 4px;color:{cor_tic};font-weight:600'>"
+                f"  {icone} {e['ticker']}</td>"
+                f"<td style='padding:3px 8px;color:var(--accent)'>{e['fonte']}</td>"
+                f"<td style='padding:3px 8px;color:var(--text-secondary)'>{e['periodos']}</td>"
+                f"<td style='padding:3px 8px;color:{cor_ins};font-weight:600'>"
+                f"  {e['n_ins']}</td>"
+                f"<td style='padding:3px 4px;color:var(--text-muted);font-size:.75rem'>"
+                f"  {e['nota']}</td>"
+                f"</tr>"
+            )
+        html = (
+            "<div style='max-height:320px;overflow-y:auto;margin-top:8px'>"
+            "<table style='width:100%;border-collapse:collapse;"
+            "font-family:var(--font-ui,sans-serif);font-size:.82rem'>"
+            "<thead><tr style='border-bottom:1px solid var(--border-subtle)'>"
+            "<th style='text-align:left;padding:4px 10px 4px 4px;color:var(--text-muted);"
+            "font-weight:500'>ticker</th>"
+            "<th style='text-align:left;padding:4px 8px;color:var(--text-muted);"
+            "font-weight:500'>fonte</th>"
+            "<th style='text-align:left;padding:4px 8px;color:var(--text-muted);"
+            "font-weight:500'>períodos</th>"
+            "<th style='text-align:left;padding:4px 8px;color:var(--text-muted);"
+            "font-weight:500'>inseridos</th>"
+            "<th style='text-align:left;padding:4px 4px;color:var(--text-muted);"
+            "font-weight:500'>detalhe</th>"
+            "</tr></thead>"
+            f"<tbody>{''.join(linhas)}</tbody>"
+            "</table></div>"
+        )
+        log_ph.markdown(html, unsafe_allow_html=True)
+
     for idx, ticker in enumerate(lote, 1):
-        pct  = idx / len(lote)
+        pct = idx / len(lote)
         barra.progress(pct, text=f"{idx}/{len(lote)} — {ticker.replace('.SA', '')}")
 
-        status_ph = log_area.empty()
         try:
-            n_ins, n_skip, diag = _processar_ticker_st(ticker, macro_tl, status_ph)
+            n_ins, n_skip, diag, fonte = _processar_ticker_st(ticker, macro_tl, status_ph)
             total_inseridos += n_ins
             total_skipped   += n_skip
 
+            # Determina nota curta para a tabela
             if n_ins > 0:
-                log_area.success(
-                    f"✅ `{ticker.replace('.SA','')}` — {n_ins} pts inseridos | {diag}"
-                )
+                icone = "✅"
+                nota  = f"+{n_ins} pts"
+            elif n_skip > 0:
+                icone = "⏭️"
+                nota  = f"skip {n_skip}"
             elif "sem dados" in diag or "quota" in diag:
-                log_area.warning(
-                    f"⚠️ `{ticker.replace('.SA','')}` — {diag}"
-                )
+                icone = "⚠️"
+                nota  = "sem dados"
             else:
-                log_area.info(
-                    f"ℹ️ `{ticker.replace('.SA','')}` — {diag}"
-                )
+                icone = "ℹ️"
+                nota  = "0 novos"
+
+            # Extrai número de períodos do diag ("X períodos (...)")
+            import re as _re
+            m_per = _re.search(r"(\d+) períodos", diag)
+            periodos = m_per.group(1) if m_per else "—"
+
         except Exception as e:
             erros.append(ticker)
-            log_area.error(f"❌ `{ticker.replace('.SA','')}` — exceção: {e}")
+            fonte, n_ins, n_skip = "—", 0, 0
+            icone, nota, periodos = "❌", str(e)[:40], "—"
             logger.error(f"[backfill] {ticker}: {e}", exc_info=True)
 
-        # Atualiza resumo corrente
-        elapsed       = time.time() - inicio_run
+        log_entries.append({
+            "ticker":   ticker.replace(".SA", ""),
+            "fonte":    fonte,
+            "periodos": periodos,
+            "n_ins":    n_ins,
+            "icone":    icone,
+            "nota":     nota,
+        })
+
+        # Limpa status do ticker atual e re-renderiza log
+        status_ph.empty()
+        _render_log(log_entries)
+
+        # Atualiza totais
+        elapsed        = time.time() - inicio_run
         restantes_lote = len(lote) - idx
         eta_s          = max(0, (elapsed / idx) * restantes_lote) if idx > 0 else 0
         eta_str        = f"~{int(eta_s)}s" if restantes_lote > 0 else "concluído"
         resumo.markdown(
-            f'<div style="font-family:Courier New; font-size:0.78rem; '
-            f'color:#555; padding:4px 0;">'
-            f'inseridos: <b style="color:#00C853;">{total_inseridos}</b> pontos | '
-            f'já existiam: {total_skipped} | '
-            f'erros: <b style="color:#FF1744;">{len(erros)}</b> | '
-            f'decorrido: {int(elapsed)}s | '
-            f'eta: {eta_str}'
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;'
+            f'color:var(--text-muted);padding:4px 0 8px">'
+            f'inseridos: <b style="color:var(--bull)">{total_inseridos}</b> pts · '
+            f'skip: {total_skipped} · '
+            f'erros: <b style="color:var(--bear)">{len(erros)}</b> · '
+            f'{int(elapsed)}s decorridos · eta: {eta_str}'
             f'</div>',
             unsafe_allow_html=True,
         )
