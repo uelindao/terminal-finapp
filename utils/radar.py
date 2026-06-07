@@ -38,9 +38,13 @@ def calcular_oportunidades_watchlist(
     fund_all = get_todos_fundamentos_cache()
 
     resultados = []
+    _seen_base: set = set()   # evita duplicatas por ticker base
 
     for ticker in tickers:
         t_base  = mapear_ticker_base(ticker)
+        if t_base in _seen_base:
+            continue
+        _seen_base.add(t_base)
         hs_row  = hs_all.get(t_base) or hs_all.get(ticker)
         if not hs_row:
             continue
@@ -261,8 +265,8 @@ def calcular_oportunidades_watchlist(
         except Exception:
             continue
 
-    return sorted(
-        resultados,
-        key=lambda x: x['score_assim'],
-        reverse=True,
-    )[:5]
+    # Top 3 por mercado (BR + EUA) para garantir representação de ambos
+    _sorted = sorted(resultados, key=lambda x: x['score_assim'], reverse=True)
+    _br  = [r for r in _sorted if r['mercado'] == 'BR'][:3]
+    _eua = [r for r in _sorted if r['mercado'] == 'EUA'][:3]
+    return _br + _eua
