@@ -92,7 +92,10 @@ def calcular_oportunidades_watchlist(
 
             pts_hs = round((score_hs / 100) * 55, 1)
 
-            pts_val = 10.0  # neutro quando sem dados históricos
+            pts_val = 10.0
+            _val_computed = False
+
+            # 1ª tentativa: percentil histórico FMP (5 anos) — mais preciso
             try:
                 _medios = get_multiplos_medios(t_base, anos=5)
                 if _medios:
@@ -105,19 +108,59 @@ def calcular_oportunidades_watchlist(
                             _banda = _max_v - _min_v
                             if _banda > 0:
                                 _pct = (_atual_v - _min_v) / _banda
-                                if _pct <= 0.20:
-                                    pts_val = 20.0
-                                elif _pct <= 0.35:
-                                    pts_val = 15.0
-                                elif _pct <= 0.50:
-                                    pts_val = 10.0
-                                elif _pct <= 0.70:
-                                    pts_val = 5.0
-                                else:
-                                    pts_val = 0.0
-                # _medios vazio = FMP sem cobertura → mantém neutro 10.0
+                                if _pct <= 0.20:   pts_val = 20.0
+                                elif _pct <= 0.35: pts_val = 15.0
+                                elif _pct <= 0.50: pts_val = 10.0
+                                elif _pct <= 0.70: pts_val = 5.0
+                                else:              pts_val = 0.0
+                                _val_computed = True
             except Exception:
-                pts_val = 10.0
+                pass
+
+            # 2ª tentativa: P/L atual do cache de fundamentos (backfill)
+            if not _val_computed:
+                _fund = fund_all.get(t_base, {})
+                _pl   = _fund.get('p/l')
+                _pvpa = _fund.get('p/vp')
+                _is_br = t_base.endswith('.SA')
+
+                if _pl is not None:
+                    try:
+                        _pl = float(_pl)
+                        if _pl > 0:
+                            # Thresholds ajustados por mercado:
+                            # BR ~10-15x histórico; EUA ~18-22x histórico
+                            if _is_br:
+                                if   _pl <= 7:   pts_val = 20.0
+                                elif _pl <= 11:  pts_val = 16.0
+                                elif _pl <= 16:  pts_val = 10.0
+                                elif _pl <= 23:  pts_val = 5.0
+                                else:            pts_val = 1.0
+                            else:
+                                if   _pl <= 12:  pts_val = 20.0
+                                elif _pl <= 18:  pts_val = 16.0
+                                elif _pl <= 26:  pts_val = 10.0
+                                elif _pl <= 38:  pts_val = 5.0
+                                else:            pts_val = 1.0
+                            _val_computed = True
+                    except (TypeError, ValueError):
+                        pass
+
+                # 3ª tentativa: P/VPA se P/L indisponível
+                if not _val_computed and _pvpa is not None:
+                    try:
+                        _pvpa = float(_pvpa)
+                        if _pvpa > 0:
+                            if   _pvpa <= 1.0: pts_val = 18.0
+                            elif _pvpa <= 2.0: pts_val = 14.0
+                            elif _pvpa <= 3.5: pts_val = 9.0
+                            elif _pvpa <= 6.0: pts_val = 4.0
+                            else:              pts_val = 1.0
+                            _val_computed = True
+                    except (TypeError, ValueError):
+                        pass
+
+                # sem nenhum dado de múltiplo → neutro 10
 
             pts_timing = 0.0
 
