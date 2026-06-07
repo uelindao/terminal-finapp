@@ -873,9 +873,9 @@ elif mercado_sel == "Brasil (B3)":
 else:
     todos_tickers = list(SCREENER_US) + list(SCREENER_B3)
 
-# Filtra cobertura
+# Filtra cobertura — qualquer ticker com ≥4 pontos já está coberto
 if pular_cobertos and not cob.empty:
-    completos = set(cob[cob["pontos"] >= 20]["ticker"].tolist())
+    completos = set(cob[cob["pontos"] >= 4]["ticker"].tolist())
     pendentes = [t for t in todos_tickers if t not in completos]
 else:
     pendentes = todos_tickers
@@ -1143,6 +1143,8 @@ if btn_run and lote:
         f"({elapsed_total/len(lote):.1f}s/ticker)  \n"
         + (f"- ⚠️ Erros: {', '.join(erros)}" if erros else "")
     )
+
+    _cobertura_atual.clear()  # força releitura na próxima rodada
 
     if pendentes[batch_size:]:
         restantes = len(pendentes) - batch_size
