@@ -529,9 +529,10 @@ def _processar_ticker_st(
         if cvm_nota and not ratios_list:
             diag = cvm_nota  # mostra motivo na coluna "nota" da tabela
 
-    # ── 4. Fallback yfinance para BR sem cobertura FMP nem CVM ───────────────
-    if not ratios_list and is_br:
-        status_placeholder.write(f"🔄 `{tk_fmp}` — CVM sem dados, tentando yfinance (trimestral → anual)…")
+    # ── 4. Fallback yfinance (BR sem CVM + todos os EUA sem FMP) ─────────────
+    if not ratios_list:
+        msg = "CVM sem dados" if is_br else "FMP vazio"
+        status_placeholder.write(f"🔄 `{tk_fmp}` — {msg}, tentando yfinance (trimestral → anual)…")
         yf_data, yf_yoy, yf_gran = _ratios_yf(ticker_yf, anos=4)
         if yf_data:
             ratios_list = [r for _, r, _ in yf_data]
