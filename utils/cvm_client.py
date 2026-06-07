@@ -118,11 +118,20 @@ _STATIC: dict[str, str] = {
 # Helpers de download
 # ─────────────────────────────────────────────────────────────────────────────
 
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; finterminal-backfill/1.0; "
+        "+https://github.com/uelindao/terminal-finapp)"
+    ),
+    "Accept": "application/zip, application/octet-stream, */*",
+}
+
+
 def _get(url: str, timeout: int = 90) -> bytes | None:
-    """HTTP GET com retry (3×). Retorna bytes ou None."""
+    """HTTP GET com retry (3×) e User-Agent adequado para portais gov.br."""
     for tentativa in range(3):
         try:
-            r = requests.get(url, timeout=timeout)
+            r = requests.get(url, headers=_HEADERS, timeout=timeout)
             r.raise_for_status()
             return r.content
         except Exception as e:
@@ -134,9 +143,17 @@ def _get(url: str, timeout: int = 90) -> bytes | None:
     return None
 
 
-@st.cache_data(ttl=86400 * 3, show_spinner=False)
+# Cache em memória de módulo (não usa st.cache_data para evitar cacheamento de
+# resultado vazio — se download falhar, a próxima chamada re-tenta).
+_zip_mem: dict[str, dict[str, pd.DataFrame]] = {}
+_cad_mem: pd.DataFrame | None = None
+
+
 def _download_cad() -> pd.DataFrame:
-    """Baixa cad_cia_aberta.csv (cadastro de empresas). Cache 3 dias."""
+    """Baixa cad_cia_aberta.csv. Cache em memória por processo."""
+    global _cad_mem
+    if _cad_mem is not None and not _cad_mem.empty:
+        return _cad_mem
     data = _get(_CAD_URL, timeout=30)
     if data is None:
         return pd.DataFrame()
@@ -144,40 +161,49 @@ def _download_cad() -> pd.DataFrame:
         try:
             df = pd.read_csv(io.BytesIO(data), sep=";", encoding=enc, dtype=str)
             df.columns = [c.strip() for c in df.columns]
+            if not df.empty:
+                _cad_mem = df
+                logger.info(f"[cvm] cad_cia_aberta.csv: {len(df)} empresas")
             return df
         except Exception:
             continue
     return pd.DataFrame()
 
 
-@st.cache_data(ttl=86400 * 7, show_spinner=False)
 def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
     """
     Baixa o ZIP CVM de um ano e retorna {tipo: DataFrame}.
     tipo: 'BPA', 'BPP', 'DRE', 'DFC'.
-    Usa apenas colunas em _USECOLS. Cache 7 dias.
+    Cache em memória por processo (compartilhado entre tickers na mesma sessão).
+    Não cacheia resultado vazio — re-tenta na próxima chamada.
     """
+    cache_key = f"{url_tmpl}::{year}"
+    if cache_key in _zip_mem:
+        return _zip_mem[cache_key]
+
     url  = url_tmpl.format(year=year)
     data = _get(url, timeout=120)
     if not data:
-        return {}
+        logger.warning(f"[cvm] ZIP não baixado: {url}")
+        return {}   # não cacheia falha
 
     dfs: dict[str, pd.DataFrame] = {}
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = zf.namelist()
-            # Queremos apenas demonstrativos consolidados
+            logger.info(f"[cvm] ZIP {url} — {len(names)} arquivos: {names[:6]}")
             patterns = {
                 "BPA": re.compile(r"BPA_con", re.I),
                 "BPP": re.compile(r"BPP_con", re.I),
                 "DRE": re.compile(r"DRE_con", re.I),
-                "DFC": re.compile(r"DFC_M[IDi]_con", re.I),  # MD ou MI
+                "DFC": re.compile(r"DFC_M[IDi]_con", re.I),
             }
             for tipo, pat in patterns.items():
                 matched = [n for n in names if pat.search(n) and n.endswith(".csv")]
                 if not matched:
+                    logger.debug(f"[cvm] {tipo} não encontrado em {url}")
                     continue
-                fname = matched[0]  # geralmente só um por tipo
+                fname = matched[0]
                 raw   = zf.read(fname)
                 for enc in ("utf-8", "latin-1"):
                     try:
@@ -190,12 +216,15 @@ def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
                         )
                         df.columns = [c.strip() for c in df.columns]
                         dfs[tipo] = df
+                        logger.info(f"[cvm] {tipo} {year}: {len(df)} linhas")
                         break
                     except Exception:
                         continue
     except Exception as e:
         logger.warning(f"[cvm] erro ao parsear ZIP {url}: {e}")
 
+    if dfs:
+        _zip_mem[cache_key] = dfs   # só cacheia se pelo menos um DF foi carregado
     return dfs
 
 
@@ -203,7 +232,10 @@ def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
 # Resolução ticker → CD_CVM
 # ─────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=86400, show_spinner=False)
+# Cache de CD_CVM por ticker (evita re-consultar yfinance/CAD repetidamente)
+_cvm_code_cache: dict[str, str | None] = {}
+
+
 def get_cvm_code(ticker: str) -> str | None:
     """
     Resolve ticker B3 (ex: PETR4 ou PETR4.SA) para o CD_CVM da CVM.
@@ -213,12 +245,19 @@ def get_cvm_code(ticker: str) -> str | None:
     """
     tk = ticker.upper().replace(".SA", "")
 
+    # Cache em memória
+    if tk in _cvm_code_cache:
+        return _cvm_code_cache[tk]
+
     # 1. Mapa estático
     if tk in _STATIC:
+        _cvm_code_cache[tk] = _STATIC[tk]
+        logger.info(f"[cvm] {tk} → CD_CVM {_STATIC[tk]} (mapa estático)")
         return _STATIC[tk]
 
     cad = _download_cad()
     if cad.empty:
+        logger.warning(f"[cvm] {tk} — CAD vazio, não foi possível resolver CD_CVM")
         return None
 
     ativos = cad
@@ -271,9 +310,11 @@ def get_cvm_code(ticker: str) -> str | None:
 
     if best_score >= 0.75:
         logger.info(f"[cvm] {tk} → CD_CVM {best_code} via nome (score={best_score:.2f})")
+        _cvm_code_cache[tk] = best_code
         return best_code
 
     logger.info(f"[cvm] {tk} — CD_CVM não encontrado (score máx={best_score:.2f})")
+    _cvm_code_cache[tk] = None
     return None
 
 

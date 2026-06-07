@@ -497,17 +497,34 @@ def _processar_ticker_st(
 
     # ── 3. CVM — fonte oficial para ativos BR (10 anos de DFP/ITR) ──────────────
     if not ratios_list and is_br:
-        status_placeholder.write(f"🔄 `{tk_fmp}` — FMP sem dados, tentando CVM (ITR trimestral → DFP anual)…")
         try:
-            from utils.cvm_client import get_historico_cvm
-            cvm_data, cvm_yoy, cvm_gran = get_historico_cvm(ticker_yf, anos=10)
-            if cvm_data:
-                ratios_list = [r for _, r, _ in cvm_data]
-                km_list     = [k for _, _, k in cvm_data]
-                yoy_offset  = cvm_yoy
-                granular    = cvm_gran
+            from utils.cvm_client import get_historico_cvm, get_cvm_code
+            cd_cvm = get_cvm_code(ticker_yf)
+            if cd_cvm:
+                status_placeholder.write(
+                    f"🏛️ `{tk_fmp}` — CVM CD={cd_cvm}, baixando DFP/ITR "
+                    f"(primeiro acesso baixa ZIPs de ~10 anos, aguarde)…"
+                )
+                cvm_data, cvm_yoy, cvm_gran = get_historico_cvm(ticker_yf, anos=10)
+                if cvm_data:
+                    ratios_list = [r for _, r, _ in cvm_data]
+                    km_list     = [k for _, _, k in cvm_data]
+                    yoy_offset  = cvm_yoy
+                    granular    = cvm_gran
+                    status_placeholder.write(
+                        f"✅ `{tk_fmp}` — CVM: {len(ratios_list)} períodos ({cvm_gran})"
+                    )
+                else:
+                    status_placeholder.write(
+                        f"⚠️ `{tk_fmp}` — CVM: CD_CVM={cd_cvm} encontrado mas sem dados nos ZIPs"
+                    )
+            else:
+                status_placeholder.write(
+                    f"⚠️ `{tk_fmp}` — CVM: ticker não mapeado, tentando yfinance…"
+                )
         except Exception as _e:
             logger.warning(f"[backfill] CVM falhou para {tk_fmp}: {_e}")
+            status_placeholder.write(f"⚠️ `{tk_fmp}` — CVM erro: {_e}")
 
     # ── 4. Fallback yfinance para BR sem cobertura FMP nem CVM ───────────────
     if not ratios_list and is_br:
