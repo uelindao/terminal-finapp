@@ -147,20 +147,38 @@ def _ratios_yf(
     """
     import yfinance as yf
 
+    def _get_attr(tk, *names):
+        """Tenta vários nomes de atributo — compatível com yfinance 0.2.x e 1.x."""
+        for name in names:
+            try:
+                v = getattr(tk, name, None)
+                if v is not None and not (hasattr(v, 'empty') and v.empty):
+                    return v
+            except Exception:
+                continue
+        return None
+
     try:
         tk   = yf.Ticker(ticker_yf)
-        info = tk.info or {}
 
-        # Tenta trimestral primeiro
-        fin = tk.quarterly_financials
-        bal = tk.quarterly_balance_sheet
-        cf  = tk.quarterly_cashflow
+        # tk.info pode ser lento/falhar em 1.x — isola para não abortar tudo
+        info = {}
+        try:
+            info = tk.info or {}
+        except Exception:
+            pass
+
+        # yfinance 1.x: quarterly_income_stmt; 0.2.x: quarterly_financials
+        fin = _get_attr(tk, "quarterly_income_stmt", "quarterly_financials")
+        bal = _get_attr(tk, "quarterly_balance_sheet")
+        cf  = _get_attr(tk, "quarterly_cashflow")
         is_quarterly = fin is not None and not fin.empty
 
         if not is_quarterly:
-            fin = tk.financials
-            bal = tk.balance_sheet
-            cf  = tk.cashflow
+            # fallback anual — mesmos aliases
+            fin = _get_attr(tk, "income_stmt", "financials")
+            bal = _get_attr(tk, "balance_sheet")
+            cf  = _get_attr(tk, "cashflow")
     except Exception:
         return [], 1, "anual (yfinance)"
 
@@ -542,9 +560,12 @@ def _processar_ticker_st(
             fonte_usada = "YF-q" if "trimestral" in yf_gran else "YF-a"
 
     if not ratios_list:
-        diag = "sem dados (ativo não coberto ou quota esgotada)"
+        # Distingue quota/transitório de ausência real de cobertura
+        # yfinance 1.x: se chegou aqui após tentar income_stmt, provável ausência real
+        diag = "sem dados (não coberto por nenhuma fonte)"
         status_placeholder.write(f"⚠️ `{tk_fmp}` — {diag}")
-        # Persiste "tentado mas sem dados" no banco para não voltar ao lote
+        # Sentinel persistente: evita reprocessar indefinidamente tickers sem cobertura real.
+        # Para retentativas (ex: quota FMP voltou), use o botão "retry sem dados".
         try:
             registrar_historico_score_batch(
                 [{"ticker": ticker_yf, "score": 0, "calculado_em": "2000-01-01"}],
