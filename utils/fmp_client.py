@@ -1,14 +1,17 @@
 """
 utils/fmp_client.py
-Cliente para Financial Modeling Prep (FMP) API.
+Cliente para Financial Modeling Prep (FMP) API — endpoints /stable/.
 Documentação: https://financialmodelingprep.com/developer/docs
 
 Endpoints usados:
-  /ratios/{ticker}         — múltiplos históricos (P/E, P/B, ROE, ROIC…)
-  /key-metrics/{ticker}    — métricas chave históricas (FCF, D/E, etc.)
-  /stock_peers             — peers por setor
-  /earning_calendar        — calendário de earnings
-  /profile/{ticker}        — perfil da empresa
+  /ratios?symbol={ticker}           — múltiplos históricos (P/E, P/B, ROE, ROIC…)
+  /key-metrics?symbol={ticker}      — métricas chave históricas (FCF, D/E, etc.)
+  /stock-peers?symbol={ticker}      — peers por setor
+  /earnings-calendar?from=&to=      — calendário de earnings
+  /profile?symbol={ticker}          — perfil da empresa
+  /financial-scores?symbol={ticker} — Altman Z-Score, Piotroski F-Score
+  /analyst-estimates?symbol={ticker}— estimativas de analistas (receita, EBITDA, EPS)
+  /grades-consensus?symbol={ticker} — consenso de recomendações (Buy/Hold/Sell)
 
 Política de cache:
   - Múltiplos/perfil: 24 h (dados raramente mudam intraday)
@@ -26,8 +29,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-FMP_BASE    = "https://financialmodelingprep.com/api/v3"
+FMP_BASE    = "https://financialmodelingprep.com/stable"
 FMP_TIMEOUT = 15  # segundos
+FMP_MAX_LIMIT = 5  # free tier: max 5 registros por request em endpoints históricos
 
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
@@ -57,22 +61,60 @@ def _get_keys() -> list[str]:
     return keys
 
 
+_ENDPOINT_MAP = {
+    "ratios":              "ratios",
+    "ratios-ttm":          "ratios-ttm",
+    "key-metrics":         "key-metrics",
+    "stock_peers":         "stock-peers",
+    "stock-peers":         "stock-peers",
+    "earning_calendar":    "earnings-calendar",
+    "earnings-calendar":   "earnings-calendar",
+    "profile":             "profile",
+    "financial-scores":    "financial-scores",
+    "analyst-estimates":   "analyst-estimates",
+    "grades-consensus":    "grades-consensus",
+}
+
+
+def _resolve_endpoint(endpoint: str, params: dict | None) -> tuple[str, dict]:
+    """
+    Converte chamadas antigas (path-style: 'ratios/AAPL') para novas
+    (query-style: 'ratios?symbol=AAPL').  Retorna (endpoint_novo, params).
+    """
+    import re
+
+    p = dict(params or {})
+
+    # Ex: "ratios/AAPL" → endpoint="ratios", symbol="AAPL"
+    m = re.match(r"^([a-z_-]+)/([A-Za-z0-9.^]+)$", endpoint, re.IGNORECASE)
+    if m:
+        raw_name, ticker = m.group(1), m.group(2)
+        p.setdefault("symbol", ticker.upper().replace(".SA", ""))
+        endpoint = raw_name
+
+    resolved = _ENDPOINT_MAP.get(endpoint, endpoint)
+    return resolved, p
+
+
 def _get(endpoint: str, params: dict | None = None) -> dict | list:
     """
     GET genérico para a API FMP com fallback entre múltiplas chaves.
     Tenta cada chave em ordem; se uma retorna 403, passa para a próxima.
+    Aceita nomes antigos (path-style) e novos (query-style).
     Retorna [] em caso de todas falharem.
     """
     keys = _get_keys()
     if not keys:
         return []
 
-    p = dict(params or {})
+    endpoint, p = _resolve_endpoint(endpoint, params)
 
     for i, key in enumerate(keys):
         try:
             p["apikey"] = key
-            resp = requests.get(f"{FMP_BASE}/{endpoint}", params=p, timeout=10)
+            url = f"{FMP_BASE}/{endpoint}"
+            logger.debug(f"[fmp] GET {url} params={{k:v for k,v in p.items() if k!='apikey'}}")
+            resp = requests.get(url, params=p, timeout=10)
 
             if resp.status_code == 403:
                 if i < len(keys) - 1:
@@ -82,6 +124,12 @@ def _get(endpoint: str, params: dict | None = None) -> dict | list:
                     continue
                 logger.warning(
                     f"[fmp] todas as {len(keys)} keys retornaram 403 em /{endpoint}"
+                )
+                return []
+
+            if resp.status_code == 402:
+                logger.warning(
+                    f"[fmp] endpoint premium (402) em /{endpoint} — assinatura necessária"
                 )
                 return []
 
@@ -320,12 +368,11 @@ def get_multiplos_historicos(ticker: str, anos: int = 5) -> list[dict]:
 
     # ── FMP (EUA ou fallback para BR) ────────────────────────────────────────
     t    = ticker.replace(".SA", "").upper()
-    data = _get(f"ratios/{t}", {"limit": anos * 4})
+    data = _get("ratios", {"symbol": t, "limit": min(anos * 4, FMP_MAX_LIMIT)})
 
     if not data or not isinstance(data, list):
-        if is_br:
-            return _get_multiplos_historicos_yf(ticker, min(anos, 3))
-        return []
+        # Fallback yfinance quando FMP retorna vazio (ex: 402 premium)
+        return _get_multiplos_historicos_yf(ticker, min(anos, 3))
 
     resultados = []
     for item in data[: anos * 4]:
@@ -366,7 +413,7 @@ def get_key_metrics_historico(ticker: str, anos: int = 5) -> list[dict]:
     Útil para ver tendência de ROIC, FCF e alavancagem ao longo do tempo.
     """
     t = ticker.replace(".SA", "").upper()
-    data = _get(f"key-metrics/{t}", {"limit": anos * 4, "period": "quarter"})
+    data = _get("key-metrics", {"symbol": t, "limit": min(anos * 4, FMP_MAX_LIMIT)})
 
     if not data or not isinstance(data, list):
         return []
@@ -457,13 +504,17 @@ def get_peers(ticker: str) -> list[str]:
     Limita a 8 peers.
     """
     t = ticker.replace(".SA", "").upper()
-    data = _get("stock_peers", {"symbol": t})
+    data = _get("stock-peers", {"symbol": t})
 
     if not data or not isinstance(data, list):
         return []
 
-    # FMP retorna lista com um item contendo 'peersList'
-    item = data[0] if data else {}
+    # Nova estrutura FMP /stable: lista de dicts com 'symbol'
+    if isinstance(data[0], dict) and "symbol" in data[0]:
+        return [p["symbol"] for p in data if isinstance(p, dict) and p.get("symbol") and p["symbol"] != t][:8]
+
+    # Estrutura antiga: [{peersList: [...]}]
+    item = data[0]
     if isinstance(item, dict):
         peers = item.get("peersList", [])
         return [p for p in peers if p and p != t][:8]
@@ -494,7 +545,7 @@ def get_earnings_calendar(
     inicio = data_inicio or hoje.strftime("%Y-%m-%d")
     fim    = data_fim or (hoje + _dt.timedelta(days=60)).strftime("%Y-%m-%d")
 
-    data = _get("earning_calendar", {"from": inicio, "to": fim})
+    data = _get("earnings-calendar", {"from": inicio, "to": fim})
 
     if not data or not isinstance(data, list):
         return []
@@ -537,32 +588,31 @@ def get_earnings_calendar(
 
 def get_ratios_trimestrais(ticker: str, limit: int = 40) -> list[dict]:
     """
-    Busca múltiplos trimestrais históricos via /ratios/{ticker}?period=quarter.
-    limit=40 = 10 anos de trimestres. Sem cache — uso em scripts ETL.
-
-    Campos retornados por trimestre:
-      date, returnOnAssets, returnOnEquity, netProfitMargin, grossProfitMargin,
-      priceEarningsRatio, priceToBookRatio, enterpriseValueMultiple,
-      dividendYield, debtEquityRatio, currentRatio, interestCoverage,
-      assetTurnover, freeCashFlowOperatingCashFlowRatio, returnOnCapitalEmployed
+    Busca múltiplos históricos via /ratios (quarterly ou annual fallback).
+    quarter é premium (402) — fallback para annual.
+    limit=40 = 10 anos. Sem cache — uso em scripts ETL.
     """
     t    = ticker.replace(".SA", "").upper()
-    data = _get(f"ratios/{t}", {"period": "quarter", "limit": limit})
+    data = _get("ratios", {"symbol": t, "period": "quarter", "limit": min(limit, FMP_MAX_LIMIT)})
+    if isinstance(data, list) and data:
+        return data
+    # Fallback: annual (gratuito no free tier)
+    data = _get("ratios", {"symbol": t, "limit": min(limit, FMP_MAX_LIMIT)})
     return data if isinstance(data, list) else []
 
 
 def get_key_metrics_trimestrais(ticker: str, limit: int = 40) -> list[dict]:
     """
-    Busca métricas-chave trimestrais via /key-metrics/{ticker}?period=quarter.
-    limit=40 = 10 anos. Sem cache — uso em scripts ETL.
-
-    Campos retornados por trimestre:
-      date, roic, netDebtToEBITDA, debtToEquity, currentRatio,
-      revenueGrowth, epsgrowth, freeCashFlowYield, enterpriseValueOverEBITDA,
-      pbRatio, peRatio
+    Busca métricas-chave via /key-metrics (quarterly ou annual fallback).
+    quarter é premium (402) — fallback para annual.
+    limit=40. Sem cache — uso em scripts ETL.
     """
     t    = ticker.replace(".SA", "").upper()
-    data = _get(f"key-metrics/{t}", {"period": "quarter", "limit": limit})
+    data = _get("key-metrics", {"symbol": t, "period": "quarter", "limit": min(limit, FMP_MAX_LIMIT)})
+    if isinstance(data, list) and data:
+        return data
+    # Fallback: annual (gratuito no free tier)
+    data = _get("key-metrics", {"symbol": t, "limit": min(limit, FMP_MAX_LIMIT)})
     return data if isinstance(data, list) else []
 
 
@@ -575,7 +625,7 @@ def get_profile(ticker: str) -> dict:
     Retorna {} se o ticker não for encontrado.
     """
     t = ticker.replace(".SA", "").upper()
-    data = _get(f"profile/{t}")
+    data = _get("profile", {"symbol": t})
 
     if not data or not isinstance(data, list):
         return {}
@@ -598,3 +648,111 @@ def get_profile(ticker: str) -> dict:
         "preco":       _safe_float(p.get("price")),
         "logo_url":    p.get("image", ""),
     }
+
+
+# ── Financial Scores (Altman Z-Score + Piotroski F-Score) ─────────────────────
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_financial_scores(ticker: str) -> dict:
+    """
+    Busca Altman Z-Score e Piotroski F-Score via /financial-scores.
+    Retorna {} se o ticker não for encontrado.
+
+    Campos retornados:
+      altmanZScore, piotroskiScore,
+      workingCapital, totalAssets, retainedEarnings, ebit, marketCap,
+      totalLiabilities, totalCurrentAssets, totalCurrentLiabilities,
+      cashAndCashEquivalents, netReceivables
+    """
+    t = ticker.replace(".SA", "").upper()
+    data = _get("financial-scores", {"symbol": t})
+
+    if not data or not isinstance(data, list):
+        return {}
+
+    p = data[0]
+    return {
+        "altman_z_score":    _safe_float(p.get("altmanZScore")),
+        "piotroski_score":   _safe_float(p.get("piotroskiScore")),
+        "working_capital":   _safe_float(p.get("workingCapital")),
+        "total_assets":      _safe_float(p.get("totalAssets")),
+        "retained_earnings": _safe_float(p.get("retainedEarnings")),
+        "ebit":              _safe_float(p.get("ebit")),
+        "market_cap":        _safe_float(p.get("marketCap")),
+        "total_liabilities": _safe_float(p.get("totalLiabilities")),
+        "current_assets":    _safe_float(p.get("totalCurrentAssets")),
+        "current_liabilities": _safe_float(p.get("totalCurrentLiabilities")),
+        "cash":              _safe_float(p.get("cashAndCashEquivalents")),
+        "net_receivables":   _safe_float(p.get("netReceivables")),
+    }
+
+
+# ── Analyst Consensus (Buy/Hold/Sell) ────────────────────────────────────────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_analyst_grades(ticker: str) -> dict:
+    """
+    Busca consenso de analistas via /grades-consensus.
+    Retorna {} se o ticker não for encontrado.
+
+    Campos retornados:
+      strongBuy, buy, hold, sell, strongSell, consensus, numAnalysts
+    """
+    t = ticker.replace(".SA", "").upper()
+    data = _get("grades-consensus", {"symbol": t})
+
+    if not data or not isinstance(data, list):
+        return {}
+
+    p = data[0]
+    return {
+        "strong_buy":  _safe_float(p.get("strongBuy")),
+        "buy":         _safe_float(p.get("buy")),
+        "hold":        _safe_float(p.get("hold")),
+        "sell":        _safe_float(p.get("sell")),
+        "strong_sell": _safe_float(p.get("strongSell")),
+        "consensus":   p.get("consensus", ""),
+        "num_analysts": _safe_float(p.get("numAnalysts")),
+    }
+
+
+# ── Analyst Estimates (Revenue, EBITDA, EPS) ─────────────────────────────────
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_analyst_estimates(
+    ticker: str,
+    period: str = "annual",
+    limit: int = 4,
+) -> list[dict]:
+    """
+    Busca estimativas de analistas via /analyst-estimates.
+    period: 'annual' ou 'quarter'
+    Retorna [] se o ticker não for encontrado.
+
+    Campos retornados por período:
+      date, estimatedRevenue, estimatedEbitda, estimatedEps,
+      numberAnalystEstimatedRevenue, numberAnalystEstimatedEps,
+      estimatedRevenueGrowth
+    """
+    t = ticker.replace(".SA", "").upper()
+    data = _get("analyst-estimates", {"symbol": t, "period": period})
+
+    if not data or not isinstance(data, list):
+        return []
+
+    resultados = []
+    for item in data:
+        try:
+            resultados.append({
+                "date":                item.get("date", ""),
+                "estimated_revenue":   _safe_float(item.get("revenueAvg") or item.get("estimatedRevenue")),
+                "estimated_ebitda":    _safe_float(item.get("ebitdaAvg") or item.get("estimatedEbitda")),
+                "estimated_eps":       _safe_float(item.get("epsAvg") or item.get("estimatedEps")),
+                "num_analysts_revenue": _safe_float(item.get("numAnalystEstimatedRevenue") or item.get("numAnalystsRevenue")),
+                "num_analysts_eps":    _safe_float(item.get("numAnalystEstimatedEps") or item.get("numAnalystsEps")),
+                "revenue_growth_est":  _safe_float(item.get("estimatedRevenueGrowth")),
+            })
+        except Exception:
+            continue
+
+    return resultados[:limit]

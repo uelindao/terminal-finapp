@@ -21,7 +21,7 @@ from scripts.supabase_helper import (
 # Importa lista de tickers diretamente de utils/tickers.py (sem dependência de streamlit)
 from utils.tickers import SCREENER_US
 
-FMP_BASE = "https://financialmodelingprep.com/api/v3"
+FMP_BASE = "https://financialmodelingprep.com/stable"
 FMP_KEYS = []
 
 
@@ -63,7 +63,7 @@ def _fmp_get(endpoint: str, params: dict | None = None) -> list | dict:
 
 def fetch_fmp_profile(ticker: str) -> dict | None:
     """Fetch company profile from FMP."""
-    data = _fmp_get(f"profile/{ticker}")
+    data = _fmp_get("profile", {"symbol": ticker})
     if isinstance(data, list) and data:
         return data[0]
     return None
@@ -71,7 +71,7 @@ def fetch_fmp_profile(ticker: str) -> dict | None:
 
 def fetch_fmp_key_metrics(ticker: str) -> dict | None:
     """Fetch key financial metrics from FMP."""
-    data = _fmp_get(f"key-metrics/{ticker}", {"limit": 1})
+    data = _fmp_get("key-metrics", {"symbol": ticker, "limit": 1})
     if isinstance(data, list) and data:
         return data[0]
     return None
@@ -79,7 +79,7 @@ def fetch_fmp_key_metrics(ticker: str) -> dict | None:
 
 def fetch_fmp_ratios(ticker: str) -> dict | None:
     """Fetch TTM ratios from FMP."""
-    data = _fmp_get(f"ratios-ttm/{ticker}")
+    data = _fmp_get("ratios-ttm", {"symbol": ticker})
     if isinstance(data, list) and data:
         return data[0]
     return None

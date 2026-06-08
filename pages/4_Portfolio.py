@@ -760,8 +760,8 @@ def rodar_backtesting_score(
                     _falhas = []
                     for _fk in _fmp_keys:
                         _rf = _req.get(
-                            f"https://financialmodelingprep.com/api/v3/ratios/PETR4",
-                            params={"limit": 1, "apikey": _fk},
+                            f"https://financialmodelingprep.com/stable/ratios",
+                            params={"symbol": "PETR4", "limit": 1, "apikey": _fk},
                             timeout=5,
                         )
                         if _rf.status_code == 403:

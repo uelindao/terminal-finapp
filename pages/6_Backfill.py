@@ -510,9 +510,9 @@ def _processar_ticker_st(
     # ── 2. Fallback anual ─────────────────────────────────────────────────────
     if not ratios_list:
         status_placeholder.write(f"🔄 `{tk_fmp}` — quarterly vazio, tentando annual…")
-        ratios_list = _get(f"ratios/{tk_fmp}", {"limit": 10}) or []
+        ratios_list = _get("ratios", {"symbol": tk_fmp, "limit": 10}) or []
         time.sleep(0.4)
-        km_list     = _get(f"key-metrics/{tk_fmp}", {"limit": 10}) or []
+        km_list     = _get("key-metrics", {"symbol": tk_fmp, "limit": 10}) or []
         time.sleep(0.4)
         yoy_offset  = 1
         granular    = "anual"
@@ -981,7 +981,7 @@ with st.expander("🔍 diagnóstico (testar FMP + Supabase antes de rodar)", exp
         with col_d1:
             st.markdown("**FMP — /ratios (quarterly)**")
             try:
-                r = _get(f"ratios/{ticker_teste.upper().replace('.SA','')}", {"period": "quarter", "limit": 3})
+                r = _get("ratios", {"symbol": ticker_teste.upper().replace('.SA',''), "period": "quarter", "limit": 3})
                 if r and isinstance(r, list) and len(r) > 0:
                     st.success(f"✅ {len(r)} registros | primeiro: {r[0].get('date')}")
                     st.json({"amostra": r[0]}, expanded=False)
