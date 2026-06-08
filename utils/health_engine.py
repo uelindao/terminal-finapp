@@ -728,7 +728,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             # yfinance recente pode retornar MultiIndex mesmo para único ticker
             if isinstance(hist.columns, pd.MultiIndex):
                 hist.columns = hist.columns.get_level_values(0)
-            if hist.index.tz is not None:
+            if not hist.empty and hasattr(hist.index, 'tz') and hist.index.tz is not None:
                 hist.index = hist.index.tz_localize(None)
 
         # info (mercado) pode vir vazia se cache tem dados
@@ -1025,7 +1025,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 if margem > 15: score_q += 12
                 elif margem > 5: score_q += 8
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
-            else: score_q += 6
 
             # --- Valuation Adaptativo com múltiplos setoriais (máx 26pts) ---
             if setor_yf in MULTIPLOS_SETOR:
@@ -1145,7 +1144,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif ev_ebitda > limite_ev_medio:
                     alertas.append(f"🚨 alavancagem alta (ev/ebitda: {ev_ebitda:.1f}).")
                     score_r -= (5 * penalizacao_divida)
-            else: score_r += 10 
             
             score_r_final = max(0, score_r)
 
@@ -1250,6 +1248,15 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             if not dados_confiaveis and not is_us:
                 penalidade_dados = -10
                 alertas.append(f"⚠️ dados fundamentalistas com qualidade baixa ({qualidade}%). score pode estar subestimado.")
+
+            # penalidade por múltiplos fundamentais ausentes (P/L, P/VP, ROE, margem)
+            _multiplos_presentes = sum(1 for v in [pl, pvp, roe, margem] if v is not None)
+            if _multiplos_presentes == 0:
+                penalidade_dados -= 25
+                alertas.append("🚨 múltiplos fundamentais ausentes (p/l, p/vp, roe, margem). score penalizado.")
+            elif _multiplos_presentes <= 1:
+                penalidade_dados -= 10
+                alertas.append(f"⚠️ poucos múltiplos disponíveis ({_multiplos_presentes}/4). score pode estar subestimado.")
 
             score = (
                 score_q + score_v + score_r_final + score_y

@@ -58,16 +58,19 @@ def buscar_dados_b3(ticker: str) -> dict:
         
         res = validar_fundamentos(res)
 
-        # fallback: se qualidade < 40% e é B3, complementar com yfinance
-        if res.get('qualidade_dados', 0) < 40:
+        # fallback: se qualidade baixa OU múltiplos críticos faltando, complementar com yfinance
+        _criticos_ausentes = any(res.get(c) is None for c in ('p/l', 'p/vp', 'roe%'))
+        if res.get('qualidade_dados', 0) < 60 or _criticos_ausentes:
             qualidade = res.get('qualidade_dados', 0)
-            logger.info(f"[scrapers] fallback yfinance para {ticker} (qualidade fundamentus: {qualidade}%)")
+            logger.info(f"[scrapers] fallback yfinance para {ticker} (qualidade: {qualidade}%, criticos ausentes: {_criticos_ausentes})")
             yf_dados = buscar_dados_us(ticker)
             for campo in ['p/l', 'p/vp', 'roe%', 'dy%', 'ev/ebitda', 'margem%']:
                 if res.get(campo) is None and yf_dados.get(campo) is not None:
                     res[campo] = yf_dados[campo]
             if res['nome'] == '—' and yf_dados['nome'] != '—':
                 res['nome'] = yf_dados['nome']
+            # recalcular qualidade após fallback
+            res = validar_fundamentos(res)
 
         return res
     except Exception as e:

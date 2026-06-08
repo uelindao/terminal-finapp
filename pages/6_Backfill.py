@@ -795,8 +795,8 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
     st.info(
         "Sincroniza dados atuais (P/L, ROE, DY, setor…) usados pelo Discovery e Screener.\n\n"
         "**B3:** Fundamentus scraper + yfinance como fallback.  \n"
-        "**EUA:** yfinance.  \n"
-        "Não consome quota FMP nem AV.",
+        "**EUA:** FMP (ratios-ttm + profile) + yfinance como fallback.  \n"
+        "Não consome quota FMP além do necessário.",
         icon="ℹ️",
     )
     _sc1, _sc2 = st.columns(2)
@@ -851,6 +851,10 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
         from database.db import salvar_fundamento_cache
         from utils.formatters import traduzir_setor
         from utils.tickers import SCREENER_US, XSTOCKS_INDICES, mapear_ticker_base
+        from utils.fmp_client import (
+            get_profile, get_financial_scores, get_analyst_grades,
+            _get as fmp_get, FMP_MAX_LIMIT
+        )
 
         _us_lista = list({mapear_ticker_base(t) for t in SCREENER_US + XSTOCKS_INDICES})
         _bar_us   = st.progress(0, text="iniciando sync EUA…")
@@ -858,19 +862,90 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
 
         def _sync_us_item(t_base):
             try:
-                info = yf.Ticker(t_base).info
-                dados = {
-                    "nome":       info.get("shortName", t_base),
-                    "setor":      traduzir_setor(info.get("sector", "—")),
-                    "p/l":        info.get("trailingPE", info.get("forwardPE")),
-                    "p/vp":       info.get("priceToBook"),
-                    "roe%":       (info["returnOnEquity"] * 100) if info.get("returnOnEquity") is not None else None,
-                    "dy%":        (info["dividendYield"]  * 100) if info.get("dividendYield")  is not None else 0,
-                    "market_cap": info.get("marketCap", 0),
-                    "ev/ebitda":  info.get("enterpriseToEbitda"),
-                    "margem%":    (info["profitMargins"]  * 100) if info.get("profitMargins")  is not None else None,
-                    "beta":       info.get("beta"),
-                }
+                dados = {}
+
+                # Fonte 1: FMP (ratios-ttm, profile, financial-scores)
+                try:
+                    _rt = fmp_get("ratios-ttm", {"symbol": t_base})
+                    if isinstance(_rt, list) and _rt:
+                        r = _rt[0]
+                        pe = r.get("priceToEarningsRatioTTM") or r.get("peRatioTTM")
+                        pb = r.get("priceToBookRatioTTM") or r.get("pbRatioTTM")
+                        dy = r.get("dividendYieldTTM")
+                        margem = r.get("netProfitMarginTTM")
+                        ev_ebitda = r.get("enterpriseValueMultipleTTM") or r.get("enterpriseValueOverEBITDATTM")
+
+                        if pe is not None: dados["p/l"] = float(pe)
+                        if pb is not None: dados["p/vp"] = float(pb)
+                        if dy is not None:
+                            dados["dy%"] = float(dy) * 100 if float(dy) < 1 else float(dy)
+                        if margem is not None:
+                            dados["margem%"] = float(margem) * 100 if abs(float(margem)) < 2 else float(margem)
+                        if ev_ebitda is not None: dados["ev/ebitda"] = float(ev_ebitda)
+                except Exception:
+                    pass
+
+                # FMP key-metrics para ROE
+                try:
+                    _km = fmp_get("key-metrics", {"symbol": t_base, "limit": 1})
+                    if isinstance(_km, list) and _km:
+                        roe_m = _km[0].get("returnOnEquity") or _km[0].get("roe")
+                        if roe_m is not None:
+                            dados["roe%"] = float(roe_m) * 100 if abs(float(roe_m)) < 2 else float(roe_m)
+                except Exception:
+                    pass
+
+                # FMP profile para nome/setor/market_cap
+                try:
+                    prof = get_profile(t_base)
+                    if prof:
+                        dados["nome"] = prof.get("nome", t_base)
+                        dados["setor"] = traduzir_setor(prof.get("setor", "—"))
+                        dados["market_cap"] = prof.get("market_cap")
+                        dados["beta"] = prof.get("beta")
+                        dados["preco"] = prof.get("preco")
+                except Exception:
+                    pass
+
+                # Fallback: yfinance se FMP não retornou múltiplos críticos
+                _temMultiplos = all(k in dados for k in ("p/l", "p/vp", "roe%"))
+                if not _temMultiplos:
+                    try:
+                        info = yf.Ticker(t_base).info or {}
+                        if "p/l" not in dados:
+                            pe_yf = info.get("trailingPE") or info.get("forwardPE")
+                            if pe_yf is not None: dados["p/l"] = float(pe_yf)
+                        if "p/vp" not in dados:
+                            pb_yf = info.get("priceToBook")
+                            if pb_yf is not None: dados["p/vp"] = float(pb_yf)
+                        if "roe%" not in dados:
+                            roe_yf = info.get("returnOnEquity")
+                            if roe_yf is not None: dados["roe%"] = float(roe_yf) * 100
+                        if "margem%" not in dados:
+                            mrg_yf = info.get("profitMargins")
+                            if mrg_yf is not None: dados["margem%"] = float(mrg_yf) * 100
+                        if "dy%" not in dados:
+                            dy_yf = info.get("dividendYield")
+                            dados["dy%"] = (float(dy_yf) * 100) if dy_yf is not None else 0
+                        if "ev/ebitda" not in dados:
+                            ev_yf = info.get("enterpriseToEbitda")
+                            if ev_yf is not None: dados["ev/ebitda"] = float(ev_yf)
+                        if "nome" not in dados:
+                            dados["nome"] = info.get("shortName", t_base)
+                        if "setor" not in dados:
+                            dados["setor"] = traduzir_setor(info.get("sector", "—"))
+                        if "market_cap" not in dados:
+                            dados["market_cap"] = info.get("marketCap")
+                        if "beta" not in dados:
+                            dados["beta"] = info.get("beta")
+                    except Exception:
+                        pass
+
+                if not dados:
+                    return False
+
+                dados["ticker"] = t_base
+                dados["data_quality"] = 85 if dados.get("p/l") and dados.get("roe%") else 60
                 salvar_fundamento_cache(t_base, dados)
                 return True
             except Exception:

@@ -3119,6 +3119,14 @@ with tab_calendar:
     except Exception:
         pass
 
+    # fallback: se portfolio/watchlist vazio, usa top tickers US do screener
+    if not tickers_port:
+        try:
+            from utils.tickers import SCREENER_US
+            tickers_port = set(SCREENER_US[:30])
+        except Exception:
+            pass
+
     tickers_port = tuple(tickers_port)
 
     eventos_earnings = []

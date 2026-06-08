@@ -103,26 +103,23 @@ def transform_fmp(ticker: str) -> dict | None:
         data["beta"] = _sf(profile.get("beta"))
 
     if ratios:
-        data["p/l"] = _sf(ratios.get("peRatioTTM") or ratios.get("priceEarningsRatioTTM"))
-        data["p/vp"] = _sf(ratios.get("pbRatioTTM") or ratios.get("priceToBookRatioTTM"))
+        data["p/l"] = _sf(ratios.get("priceToEarningsRatioTTM") or ratios.get("peRatioTTM"))
+        data["p/vp"] = _sf(ratios.get("priceToBookRatioTTM") or ratios.get("pbRatioTTM"))
         data["dy%"] = _sf(ratios.get("dividendYieldTTM"))
-        roe = _sf(ratios.get("roeTTM"))
-        if roe is not None:
-            if abs(roe) < 2:
-                roe = roe * 100
-        data["roe%"] = roe
         margem = _sf(ratios.get("netProfitMarginTTM"))
         if margem is not None:
             if abs(margem) < 2:
                 margem = margem * 100
         data["margem%"] = margem
-        data["ev/ebitda"] = _sf(ratios.get("enterpriseValueOverEBITDATTM"))
+        data["ev/ebitda"] = _sf(ratios.get("enterpriseValueMultipleTTM")
+                                 or ratios.get("enterpriseValueOverEBITDATTM"))
 
     if metrics:
         data.setdefault("ev/ebitda",
-                        _sf(metrics.get("enterpriseValueOverEBITDA")))
-        roe_m = _sf(metrics.get("roe"))
-        if roe_m is not None and data.get("roe%") is None:
+                        _sf(metrics.get("evToEBITDA")
+                            or metrics.get("enterpriseValueOverEBITDA")))
+        roe_m = _sf(metrics.get("returnOnEquity") or metrics.get("roe"))
+        if roe_m is not None:
             if abs(roe_m) < 2:
                 roe_m = roe_m * 100
             data["roe%"] = roe_m
