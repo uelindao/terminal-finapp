@@ -544,6 +544,14 @@ def _processar_ticker_st(
     if not ratios_list:
         diag = "sem dados (ativo não coberto ou quota esgotada)"
         status_placeholder.write(f"⚠️ `{tk_fmp}` — {diag}")
+        # Persiste "tentado mas sem dados" no banco para não voltar ao lote
+        try:
+            registrar_historico_score_batch(
+                [{"ticker": ticker_yf, "score": 0, "calculado_em": "2000-01-01"}],
+                ignorar_existentes=True,
+            )
+        except Exception:
+            pass
         return 0, 0, diag, fonte_usada
 
     diag = f"{len(ratios_list)} períodos ({granular}), km: {len(km_list)}"
@@ -635,22 +643,35 @@ def _cobertura_atual() -> pd.DataFrame:
     from database.supabase_client import get_supabase
     try:
         sb   = get_supabase()
-        rows = sb.table("health_score_history").select("ticker, calculado_em").execute().data or []
+        rows = sb.table("health_score_history").select("ticker, calculado_em, score").execute().data or []
         if not rows:
-            return pd.DataFrame(columns=["ticker", "pontos", "inicio", "fim"])
+            return pd.DataFrame(columns=["ticker", "pontos", "inicio", "fim", "sem_dados"])
         df = pd.DataFrame(rows)
+        # Sentinels "sem dados": score=0, calculado_em=2000-01-01 — excluir do cálculo de datas
         df["calculado_em"] = pd.to_datetime(df["calculado_em"], format="ISO8601", utc=True)
+        df_real  = df[~((df["score"] == 0) & (df["calculado_em"].dt.year == 2000))]
+        df_nd    = df[ ((df["score"] == 0) & (df["calculado_em"].dt.year == 2000))]
+        nd_set   = set(df_nd["ticker"].tolist())
+
         agg = df.groupby("ticker")["calculado_em"].agg(
             pontos="count",
-            inicio="min",
-            fim="max",
         ).reset_index()
-        agg["inicio"] = agg["inicio"].dt.strftime("%Y-%m-%d")
-        agg["fim"]    = agg["fim"].dt.strftime("%Y-%m-%d")
+        # Datas reais (ignora sentinel)
+        if not df_real.empty:
+            agg_real = df_real.groupby("ticker")["calculado_em"].agg(
+                inicio="min", fim="max"
+            ).reset_index()
+            agg = agg.merge(agg_real, on="ticker", how="left")
+        else:
+            agg["inicio"] = pd.NaT
+            agg["fim"]    = pd.NaT
+        agg["inicio"] = pd.to_datetime(agg.get("inicio")).dt.strftime("%Y-%m-%d")
+        agg["fim"]    = pd.to_datetime(agg.get("fim")).dt.strftime("%Y-%m-%d")
+        agg["sem_dados"] = agg["ticker"].isin(nd_set)
         return agg.sort_values("pontos", ascending=False)
     except Exception as e:
         logger.warning(f"[backfill] falha ao buscar cobertura: {e}")
-        return pd.DataFrame(columns=["ticker", "pontos", "inicio", "fim"])
+        return pd.DataFrame(columns=["ticker", "pontos", "inicio", "fim", "sem_dados"])
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -674,17 +695,28 @@ total_br  = len(_br_set)
 cob_eua = cob[cob["ticker"].isin(_us_set)]
 cob_br  = cob[cob["ticker"].isin(_br_set)]
 
+# "cobertos" = têm dados reais (excluir sentinels "sem dados")
+_has_sem_dados = "sem_dados" in cob.columns
+cob_eua_ok = cob_eua[~cob_eua["sem_dados"]] if _has_sem_dados else cob_eua
+cob_br_ok  = cob_br[~cob_br["sem_dados"]]   if _has_sem_dados else cob_br
+
 m1, m2, m3, m4 = st.columns(4)
 with m1:
-    n_eua = len(cob_eua)
+    n_eua = len(cob_eua_ok)
+    n_eua_nd = len(cob_eua) - n_eua
+    delta_eua = f"{n_eua/total_eua*100:.0f}%" + (f" | {n_eua_nd} sem dados" if n_eua_nd else "")
     st.metric("tickers EUA cobertos", f"{n_eua} / {total_eua}",
-              f"{n_eua/total_eua*100:.0f}%" if total_eua else "—")
+              delta_eua if total_eua else "—")
 with m2:
-    n_br = len(cob_br)
+    n_br = len(cob_br_ok)
+    n_br_nd = len(cob_br) - n_br
+    delta_br = f"{n_br/total_br*100:.0f}%" + (f" | {n_br_nd} sem dados" if n_br_nd else "")
     st.metric("tickers BR cobertos", f"{n_br} / {total_br}",
-              f"{n_br/total_br*100:.0f}%" if total_br else "—")
+              delta_br if total_br else "—")
 with m3:
-    total_pts = int(cob["pontos"].sum()) if not cob.empty else 0
+    # Exclui pontos sentinel (score=0, 2000-01-01) da contagem total
+    cob_com_dados = cob[~cob["sem_dados"]] if _has_sem_dados else cob
+    total_pts = int(cob_com_dados["pontos"].sum()) if not cob_com_dados.empty else 0
     st.metric("total de pontos no banco", f"{total_pts:,}")
 with m4:
     # Mediana só dos tickers com backfill real (≥ 5 pontos)
@@ -882,7 +914,9 @@ if pular_cobertos:
     # 1. Tickers com ≥4 pontos no banco
     completos_db: set[str] = set()
     if not cob.empty:
-        completos_db = set(cob[cob["pontos"] >= 4]["ticker"].tolist())
+        # >= 1: qualquer ticker com ao menos 1 registro (inclusive sentinel "sem dados")
+        # fica fora do lote — evita re-processar tickers que já foram tentados
+        completos_db = set(cob[cob["pontos"] >= 1]["ticker"].tolist())
         # BR tickers são salvos como "PETR4.SA" no banco mas listados sem sufixo em SCREENER_B3
         completos_db |= {t.replace(".SA", "") for t in completos_db}
     # 2. Tickers já processados nesta sessão (persiste entre reruns)
@@ -1003,15 +1037,36 @@ with st.expander("🔍 diagnóstico (testar FMP + Supabase antes de rodar)", exp
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Botão de execução
-col_btn1, col_btn2, _ = st.columns([2, 2, 4])
+col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 2])
 btn_run   = col_btn1.button("▶ iniciar backfill", type="primary",
                              use_container_width=True, disabled=not lote)
 btn_clear = col_btn2.button("🗑 limpar cache", use_container_width=True,
                              help="Força recarregar cobertura do banco")
+btn_reset_nd = col_btn3.button(
+    "🔄 retry 'sem dados'",
+    use_container_width=True,
+    help="Remove marcadores de 'sem dados' para retentar tickers que falharam por quota/timeout",
+)
 
 if btn_clear:
     st.cache_data.clear()
     st.rerun()
+
+if btn_reset_nd:
+    # Remove registros sentinel (score=0, calculado_em=2000-01-01) para recolocar no lote
+    try:
+        from database.supabase_client import get_supabase as _get_sb
+        _sb = _get_sb()
+        _sb.table("health_score_history") \
+            .delete() \
+            .eq("calculado_em", "2000-01-01") \
+            .eq("score", 0) \
+            .execute()
+        st.cache_data.clear()
+        show_toast("tickers 'sem dados' removidos do cache — serão retentados no próximo lote", "success", 4000)
+        st.rerun()
+    except Exception as _e:
+        st.error(f"erro ao resetar: {_e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # EXECUÇÃO
