@@ -875,7 +875,7 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
                         if pe is not None: dados["p/l"] = float(pe)
                         if pb is not None: dados["p/vp"] = float(pb)
                         if dy is not None:
-                            dados["dy%"] = float(dy) * 100 if float(dy) < 1 else float(dy)
+                            dados["dy%"] = float(dy)  # FMP /stable/ returns percentage (e.g. 0.36 for 0.36%)
                         if margem is not None:
                             dados["margem%"] = float(margem) * 100 if abs(float(margem)) < 2 else float(margem)
                         if ev_ebitda is not None: dados["ev/ebitda"] = float(ev_ebitda)

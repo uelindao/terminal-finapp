@@ -54,86 +54,95 @@ def puxar_historico_mestre():
     """
     Busca séries históricas macro (BCB Brasil + FRED Global + yfinance Commodities).
 
-    Padrão cache-aside com fallback Supabase:
-      1. Tenta APIs ao vivo (BCB SGS + FRED)
-      2. Se dados OK → salva snapshot no Supabase (para uso futuro)
-      3. Se dados vazios/falha → carrega último snapshot do Supabase
+    Padrão cache-first com fallback live:
+      1. Tenta carregar snapshot recente do Supabase (< 6h)
+      2. Se cache válido → retorna imediatamente (evita APIs lentas)
+      3. Se cache expirado/ausente → chama APIs ao vivo → salva novo snapshot
          (resolve "sem dados" em fins de semana, cold-start, manutenção BCB/FRED)
 
-    TTL: 1h — retenta APIs a cada hora. Fins de semana servem do Supabase.
+    TTL: 1h (st.cache_data) + 6h (Supabase) — cache entre sessões e deploys.
     """
     from utils.macro_supabase import salvar_snapshot, carregar_snapshot
 
     hoje      = datetime.datetime.today()
     inicio_10a = hoje - datetime.timedelta(days=365 * 10)
 
+    MAX_CACHE_HORAS = 6  # horas de validade do cache Supabase
+
     # ── 1. Brasil — BCB SGS ───────────────────────────────────────────────────
-    series_bcb = {
-        'Selic':            432,
-        'IPCA':             433,
-        'Dolar':            1,
-        'Desemprego':       24369,
-        'Divida_Bruta_PIB': 13762,
-        'Result_Primario':  5793,
-        'Result_Nominal':   4192,
-    }
-    dfs_br_dict = {}
-    for nome, codigo in series_bcb.items():
-        try:
-            df_temp = sgs.get({nome: codigo}, start=inicio_10a)
-            if not df_temp.empty:
-                dfs_br_dict[nome] = df_temp[nome]
-        except Exception as e:
-            logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
-
-    # Fallback Selic: série 432 → 439
-    if 'Selic' not in dfs_br_dict:
-        try:
-            _selic_fb = sgs.get({'Selic': 439}, start=inicio_10a)
-            if not _selic_fb.empty:
-                dfs_br_dict['Selic'] = _selic_fb['Selic']
-        except Exception as e:
-            logger.error(f"[macro] BCB Selic fallback (série 439) falhou: {e}")
-
-    df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
-
-    # Calcula IPCA acumulado 12m
-    if not df_br.empty and 'IPCA' in df_br.columns:
-        try:
-            _ipca_raw = df_br['IPCA'].dropna()
-            df_br['IPCA_12M'] = ((1 + _ipca_raw / 100)
-                                 .rolling(12)
-                                 .apply(lambda x: x.prod(), raw=True) - 1) * 100
-        except Exception:
-            pass
-
-    if not df_br.empty:
-        # Sucesso → salva snapshot para uso posterior
-        salvar_snapshot("bcb_br", df_br)
-        logger.info("[macro] BCB: dados ao vivo OK, snapshot Supabase atualizado.")
+    df_br = None
+    # Cache-first: tenta carregar do Supabase
+    _cache_br = carregar_snapshot("bcb_br", max_age_days=MAX_CACHE_HORAS / 24)
+    if _cache_br is not None and not _cache_br.empty:
+        df_br = _cache_br
+        logger.info("[macro] BCB: servindo do cache Supabase (cache-first).")
     else:
-        # Falha → tenta carregar snapshot do Supabase (últimos 7 dias)
-        logger.warning("[macro] BCB: nenhum dado ao vivo. Tentando fallback Supabase...")
-        _fb = carregar_snapshot("bcb_br", max_age_days=7)
-        if _fb is not None and not _fb.empty:
-            df_br = _fb
-            logger.info("[macro] BCB: servindo dados do Supabase (snapshot anterior).")
+        # Cache miss → busca ao vivo
+        series_bcb = {
+            'Selic':            432,
+            'IPCA':             433,
+            'Dolar':            1,
+            'Desemprego':       24369,
+            'Divida_Bruta_PIB': 13762,
+            'Result_Primario':  5793,
+            'Result_Nominal':   4192,
+        }
+        dfs_br_dict = {}
+        for nome, codigo in series_bcb.items():
+            try:
+                df_temp = sgs.get({nome: codigo}, start=inicio_10a)
+                if not df_temp.empty:
+                    dfs_br_dict[nome] = df_temp[nome]
+            except Exception as e:
+                logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
+
+        # Fallback Selic: série 432 → 439
+        if 'Selic' not in dfs_br_dict:
+            try:
+                _selic_fb = sgs.get({'Selic': 439}, start=inicio_10a)
+                if not _selic_fb.empty:
+                    dfs_br_dict['Selic'] = _selic_fb['Selic']
+            except Exception as e:
+                logger.error(f"[macro] BCB Selic fallback (série 439) falhou: {e}")
+
+        df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
+
+        # Calcula IPCA acumulado 12m
+        if not df_br.empty and 'IPCA' in df_br.columns:
+            try:
+                _ipca_raw = df_br['IPCA'].dropna()
+                df_br['IPCA_12M'] = ((1 + _ipca_raw / 100)
+                                     .rolling(12)
+                                     .apply(lambda x: x.prod(), raw=True) - 1) * 100
+            except Exception:
+                pass
+
+        if not df_br.empty:
+            salvar_snapshot("bcb_br", df_br)
+            logger.info("[macro] BCB: dados ao vivo OK, snapshot Supabase atualizado.")
         else:
-            logger.error("[macro] BCB: sem dados ao vivo e sem snapshot Supabase disponível.")
+            # Live API failed → emergency fallback to stale cache (up to 7 days)
+            _stale = carregar_snapshot("bcb_br", max_age_days=7)
+            if _stale is not None and not _stale.empty:
+                df_br = _stale
+                logger.warning("[macro] BCB: servindo cache expirado (fallback emergencial).")
+            else:
+                logger.error("[macro] BCB: sem dados ao vivo e sem snapshot Supabase disponível.")
 
     # ── 2. Global — FRED ─────────────────────────────────────────────────────
     df_global = pd.DataFrame()
-    if "FRED_API_KEY" in st.secrets:
+    # Cache-first: tenta carregar do Supabase
+    _cache_global = carregar_snapshot("fred_global", max_age_days=MAX_CACHE_HORAS / 24)
+    if _cache_global is not None and not _cache_global.empty:
+        df_global = _cache_global
+        logger.info("[macro] FRED: servindo do cache Supabase (cache-first).")
+    elif "FRED_API_KEY" in st.secrets:
         try:
             fred = Fred(api_key=st.secrets["FRED_API_KEY"])
             try:
                 fred.get_series_info('FEDFUNDS')
             except Exception as e:
                 logger.error(f"[macro] Chave FRED API parece inválida: {e}")
-                # Tenta fallback imediatamente
-                _fb_g = carregar_snapshot("fred_global", max_age_days=7)
-                if _fb_g is not None:
-                    df_global = _fb_g
                 return df_br, df_global, pd.DataFrame()
 
             series_fred = {
@@ -167,18 +176,21 @@ def puxar_historico_mestre():
                 salvar_snapshot("fred_global", df_global)
                 logger.info("[macro] FRED: dados ao vivo OK, snapshot Supabase atualizado.")
             else:
-                logger.warning("[macro] FRED: nenhuma série carregada. Tentando fallback Supabase...")
-                _fb_g = carregar_snapshot("fred_global", max_age_days=7)
-                if _fb_g is not None and not _fb_g.empty:
-                    df_global = _fb_g
-                    logger.info("[macro] FRED: servindo dados do Supabase (snapshot anterior).")
+                # Live API failed → emergency fallback to stale cache (up to 7 days)
+                _stale_g = carregar_snapshot("fred_global", max_age_days=7)
+                if _stale_g is not None and not _stale_g.empty:
+                    df_global = _stale_g
+                    logger.warning("[macro] FRED: servindo cache expirado (fallback emergencial).")
+                else:
+                    logger.warning("[macro] FRED: nenhuma série carregada e sem cache disponível.")
 
         except Exception as e:
             logger.exception(f"[macro] Bloco FRED inteiro falhou: {e}")
-            _fb_g = carregar_snapshot("fred_global", max_age_days=7)
-            if _fb_g is not None and not _fb_g.empty:
-                df_global = _fb_g
-                logger.info("[macro] FRED: fallback Supabase após exceção.")
+            # Emergency fallback
+            _stale_ge = carregar_snapshot("fred_global", max_age_days=7)
+            if _stale_ge is not None and not _stale_ge.empty:
+                df_global = _stale_ge
+                logger.warning("[macro] FRED: servindo cache expirado após exceção.")
 
     # ── 3. Commodities — yfinance ─────────────────────────────────────────────
     df_commodities = pd.DataFrame()
@@ -950,7 +962,7 @@ def get_eventos_macro_fixos() -> list[dict]:
     return proximos[:20]
 
 
-def buscar_earnings_calendario(tickers_tuple: tuple, data_fim_str: str | None = None) -> list[dict]:
+def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str: str | None = None) -> list[dict]:
     """
     Busca earnings dates via FMP para uma lista de tickers.
     Substitui a versão yfinance que quebra no yfinance >=1.3.0
@@ -1690,6 +1702,113 @@ with tab_global:
                     "acima de 5% = desaceleração → fed pode cortar juros. "
                     "leitura: desemprego subindo rapidamente ('sahm rule') é sinal recessivo clássico — "
                     "alta de 0.5pp em 3 meses ativa o sinal historicamente."
+                )
+
+            # ── 📐 P/L JUSTO — EUA (Gordon simplificado) ───────────────────────
+            st.markdown("---")
+            section_title("📐 p/l justo — valuation do s&p 500 pelo regime de juros reais (eua)")
+            _ERP_US = 0.03
+            _real_yield_us = None
+            if v_dgs10 is not None and _cpi_yoy_val is not None:
+                _real_yield_us = v_dgs10 - _cpi_yoy_val
+            _pl_justo_us = None
+            if _real_yield_us is not None:
+                _ry_dec = _real_yield_us / 100
+                if _ry_dec + _ERP_US > 0:
+                    _pl_justo_us = round(1 / (_ry_dec + _ERP_US), 1)
+
+            # Série histórica do P/L teórico (a partir de DGS10 − CPI_YOY)
+            _pl_hist_us = None
+            if 'DGS10' in df_global.columns and 'CPI_YOY' in df_global.columns:
+                try:
+                    _ry_hist = (df_global['DGS10'] - df_global['CPI_YOY']).dropna()
+                    _pl_hist_us = (1 / (_ry_hist / 100 + _ERP_US)).clip(10, 40)
+                    _pl_hist_us.name = 'pl_teorico_us'
+                except Exception:
+                    pass
+
+            # P/L real do S&P 500 via yfinance
+            _pl_real_spx = None
+            try:
+                _spx_info = yf.Ticker("^GSPC").info or {}
+                _pl_real_spx = _spx_info.get("trailingPE")
+                if _pl_real_spx is None:
+                    _spy_info = yf.Ticker("SPY").info or {}
+                    _pl_real_spx = _spy_info.get("trailingPE")
+            except Exception:
+                pass
+
+            _pj1, _pj2, _pj3, _pj4 = st.columns(4)
+            with _pj1:
+                metric_card(
+                    "p/l teórico s&p 500", f"{_pl_justo_us:.1f}x" if _pl_justo_us else "n/d",
+                    "1 / (real yield 10y + erp 3%)",
+                    "bear" if (_pl_justo_us or 99) < 14 else "amber" if (_pl_justo_us or 99) < 18 else "bull"
+                )
+            with _pj2:
+                _custo_eq = ((_real_yield_us or 0) / 100 + _ERP_US) * 100 if _real_yield_us is not None else None
+                metric_card(
+                    "custo de equity us", f"{_custo_eq:.1f}%" if _custo_eq else "n/d",
+                    f"10y real {_real_yield_us:.1f}% + erp {_ERP_US*100:.0f}%",
+                    "bear"
+                )
+            with _pj3:
+                _pl_cenario_bull_us = round(1 / (0.01 + _ERP_US), 1)
+                metric_card(
+                    "p/l se real yield = 1%", f"{_pl_cenario_bull_us:.1f}x",
+                    "cenário de corte do fed (real yield baixo)", "bull"
+                )
+            with _pj4:
+                if _pl_justo_us and _pl_real_spx:
+                    _desconto = ((_pl_real_spx / _pl_justo_us) - 1) * 100
+                    metric_card(
+                        "s&p 500 vs teórico",
+                        f"{_desconto:+.0f}%" if abs(_desconto) < 999 else "n/a",
+                        f"spx real {_pl_real_spx:.1f}x vs teórico {_pl_justo_us:.1f}x",
+                        "bull" if _desconto < -10 else "bear" if _desconto > 15 else "amber"
+                    )
+                elif _pl_justo_us:
+                    metric_card("s&p 500 real", "n/d", "yfinance indisponível", "amber")
+
+            if _pl_hist_us is not None and not _pl_hist_us.empty:
+                _fig_pl_us = go.Figure()
+                _fig_pl_us.add_trace(go.Scatter(
+                    x=_pl_hist_us.index, y=_pl_hist_us.values,
+                    name='p/l teórico (1/(10y real+erp))',
+                    fill='tozeroy', fillcolor='rgba(0,176,255,0.07)',
+                    line=dict(color='#00B0FF', width=2),
+                    hovertemplate='%{x|%b %Y}<br>p/l teórico: %{y:.1f}x<extra></extra>',
+                ))
+                if _pl_real_spx:
+                    _fig_pl_us.add_trace(go.Scatter(
+                        x=[_pl_hist_us.index[-1]], y=[_pl_real_spx],
+                        mode='markers',                         name='s&p 500 real',
+                        marker=dict(color='#FF6B35', size=12, symbol='diamond'),
+                        hovertemplate=f's&p 500 real: {_pl_real_spx:.1f}x<extra></extra>',
+                    ))
+                _cc_pl_us = _chart_cores()
+                _fig_pl_us.add_hline(y=25, line_color=_cc_pl_us["bull"],  line_dash='dash', line_width=1, annotation_text='25x (juro baixo)', annotation_font_color=_cc_pl_us["bull"],  annotation_font_size=9)
+                _fig_pl_us.add_hline(y=18, line_color=_cc_pl_us["amber"], line_dash='dash', line_width=1, annotation_text='18x (neutro)',    annotation_font_color=_cc_pl_us["amber"], annotation_font_size=9)
+                _fig_pl_us.add_hline(y=13, line_color=_cc_pl_us["bear"],  line_dash='dash', line_width=1, annotation_text='13x (juro alto)',  annotation_font_color=_cc_pl_us["bear"],  annotation_font_size=9)
+                if _pl_justo_us:
+                    _fig_pl_us.add_trace(go.Scatter(
+                        x=[_pl_hist_us.index[-1]], y=[_pl_justo_us],
+                        mode='markers', name='teórico atual',
+                        marker=dict(color='#00E5FF', size=10, symbol='circle'),
+                        hovertemplate=f'teórico: {_pl_justo_us:.1f}x<extra></extra>',
+                    ))
+                _fig_pl_us.update_layout(**base_layout(height=280, title="p/l teórico s&p 500 pelo regime de juros reais (modelo gordon simplificado)"))
+                _fig_pl_us.update_yaxes(title_text="p/l teórico (x)", range=[8, 38])
+                st.plotly_chart(_fig_pl_us, use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "p/l teórico = 1 / (real yield 10y + erp). "
+                    "equity risk premium (erp) estimado em 3% para eua (mercado maduro). "
+                    "real yield = treasury 10y − cpi yoy. "
+                    "quando o fed corta juros, a real yield cai → p/l justo SOBE. "
+                    "quando o fed aperta, sobe → p/l justo CAI. "
+                    "leitura: s&p 500 acima do p/l teórico = valuation esticado; "
+                    "abaixo = desconto relativo ao regime de juros. "
+                    "use como referência de regime, não como timing tool."
                 )
 
             # ── FISCAL EUA ──────────────────────────────────────────────────────

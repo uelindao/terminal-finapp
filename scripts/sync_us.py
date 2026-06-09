@@ -124,10 +124,7 @@ def transform_fmp(ticker: str) -> dict | None:
                 roe_m = roe_m * 100
             data["roe%"] = roe_m
 
-    # Normalize DY
-    dy = data.get("dy%")
-    if dy is not None and dy < 1.0:
-        data["dy%"] = dy * 100
+    # DY is already stored as-is from FMP /stable/ (percentage format, e.g. 0.36 for 0.36%)
 
     data["ticker"] = ticker
     data["data_quality"] = 80
