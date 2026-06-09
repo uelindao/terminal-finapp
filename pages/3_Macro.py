@@ -899,7 +899,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple, data_fim_str: str | None = 
     fim  = data_fim_str or (hoje + datetime.timedelta(days=90)).strftime("%Y-%m-%d")
 
     fmp_eventos = _fmp_earnings_calendar(
-        tickers     = list(tickers_tuple),
+        tickers     = list(tickers_tuple) if tickers_tuple else None,
         data_inicio = hoje.strftime("%Y-%m-%d"),
         data_fim    = fim,
     )
@@ -3080,7 +3080,7 @@ with tab_calendar:
 
     status_card(
         "cobertura",
-        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates do portfólio e watchlists via FMP. cache de 1h — datas atualizam automaticamente.",
+        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates de todas as empresas listadas no FMP. cache de 1h — datas atualizam automaticamente.",
         tipo="info"
     )
 
@@ -3103,7 +3103,7 @@ with tab_calendar:
     eventos_macro = get_eventos_macro_fixos()
     eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
 
-    # earnings do portfólio + watchlists (via FMP)
+    # earnings do portfólio + watchlists + top US (via FMP)
     from database.db import get_pesos, listar_watchlists, listar_watchlist
     pesos = get_pesos()
     tickers_port = set([p['ticker'] for p in pesos if p.get('quantidade', 0) > 0])
@@ -3119,21 +3119,21 @@ with tab_calendar:
     except Exception:
         pass
 
-    # fallback: se portfolio/watchlist vazio, usa top tickers US do screener
-    if not tickers_port:
-        try:
-            from utils.tickers import SCREENER_US
-            tickers_port = set(SCREENER_US[:30])
-        except Exception:
-            pass
+    # SEMPRE inclui top tickers US (FMP só tem earnings US)
+    try:
+        from utils.tickers import SCREENER_US
+        for _t in SCREENER_US[:40]:
+            tickers_port.add(_t)
+    except Exception:
+        pass
 
     tickers_port = tuple(tickers_port)
 
     eventos_earnings = []
-    if "earnings" in filtro_cat and tickers_port:
-        with st.spinner("buscando earnings dates via FMP (portfólio + watchlists)..."):
+    if "earnings" in filtro_cat:
+        with st.spinner("buscando earnings dates via FMP (todos os mercados)..."):
             eventos_earnings = buscar_earnings_calendario(
-                tickers_port,
+                tickers_port=None,
                 data_fim_str=limite_cal.strftime("%Y-%m-%d"),
             )
             eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_cal]
