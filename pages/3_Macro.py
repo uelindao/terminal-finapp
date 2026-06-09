@@ -1592,21 +1592,17 @@ with tab_global:
             tooltip("treasury_10y")
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
 
-            # CPI YoY — tenta df_global (fredapi), fallback pandas-datareader
-            _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
-            _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)
-
-            if _cpi_yoy_val is None and 'CPIAUCSL' in df_global.columns:
+            # CPI YoY — calcula a partir de CPIAUCSL se coluna não existe
+            if 'CPI_YOY' not in df_global.columns and 'CPIAUCSL' in df_global.columns:
                 try:
                     _cpi_raw = df_global['CPIAUCSL'].dropna()
                     if not _cpi_raw.empty:
-                        _cpi_yoy_fb = _cpi_raw.pct_change(12) * 100
-                        _cpi_yoy_fb = _cpi_yoy_fb.dropna()
-                        if not _cpi_yoy_fb.empty:
-                            _df_cpi_yoy = _cpi_yoy_fb
-                            _cpi_yoy_val = round(float(_cpi_yoy_fb.iloc[-1]), 2)
+                        df_global['CPI_YOY'] = _cpi_raw.pct_change(12) * 100
                 except Exception as e:
-                    logger.error(f"[macro] CPI YoY fallback via df_global falhou: {e}")
+                    logger.error(f"[macro] CPI_YOY calc via CPIAUCSL falhou: {e}")
+
+            _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
+            _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)
 
             with c2:
                 metric_card(
