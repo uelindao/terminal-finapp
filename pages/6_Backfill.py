@@ -851,10 +851,7 @@ with st.expander("🔄 sincronização de fundamentos — screener / research", 
         from database.db import salvar_fundamento_cache
         from utils.formatters import traduzir_setor
         from utils.tickers import SCREENER_US, XSTOCKS_INDICES, mapear_ticker_base
-        from utils.fmp_client import (
-            get_profile, get_financial_scores, get_analyst_grades,
-            _get as fmp_get, FMP_MAX_LIMIT
-        )
+        from utils.fmp_client import get_profile, _get as fmp_get
 
         _us_lista = list({mapear_ticker_base(t) for t in SCREENER_US + XSTOCKS_INDICES})
         _bar_us   = st.progress(0, text="iniciando sync EUA…")

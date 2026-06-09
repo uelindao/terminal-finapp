@@ -849,6 +849,67 @@ def diagnosticar_ciclo(t10y2y, vix, hy_spread):
         return "🟡 pico de ciclo (late cycle)", "var(--amber)", "energia (xle), materiais (xlb), saúde (xlv)"
     return "⚪ transição", "#888888", "posicionamento neutro — aguardar confirmação"
 
+
+def _render_evento_card(evento: dict, key_prefix: str = "ev"):
+    """Renderiza um card de evento (macro ou earnings) no calendário."""
+    # Macro events: evento, data (datetime), categoria, impacto, detalhe
+    # Earnings events: ticker, data (str), eps_est, hora, surpresa
+    is_earnings = "ticker" in evento and "evento" not in evento
+
+    if is_earnings:
+        ticker = evento.get("ticker", "—")
+        data_str = evento.get("data", "")
+        hora = evento.get("hora", "amc")
+        eps = evento.get("eps_est")
+        surpresa = evento.get("surpresa")
+
+        label = f"📊 {ticker}"
+        detalhe = f"eps est: {eps}" if eps else ""
+        if surpresa is not None:
+            detalhe += f" | surpresa: {surpresa:+.1f}%"
+        hora_label = "após fechamento" if hora == "amc" else "pré-mercado"
+
+        with st.container():
+            cols = st.columns([5, 1])
+            with cols[0]:
+                st.markdown(
+                    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+                    f'border-left:3px solid #FF9900;border-radius:4px;padding:8px 12px;margin-bottom:4px;">'
+                    f'<span style="font-size:0.85rem;font-weight:600;">{label}</span>'
+                    f'<span style="font-size:0.72rem;color:var(--text-muted);margin-left:8px;">{detalhe}</span>'
+                    f'</div>', unsafe_allow_html=True
+                )
+            with cols[1]:
+                st.caption(f"{data_str}\n{hora_label}")
+    else:
+        nome = evento.get("evento", "—")
+        cat = evento.get("categoria", "")
+        impacto = evento.get("impacto", "baixo")
+        detalhe = evento.get("detalhe", "")
+        data_raw = evento.get("data")
+        data_str = data_raw.strftime("%d/%m") if hasattr(data_raw, "strftime") else str(data_raw)
+
+        cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E"}.get(cat, "#555")
+        icone_imp = {"alto": "🔴", "medio": "🟡", "baixo": "🟢"}.get(impacto, "⚪")
+        label_cat = {"brasil": "BR", "eua": "EUA"}.get(cat, cat.upper())
+
+        with st.container():
+            cols = st.columns([5, 1])
+            with cols[0]:
+                texto = f"{nome}"
+                if detalhe:
+                    texto += f" | {detalhe}"
+                st.markdown(
+                    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+                    f'border-left:3px solid {cor_cat};border-radius:4px;padding:8px 12px;margin-bottom:4px;">'
+                    f'<span style="font-size:0.7rem;color:{cor_cat};font-weight:bold;text-transform:uppercase;">{label_cat}</span>'
+                    f'<span style="font-size:0.8rem;margin-left:6px;">{texto}</span>'
+                    f'</div>', unsafe_allow_html=True
+                )
+            with cols[1]:
+                st.markdown(f"<div style='text-align:right;'>{data_str} {icone_imp}</div>", unsafe_allow_html=True)
+
+
 def get_eventos_macro_fixos() -> list[dict]:
     """
     Retorna calendário de eventos macro fixos para os próximos 90 dias.
@@ -3078,169 +3139,88 @@ with tab_ciclo:
 with tab_calendar:
     section_title("📅 calendário de eventos de mercado")
 
-    status_card(
-        "cobertura",
-        "eventos macro fixos (copom, fed, cpi, payroll) para os próximos 90 dias + earnings dates de todas as empresas listadas no FMP. cache de 1h — datas atualizam automaticamente.",
-        tipo="info"
-    )
+    cal_tab1, cal_tab2 = st.tabs(["🏛️ decisões macro", "📊 earnings"])
 
-    # filtros
-    fc1, fc2 = st.columns([3, 1])
-    with fc1:
-        filtro_cat = st.multiselect(
-            "filtrar por categoria:",
-            ["brasil", "eua", "earnings"],
-            default=["brasil", "eua", "earnings"],
-            key="cal_filtro_cat"
+    # ── Tab: Decisões Macro ─────────────────────────────────────────────────
+    with cal_tab1:
+        status_card(
+            "cobertura",
+            "eventos macro fixos (copom, fed, cpi, payroll) — próximos 90 dias.",
+            tipo="info"
         )
-    with fc2:
-        janela_dias = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela")
-
-    hoje = datetime.date.today()
-    limite_cal = hoje + datetime.timedelta(days=janela_dias)
-
-    # eventos macro fixos
-    eventos_macro = get_eventos_macro_fixos()
-    eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
-
-    # earnings do portfólio + watchlists + top US (via FMP)
-    from database.db import get_pesos, listar_watchlists, listar_watchlist
-    pesos = get_pesos()
-    tickers_port = set([p['ticker'] for p in pesos if p.get('quantidade', 0) > 0])
-
-    # agrega tickers de todas as watchlists do usuário
-    try:
-        _wls = listar_watchlists() or []
-        for _wl in _wls:
-            _itens = listar_watchlist(_wl['id']) or []
-            for _it in _itens:
-                if _it.get('ticker'):
-                    tickers_port.add(_it['ticker'])
-    except Exception:
-        pass
-
-    # SEMPRE inclui top tickers US (FMP só tem earnings US)
-    try:
-        from utils.tickers import SCREENER_US
-        for _t in SCREENER_US[:40]:
-            tickers_port.add(_t)
-    except Exception:
-        pass
-
-    tickers_port = tuple(tickers_port)
-
-    eventos_earnings = []
-    if "earnings" in filtro_cat:
-        with st.spinner("buscando earnings dates via FMP (todos os mercados)..."):
-            eventos_earnings = buscar_earnings_calendario(
-                tickers_port=None,
-                data_fim_str=limite_cal.strftime("%Y-%m-%d"),
+        fc1, fc2 = st.columns([3, 1])
+        with fc1:
+            filtro_cat = st.multiselect(
+                "filtrar por categoria:",
+                ["brasil", "eua"],
+                default=["brasil", "eua"],
+                key="cal_filtro_cat"
             )
-            eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_cal]
+        with fc2:
+            janela_dias = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela")
 
-    todos_eventos = sorted(eventos_macro + eventos_earnings, key=lambda x: x['data'])
+        hoje = datetime.date.today()
+        limite_cal = hoje + datetime.timedelta(days=janela_dias)
+        eventos_macro = get_eventos_macro_fixos()
+        eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
 
-    if not todos_eventos:
-        empty_state("📅", "sem eventos", f"nenhum evento encontrado nos próximos {janela_dias} dias para as categorias selecionadas.")
-    else:
-        # métricas rápidas
-        mc1, mc2, mc3 = st.columns(3)
-        with mc1:
-            proximos_7 = len([e for e in todos_eventos if e['data'] <= hoje + datetime.timedelta(days=7)])
-            metric_card("próximos 7 dias", str(proximos_7), "eventos críticos" if proximos_7 > 0 else "", "bear" if proximos_7 > 0 else "muted")
-        with mc2:
-            total_alto = len([e for e in todos_eventos if e['impacto'] == 'alto'])
-            metric_card("alto impacto", str(total_alto), f"de {len(todos_eventos)} eventos", "amber")
-        with mc3:
-            total_earnings = len([e for e in todos_eventos if e['categoria'] == 'earnings'])
-            metric_card("earnings portfólio", str(total_earnings), f"nos próximos {janela_dias}d", "info")
+        if not eventos_macro:
+            empty_state("📅", "sem eventos", f"nenhum evento macro nos próximos {janela_dias} dias.")
+        else:
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                prox_7 = len([e for e in eventos_macro if e['data'] <= hoje + datetime.timedelta(days=7)])
+                metric_card("próximos 7 dias", str(prox_7), "" if prox_7 > 0 else "nenhum", "bear" if prox_7 > 0 else "muted")
+            with mc2:
+                total_alto = len([e for e in eventos_macro if e['impacto'] == 'alto'])
+                metric_card("alto impacto", str(total_alto), f"de {len(eventos_macro)} eventos", "amber")
+            for ev in eventos_macro:
+                _render_evento_card(ev, key_prefix=f"macro_{ev.get('_uid','')}")
 
-        st.markdown("---")
+    # ── Tab: Earnings ───────────────────────────────────────────────────────
+    with cal_tab2:
+        status_card(
+            "cobertura",
+            "earnings dates de todas as empresas disponíveis no FMP. cache de 1h.",
+            tipo="info"
+        )
+        ec1, ec2 = st.columns([3, 1])
+        with ec1:
+            filtro_ticker = st.text_input("filtrar ticker (opcional):", placeholder="ex: AAPL, MSFT...", key="cal_filtro_ticker")
+        with ec2:
+            janela_earn = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela_earnings")
 
-        # timeline de eventos agrupados por semana
-        section_title("🗓️ timeline de eventos")
+        hoje_earn = datetime.date.today()
+        limite_earn = hoje_earn + datetime.timedelta(days=janela_earn)
 
-        semana_atual = None
-        for evento in todos_eventos:
-            semana = evento['data'].isocalendar()[1]
-            ano = evento['data'].year
-            chave_semana = f"{ano}-{semana}"
+        with st.spinner("buscando earnings dates via FMP..."):
+            eventos_earnings = buscar_earnings_calendario(
+                data_fim_str=limite_earn.strftime("%Y-%m-%d"),
+            )
 
-            if chave_semana != semana_atual:
-                semana_atual = chave_semana
-                inicio_semana = evento['data'] - datetime.timedelta(days=evento['data'].weekday())
-                dias_ate = (inicio_semana - hoje).days
-                if dias_ate <= 0:
-                    label_semana = "🔴 esta semana"
-                elif dias_ate <= 7:
-                    label_semana = "🟡 próxima semana"
-                else:
-                    label_semana = f"📆 semana de {inicio_semana.strftime('%d/%m')}"
-                st.markdown(f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.1em; margin:16px 0 4px 0; border-bottom:1px solid var(--border-subtle); padding-bottom:4px;">{label_semana}</div>', unsafe_allow_html=True)
+        # earnings events have string dates; compare as strings
+        limite_str = limite_earn.strftime("%Y-%m-%d")
+        eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_str]
 
-            cat = evento['categoria']
-            cor_cat = {"brasil": "#009C3B", "eua": "#3C3B6E", "earnings": "#FF9900"}.get(cat, "#555")
-            icone_imp = {"alto": "🔴", "medio": "🟡", "baixo": "🟢"}.get(evento['impacto'], "⚪")
-            label_cat = {"brasil": "BR", "eua": "EUA", "earnings": "EARN"}.get(cat, cat.upper())
-            detalhe = evento.get('detalhe', '')
+        if filtro_ticker:
+            _ft = filtro_ticker.strip().upper().replace(".SA", "")
+            eventos_earnings = [e for e in eventos_earnings if _ft in e.get("ticker", "").upper()]
 
-            dias_evento = (evento['data'] - hoje).days
-            if dias_evento == 0:
-                data_label = "hoje"
-                cor_data = "var(--bear)"
-            elif dias_evento == 1:
-                data_label = "amanhã"
-                cor_data = "var(--accent)"
-            else:
-                data_label = evento['data'].strftime('%d/%m/%Y')
-                cor_data = "var(--text-muted)"
-
-            ev1, ev2 = st.columns([5, 1])
-            with ev1:
-                texto_evento = f"{evento['evento']}"
-                if detalhe:
-                    texto_evento += f" | {detalhe}"
-                st.markdown(
-                    f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-left:3px solid {cor_cat}; border-radius:4px; padding:10px 14px; margin-bottom:6px;">'
-                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{label_cat}</span>'
-                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:var(--border-normal,#333); margin:0 6px;">|</span>'
-                    f'<span style="font-family:var(--font-ui,sans-serif); font-size:0.85rem; color:var(--text-primary);">{texto_evento}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-            with ev2:
-                st.markdown(
-                    f'<div style="text-align:right; padding-top:12px;">'
-                    f'<span style="font-family:var(--font-data,monospace); font-size:0.75rem; color:{cor_data};">{data_label}</span>'
-                    f' {icone_imp}</div>',
-                    unsafe_allow_html=True
-                )
-
-        st.markdown("---")
-
-        if st.button("🧠 ia: analisar o calendário e identificar riscos", type="primary", use_container_width=True):
-            with st.spinner("analisando eventos e gerando briefing..."):
-                _eventos_txt = "\n".join([
-                    f"{e['data'].strftime('%d/%m/%Y')} | {e['categoria'].upper()} | "
-                    f"{e['evento']} | impacto: {e['impacto']}"
-                    for e in todos_eventos[:15]
-                ])
-                _prompt_cal = (
-                    f"calendário dos próximos {janela_dias} dias:\n"
-                    f"{_eventos_txt}\n\n"
-                    "responda em 4 bullet points em português, letra minúscula:\n"
-                    "1. evento de maior impacto potencial e o que monitorar.\n"
-                    "2. como o calendário pode afetar o mercado brasileiro especificamente.\n"
-                    "3. qual posicionamento defensivo faz sentido antes dos eventos críticos.\n"
-                    "4. após os eventos, quais serão os principais gatilhos para reposicionamento."
-                )
-                chamar_ia(
-                    prompt_usuario = _prompt_cal,
-                    system         = SYSTEM_MACRO,
-                    max_tokens     = 600,
-                    temperatura    = 0.3,
-                    stream         = True,
-                )
+        if not eventos_earnings:
+            empty_state("📊", "sem earnings", f"nenhum earnings nos próximos {janela_earn} dias.")
+        else:
+            ec_a, ec_b, ec_c = st.columns(3)
+            with ec_a:
+                prox7_str = (hoje_earn + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+                prox_7 = len([e for e in eventos_earnings if e['data'] <= prox7_str])
+                metric_card("próximos 7 dias", str(prox_7), "" if prox_7 > 0 else "nenhum", "bear" if prox_7 > 0 else "muted")
+            with ec_b:
+                com_est = len([e for e in eventos_earnings if e.get('eps_est') is not None])
+                metric_card("com estimativa", str(com_est), f"de {len(eventos_earnings)}", "amber")
+            with ec_c:
+                metric_card("total na janela", str(len(eventos_earnings)), f"{janela_earn} dias", "muted")
+            for ev in eventos_earnings:
+                _render_evento_card(ev, key_prefix=f"earn_{ev.get('ticker','')}_{ev.get('data','')}")
 
 with tab_overlay:
     st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")
