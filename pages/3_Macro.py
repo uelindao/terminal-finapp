@@ -1745,7 +1745,7 @@ with tab_global:
                 _custo_eq = ((_real_yield_us or 0) / 100 + _ERP_US) * 100 if _real_yield_us is not None else None
                 metric_card(
                     "custo de equity us", f"{_custo_eq:.1f}%" if _custo_eq else "n/d",
-                    f"10y real {_real_yield_us:.1f}% + erp {_ERP_US*100:.0f}%",
+                    f"10y real {_real_yield_us:.1f}% + erp {_ERP_US*100:.0f}%" if _real_yield_us is not None else "dados insuficientes",
                     "bear"
                 )
             with _pj3:
