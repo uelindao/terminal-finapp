@@ -3315,7 +3315,7 @@ with tab_calendar:
 
         # earnings events have string dates; compare as strings
         limite_str = limite_earn.strftime("%Y-%m-%d")
-        eventos_earnings = [e for e in eventos_earnings if e['data'] <= limite_str]
+        eventos_earnings = [e for e in eventos_earnings if e.get('data') and e['data'] <= limite_str]
 
         if filtro_ticker:
             _ft = filtro_ticker.strip().upper().replace(".SA", "")
