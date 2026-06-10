@@ -1004,7 +1004,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
             detalhe += f" | {hora_label}"
 
         eventos.append({
-            "data":      data_ev,
+            "data":      data_ev.strftime("%Y-%m-%d"),
             "evento":    f"{ev['ticker']} — divulgação de resultados",
             "categoria": "earnings",
             "impacto":   "alto",
