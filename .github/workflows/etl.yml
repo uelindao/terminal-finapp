@@ -1,6 +1,10 @@
 name: ETL Financeiro — Sincronizacao de Dados
 
 on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
   schedule:
     # 06:00 UTC = 03:00 BRT — fundamentos BR (antes da abertura)
     - cron: '0 6 * * *'
@@ -101,3 +105,26 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+
+  test:
+    name: Testes Automatizados
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Executar testes
+        run: python -m pytest tests/ -v --tb=short

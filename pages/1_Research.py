@@ -337,7 +337,8 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                             raw = info.get(yf_key)
                             if raw is not None and yf_key == 'dividendYield':
                                 raw_f = float(raw)
-                                v = raw_f if raw_f > 0.30 else raw_f * 100
+                                # yfinance retorna decimal (0.035 = 3.5%). Sempre ×100.
+                                v = raw_f * 100 if raw_f <= 0.50 else None
                             else:
                                 v = (float(raw) * multiplier) if raw is not None else None
                         try:
@@ -675,7 +676,8 @@ c1, c2, c3, c4 = st.columns(4)
 if is_fii:
     pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
     _dy_raw_fii = safe_float(info_dict.get('dividendYield', 0))
-    _dy_info_fii = _dy_raw_fii if _dy_raw_fii and _dy_raw_fii > 0.30 else (_dy_raw_fii * 100 if _dy_raw_fii else 0)
+    # yfinance retorna decimal. Sempre ×100.
+    _dy_info_fii = (_dy_raw_fii * 100 if _dy_raw_fii and _dy_raw_fii <= 0.50 else 0)
     dy = safe_float(cache_d.get('dy%')) or _dy_info_fii
     mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
     assets = safe_float(info_dict.get('totalAssets'))
@@ -739,7 +741,8 @@ else:
     roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
     mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
     _dy_raw_us = safe_float(info_dict.get('dividendYield', 0))
-    _dy_info_us = _dy_raw_us if _dy_raw_us and _dy_raw_us > 0.30 else (_dy_raw_us * 100 if _dy_raw_us else 0)
+    # yfinance retorna decimal. Sempre ×100.
+    _dy_info_us = (_dy_raw_us * 100 if _dy_raw_us and _dy_raw_us <= 0.50 else 0)
     dy = safe_float(cache_d.get('dy%')) or _dy_info_us
     with c1:
         metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️", destaque=True)

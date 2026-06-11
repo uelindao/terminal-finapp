@@ -422,29 +422,29 @@ def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
                                 earnings_growth = (float(v_atual) - float(v_ant)) / abs(float(v_ant))
                             break
 
-        # --- Pontuação de receita (máx 8pts) ---
+        # --- Pontuação de receita (máx 7pts) ---
         if rev_growth is not None:
             if rev_growth > 0.15:
-                score_cresc += 8
+                score_cresc += 7
             elif rev_growth > 0.05:
-                score_cresc += 5
+                score_cresc += 4
             elif rev_growth < 0:
-                score_cresc -= 5
+                score_cresc -= 4
                 alertas_cresc.append("⚠️ receita em queda (sinal de deterioração).")
 
-        # --- Pontuação de lucro (máx 7pts) ---
+        # --- Pontuação de lucro (máx 5pts) ---
         if earnings_growth is not None:
             if earnings_growth > 0.20:
-                score_cresc += 7
+                score_cresc += 5
             elif earnings_growth > 0.05:
-                score_cresc += 4
+                score_cresc += 3
             elif earnings_growth < 0 and rev_growth is not None and rev_growth < 0:
                 alertas_cresc.append("🚨 compressão de margem e queda de receita simultâneas.")
 
         # Qualidade do crescimento: receita caindo mas margem expandindo
         if rev_growth is not None and rev_growth < 0 \
            and earnings_growth is not None and earnings_growth > 0.10:
-            score_cresc += 4
+            score_cresc += 3
             alertas_cresc.append(
                 "💡 receita em queda mas lucro crescendo — "
                 "possível reestruturação e expansão de margem."
@@ -453,7 +453,7 @@ def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
         # Penaliza compressão de margem mesmo com receita crescendo
         if rev_growth is not None and rev_growth > 0.05 \
            and earnings_growth is not None and earnings_growth < -0.10:
-            score_cresc -= 4
+            score_cresc -= 3
             alertas_cresc.append(
                 "⚠️ receita crescendo mas lucro caindo — "
                 "compressão de margem. crescimento de baixa qualidade."
@@ -531,13 +531,13 @@ def calcular_roic(
                 wacc_ref = max(6.0, min(25.0, wacc_ref))
 
                 if roic_valor > wacc_ref * 1.5:
-                    score_roic = 12
-                elif roic_valor > wacc_ref:
                     score_roic = 8
+                elif roic_valor > wacc_ref:
+                    score_roic = 5
                 elif roic_valor >= 0:
-                    score_roic = 3
+                    score_roic = 2
                 else:
-                    score_roic = -5   # alerta adicionado pelo chamador
+                    score_roic = -4   # alerta adicionado pelo chamador
 
     except Exception as e:
         logger.warning(f"[health_engine] falha ao calcular ROIC: {e}")
@@ -570,17 +570,17 @@ def calcular_momentum(hist: pd.DataFrame) -> tuple[int, dict, list]:
     alertas_mom: list[str] = []
 
     if retorno_momentum > 20:
-        score_mom = 10
+        score_mom = 8
         alertas_mom.append(f"✅ Momentum forte (12-1m: +{retorno_momentum:.1f}%)")
     elif retorno_momentum > 8:
-        score_mom = 6
+        score_mom = 5
     elif retorno_momentum > 0:
-        score_mom = 3
+        score_mom = 2
     elif retorno_momentum < -20:
-        score_mom = -8
+        score_mom = -6
         alertas_mom.append(f"🚨 Momentum negativo severo (12-1m: {retorno_momentum:.1f}%)")
     elif retorno_momentum < -8:
-        score_mom = -4
+        score_mom = -3
         alertas_mom.append(f"⚠️ Momentum negativo (12-1m: {retorno_momentum:.1f}%)")
 
     detalhes = {
@@ -756,7 +756,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
         pvp = safe_float(dados_base.get('p/vp')) or safe_float(info.get('priceToBook'))
         _dy_raw_info = safe_float(info.get('dividendYield'))
-        _dy_from_info = (_dy_raw_info if _dy_raw_info and _dy_raw_info > 0.30 else (_dy_raw_info * 100 if _dy_raw_info else 0))
+        # yfinance retorna decimal (0.035 = 3.5%). Sempre multiplicar por 100.
+        _dy_from_info = (_dy_raw_info * 100 if _dy_raw_info and _dy_raw_info <= 0.50 else 0)
         dy = safe_float(dados_base.get('dy%')) or _dy_from_info
         if dy is not None:
             try:
@@ -800,13 +801,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         if preco_atual < mm200:
             dist_mm200 = ((preco_atual / float(mm200)) - 1) * 100
             if dist_mm200 < -15:
-                penalidade_tec = -8
+                penalidade_tec = -6
                 alertas.append(
                     f"📉 tendência de baixa severa "
                     f"({dist_mm200:.1f}% abaixo da MM200)."
                 )
             else:
-                penalidade_tec = -4
+                penalidade_tec = -3
                 alertas.append(
                     f"⚠️ preço abaixo da MM200 "
                     f"({dist_mm200:.1f}%). monitorar tendência."
@@ -839,13 +840,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             beta_val = float(beta_val) if beta_val is not None else 1.0
 
             if beta_val > 1.5:
-                penalidade_vix = -10
+                penalidade_vix = -8
                 alertas.append(
                     f"⚠️ ativo de alto beta ({beta_val:.2f}) "
                     f"em stress global (VIX alto). risco elevado."
                 )
             elif beta_val > 1.2:
-                penalidade_vix = -6
+                penalidade_vix = -5
                 alertas.append(
                     f"⚠️ ativo volátil (beta {beta_val:.2f}) "
                     f"em cenário de stress (VIX alto)."
@@ -1013,20 +1014,20 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             ev_ebitda = safe_float(dados_base.get('ev/ebitda')) or safe_float(info.get('enterpriseToEbitda'))
             debt_equity = safe_float(info.get('debtToEquity'))
 
-            # --- Qualidade e Rentabilidade (máx 24pts) ---
+            # --- Qualidade e Rentabilidade (máx 15pts) ---
             score_q = 0
             if roe is not None:
-                if roe > 20: score_q += 12
-                elif roe > 10: score_q += 8
-                elif roe > 0: score_q += 4
+                if roe > 20: score_q += 8
+                elif roe > 10: score_q += 5
+                elif roe > 0: score_q += 2
                 else: alertas.append("⚠️ empresa destruindo valor (roe negativo).")
 
             if margem is not None:
-                if margem > 15: score_q += 12
-                elif margem > 5: score_q += 8
+                if margem > 15: score_q += 7
+                elif margem > 5: score_q += 5
                 elif margem < 0: alertas.append("⚠️ margem líquida negativa.")
 
-            # --- Valuation Adaptativo com múltiplos setoriais (máx 26pts) ---
+            # --- Valuation Adaptativo com múltiplos setoriais (máx 15pts) ---
             if setor_yf in MULTIPLOS_SETOR:
                 # setor identificado — usa thresholds específicos do setor
                 limite_pl_bom, limite_pl_medio, limite_pvp_bom, limite_pvp_medio = MULTIPLOS_SETOR[setor_yf]
@@ -1039,13 +1040,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
             score_v = 0
             if pl is not None and pl > 0:
-                if pl <= limite_pl_bom:    score_v += 13
-                elif pl <= limite_pl_medio: score_v += 8
+                if pl <= limite_pl_bom:    score_v += 8
+                elif pl <= limite_pl_medio: score_v += 5
                 elif pl > limite_pl_medio:  alertas.append(f"⚠️ valuation esticado (p/l de {pl:.1f}).")
 
             if pvp is not None and pvp > 0:
-                if pvp <= limite_pvp_bom:    score_v += 13
-                elif pvp <= limite_pvp_medio: score_v += 8
+                if pvp <= limite_pvp_bom:    score_v += 7
+                elif pvp <= limite_pvp_medio: score_v += 5
                 elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
             # ── Net Debt / EBITDA — métrica complementar de alavancagem ──────
@@ -1095,15 +1096,15 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                         _lim_ag   = 4.5 if is_br else 5.0
 
                         if nd_ebitda < 0:
-                            score_nd = 8
+                            score_nd = 5
                             alertas.append(
                                 f"✅ caixa líquido positivo "
                                 f"(net debt/ebitda: {nd_ebitda:.1f}x)."
                             )
                         elif nd_ebitda <= _lim_cons:
-                            score_nd = 6
+                            score_nd = 4
                         elif nd_ebitda <= _lim_mod:
-                            score_nd = 3
+                            score_nd = 2
                         elif nd_ebitda <= _lim_ag:
                             score_nd = 0
                             alertas.append(
@@ -1122,7 +1123,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             except Exception:
                 pass
 
-            # --- Solvência e Risco (máx 20pts, D/E mais rigoroso em B3 com juros altos) ---
+            # --- Solvência e Risco (máx 12pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
             penalizacao_divida = 2 if (is_br and juros_altos_br) else 1
 
@@ -1130,20 +1131,20 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 limite_de_bom   = 30 if (is_br and juros_altos_br) else 50
                 limite_de_medio = 100 if (is_br and juros_altos_br) else 120
 
-                if debt_equity < limite_de_bom: score_r += 20
-                elif debt_equity < limite_de_medio: score_r += 10
+                if debt_equity < limite_de_bom: score_r += 12
+                elif debt_equity < limite_de_medio: score_r += 6
                 elif debt_equity > 150:
                     alertas.append(f"🚨 risco de solvência (dívida alta, d/e: {debt_equity:.0f}).")
-                    score_r -= (10 * penalizacao_divida)
+                    score_r -= (6 * penalizacao_divida)
             elif ev_ebitda is not None and ev_ebitda > 0:
                 limite_ev_bom   = 12 if is_us else 8
                 limite_ev_medio = 20 if is_us else 14
 
-                if ev_ebitda <= limite_ev_bom: score_r += 20
-                elif ev_ebitda <= limite_ev_medio: score_r += 10
+                if ev_ebitda <= limite_ev_bom: score_r += 12
+                elif ev_ebitda <= limite_ev_medio: score_r += 6
                 elif ev_ebitda > limite_ev_medio:
                     alertas.append(f"🚨 alavancagem alta (ev/ebitda: {ev_ebitda:.1f}).")
-                    score_r -= (5 * penalizacao_divida)
+                    score_r -= (3 * penalizacao_divida)
             
             score_r_final = max(0, score_r)
 
@@ -1177,11 +1178,11 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             icr = _ebit_icr / _int_exp_icr
 
                             if icr >= 5.0:
-                                score_icr = 8
-                            elif icr >= 3.0:
                                 score_icr = 5
+                            elif icr >= 3.0:
+                                score_icr = 3
                             elif icr >= 1.5:
-                                score_icr = 2
+                                score_icr = 1
                             elif icr >= 1.0:
                                 score_icr = 0
                                 alertas.append(
@@ -1202,23 +1203,23 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             except Exception:
                 pass
 
-            # --- Geração de Caixa / Yield Adaptativo ---
+            # --- Geração de Caixa / Yield Adaptativo (máx 10pts) ---
             score_y = 0
             exigencia_yield = 2.5 if is_us else (6.0 if juros_altos_br else 4.0)
             
             if dy is not None:
-                if dy >= exigencia_yield: score_y += 20
-                elif dy >= (exigencia_yield / 2): score_y += 10
+                if dy >= exigencia_yield: score_y += 10
+                elif dy >= (exigencia_yield / 2): score_y += 5
                 elif dy == 0 and is_br: alertas.append("ℹ️ empresa não distribui proventos.")
 
             score_piotroski = 0
             if f_score >= 7:
-                score_piotroski = 15
+                score_piotroski = 10
                 alertas.append(f"✅ balanço de alta qualidade (piotroski f-score: {f_score}/9).")
             elif f_score >= 5:
-                score_piotroski = 8
+                score_piotroski = 5
             elif f_score <= 2 and f_detalhamento:
-                score_piotroski = -8
+                score_piotroski = -6
                 alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
 
             # --- Crescimento de Receita e Lucro (máx 15pts) ---
@@ -1246,16 +1247,16 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             # penalidade por dados de baixa qualidade
             penalidade_dados = 0
             if not dados_confiaveis and not is_us:
-                penalidade_dados = -10
+                penalidade_dados = -8
                 alertas.append(f"⚠️ dados fundamentalistas com qualidade baixa ({qualidade}%). score pode estar subestimado.")
 
             # penalidade por múltiplos fundamentais ausentes (P/L, P/VP, ROE, margem)
             _multiplos_presentes = sum(1 for v in [pl, pvp, roe, margem] if v is not None)
             if _multiplos_presentes == 0:
-                penalidade_dados -= 25
+                penalidade_dados -= 20
                 alertas.append("🚨 múltiplos fundamentais ausentes (p/l, p/vp, roe, margem). score penalizado.")
             elif _multiplos_presentes <= 1:
-                penalidade_dados -= 10
+                penalidade_dados -= 8
                 alertas.append(f"⚠️ poucos múltiplos disponíveis ({_multiplos_presentes}/4). score pode estar subestimado.")
 
             score = (

@@ -25,6 +25,10 @@ from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
+from utils.macro_supabase import (
+    carregar_fear_greed, salvar_fear_greed,
+    carregar_snapshot, salvar_snapshot,
+)
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -192,14 +196,22 @@ def puxar_historico_mestre():
                 df_global = _stale_ge
                 logger.warning("[macro] FRED: servindo cache expirado após exceção.")
 
-    # ── 3. Commodities — yfinance ─────────────────────────────────────────────
+    # ── 3. Commodities — yfinance (cache-first) ────────────────────────────────
     df_commodities = pd.DataFrame()
     try:
-        df_commodities = yf.download(
-            ['CL=F', 'GC=F'], start=inicio_10a, progress=False
-        )['Close']
-        if isinstance(df_commodities, pd.Series):
-            df_commodities = df_commodities.to_frame()
+        # Cache-first: tenta Supabase (6h TTL), senão baixa live
+        _cached_comm = carregar_snapshot("commodities_yf", max_age_days=1)
+        if _cached_comm is not None and not _cached_comm.empty:
+            df_commodities = _cached_comm
+            logger.info("[macro] commodities: servindo do cache Supabase.")
+        else:
+            df_commodities = yf.download(
+                ['CL=F', 'GC=F'], start=inicio_10a, progress=False
+            )['Close']
+            if isinstance(df_commodities, pd.Series):
+                df_commodities = df_commodities.to_frame()
+            if not df_commodities.empty:
+                salvar_snapshot("commodities_yf", df_commodities)
     except Exception as e:
         logger.error(f"[macro] Download de commodities falhou: {e}")
 
@@ -3400,8 +3412,20 @@ with tab_sentimento:
     tooltip("fear_greed")
 
     with st.spinner("calculando índices de sentimento..."):
-        _fg_eua = calcular_fear_greed()
-        _fg_br  = calcular_fear_greed_br()
+        # Cache-first: tenta Supabase (4h TTL), senão calcula live
+        _fg_eua = carregar_fear_greed("us", max_age_hours=4)
+        if _fg_eua is None:
+            _fg_eua = calcular_fear_greed()
+            salvar_fear_greed("us", _fg_eua.get('score', 50),
+                              _fg_eua.get('label', 'neutro'),
+                              _fg_eua.get('componentes', {}))
+
+        _fg_br = carregar_fear_greed("br", max_age_hours=4)
+        if _fg_br is None:
+            _fg_br = calcular_fear_greed_br()
+            salvar_fear_greed("br", _fg_br.get('score', 50),
+                              _fg_br.get('label', 'neutro'),
+                              _fg_br.get('scores', {}))
 
         _score_global = round(_fg_eua.get('score', 50) * 0.50 + _fg_br.get('score', 50) * 0.50)
         if _score_global >= 75:

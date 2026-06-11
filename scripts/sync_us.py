@@ -1,7 +1,7 @@
 """
 sync_us.py — ETL de ativos dos EUA
 Fontes: FMP (Financial Modeling Prep) + yfinance (fallback precos)
-FMP free tier: ~250 req/dia — suficiente para ~170 tickers US
+FMP free tier: ~500 req/dia (2 chaves × 250). Usa 2 calls/ticker (profile + ratios-ttm) = ~466 calls
 
 Execucao:
   SUPABASE_URL=... SUPABASE_SERVICE_KEY=... FMP_API_KEY=... python scripts/sync_us.py
@@ -86,12 +86,13 @@ def fetch_fmp_ratios(ticker: str) -> dict | None:
 
 
 def transform_fmp(ticker: str) -> dict | None:
-    """Transforma dados FMP em dict padrao para fundamentals_cache."""
+    """Transforma dados FMP em dict padrao para fundamentals_cache.
+    Usa apenas profile + ratios-ttm (2 chamadas/ticker) para respeitar free tier.
+    """
     profile = fetch_fmp_profile(ticker)
-    metrics = fetch_fmp_key_metrics(ticker)
     ratios = fetch_fmp_ratios(ticker)
 
-    if not profile and not ratios and not metrics:
+    if not profile and not ratios:
         return None
 
     data = {}
@@ -113,22 +114,15 @@ def transform_fmp(ticker: str) -> dict | None:
         data["margem%"] = margem
         data["ev/ebitda"] = _sf(ratios.get("enterpriseValueMultipleTTM")
                                  or ratios.get("enterpriseValueOverEBITDATTM"))
-
-    if metrics:
-        data.setdefault("ev/ebitda",
-                        _sf(metrics.get("evToEBITDA")
-                            or metrics.get("enterpriseValueOverEBITDA")))
-        roe_m = _sf(metrics.get("returnOnEquity") or metrics.get("roe"))
-        if roe_m is not None:
-            if abs(roe_m) < 2:
-                roe_m = roe_m * 100
-            data["roe%"] = roe_m
-
-    # DY is already stored as-is from FMP /stable/ (percentage format, e.g. 0.36 for 0.36%)
+        roe_r = _sf(ratios.get("returnOnEquity"))
+        if roe_r is not None:
+            if abs(roe_r) < 2:
+                roe_r = roe_r * 100
+            data["roe%"] = roe_r
 
     data["ticker"] = ticker
     data["data_quality"] = 80
-    data["_raw"] = {"profile": profile, "metrics": metrics, "ratios": ratios}
+    data["_raw"] = {"profile": profile, "ratios": ratios}
 
     return data
 

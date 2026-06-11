@@ -193,3 +193,75 @@ def listar_snapshots() -> list[dict]:
     except Exception as e:
         logger.warning(f"[macro_supabase] listar_snapshots falhou: {e}")
         return []
+
+
+# ─── Fear & Greed Cache ──────────────────────────────────────────────────────
+
+def salvar_fear_greed(market: str, score: int, label: str, componentes: dict) -> bool:
+    """
+    Salva o resultado do Fear & Greed Index no Supabase.
+    market: 'us' ou 'br'
+    Retorna True em sucesso, False em falha silenciosa.
+    """
+    sb = _sb()
+    if sb is None:
+        return False
+
+    try:
+        sb.table("fear_greed_cache").upsert(
+            {
+                "market":       market,
+                "score":        int(score),
+                "label":        label,
+                "componentes":  componentes,
+            },
+            on_conflict="market",
+        ).execute()
+        logger.info(f"[macro_supabase] fear_greed '{market}' salvo (score={score}).")
+        return True
+    except Exception as e:
+        logger.warning(f"[macro_supabase] salvar_fear_greed '{market}' falhou: {e}")
+        return False
+
+
+def carregar_fear_greed(market: str, max_age_hours: int = 4) -> dict | None:
+    """
+    Carrega o Fear & Greed Index do cache do Supabase.
+    Retorna None se não encontrar, expirado (> max_age_hours) ou Supabase offline.
+    """
+    sb = _sb()
+    if sb is None:
+        return None
+
+    try:
+        cutoff = (
+            datetime.datetime.utcnow() - datetime.timedelta(hours=max_age_hours)
+        ).isoformat()
+
+        resp = (
+            sb.table("fear_greed_cache")
+            .select("score, label, componentes, updated_at")
+            .eq("market", market)
+            .gte("updated_at", cutoff)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if not resp.data:
+            return None
+
+        row = resp.data[0]
+        componentes = row.get("componentes", {})
+        if isinstance(componentes, str):
+            componentes = json.loads(componentes)
+
+        return {
+            "score":       row["score"],
+            "label":       row["label"],
+            "componentes": componentes,
+        }
+
+    except Exception as e:
+        logger.warning(f"[macro_supabase] carregar_fear_greed '{market}' falhou: {e}")
+        return None

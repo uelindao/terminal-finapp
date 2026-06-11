@@ -140,11 +140,11 @@ def buscar_dados_us(ticker: str) -> dict:
         res['ev/ebitda']  = info.get('enterpriseToEbitda')
         _dy_raw = info.get('dividendYield') or info.get('trailingAnnualDividendYield')
         if _dy_raw is not None:
-            _dy_raw = float(_dy_raw)
-            if _dy_raw > 0.30:
-                res['dy%'] = round(_dy_raw, 2)
-            else:
-                res['dy%'] = round(_dy_raw * 100, 2)
+            _dy_v = float(_dy_raw)
+            # yfinance retorna decimal (0.035 = 3.5%). Sempre multiplicar por 100.
+            # Sanity cap: > 50% é provavelmente dado errado.
+            _dy_pct = _dy_v * 100
+            res['dy%'] = round(_dy_pct, 2) if _dy_pct <= 50 else None
         else:
             res['dy%'] = None
         res['margem%']    = (info.get('profitMargins', 0) or 0) * 100
