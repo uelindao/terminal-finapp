@@ -21,6 +21,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.logger import get_logger
+logger = get_logger(__name__)
+
 from scripts.supabase_helper import (
     upsert_macro, log_etl_start, log_etl_finish,
 )
@@ -156,8 +159,8 @@ def fetch_bcb():
                     _ipca_12m = ((1 + _ipca_raw / 100).rolling(12).apply(
                         lambda x: x.prod(), raw=True) - 1) * 100
                     df_br_hist["IPCA_12M"] = _ipca_12m
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"falha ao calcular IPCA_12M acumulado: {e}")
             _salvar_snapshot_historico("bcb_br", df_br_hist)
         else:
             print("  [BCB hist] nenhum dado histórico obtido.")
@@ -233,8 +236,8 @@ def fetch_fred():
             if "CPIAUCSL" in df_global_hist.columns:
                 try:
                     df_global_hist["CPI_YOY"] = df_global_hist["CPIAUCSL"].pct_change(12) * 100
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"falha ao calcular CPI_YOY: {e}")
             _salvar_snapshot_historico("fred_global", df_global_hist)
         else:
             print("  [FRED hist] nenhum dado histórico obtido.")

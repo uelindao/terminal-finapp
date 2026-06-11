@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.logger import get_logger
+logger = get_logger(__name__)
+
 from scripts.supabase_helper import (
     upsert_fundamentals, upsert_price, log_etl_start, log_etl_finish,
 )
@@ -158,8 +161,8 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                     rs = gain / loss.replace(0, float('nan'))
                     rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs.dropna()) >= 14 else 50.0
                     price_data["rsi_14"] = round(rsi, 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"RSI indisponível para {ticker}: {e}")
 
                 upsert_price(ticker, price_data)
                 hist_dict[ticker] = s.to_frame(name='Close')

@@ -93,7 +93,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                             val = val.dropna()
                             return float(val.iloc[0]) if not val.empty else None
                         return float(val)
-                except Exception:
+                except (TypeError, ValueError) as e:
+                    logger.debug(f"[health_engine] campo '{nome}' não convertível: {e}")
                     continue
             return None
 
@@ -103,7 +104,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
             cf    = acao.cashflow if acao else None
             fin_q = acao.quarterly_financials if acao else None
             bal_q = acao.quarterly_balance_sheet if acao else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao carregar financials/balance/cashflow: {e}")
             fin = bal = cf = fin_q = bal_q = None
 
         # Total Assets (dois períodos)
@@ -120,8 +122,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                     total_assets_atual = float(row.iloc[0])
                 if row is not None and len(row) >= 2:
                     total_assets_ant   = float(row.iloc[1])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao extrair total_assets: {e}")
 
         # Net Income
         net_income = _get_val_financials(
@@ -148,8 +150,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                     )
                     if ebit_proxy is not None:
                         net_income = ebit_proxy * (1 - 0.34)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao ajustar net_income via other_income: {e}")
 
         # Operating Cash Flow
         op_cashflow = _get_val_financials(
@@ -174,12 +176,12 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                         break
                 if row_ni is not None and len(row_ni) >= 2:
                     ni_ant = float(row_ni.iloc[1])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao extrair ni_ant: {e}")
             if ni_ant is not None and total_assets_ant and total_assets_ant > 0:
                 roa_ant = ni_ant / total_assets_ant
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao calcular ROA: {e}")
 
         # Long Term Debt
         debt_atual = _get_val_financials(
@@ -197,8 +199,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                     if len(row_d) >= 2:
                         debt_ant = float(row_d.iloc[1])
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao extrair debt_ant: {e}")
 
         # Current Ratio
         current_ratio_atual = None
@@ -222,8 +224,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                                     current_ratio_ant = ca2 / cl2
                             break
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao calcular current_ratio: {e}")
 
         # Shares outstanding (para F7 — diluição)
         shares_atual = _get_val_financials(
@@ -238,8 +240,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                     if len(row_s) >= 2:
                         shares_ant = float(row_s.iloc[1])
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao extrair shares_ant: {e}")
 
         # Gross Margin (atual e anterior)
         gross_margin_atual = None
@@ -263,8 +265,8 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                                     gross_margin_ant = g2 / r2
                             break
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao calcular gross_margin: {e}")
 
         # Asset Turnover (F9)
         asset_turnover_atual = None
@@ -279,34 +281,34 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                     if len(row_r) >= 2 and total_assets_ant and total_assets_ant > 0:
                         asset_turnover_ant = float(row_r.iloc[1]) / total_assets_ant
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao calcular asset_turnover: {e}")
 
         # ── Critérios Piotroski com try/except individual ─────────────
         f1 = f2 = f3 = f4 = f5 = f6 = f7 = f8 = f9 = 0
 
         try:
             f1 = 1 if (roa_atual is not None and roa_atual > 0) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F1 (ROA): {e}")
 
         try:
             f2 = 1 if (op_cashflow is not None and op_cashflow > 0) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F2 (FCF): {e}")
 
         try:
             f3 = 1 if (roa_atual and roa_ant and roa_atual > roa_ant) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F3 (ROA cresc): {e}")
 
         try:
             if (op_cashflow and net_income and
                     total_assets_atual and total_assets_atual > 0):
                 accrual = op_cashflow / total_assets_atual
                 f4 = 1 if accrual > (net_income / total_assets_atual) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F4 (qualidade lucro): {e}")
 
         # Empresas financeiras são estruturalmente alavancadas — F5 e F6 distorcem
         _setor_lower  = setor.lower()
@@ -324,34 +326,35 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
                 _lev_atual = (debt_atual / total_assets_atual) if debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
                 _lev_ant   = (debt_ant / total_assets_ant) if debt_ant is not None and total_assets_ant is not None and total_assets_ant > 0 else None
                 f5 = 1 if _lev_atual is not None and _lev_ant is not None and _lev_atual < _lev_ant else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao avaliar F5 (dívida): {e}")
             try:
                 _cr_atual = current_ratio_atual
                 _cr_ant   = current_ratio_ant
                 f6 = 1 if _cr_atual is not None and _cr_ant is not None and _cr_atual > _cr_ant else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao avaliar F6 (liquidez): {e}")
 
         try:
             if shares_atual and shares_ant:
                 f7 = 1 if shares_atual <= shares_ant * 1.01 else 0
             else:
                 f7 = 1
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F7 (diluição): {e}")
             f7 = 1
 
         try:
             f8 = 1 if (gross_margin_atual and gross_margin_ant and
                        gross_margin_atual > gross_margin_ant) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F8 (margem bruta): {e}")
 
         try:
             f9 = 1 if (asset_turnover_atual and asset_turnover_ant and
                        asset_turnover_atual > asset_turnover_ant) else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[health_engine] falha ao avaliar F9 (giro ativos): {e}")
 
         _criterios = [f1, f2, f3, f4, f5, f6, f7, f8, f9]
         _criterios_validos = [c for c in _criterios if c is not None]
@@ -609,8 +612,8 @@ def _buscar_yield_ntnb() -> float:
             val = float(df['ntnb'].dropna().iloc[-1])
             if 3.0 <= val <= 15.0:   # sanidade
                 return round(val, 2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[health_engine] falha ao buscar yield NTN-B via BCB: {e}")
     return 6.5   # fallback conservador
 
 
@@ -702,8 +705,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                         idade = (datetime.now(timezone.utc) - updated).total_seconds()
                         if idade < 86400 and h.get('score', 0) > 50:
                             return {'score': h['score'], 'alertas': [], 'status': 'cached'}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao ler cache de health scores: {e}")
 
         cache = get_todos_fundamentos_cache()
         dados_base = cache.get(ticker, {})
@@ -834,7 +837,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             _cov = _df_beta.cov().iloc[0, 1]
                             _var = _df_beta.iloc[:, 1].var()
                             beta_val = _cov / _var if _var > 0 else 1.0
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[health_engine] falha ao calcular beta para {ticker}: {e}")
                     beta_val = 1.0
 
             beta_val = float(beta_val) if beta_val is not None else 1.0
@@ -932,8 +936,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                         ipca_atual = st.session_state.get(
                             "macro_context", {}
                         ).get("ipca", 4.5)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[health_engine] falha ao ler ipca do session_state: {e}")
 
                     dy_real = ((1 + dy_f/100) / (1 + ipca_atual/100) - 1) * 100
                     spread = dy_real - yield_ntnb
@@ -983,7 +987,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             score += score_pvp + score_y
             try:
                 _seg_fii = _detectar_segmento_fii(ticker, dados_base)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao detectar segmento FII: {e}")
                 _seg_fii = "fii"
             breakdown = {
                 f"Valuation P/VP ({_seg_fii})":   score_pvp,
@@ -1120,8 +1125,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             )
 
                         breakdown['Net Debt / EBITDA'] = f"{nd_ebitda:.1f}x"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao calcular net debt/ebitda: {e}")
 
             # --- Solvência e Risco (máx 12pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
@@ -1200,8 +1205,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
                             breakdown['Interest Coverage (EBIT/JurosExp)'] = \
                                 f"{icr:.1f}x"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao calcular ICR: {e}")
 
             # --- Geração de Caixa / Yield Adaptativo (máx 10pts) ---
             score_y = 0
@@ -1341,10 +1346,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         try:
             _scores_db = get_health_scores()
             _score_atual = next((h['score'] for h in (_scores_db or []) if h['ticker'] == ticker), 0)
-        except Exception:
-            _score_atual = 0
-        _score_retorno = _score_atual if _score_atual > 50 else 50
+        except Exception as e_db:
+            logger.debug(f"[health_engine] falha ao buscar score do banco para {ticker}: {e_db}")
+            _score_atual = None
         payload = {"alertas": [f"erro no cálculo: {e}", f"traceback: {_tb[:300]}"], "breakdown": {}}
-        if _score_atual <= 50:  # só sobrescreve se não há score válido salvo
-            salvar_health_score(ticker, 50, payload)
-        return {'score': _score_retorno, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}
+        if _score_atual is None or _score_atual <= 0:
+            salvar_health_score(ticker, None, payload)
+        return {'score': None, 'alertas': [f"erro: {e}"], 'status': "⚪ ERRO"}

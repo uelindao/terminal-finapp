@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.logger import get_logger
+logger = get_logger(__name__)
+
 from scripts.supabase_helper import (
     upsert_fundamentals, upsert_price, log_etl_start, log_etl_finish,
 )
@@ -56,7 +59,8 @@ def _fmp_get(endpoint: str, params: dict | None = None) -> list | dict:
             resp = requests.get(f"{FMP_BASE}/{endpoint}", params=p, timeout=15)
             if resp.status_code == 200:
                 return resp.json()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"FMP key falhou para {endpoint}: {e}, tentando próxima")
             continue
     return []
 
@@ -198,8 +202,8 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                     rs = gain / loss.replace(0, float('nan'))
                     rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs.dropna()) >= 14 else 50.0
                     price_data["rsi_14"] = round(rsi, 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"RSI indisponível para {ticker}: {e}")
 
                 upsert_price(ticker, price_data)
                 # Captura hist para reuso no health score (evita re-download)
@@ -276,7 +280,8 @@ def main():
             'vix':    _mc.get('vix', {}).get('value', 15.0),
             'ipca':   _mc.get('ipca_12m', {}).get('value', 4.5),
         }
-    except Exception:
+    except Exception as e:
+        logger.debug(f"macro context usando padrão: {e}")
         macro_ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
 
     sync_health_scores(tickers_com_hist, hist_dict, macro_ctx)

@@ -56,7 +56,8 @@ def _periodo_from_date(date_str: str) -> str:
         dt = datetime.datetime.strptime(date_str[:10], "%Y-%m-%d")
         q  = (dt.month - 1) // 3 + 1
         return f"{dt.year}-Q{q}"
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[api_cache] falha ao parsear período de '{date_str}': {e}")
         return date_str[:7]
 
 
@@ -75,7 +76,8 @@ def _is_periodo_fechado(periodo: str | None) -> bool:
         if ano == ano_atual and q < q_atual:
             return True
         return False
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[api_cache] falha ao verificar período fechado '{periodo}': {e}")
         return False
 
 
@@ -258,8 +260,8 @@ class AlphaVantageKeyRotator:
                 keys.extend(plural)
             if singular and singular not in keys:
                 keys.append(singular)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[api_cache] falha ao ler chaves AV do secrets: {e}")
         self.keys = keys
         self._exhausted_keys: set[str] = set()
         self._today: str = str(datetime.date.today())
@@ -283,7 +285,8 @@ class AlphaVantageKeyRotator:
             if resp.data:
                 return int(resp.data[0]["n_requests"])
             return 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[api_cache] falha ao consultar uso da chave AV: {e}")
             return 0
 
     def _incrementar_uso(self, key: str) -> None:
@@ -297,7 +300,8 @@ class AlphaVantageKeyRotator:
                 "p_provider": "alpha_vantage",
                 "p_key_hash": h,
             }).execute()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[api_cache] RPC increment_api_usage falhou: {e}")
             # fallback: upsert convencional (não atômico, mas funciona para 1 usuário)
             try:
                 sb.table("api_key_usage").upsert(
@@ -309,8 +313,8 @@ class AlphaVantageKeyRotator:
                     },
                     on_conflict="provider,api_key_hash,data_uso"
                 ).execute()
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug(f"[api_cache] upsert fallback uso AV falhou: {e2}")
 
     def get_available_key(self) -> str | None:
         _hoje = str(datetime.date.today())
@@ -411,7 +415,8 @@ def get_tickers_cached_av() -> dict[str, int]:
             t = r["ticker"]
             result[t] = result.get(t, 0) + 1
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[api_cache] get_tickers_cached_av falhou: {e}")
         return {}
 
 
@@ -438,7 +443,8 @@ def get_tickers_cached_total() -> dict[str, int]:
             t = r["ticker"]
             result[t] = result.get(t, 0) + 1
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[api_cache] get_tickers_cached_total falhou: {e}")
         return {}
 
 
@@ -476,7 +482,8 @@ def get_sync_dashboard() -> dict:
         n_chaves_real = len(_lista) + (
             1 if _singular and _singular not in list(_lista) else 0
         )
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[api_cache] falha ao ler n_chaves AV do secrets: {e}")
         n_chaves_real = max(1, len(rotator.keys))
 
     # calcula uso somando todas as chaves configuradas para hoje
@@ -500,8 +507,8 @@ def get_sync_dashboard() -> dict:
                 .execute()
             )
             sincronizados_hoje = list({row["ticker"] for row in (r.data or [])})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[api_cache] falha ao consultar sincronizados hoje: {e}")
 
     acoes_por_dia = max(1, quota_total // 3)
     # Estimativa baseada nos que AINDA PRECISAM de AV (têm yfinance mas não AV)
