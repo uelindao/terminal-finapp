@@ -1391,12 +1391,65 @@ with tab_setorial:
                 _dc3.metric("pior score",    f"{_ds['score_min']:.0f}")
                 _dc4.metric("n° de ativos",  str(_ds['n_ativos']))
 
-                st.markdown(
-                    "**ativos com dados:** "
-                    + " · ".join([
-                        t.replace('.SA', '') for t in _ds['tickers']
-                    ]),
-                )
+                    st.markdown(
+                        "**ativos com dados:** "
+                        + " · ".join([
+                            t.replace('.SA', '') for t in _ds['tickers']
+                        ]),
+                    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("Força Relativa Setorial (US) — base 100, 12 meses")
+
+    from utils.setor_rs import calcular_rs_setorial
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _carregar_rs():
+        return calcular_rs_setorial()
+
+    rs = _carregar_rs()
+    if rs is None:
+        st.info("RS indisponível — falha em yfinance ou dados insuficientes.")
+    else:
+        _fig_rs = go.Figure()
+        _cc_rs = _chart_cores()
+        _cores_rs = [
+            _cc_rs["accent"], _cc_rs["info"], _cc_rs["bull"],
+            _cc_rs["amber"], _cc_rs["bear"],
+            "#8B5CF6", "#06B6D4", "#EC4899", "#A78BFA",
+            "#34D399", "#F472B6",
+        ]
+        for i, col in enumerate(rs.df_rs.columns):
+            _fig_rs.add_trace(go.Scatter(
+                x=rs.df_rs.index, y=rs.df_rs[col],
+                mode="lines", name=col,
+                line=dict(width=1.5, color=_cores_rs[i % len(_cores_rs)]),
+                hovertemplate=f"{col}<br>%{{x}}<br>RS: %{{y:.1f}}<extra></extra>",
+            ))
+        _fig_rs.add_hline(y=100, line_color=_cc_rs["border"], line_dash="dot", line_width=1)
+        _lay_rs = base_layout(height=420, title="RS lines — setores EUA vs SPY (base 100)")
+        _lay_rs.update(
+            yaxis=dict(title="RS (base 100)", gridcolor=_cc_rs["border"]),
+            xaxis=dict(gridcolor=_cc_rs["border"]),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.22, font=dict(size=9)),
+        )
+        _fig_rs.update_layout(**_lay_rs)
+        st.plotly_chart(_fig_rs, use_container_width=True, config={"responsive": True})
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        _rc1, _rc2, _rc3 = st.columns(3)
+        with _rc1:
+            st.markdown("**Ranking 3 meses**")
+            if rs.ranking_3m is not None:
+                st.dataframe(rs.ranking_3m, hide_index=True, use_container_width=True)
+        with _rc2:
+            st.markdown("**Ranking 6 meses**")
+            if rs.ranking_6m is not None:
+                st.dataframe(rs.ranking_6m, hide_index=True, use_container_width=True)
+        with _rc3:
+            st.markdown("**Ranking 12 meses**")
+            if rs.ranking_12m is not None:
+                st.dataframe(rs.ranking_12m, hide_index=True, use_container_width=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("Earnings Revisions Breadth (EUA, últimos 30 dias)")
