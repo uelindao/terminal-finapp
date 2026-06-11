@@ -269,7 +269,7 @@ def carregar_fear_greed(market: str, max_age_hours: int = 4) -> dict | None:
 
 # ─── Slope da curva de juros US ─────────────────────────────────────────────
 
-def buscar_slope_curva(origem: str = "fred_global") -> "pd.DataFrame | None":
+def buscar_slope_curva(origem: str = "fred_global") -> Optional[pd.DataFrame]:
     """
     Retorna DataFrame com colunas [data, t10y, t2y, t3m, slope_10y_2y, slope_10y_3m].
     Lê o snapshot persistido pelo sync_macro. Retorna None se não houver dados.
