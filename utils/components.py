@@ -1489,30 +1489,31 @@ def data_quality_badge(quality_pct: float | None, fonte: str = "", atualizado_em
     """
     import html as _html
     if quality_pct is None:
-        cor_bg, cor_fg, label = "rgba(120,120,120,0.18)", "var(--text-muted, #888)", "N/D"
+        # Estado "N/D" precisa ser visível — antes era cinza-pálido e se perdia no fundo
+        cor_bg, cor_fg, label = "rgba(150,150,150,0.30)", "#bbb", "DADOS N/D"
     elif quality_pct >= 85:
-        cor_bg, cor_fg, label = "rgba(46,204,113,0.18)", "var(--bull)", f"{int(quality_pct)}%"
+        cor_bg, cor_fg, label = "rgba(46,204,113,0.25)", "var(--bull)", f"DADOS {int(quality_pct)}%"
     elif quality_pct >= 60:
-        cor_bg, cor_fg, label = "rgba(241,196,15,0.20)", "var(--amber)", f"{int(quality_pct)}%"
+        cor_bg, cor_fg, label = "rgba(241,196,15,0.28)", "var(--amber)", f"DADOS {int(quality_pct)}%"
     elif quality_pct >= 30:
-        cor_bg, cor_fg, label = "rgba(255,140,0,0.20)", "var(--accent)", f"{int(quality_pct)}%"
+        cor_bg, cor_fg, label = "rgba(255,140,0,0.28)", "var(--accent)", f"DADOS {int(quality_pct)}%"
     else:
-        cor_bg, cor_fg, label = "rgba(231,76,60,0.20)", "var(--bear)", f"{int(quality_pct)}%"
+        cor_bg, cor_fg, label = "rgba(231,76,60,0.28)", "var(--bear)", f"DADOS {int(quality_pct)}%"
 
     tooltip_parts = []
     if fonte:
         tooltip_parts.append(f"fonte: {_html.escape(fonte)}")
     if atualizado_em:
         tooltip_parts.append(_html.escape(atualizado_em))
-    tooltip = " · ".join(tooltip_parts) if tooltip_parts else "qualidade do dado"
+    tooltip = " · ".join(tooltip_parts) if tooltip_parts else "qualidade do dado (% campos críticos preenchidos)"
 
     return (
         f'<span title="{tooltip}" style="'
-        f'display:inline-block; padding:2px 8px; border-radius:6px; '
+        f'display:inline-block; padding:3px 9px; border-radius:6px; '
         f'background:{cor_bg}; color:{cor_fg}; '
-        f'font-family:Courier New,monospace; font-size:0.65rem; '
-        f'font-weight:600; letter-spacing:0.05em; margin-left:6px; '
-        f'vertical-align:middle;">'
+        f'font-family:Courier New,monospace; font-size:0.7rem; '
+        f'font-weight:700; letter-spacing:0.06em; margin-left:8px; '
+        f'vertical-align:middle; border:1px solid {cor_bg.replace("0.30","0.55").replace("0.25","0.55").replace("0.28","0.55")};">'
         f'◆ {label}'
         f'</span>'
     )

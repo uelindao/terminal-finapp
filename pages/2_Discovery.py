@@ -1435,6 +1435,16 @@ with tab_setorial:
         )
         _fig_rs.update_layout(**_lay_rs)
         st.plotly_chart(_fig_rs, use_container_width=True, config={"responsive": True})
+        st.caption(
+            "rs (relative strength) = preço do etf setorial dividido pelo spy, "
+            "normalizado a 100 no início do período. linhas acima de 100 = "
+            "setor outperforming o índice; abaixo = underperforming. "
+            "etfs: xlk (tech), xlf (financeiro), xle (energia), xlv (saúde), "
+            "xli (industrial), xly (cons. discricionário), xlp (cons. básico), "
+            "xlu (utilities), xlre (real estate), xlb (materiais), xlc (comunicação). "
+            "leitura: setor com rs subindo persistente = rotação institucional em curso; "
+            "topos seguidos de quedas bruscas = exaustão e possível reversão."
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
         _rc1, _rc2, _rc3 = st.columns(3)
@@ -1450,6 +1460,13 @@ with tab_setorial:
             st.markdown("**Ranking 12 meses**")
             if rs.ranking_12m is not None:
                 st.dataframe(rs.ranking_12m, hide_index=True, use_container_width=True)
+        st.caption(
+            "Δ rs (%) = variação percentual da rs line no período. "
+            "valores positivos = setor venceu o spy no intervalo, negativos = perdeu. "
+            "compare horizontes: setor liderando 12m mas perdendo 3m sinaliza topo de ciclo "
+            "ou rotação saindo. setor perdendo 12m mas liderando 3m pode indicar reversão "
+            "de tendência (estágio inicial — confirmar com fundamentos)."
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("Earnings Revisions Breadth (EUA, últimos 30 dias)")
@@ -1457,9 +1474,23 @@ with tab_setorial:
     try:
         from database.supabase_client import get_supabase
         _client_er = get_supabase()
+        # Conta total de leituras (com e sem comparação) para sinalizar progresso
+        res_all = _client_er.table("earnings_revisions").select("ticker", count="exact").execute()
+        n_total_capturas = getattr(res_all, "count", None) or len(res_all.data or [])
         res_er = _client_er.table("earnings_revisions").select("setor, revisao_positiva").not_.is_("revisao_positiva", "null").execute()
         if not res_er.data:
-            st.info("Sem leituras de revisões ainda. Aguarde execução do ETL.")
+            if n_total_capturas == 0:
+                st.info(
+                    "📊 **Sem capturas ainda.** O ETL US ainda não populou a tabela. "
+                    "Próxima execução vai gravar os snapshots iniciais."
+                )
+            else:
+                st.info(
+                    f"📊 **Capturas iniciais em andamento — {n_total_capturas} leituras gravadas.** "
+                    "A breadth precisa de 2 snapshots por ticker espaçados em ~30 dias para calcular a revisão. "
+                    "Próxima rodada do ETL (em ~30 dias após a primeira) vai começar a popular a tabela. "
+                    "Aguarde o ciclo completo."
+                )
         else:
             df_er = pd.DataFrame(res_er.data)
             breadth = df_er.groupby("setor").agg(
@@ -1477,6 +1508,14 @@ with tab_setorial:
                 }),
                 use_container_width=True, hide_index=True,
             )
+        st.caption(
+            "earnings revisions breadth = % de empresas por setor com revisão positiva "
+            "(>+1%) na estimativa média de eps de analistas nos últimos 30 dias. "
+            "fonte: fmp analyst-estimates. é um dos indicadores mais robustos de rotação "
+            "setorial — institucionais costumam alocar onde o consenso está revisando pra cima. "
+            "leitura: breadth >60% = momentum positivo de revisões; <40% = setor sob pressão. "
+            "captura: top 100 tickers do screener us, 1× por execução do etl."
+        )
     except Exception as e:
         st.warning(f"Indisponível: {e}")
 

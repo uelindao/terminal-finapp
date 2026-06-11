@@ -759,7 +759,7 @@ else:
     _dy_info_us = (_dy_raw_us * 100 if _dy_raw_us and _dy_raw_us <= 0.50 else 0)
     dy = safe_float(cache_d.get('dy%')) or _dy_info_us
     with c1:
-        metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️", destaque=True)
+        metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️")
         tooltip("pl")
     with c2:
         metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted", icone="📈")

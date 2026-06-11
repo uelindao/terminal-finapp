@@ -1181,6 +1181,20 @@ with tab_global:
             v_dolar = valor_atual_seguro(df_br, 'Dolar')
             v_desemp = valor_atual_seguro(df_br, 'Desemprego')
 
+            # Fallback live para Selic: snapshot pode estar com a coluna ausente
+            # após mudanças no schema. Tenta BCB SGS 432, depois 439.
+            if v_selic is None:
+                try:
+                    _ini_fb = (datetime.datetime.today() - datetime.timedelta(days=60)).strftime('%Y-%m-%d')
+                    _selic_live = sgs.get({'Selic': 432}, start=_ini_fb)
+                    if _selic_live.empty:
+                        _selic_live = sgs.get({'Selic': 439}, start=_ini_fb)
+                    if not _selic_live.empty:
+                        v_selic = float(_selic_live['Selic'].dropna().iloc[-1])
+                        logger.info(f"[macro] Selic fallback BCB live: {v_selic}%")
+                except Exception as e:
+                    logger.warning(f"[macro] fallback Selic BCB falhou: {e}")
+
             # Calcula IPCA acumulado 12 meses
             _ipca_12m = None
             if 'IPCA' in df_br.columns:
@@ -1647,14 +1661,24 @@ with tab_global:
             tooltip("treasury_10y")
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
 
-            # CPI YoY — calcula a partir de CPIAUCSL se coluna não existe
-            if 'CPI_YOY' not in df_global.columns and 'CPIAUCSL' in df_global.columns:
+            # CPI YoY — SEMPRE recalcula de CPIAUCSL se a série base existir.
+            # Não confia em snapshot porque pode ter sido salvo com CPI_YOY=NaN antes
+            # do fix do sync_macro. Alinhamento por índice (sem dropna intermediário).
+            if 'CPIAUCSL' in df_global.columns:
                 try:
-                    _cpi_raw = df_global['CPIAUCSL'].dropna()
-                    if not _cpi_raw.empty:
-                        df_global['CPI_YOY'] = _cpi_raw.pct_change(12) * 100
+                    _cpi_serie = df_global['CPIAUCSL'].dropna()
+                    if len(_cpi_serie) >= 13:
+                        df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
+                        logger.info(
+                            f"[macro] CPI_YOY recalculado: {len(_cpi_serie)} pontos CPIAUCSL, "
+                            f"último valor CPI_YOY = {df_global['CPI_YOY'].dropna().iloc[-1] if not df_global['CPI_YOY'].dropna().empty else 'NaN'}"
+                        )
+                    else:
+                        logger.warning(f"[macro] CPI_YOY: CPIAUCSL tem só {len(_cpi_serie)} pontos (precisa >=13).")
                 except Exception as e:
                     logger.error(f"[macro] CPI_YOY calc via CPIAUCSL falhou: {e}")
+            else:
+                logger.warning("[macro] CPI_YOY: CPIAUCSL ausente no snapshot fred_global.")
 
             _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
             _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)

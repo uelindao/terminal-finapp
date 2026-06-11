@@ -277,14 +277,28 @@ def sync_earnings_revisions(client, tickers: list[str], setores_map: dict[str, s
     from datetime import timedelta
     from utils.fmp_client import buscar_analyst_estimates
 
+    # Pré-flight: tabela existe e está acessível?
+    try:
+        client.table("earnings_revisions").select("ticker", count="exact").limit(0).execute()
+    except Exception as e:
+        print(f"  [revisions] ABORT: tabela earnings_revisions inacessível ({e})")
+        print("  [revisions] rode o CREATE TABLE do supabase_setup.sql no SQL Editor antes do próximo ETL.")
+        return 0, 0
+
     logger.info(f"earnings revisions: processando {len(tickers)} tickers")
+    n_ok = 0
+    n_fmp_vazio = 0
+    n_eps_none = 0
+    n_erro = 0
     for i, ticker in enumerate(tickers):
         try:
             est = buscar_analyst_estimates(ticker)
             if not est:
+                n_fmp_vazio += 1
                 continue
             eps_atual = est.get("estimatedEpsAvg") or est.get("epsAvg")
             if eps_atual is None:
+                n_eps_none += 1
                 continue
 
             # Busca leitura ~30d atrás do mesmo ticker no banco
@@ -298,19 +312,25 @@ def sync_earnings_revisions(client, tickers: list[str], setores_map: dict[str, s
                 delta_pct = round(100.0 * (eps_atual - eps_30d) / abs(eps_30d), 2)
                 revisao_pos = delta_pct > 1.0  # >+1% = revisão positiva clara
 
-            client.table("earnings_revisions").upsert({
+            # Insert (não upsert): cada execução cria uma captura nova (timestamp default now()).
+            # Não há conflito porque PK é (ticker, capturado_em) e capturado_em sempre muda.
+            client.table("earnings_revisions").insert({
                 "ticker": ticker,
                 "setor": setores_map.get(ticker),
                 "eps_estimate": float(eps_atual),
                 "eps_estimate_30d_atras": float(eps_30d) if eps_30d is not None else None,
                 "delta_pct": delta_pct,
                 "revisao_positiva": revisao_pos,
-            }, on_conflict="ticker,capturado_em").execute()
+            }).execute()
+            n_ok += 1
 
             time.sleep(0.4)  # rate limit
         except Exception:
+            n_erro += 1
             logger.error(f"erro revisao {ticker}", exc_info=True)
             continue
+    print(f"  [revisions] resumo: ok={n_ok}, fmp_vazio={n_fmp_vazio}, eps_none={n_eps_none}, erro={n_erro}")
+    return n_ok, n_erro
 
 
 def main():
