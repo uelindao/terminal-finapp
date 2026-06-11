@@ -1391,12 +1391,12 @@ with tab_setorial:
                 _dc3.metric("pior score",    f"{_ds['score_min']:.0f}")
                 _dc4.metric("n° de ativos",  str(_ds['n_ativos']))
 
-                    st.markdown(
-                        "**ativos com dados:** "
-                        + " · ".join([
-                            t.replace('.SA', '') for t in _ds['tickers']
-                        ]),
-                    )
+                st.markdown(
+                    "**ativos com dados:** "
+                    + " · ".join([
+                        t.replace('.SA', '') for t in _ds['tickers']
+                    ]),
+                )
 
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("Força Relativa Setorial (US) — base 100, 12 meses")

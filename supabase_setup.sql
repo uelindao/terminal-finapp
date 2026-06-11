@@ -72,12 +72,10 @@ COMMENT ON COLUMN health_scores.data_quality_pct IS
 COMMENT ON COLUMN fundamentals_cache.data_quality_pct IS
     'Idem health_scores.';
 
--- ── Colunas de inclinação da curva de juros US ─────────────────────────────
--- Rodar manualmente no Supabase SQL Editor antes do próximo ETL.
-ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t2y_pct REAL;
-ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t3m_pct REAL;
-ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_2y_pp REAL;
-ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_3m_pp REAL;
+-- Nota: inclinação da curva US (T10Y-T2Y, T10Y-T3M) é persistida em macro_cache
+-- via upsert_macro como linhas key-value (indicator='slope_10y_2y_pp' etc.),
+-- não como colunas separadas. A série histórica é lida do snapshot fred_global
+-- (colunas DGS10/DGS2/DGS3MO). Por isso nenhum ALTER TABLE é necessário aqui.
 
 -- ── Earnings Revisions (revisões de EPS por setor) ───────────────────────────
 -- Rodar manualmente no Supabase SQL Editor antes do próximo ETL.

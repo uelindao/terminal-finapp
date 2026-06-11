@@ -54,8 +54,18 @@ if "FRED_API_KEY" not in st.secrets:
 
 # ── Regime Macro — classificador automático ──────────────────────────────────
 section_title("regime macro — classificador automático")
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _regime_macro_cached():
+    """
+    Cache 1h. O classificador faz 4-5 chamadas yfinance em sequência
+    (^TNX, ^VIX, ^IRX, SPY, ^BVSP). Sem cache, cada render da página
+    dispara todas elas — lento e arrisca rate limit.
+    """
+    return classificar_regime_do_macro_context()
+
 try:
-    _regime = classificar_regime_do_macro_context()
+    _regime = _regime_macro_cached()
     _cor_regime = {
         "expansao": "var(--bull)",
         "pico": "var(--amber)",

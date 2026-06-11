@@ -8,16 +8,12 @@ momentum negativo). Soma → fase. Probabilidade é heurística.
 Não substitui análise discricionária — é um termômetro top-down auxiliar.
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Fallbacks
-TREASURY_10Y_FALLBACK = 4.5
-VIX_FALLBACK = 15.0
 
 
 @dataclass
@@ -165,16 +161,10 @@ def classificar_regime_do_macro_context() -> RegimeResult:
     except Exception:
         logger.debug("CPI YoY indisponível via snapshot", exc_info=True)
 
-    # Fallback: calcula CPI YoY de CPIAUCSL via yfinance
-    if cpi_serie is None:
-        try:
-            cpi_raw = yf.Ticker("CPIAUCSL").history(period="2y")["Close"]
-            if cpi_raw is not None and len(cpi_raw) >= 24:
-                cpi_yoy_calc = (cpi_raw.pct_change(12) * 100).dropna()
-                if len(cpi_yoy_calc) >= 3:
-                    cpi_serie = cpi_yoy_calc.tail(6).tolist()
-        except Exception:
-            logger.debug("CPIAUCSL indisponível via yfinance", exc_info=True)
+    # Nota: removido fallback de yf.Ticker("CPIAUCSL") — CPIAUCSL é série FRED,
+    # não ticker yfinance; chamada nunca retornaria dado. Se snapshot estiver
+    # vazio o sinal cpi_acelerando vira None e a probabilidade do regime já
+    # se ajusta (desconto por sinal indisponível).
 
     # SPY e IBOV séries (~14 meses para momentum 12-1)
     spy = None
