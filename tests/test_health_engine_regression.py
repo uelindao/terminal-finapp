@@ -80,7 +80,12 @@ def _build_price_history(tech: dict, n_rows: int = 260) -> pd.DataFrame:
     else:
         start = tech.get("start_price", 100)
         end = tech.get("end_price", 120)
-        np.random.seed(hash(str(start)) % 2**31)
+        # Seed determinística entre processos: hash() de string em CPython usa
+        # PYTHONHASHSEED=random por padrão, o que gera flakiness. Derivamos a
+        # seed dos próprios bytes do float (estável).
+        import struct
+        seed = abs(struct.unpack("<I", struct.pack("<f", float(start)))[0]) % (2**31)
+        np.random.seed(seed)
         noise = np.random.randn(n_rows) * (abs(end - start) / n_rows * 2)
         close = np.linspace(start, end, n_rows) + np.cumsum(noise) * 0.3
         close = list(close)

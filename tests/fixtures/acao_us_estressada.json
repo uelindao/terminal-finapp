@@ -57,7 +57,7 @@
     }
   },
   "expected": {
-    "score": 30,
+    "score": 27,
     "tolerancia": 2
   }
 }

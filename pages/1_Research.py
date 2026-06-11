@@ -187,9 +187,13 @@ with st.sidebar:
             else "manutenção" if _hs_score >= 40
             else "reduzir"
         )
-        # Badge de qualidade do dado
+        # Badge de qualidade do dado — prefere a coluna nova (ETL), com fallback ao campo legado dos scrapers
         _cache_sb = CACHE_FUNDAMENTOS.get(_tk_base_sb, {})
-        _qual_sb = _cache_sb.get('qualidade_dados') if _cache_sb else None
+        _qual_sb = (
+            _cache_sb.get('data_quality_pct') if _cache_sb else None
+        ) or (
+            _cache_sb.get('qualidade_dados') if _cache_sb else None
+        )
         _fonte_sb = _cache_sb.get('data_source', '') if _cache_sb else ''
         _hs_row_sb = {r['ticker']: r for r in (get_health_scores() or [])}.get(_tk_base_sb, {})
         _atualizado_sb = _hs_row_sb.get('updated_at', '') if _hs_row_sb else ''
@@ -438,7 +442,8 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             or _hs_comp_all.get(_tk_hs)
             or {}
         )
-        _score_hs = _row_hs.get('score', 50) if _row_hs else None
+        # score=None no banco = indisponível; nesse caso tratamos como sem dado para o card
+        _score_hs = _row_hs.get('score') if _row_hs else None
 
         _break_hs = {}
         if _row_hs:
@@ -806,14 +811,18 @@ _hs_row = _hs_map.get(t_base, {})
 if _hs_row:
     _raw = _hs_row.get('alertas_venda', '{}')
     _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+    # score=None no banco sinaliza dado indisponível (caminho de erro do engine);
+    # exibimos 50 neutro na UI mas a tag de indisponibilidade fica no status/alertas.
+    _score_db = _hs_row.get('score')
     health_result = {
-        'score':     _hs_row.get('score', 50),
+        'score':     _score_db if _score_db is not None else 50,
+        'score_indisponivel': _score_db is None,
         'status':    (_p.get('alertas') or ['—'])[0],
         'alertas':   _p.get('alertas', []),
         'breakdown': _p.get('breakdown', {}),
     }
 else:
-    health_result = {'score': 50, 'status': '—', 'alertas': [], 'breakdown': {}}
+    health_result = {'score': 50, 'score_indisponivel': True, 'status': '—', 'alertas': [], 'breakdown': {}}
 
 # --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
 historico = get_historico_score(t_base, dias=180)
@@ -954,7 +963,11 @@ if len(historico) >= 3:
             # Linha de resumo abaixo do gráfico
             _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
             _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
-            _qual_main = cache_d.get('qualidade_dados') if cache_d else None
+            _qual_main = (
+                cache_d.get('data_quality_pct') if cache_d else None
+            ) or (
+                cache_d.get('qualidade_dados') if cache_d else None
+            )
             _fonte_main = cache_d.get('data_source', '') if cache_d else ''
             _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
             _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)

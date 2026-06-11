@@ -19,7 +19,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 from scripts.supabase_helper import (
-    upsert_fundamentals, upsert_price, log_etl_start, log_etl_finish,
+    upsert_fundamentals, upsert_price, log_etl_start, log_etl_finish, get_client,
 )
 # Importa listas de tickers diretamente de utils/tickers.py (sem dependência de streamlit)
 from utils.tickers import SCREENER_B3, FII_TODOS, BR_INDICES, BRASIL_TODOS
@@ -191,14 +191,21 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
     return total_ok, total_fail, hist_dict
 
 
-def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict):
-    """Calcula e persiste health scores usando dados já cacheados — sem download extra."""
+def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict,
+                       quality_map: dict | None = None):
+    """Calcula e persiste health scores usando dados já cacheados — sem download extra.
+
+    quality_map: opcional. Map ticker -> data_quality_pct (0-100). Quando passado,
+    grava a qualidade do dado na coluna correspondente de health_scores após o
+    cálculo, fechando o ciclo iniciado em fundamentals_cache.
+    """
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.health_engine import calcular_health_score
 
     ok = 0
     fail = 0
+    sb = get_client() if quality_map else None
     for ticker in tickers_ok:
         try:
             hist_df = hist_dict.get(ticker)
@@ -209,6 +216,13 @@ def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict):
                 force=True,
             )
             ok += 1
+            if sb is not None and quality_map and ticker in quality_map:
+                try:
+                    sb.table("health_scores").update(
+                        {"data_quality_pct": quality_map[ticker]}
+                    ).eq("ticker", ticker).execute()
+                except Exception as e:
+                    logger.debug(f"[health] update data_quality_pct falhou {ticker}: {e}")
         except Exception as e:
             print(f"  [health] SKIP {ticker}: {e}")
             fail += 1
@@ -229,6 +243,7 @@ def main():
     ok = 0
     fail = 0
     rate_limit_remaining = 15000
+    quality_map: dict[str, float] = {}
 
     for i, ticker in enumerate(BRASIL_TODOS):
         if rate_limit_remaining <= 10:
@@ -241,6 +256,7 @@ def main():
         if raw:
             dados = transform_brapi(raw, ticker)
             quality = calcular_data_quality(dados)
+            quality_map[ticker] = quality
             upsert_fundamentals(ticker, dados, source="brapi", data_quality_pct=quality)
             print("OK")
             ok += 1
@@ -278,7 +294,7 @@ def main():
     except Exception as e:
         print(f"[sync_br] macro context usando padrão — {e}")
 
-    sync_health_scores(tickers_com_hist, hist_dict, macro_ctx)
+    sync_health_scores(tickers_com_hist, hist_dict, macro_ctx, quality_map=quality_map)
 
     _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
     log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)

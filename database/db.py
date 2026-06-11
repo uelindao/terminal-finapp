@@ -290,17 +290,46 @@ def salvar_fundamento_cache(ticker: str, dados: dict):
 
 
 def get_todos_fundamentos_cache() -> dict:
+    """
+    Lê fundamentals_cache. Combina o JSON legado (dados_json) com as colunas
+    novas do ETL (data_quality_pct, updated_at, source) para que o app enxergue
+    os dois fluxos de gravação.
+    """
     sb = get_supabase()
     try:
-        rows = sb.table('fundamentals_cache').select('ticker, dados_json').execute().data
-        return {
-            r['ticker']: json.loads(r['dados_json'])
-            for r in rows
-            if r.get('dados_json')
-        }
+        rows = sb.table('fundamentals_cache').select(
+            'ticker, dados_json, data_quality_pct, updated_at, source'
+        ).execute().data
     except Exception as e:
-        logger.warning(f"[db] falha ao carregar cache de fundamentos: {e}")
-        return {}
+        # Coluna nova pode não existir ainda (ALTER TABLE não rodado): tenta fallback
+        logger.warning(f"[db] falha select estendido: {e} — tentando fallback")
+        try:
+            rows = sb.table('fundamentals_cache').select('ticker, dados_json').execute().data
+        except Exception as e2:
+            logger.warning(f"[db] falha ao carregar cache de fundamentos: {e2}")
+            return {}
+
+    out: dict = {}
+    for r in rows:
+        ticker = r.get('ticker')
+        if not ticker:
+            continue
+        raw_json = r.get('dados_json')
+        try:
+            dados = json.loads(raw_json) if raw_json else {}
+        except Exception:
+            dados = {}
+        # Injeta colunas-meta sem sobrescrever dados existentes do JSON
+        if r.get('data_quality_pct') is not None:
+            dados.setdefault('data_quality_pct', r['data_quality_pct'])
+            # alias retrocompatível com o nome legado usado pelos scrapers
+            dados.setdefault('qualidade_dados', r['data_quality_pct'])
+        if r.get('updated_at'):
+            dados.setdefault('updated_at', r['updated_at'])
+        if r.get('source'):
+            dados.setdefault('data_source', r['source'])
+        out[ticker] = dados
+    return out
 
 
 # ==========================================
@@ -672,18 +701,32 @@ def get_health_scores():
     return rows
 
 
-def salvar_health_score(ticker, score, alertas_payload):
+def salvar_health_score(ticker, score, alertas_payload, data_quality_pct=None):
     """
     Guarda o score no banco de dados.
     A trava 'not isinstance(..., str)' garante que não ocorra dupla codificação (Double JSON).
+
+    score=None é permitido (caminho de erro do health_engine) — sinaliza dado
+    indisponível em vez do legado fallback silencioso=50.
+
+    data_quality_pct: % de campos críticos preenchidos no cálculo (0-100), opcional.
     """
     if not isinstance(alertas_payload, str):
         alertas_payload = json.dumps(alertas_payload)
+    payload = {'ticker': ticker, 'score': score, 'alertas_venda': alertas_payload}
+    if data_quality_pct is not None:
+        payload['data_quality_pct'] = data_quality_pct
     sb = get_supabase()
-    sb.table('health_scores').upsert(
-        {'ticker': ticker, 'score': score, 'alertas_venda': alertas_payload},
-        on_conflict='ticker',
-    ).execute()
+    try:
+        sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
+    except Exception as e:
+        # Coluna nova pode não existir ainda; tenta novamente sem ela
+        if data_quality_pct is not None and 'data_quality_pct' in str(e):
+            logger.warning(f"[db] coluna data_quality_pct ausente — retry sem ela ({ticker})")
+            payload.pop('data_quality_pct', None)
+            sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
+        else:
+            raise
 
 
 # ==========================================
