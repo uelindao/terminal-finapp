@@ -1,0 +1,31 @@
+{
+  "ticker": "XPML11.SA",
+  "tipo": "fii",
+  "inputs": {
+    "fundamentals": {
+      "qualidade_dados": 65,
+      "p/vp": 1.30,
+      "dy%": 6.0
+    },
+    "yf_info": {
+      "sector": "Real Estate",
+      "dividendYield": 0.06
+    },
+    "tecnico": {
+      "rsi_14": 30.0,
+      "start_price": 120.0,
+      "end_price": 85.0,
+      "trend": "down"
+    },
+    "macro": {
+      "selic": 14.75,
+      "vix": 25.0,
+      "ipca": 4.5
+    },
+    "ntnb_yield": 6.8
+  },
+  "expected": {
+    "score": 2,
+    "tolerancia": 2
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "ticker": "HGLG11.SA",
+  "tipo": "fii",
+  "inputs": {
+    "fundamentals": {
+      "qualidade_dados": 85,
+      "p/vp": 0.95,
+      "dy%": 9.0
+    },
+    "yf_info": {
+      "sector": "Real Estate",
+      "dividendYield": 0.09
+    },
+    "tecnico": {
+      "rsi_14": 48.0,
+      "start_price": 155.0,
+      "end_price": 162.0,
+      "trend": "up"
+    },
+    "macro": {
+      "selic": 14.75,
+      "vix": 16.5,
+      "ipca": 4.5
+    },
+    "ntnb_yield": 6.8
+  },
+  "expected": {
+    "score": 40,
+    "tolerancia": 2
+  }
+}

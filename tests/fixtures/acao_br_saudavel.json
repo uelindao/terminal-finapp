@@ -1,0 +1,63 @@
+{
+  "ticker": "WEGE3.SA",
+  "tipo": "acao_br",
+  "inputs": {
+    "fundamentals": {
+      "qualidade_dados": 85,
+      "p/vp": 4.5,
+      "p/l": 28.0,
+      "roe%": 25.0,
+      "margem%": 18.0,
+      "ev/ebitda": 18.0,
+      "dy%": 0.8
+    },
+    "yf_info": {
+      "trailingPE": 28.0,
+      "priceToBook": 4.5,
+      "returnOnEquity": 0.25,
+      "profitMargins": 0.18,
+      "enterpriseToEbitda": 18.0,
+      "debtToEquity": 30.0,
+      "beta": 0.95,
+      "sector": "Industrials",
+      "revenueGrowth": 0.15,
+      "earningsGrowth": 0.20,
+      "dividendYield": 0.008
+    },
+    "tecnico": {
+      "rsi_14": 55.0,
+      "start_price": 35.0,
+      "end_price": 42.0,
+      "trend": "up"
+    },
+    "macro": {
+      "selic": 14.75,
+      "vix": 16.5,
+      "ipca": 4.5
+    },
+    "yf_financials": {
+      "Total Revenue": [25000000000, 21000000000],
+      "Gross Profit": [10000000000, 8200000000],
+      "Net Income": [4000000000, 3200000000],
+      "EBIT": [5500000000, 4500000000],
+      "Interest Expense": [200000000, 220000000],
+      "Operating Cash Flow": [5000000000, 4200000000]
+    },
+    "yf_balance_sheet": {
+      "Total Assets": [25000000000, 22000000000],
+      "Long Term Debt": [4500000000, 4000000000],
+      "Current Assets": [12000000000, 10500000000],
+      "Current Liabilities": [6500000000, 5800000000],
+      "Share Issued": [2100000000, 2100000000],
+      "Cash And Cash Equivalents": [3000000000, 2500000000]
+    },
+    "yf_cashflow": {
+      "Operating Cash Flow": [5000000000, 4200000000],
+      "Capital Expenditure": [1200000000, 1500000000]
+    }
+  },
+  "expected": {
+    "score": 20,
+    "tolerancia": 2
+  }
+}
