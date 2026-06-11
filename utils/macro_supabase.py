@@ -265,3 +265,38 @@ def carregar_fear_greed(market: str, max_age_hours: int = 4) -> dict | None:
     except Exception as e:
         logger.warning(f"[macro_supabase] carregar_fear_greed '{market}' falhou: {e}")
         return None
+
+
+# ─── Slope da curva de juros US ─────────────────────────────────────────────
+
+def buscar_slope_curva(origem: str = "fred_global") -> "pd.DataFrame | None":
+    """
+    Retorna DataFrame com colunas [data, t10y, t2y, t3m, slope_10y_2y, slope_10y_3m].
+    Lê o snapshot persistido pelo sync_macro. Retorna None se não houver dados.
+    """
+    try:
+        snap = carregar_snapshot(origem, max_age_days=30)
+        if snap is None or snap.empty:
+            return None
+
+        df = pd.DataFrame()
+        if "DGS10" in snap.columns:
+            df["t10y"] = snap["DGS10"]
+        if "DGS2" in snap.columns:
+            df["t2y"] = snap["DGS2"]
+        if "DGS3MO" in snap.columns:
+            df["t3m"] = snap["DGS3MO"]
+
+        if df.empty or "t10y" not in df.columns or "t2y" not in df.columns:
+            return None
+
+        df["slope_10y_2y"] = df["t10y"] - df["t2y"]
+        if "t3m" in df.columns:
+            df["slope_10y_3m"] = df["t10y"] - df["t3m"]
+
+        df.index.name = "data"
+        return df.reset_index()
+
+    except Exception:
+        logger.error("falha ao reconstruir slope da curva", exc_info=True)
+        return None

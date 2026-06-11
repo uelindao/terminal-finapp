@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 from scripts.supabase_helper import (
     upsert_macro, log_etl_start, log_etl_finish,
 )
+# upsert_macro é usado abaixo para slopes da curva de juros
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 
@@ -190,6 +191,7 @@ def fetch_fred():
             "hy_spread":    ("BAMLH0A0HYM2",            "High Yield Spread (BofA)",  "%",    "fred"),
             "treasury_10y": ("DGS10",                   "US Treasury 10Y Yield",     "%",    "fred"),
             "treasury_2y":  ("DGS2",                    "US Treasury 2Y Yield",      "%",    "fred"),
+            "treasury_3m":  ("DGS3MO",                  "US Treasury 3M Yield",      "%",    "fred"),
             "fed_funds":    ("FEDFUNDS",                "Federal Funds Rate",         "%",    "fred"),
             "cpi":          ("CPIAUCSL",                "CPI All Urban Consumers",    "idx",  "fred"),
             "core_cpi":     ("CORESTICKM159SFRBATL",    "CPI Core Sticky",            "%",    "fred"),
@@ -210,7 +212,7 @@ def fetch_fred():
         print("  [FRED] buscando série histórica 10 anos...")
         series_hist = {
             "FEDFUNDS": "FEDFUNDS", "CPIAUCSL": "CPIAUCSL", "UNRATE": "UNRATE",
-            "DGS10": "DGS10", "DGS2": "DGS2", "VIXCLS": "VIXCLS",
+            "DGS10": "DGS10", "DGS2": "DGS2", "DGS3MO": "DGS3MO", "VIXCLS": "VIXCLS",
             "ECBDFR": "ECBDFR", "IRLTLT01EZM156N": "IRLTLT01EZM156N",
             "IRLTLT01JPM156N": "IRLTLT01JPM156N",
             "T10Y2Y": "T10Y2Y", "BAMLH0A0HYM2": "BAMLH0A0HYM2",
@@ -239,6 +241,24 @@ def fetch_fred():
                 except Exception as e:
                     logger.debug(f"falha ao calcular CPI_YOY: {e}")
             _salvar_snapshot_historico("fred_global", df_global_hist)
+
+            # ── slopes da curva de juros → macro_cache ────────────────────────
+            try:
+                _t10_last = df_global_hist["DGS10"].dropna().iloc[-1] if "DGS10" in df_global_hist.columns else None
+                _t2_last  = df_global_hist["DGS2"].dropna().iloc[-1]  if "DGS2"  in df_global_hist.columns else None
+                _t3m_last = df_global_hist["DGS3MO"].dropna().iloc[-1] if "DGS3MO" in df_global_hist.columns else None
+                if _t10_last is not None and _t2_last is not None:
+                    _slope_10y2y = round(float(_t10_last) - float(_t2_last), 4)
+                    upsert_macro("slope_10y_2y_pp", _slope_10y2y,
+                                 label="US Treasury 10Y-2Y Slope", unit="pp", source="fred")
+                    print(f"  [FRED] slope_10y_2y_pp = {_slope_10y2y:.4f}")
+                if _t10_last is not None and _t3m_last is not None:
+                    _slope_10y3m = round(float(_t10_last) - float(_t3m_last), 4)
+                    upsert_macro("slope_10y_3m_pp", _slope_10y3m,
+                                 label="US Treasury 10Y-3M Slope", unit="pp", source="fred")
+                    print(f"  [FRED] slope_10y_3m_pp = {_slope_10y3m:.4f}")
+            except Exception as _e_slope:
+                print(f"  [FRED] slope calc: {_e_slope}")
         else:
             print("  [FRED hist] nenhum dado histórico obtido.")
 

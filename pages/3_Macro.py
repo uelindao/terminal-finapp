@@ -29,6 +29,7 @@ from utils.regime_classifier import classificar_regime_do_macro_context
 from utils.macro_supabase import (
     carregar_fear_greed, salvar_fear_greed,
     carregar_snapshot, salvar_snapshot,
+    buscar_slope_curva,
 )
 
 # 1. barreira de segurança multi-usuário
@@ -183,7 +184,7 @@ def puxar_historico_mestre():
 
             series_fred = {
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
-                'DGS10': 'DGS10', 'DGS2': 'DGS2', 'VIXCLS': 'VIXCLS',
+                'DGS10': 'DGS10', 'DGS2': 'DGS2', 'DGS3MO': 'DGS3MO', 'VIXCLS': 'VIXCLS',
                 'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N',
                 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
                 'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2',
@@ -1742,6 +1743,65 @@ with tab_global:
                     "acima de 5% = desaceleração → fed pode cortar juros. "
                     "leitura: desemprego subindo rapidamente ('sahm rule') é sinal recessivo clássico — "
                     "alta de 0.5pp em 3 meses ativa o sinal historicamente."
+                )
+
+            # ── INCLINAÇÃO DA CURVA DE JUROS ─────────────────────────────────
+            st.markdown("---")
+            section_title("📐 inclinação da curva (us treasury)")
+            df_slope = buscar_slope_curva()
+            if df_slope is None or df_slope.empty:
+                st.info("Dados de inclinação ainda não coletados — aguarde próxima execução do ETL macro.")
+            else:
+                df_slope = df_slope.dropna(subset=["slope_10y_2y"]).tail(252 * 10)
+                fig_slope = go.Figure()
+                fig_slope.add_hrect(y0=-5, y1=0, fillcolor="rgba(231,76,60,0.08)", line_width=0, layer="below")
+                fig_slope.add_hrect(y0=0, y1=5, fillcolor="rgba(46,204,113,0.08)", line_width=0, layer="below")
+                fig_slope.add_hline(y=0, line_color="#666", line_width=1, line_dash="dot")
+                fig_slope.add_trace(go.Scatter(
+                    x=df_slope["data"], y=df_slope["slope_10y_2y"],
+                    mode="lines", name="T10Y - T2Y (pp)",
+                    line=dict(width=2, color="#ff8c00"),
+                ))
+                if "slope_10y_3m" in df_slope.columns and not df_slope["slope_10y_3m"].dropna().empty:
+                    fig_slope.add_trace(go.Scatter(
+                        x=df_slope["data"], y=df_slope["slope_10y_3m"],
+                        mode="lines", name="T10Y - T3M (pp)",
+                        line=dict(width=1.5, color="#00B0FF", dash="dot"),
+                    ))
+                fig_slope.update_layout(
+                    height=320, margin=dict(l=20, r=20, t=10, b=10),
+                    showlegend=True,
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    yaxis=dict(title="spread (pp)", zeroline=False, gridcolor="rgba(120,120,120,0.15)"),
+                    xaxis=dict(gridcolor="rgba(120,120,120,0.15)"),
+                    legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+                )
+                st.plotly_chart(fig_slope, use_container_width=True)
+                _slope_val = float(df_slope["slope_10y_2y"].iloc[-1])
+                if _slope_val < 0:
+                    st.markdown(
+                        f'<div style="color:var(--bear); font-family:Courier New,monospace;">'
+                        f'Curva invertida ({_slope_val:+.2f} pp) — sinal clássico de fim de ciclo.</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif _slope_val < 0.5:
+                    st.markdown(
+                        f'<div style="color:var(--amber); font-family:Courier New,monospace;">'
+                        f'Curva achatada ({_slope_val:+.2f} pp) — atenção.</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div style="color:var(--bull); font-family:Courier New,monospace;">'
+                        f'Curva positiva ({_slope_val:+.2f} pp).</div>',
+                        unsafe_allow_html=True,
+                    )
+                st.caption(
+                    "inclinação da curva de juros (spread 10y−2y e 10y−3m): o mercado precifica "
+                    "inversão quando juros curtos > juros longos (expectativa de recessão). "
+                    "historicamente, inversão precede recessão em 12-18 meses. "
+                    "desinversão (spread voltando a positivo) pode sinalizar piora iminente. "
+                    "fonte: fred — dgs10, dgs2, dgs3mo (série histórica 10 anos)."
                 )
 
             # ── 📐 P/L JUSTO — EUA (Gordon simplificado) ───────────────────────

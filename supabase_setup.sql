@@ -71,3 +71,10 @@ COMMENT ON COLUMN health_scores.data_quality_pct IS
     'Percentual (0-100) de campos críticos preenchidos no momento da coleta. Null = não medido.';
 COMMENT ON COLUMN fundamentals_cache.data_quality_pct IS
     'Idem health_scores.';
+
+-- ── Colunas de inclinação da curva de juros US ─────────────────────────────
+-- Rodar manualmente no Supabase SQL Editor antes do próximo ETL.
+ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t2y_pct REAL;
+ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t3m_pct REAL;
+ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_2y_pp REAL;
+ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_3m_pp REAL;
