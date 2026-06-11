@@ -23,7 +23,8 @@ def get_client():
     return create_client(url, key)
 
 
-def upsert_fundamentals(ticker: str, dados: dict, source: str = "brapi") -> None:
+def upsert_fundamentals(ticker: str, dados: dict, source: str = "brapi",
+                         data_quality_pct: float | None = None) -> None:
     """Faz upsert de dados fundamentalistas no fundamentals_cache."""
     sb = get_client()
     payload = {
@@ -34,6 +35,8 @@ def upsert_fundamentals(ticker: str, dados: dict, source: str = "brapi") -> None
         "last_validated": datetime.now(timezone.utc).isoformat(),
         "raw_json":      json.dumps(dados.get("_raw", {})),
     }
+    if data_quality_pct is not None:
+        payload["data_quality_pct"] = data_quality_pct
     sb.table("fundamentals_cache").upsert(
         payload, on_conflict="ticker"
     ).execute()

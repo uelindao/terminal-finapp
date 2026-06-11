@@ -27,6 +27,23 @@ from utils.tickers import SCREENER_US
 FMP_BASE = "https://financialmodelingprep.com/stable"
 FMP_KEYS = []
 
+# Campos críticos esperados no dict de fundamentos (chaves reais dos transforms)
+CAMPOS_CRITICOS = [
+    "preco", "p/l", "p/vp", "dy%", "roe%",
+    "margem%", "ev/ebitda", "market_cap",
+]
+
+
+def calcular_data_quality(fundamentals: dict) -> float:
+    """Retorna % (0-100) de campos críticos preenchidos no dict de fundamentos."""
+    if not fundamentals:
+        return 0.0
+    preenchidos = sum(
+        1 for campo in CAMPOS_CRITICOS
+        if fundamentals.get(campo) is not None
+    )
+    return round(100.0 * preenchidos / len(CAMPOS_CRITICOS), 1)
+
 
 def _init_keys():
     global FMP_KEYS
@@ -255,7 +272,8 @@ def main():
         dados = transform_fmp(ticker)
 
         if dados:
-            upsert_fundamentals(ticker, dados, source="fmp")
+            quality = calcular_data_quality(dados)
+            upsert_fundamentals(ticker, dados, source="fmp", data_quality_pct=quality)
             print("OK")
             ok += 1
         else:

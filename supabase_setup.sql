@@ -56,3 +56,18 @@ COMMENT ON TABLE api_cache IS
     'Cache persistente de dados de APIs externas para o FinTerminal';
 COMMENT ON COLUMN api_cache.periodo IS
     'NULL para snapshots. Formato YYYY-QN para trimestrais (ex: 2024-Q3)';
+
+-- ── Coluna de qualidade do dado (0-100) ──────────────────────────────────
+-- % de campos críticos preenchidos no momento da coleta ETL.
+-- Rodar manualmente no Supabase SQL Editor antes do próximo ETL.
+
+ALTER TABLE IF EXISTS health_scores
+    ADD COLUMN IF NOT EXISTS data_quality_pct REAL;
+
+ALTER TABLE IF EXISTS fundamentals_cache
+    ADD COLUMN IF NOT EXISTS data_quality_pct REAL;
+
+COMMENT ON COLUMN health_scores.data_quality_pct IS
+    'Percentual (0-100) de campos críticos preenchidos no momento da coleta. Null = não medido.';
+COMMENT ON COLUMN fundamentals_cache.data_quality_pct IS
+    'Idem health_scores.';

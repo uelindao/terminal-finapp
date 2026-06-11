@@ -27,6 +27,23 @@ from utils.tickers import SCREENER_B3, FII_TODOS, BR_INDICES, BRASIL_TODOS
 BRAPI_BASE = "https://brapi.dev/api"
 BRAPI_TOKEN = os.environ.get("BRAPI_TOKEN", "")
 
+# Campos críticos esperados no dict de fundamentos (chaves reais dos transforms)
+CAMPOS_CRITICOS = [
+    "preco", "p/l", "p/vp", "dy%", "roe%",
+    "margem%", "ev/ebitda", "market_cap",
+]
+
+
+def calcular_data_quality(fundamentals: dict) -> float:
+    """Retorna % (0-100) de campos críticos preenchidos no dict de fundamentos."""
+    if not fundamentals:
+        return 0.0
+    preenchidos = sum(
+        1 for campo in CAMPOS_CRITICOS
+        if fundamentals.get(campo) is not None
+    )
+    return round(100.0 * preenchidos / len(CAMPOS_CRITICOS), 1)
+
 
 def _sf(val):
     """Safe float conversion."""
@@ -223,7 +240,8 @@ def main():
 
         if raw:
             dados = transform_brapi(raw, ticker)
-            upsert_fundamentals(ticker, dados, source="brapi")
+            quality = calcular_data_quality(dados)
+            upsert_fundamentals(ticker, dados, source="brapi", data_quality_pct=quality)
             print("OK")
             ok += 1
         else:
