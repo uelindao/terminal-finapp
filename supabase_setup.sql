@@ -78,3 +78,18 @@ ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t2y_pct REAL;
 ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS t3m_pct REAL;
 ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_2y_pp REAL;
 ALTER TABLE IF EXISTS macro_cache ADD COLUMN IF NOT EXISTS slope_10y_3m_pp REAL;
+
+-- ── Earnings Revisions (revisões de EPS por setor) ───────────────────────────
+-- Rodar manualmente no Supabase SQL Editor antes do próximo ETL.
+CREATE TABLE IF NOT EXISTS earnings_revisions (
+    ticker TEXT NOT NULL,
+    setor TEXT,
+    eps_estimate REAL,
+    eps_estimate_30d_atras REAL,
+    delta_pct REAL,
+    revisao_positiva BOOLEAN,
+    capturado_em TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (ticker, capturado_em)
+);
+CREATE INDEX IF NOT EXISTS idx_er_setor ON earnings_revisions(setor);
+CREATE INDEX IF NOT EXISTS idx_er_capturado ON earnings_revisions(capturado_em DESC);

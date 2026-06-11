@@ -272,6 +272,47 @@ def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict,
     return ok, fail
 
 
+def sync_earnings_revisions(client, tickers: list[str], setores_map: dict[str, str]):
+    """Coleta EPS estimate atual + compara com leitura de 30 dias atrás (do próprio banco) → registra revisão."""
+    from datetime import timedelta
+    from utils.fmp_client import buscar_analyst_estimates
+
+    logger.info(f"earnings revisions: processando {len(tickers)} tickers")
+    for i, ticker in enumerate(tickers):
+        try:
+            est = buscar_analyst_estimates(ticker)
+            if not est:
+                continue
+            eps_atual = est.get("estimatedEpsAvg") or est.get("epsAvg")
+            if eps_atual is None:
+                continue
+
+            # Busca leitura ~30d atrás do mesmo ticker no banco
+            limite = (datetime.now(timezone.utc) - timedelta(days=27)).isoformat()
+            prev = client.table("earnings_revisions").select("eps_estimate").eq("ticker", ticker).lte("capturado_em", limite).order("capturado_em", desc=True).limit(1).execute()
+            eps_30d = prev.data[0]["eps_estimate"] if prev.data else None
+
+            delta_pct = None
+            revisao_pos = None
+            if eps_30d not in (None, 0):
+                delta_pct = round(100.0 * (eps_atual - eps_30d) / abs(eps_30d), 2)
+                revisao_pos = delta_pct > 1.0  # >+1% = revisão positiva clara
+
+            client.table("earnings_revisions").upsert({
+                "ticker": ticker,
+                "setor": setores_map.get(ticker),
+                "eps_estimate": float(eps_atual),
+                "eps_estimate_30d_atras": float(eps_30d) if eps_30d is not None else None,
+                "delta_pct": delta_pct,
+                "revisao_positiva": revisao_pos,
+            }, on_conflict="ticker,capturado_em").execute()
+
+            time.sleep(0.4)  # rate limit
+        except Exception:
+            logger.error(f"erro revisao {ticker}", exc_info=True)
+            continue
+
+
 def main():
     _init_keys()
     print(f"[sync_us] inicio — {len(SCREENER_US)} tickers")
@@ -281,6 +322,7 @@ def main():
     ok = 0
     fail = 0
     quality_map: dict[str, float] = {}
+    setores_map: dict[str, str] = {}
 
     for i, ticker in enumerate(SCREENER_US):
         print(f"  [{i+1}/{len(SCREENER_US)}] {ticker}...", end=" ")
@@ -290,6 +332,8 @@ def main():
             quality = calcular_data_quality(dados)
             quality_map[ticker] = quality
             upsert_fundamentals(ticker, dados, source="fmp", data_quality_pct=quality)
+            if dados.get("setor"):
+                setores_map[ticker] = dados["setor"]
             print("OK")
             ok += 1
         else:
@@ -319,6 +363,16 @@ def main():
         macro_ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
 
     sync_health_scores(tickers_com_hist, hist_dict, macro_ctx, quality_map=quality_map)
+
+    # ── Earnings Revisions (revisões de EPS nos últimos 30d) ────────────────
+    # Limita a top 100 tickers para não estourar rate limit
+    # TODO: ampliar para 200 quando free tier permitir
+    tickers_rev = SCREENER_US[:100]
+    try:
+        sb_rev = get_client()
+        sync_earnings_revisions(sb_rev, tickers_rev, setores_map)
+    except Exception as e:
+        logger.error(f"earnings revisions falhou: {e}")
 
     _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
     log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)

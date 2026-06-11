@@ -756,3 +756,20 @@ def get_analyst_estimates(
             continue
 
     return resultados[:limit]
+
+
+def buscar_analyst_estimates(ticker: str) -> dict | None:
+    """
+    Endpoint FMP: /analyst-estimates/{ticker}?period=quarter&limit=4
+    Retorna estimativas trimestrais futuras (EPS estimate + revision count).
+
+    Custo: 1 chamada por ticker. Use com moderação.
+    Sem cache — pensado para uso em ETL (scripts).
+    """
+    t = ticker.replace(".SA", "").upper()
+    data = _get("analyst-estimates", {"symbol": t, "period": "quarter", "limit": 4})
+
+    if not data or not isinstance(data, list):
+        return None
+
+    return data[0] if data else None

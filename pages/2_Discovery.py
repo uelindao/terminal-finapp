@@ -1398,6 +1398,35 @@ with tab_setorial:
                     ]),
                 )
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    section_title("Earnings Revisions Breadth (EUA, últimos 30 dias)")
+
+    try:
+        from database.supabase_client import get_supabase
+        _client_er = get_supabase()
+        res_er = _client_er.table("earnings_revisions").select("setor, revisao_positiva").not_.is_("revisao_positiva", "null").execute()
+        if not res_er.data:
+            st.info("Sem leituras de revisões ainda. Aguarde execução do ETL.")
+        else:
+            df_er = pd.DataFrame(res_er.data)
+            breadth = df_er.groupby("setor").agg(
+                n_total=("revisao_positiva", "count"),
+                n_pos=("revisao_positiva", "sum"),
+            ).reset_index()
+            breadth["breadth_pct"] = (breadth["n_pos"] / breadth["n_total"] * 100).round(1)
+            breadth = breadth.sort_values("breadth_pct", ascending=False)
+            st.dataframe(
+                breadth.rename(columns={
+                    "setor": "Setor",
+                    "n_total": "N",
+                    "n_pos": "Pos",
+                    "breadth_pct": "% revisões positivas",
+                }),
+                use_container_width=True, hide_index=True,
+            )
+    except Exception as e:
+        st.warning(f"Indisponível: {e}")
+
 # ==========================================
 # tab 5 — radar de mercado
 # ==========================================
