@@ -29,6 +29,7 @@ from utils.components import (
     page_header, section_title, metric_card, status_card,
     empty_state, inject_keyboard_shortcuts,
     tooltip, label_com_tooltip, TOOLTIPS,
+    data_quality_badge,
 )
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
@@ -186,6 +187,13 @@ with st.sidebar:
             else "manutenção" if _hs_score >= 40
             else "reduzir"
         )
+        # Badge de qualidade do dado
+        _cache_sb = CACHE_FUNDAMENTOS.get(_tk_base_sb, {})
+        _qual_sb = _cache_sb.get('qualidade_dados') if _cache_sb else None
+        _fonte_sb = _cache_sb.get('data_source', '') if _cache_sb else ''
+        _hs_row_sb = {r['ticker']: r for r in (get_health_scores() or [])}.get(_tk_base_sb, {})
+        _atualizado_sb = _hs_row_sb.get('updated_at', '') if _hs_row_sb else ''
+        _badge_sb = data_quality_badge(_qual_sb, _fonte_sb, _atualizado_sb)
         st.markdown(
             f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
             f'border-left:3px solid {_cor_sb}; border-radius:4px; '
@@ -196,6 +204,7 @@ with st.sidebar:
             f'<div style="font-family:var(--font-data,monospace); font-size:1.6rem; '
             f'font-weight:700; color:{_cor_sb}; line-height:1;">'
             f'{_hs_score}<span style="font-size:0.8rem;color:var(--text-muted);">/100</span>'
+            f'{_badge_sb}'
             f'</div>'
             f'<div style="font-family:var(--font-data,monospace); font-size:0.7rem; '
             f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
@@ -945,12 +954,17 @@ if len(historico) >= 3:
             # Linha de resumo abaixo do gráfico
             _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
             _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
+            _qual_main = cache_d.get('qualidade_dados') if cache_d else None
+            _fonte_main = cache_d.get('data_source', '') if cache_d else ''
+            _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
+            _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)
             st.markdown(
                 f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
                 f'color:var(--text-muted); margin-top:-8px;">'
                 f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
                 f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
                 f'score total: {health_result.get("score", 0)}/100'
+                f'{_badge_main}'
                 f'</div>',
                 unsafe_allow_html=True,
             )

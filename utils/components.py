@@ -1468,3 +1468,51 @@ def market_pulse_bar(
         + '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
+
+
+def data_quality_badge(quality_pct: float | None, fonte: str = "", atualizado_em: str = "") -> str:
+    """
+    Retorna HTML de um badge compacto indicando qualidade do dado.
+    Use ao lado de scores e métricas para o usuário saber a confiabilidade.
+
+    Args:
+        quality_pct: 0-100 (None = dado indisponível)
+        fonte: rótulo da origem (ex: "FMP", "yfinance", "cache 2h")
+        atualizado_em: timestamp ou idade legível (ex: "atualizado há 4h")
+
+    Cores:
+        verde   >=85
+        amarelo 60-84
+        laranja 30-59
+        vermelho <30
+        cinza   None
+    """
+    import html as _html
+    if quality_pct is None:
+        cor_bg, cor_fg, label = "rgba(120,120,120,0.18)", "var(--text-muted, #888)", "N/D"
+    elif quality_pct >= 85:
+        cor_bg, cor_fg, label = "rgba(46,204,113,0.18)", "var(--bull)", f"{int(quality_pct)}%"
+    elif quality_pct >= 60:
+        cor_bg, cor_fg, label = "rgba(241,196,15,0.20)", "var(--amber)", f"{int(quality_pct)}%"
+    elif quality_pct >= 30:
+        cor_bg, cor_fg, label = "rgba(255,140,0,0.20)", "var(--accent)", f"{int(quality_pct)}%"
+    else:
+        cor_bg, cor_fg, label = "rgba(231,76,60,0.20)", "var(--bear)", f"{int(quality_pct)}%"
+
+    tooltip_parts = []
+    if fonte:
+        tooltip_parts.append(f"fonte: {_html.escape(fonte)}")
+    if atualizado_em:
+        tooltip_parts.append(_html.escape(atualizado_em))
+    tooltip = " · ".join(tooltip_parts) if tooltip_parts else "qualidade do dado"
+
+    return (
+        f'<span title="{tooltip}" style="'
+        f'display:inline-block; padding:2px 8px; border-radius:6px; '
+        f'background:{cor_bg}; color:{cor_fg}; '
+        f'font-family:Courier New,monospace; font-size:0.65rem; '
+        f'font-weight:600; letter-spacing:0.05em; margin-left:6px; '
+        f'vertical-align:middle;">'
+        f'◆ {label}'
+        f'</span>'
+    )
