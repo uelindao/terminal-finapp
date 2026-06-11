@@ -42,7 +42,7 @@ def _ler_credenciais() -> tuple[str, str]:
 
     # 3ª tentativa: variáveis de ambiente (CI/CD, uso fora do Streamlit)
     url = url or os.environ.get("SUPABASE_URL", "")
-    key = key or os.environ.get("SUPABASE_KEY", "")
+    key = key or os.environ.get("SUPABASE_KEY", "") or os.environ.get("SUPABASE_SERVICE_KEY", "")
 
     if not url or not key:
         raise RuntimeError(

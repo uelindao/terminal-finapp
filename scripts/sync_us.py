@@ -68,6 +68,9 @@ def _sf(val):
 
 def _fmp_get(endpoint: str, params: dict | None = None) -> list | dict:
     """FMP GET com fallback entre multiplas chaves."""
+    if not FMP_KEYS:
+        logger.error("[fmp] nenhuma FMP_API_KEY configurada — todas as chamadas FMP vão falhar")
+        return []
     for key in FMP_KEYS:
         p = {"apikey": key}
         if params:
@@ -75,7 +78,16 @@ def _fmp_get(endpoint: str, params: dict | None = None) -> list | dict:
         try:
             resp = requests.get(f"{FMP_BASE}/{endpoint}", params=p, timeout=15)
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                # FMP retorna erros com HTTP 200 e body dict — detectar e logar
+                if isinstance(data, dict):
+                    err = data.get("Error Message") or data.get("message") or data.get("error")
+                    if err:
+                        logger.warning(f"[fmp] {endpoint} retornou erro (HTTP 200): {err}")
+                        continue
+                return data
+            else:
+                logger.warning(f"[fmp] {endpoint} HTTP {resp.status_code}: {resp.text[:200]}")
         except Exception as e:
             logger.debug(f"FMP key falhou para {endpoint}: {e}, tentando próxima")
             continue
