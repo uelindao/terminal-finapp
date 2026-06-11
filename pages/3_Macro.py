@@ -25,6 +25,7 @@ from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
+from utils.regime_classifier import classificar_regime_do_macro_context
 from utils.macro_supabase import (
     carregar_fear_greed, salvar_fear_greed,
     carregar_snapshot, salvar_snapshot,
@@ -49,6 +50,37 @@ page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação
 
 if "FRED_API_KEY" not in st.secrets:
     st.warning("⚠️ **aviso de arquitetura:** a chave da api do fred não foi encontrada no arquivo `secrets.toml`.\n\nsem ela, os dados dos eua e risco global ficarão indisponíveis.")
+
+# ── Regime Macro — classificador automático ──────────────────────────────────
+section_title("regime macro — classificador automático")
+try:
+    _regime = classificar_regime_do_macro_context()
+    _cor_regime = {
+        "expansao": "var(--bull)",
+        "pico": "var(--amber)",
+        "contracao": "var(--accent)",
+        "vale": "var(--bear)",
+    }[_regime.fase]
+    _sinais_str = " · ".join(
+        f"{k}: {'✓' if v else ('—' if v is None else '✗')}"
+        for k, v in _regime.sinais.items()
+    )
+    st.markdown(
+        f'<div style="border-left:3px solid {_cor_regime}; padding:12px 16px; '
+        f'background:var(--bg-elevated); border-radius:6px; margin-bottom:16px;">'
+        f'<div style="font-family:Courier New,monospace; font-size:1.1rem; '
+        f'font-weight:700; color:{_cor_regime}; text-transform:uppercase;">'
+        f'{_regime.fase} · prob {int(_regime.probabilidade*100)}%'
+        f'</div>'
+        f'<div style="margin-top:6px; color:var(--text-muted, #888); '
+        f'font-size:0.85rem;">{_regime.leitura}</div>'
+        f'<div style="margin-top:8px; font-family:Courier New,monospace; '
+        f'font-size:0.7rem; color:#888;">{_sinais_str}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+except Exception as e:
+    st.warning(f"Classificador de regime indisponível: {e}")
 
 # ==========================================
 # funções globais de cache e apoio
