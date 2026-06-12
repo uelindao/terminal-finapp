@@ -111,6 +111,76 @@ _STATIC: dict[str, str] = {
     "GOLL4": "21615",                      # Gol
     "ASAI3": "25291",                      # Assaí
     "PETZ3": "24465",                      # Petz
+
+    # Tickers adicionais com CD_CVM confirmados na base CVM. Empresas com nome
+    # ambíguo ficam fora do _STATIC — o name-matching dinâmico do CVM resolve.
+    "ITSA4":  "7617",                      # Itaúsa
+    "ITSA3":  "7617",                      # Itaúsa ON
+    "CMIG4":  "2453",
+    "ELET6":  "2437",
+    "CSNA3":  "1098",                      # CSN
+    "GGBR4":  "3441",                      # Gerdau
+    "GOAU4":  "8656",                      # Metalúrgica Gerdau
+    "USIM5":  "7792",                      # Usiminas
+    "DXCO3":  "5410",                      # Dexco (era Duratex)
+    "TUPY3":  "5070",                      # Tupy
+    "POMO4":  "5371",                      # Marcopolo
+    "RENT3":  "20435",                     # Localiza
+    "CCRO3":  "18910",                     # CCR
+    "CPFE3":  "18660",                     # CPFL Energia
+    "CYRE3":  "20389",                     # Cyrela
+    "EVEN3":  "20796",                     # Even
+    "EZTC3":  "21024",                     # EzTec
+    "TRIS3":  "21075",                     # Trisul
+    "TEND3":  "20761",                     # Construtora Tenda
+    "DIRR3":  "20630",                     # Direcional
+    "HBOR3":  "20486",                     # Helbor
+    "BRKM5":  "10456",                     # Braskem
+    "OIBR3":  "11312",                     # Oi
+    "KLBN11": "12653",                     # Klabin
+    "ALPA4":  "14206",                     # Alpargatas
+    "GRND3":  "19615",                     # Grendene
+    "MYPK3":  "19372",                     # Iochpe-Maxion
+    "RECV3":  "24180",                     # PetroRecôncavo (PRIO afiliada)
+    "IRBR3":  "24163",                     # IRB Brasil RE
+    "BRSR6":  "8975",                      # Banrisul
+    "FRAS3":  "8451",                      # Fras-le
+    "ROMI3":  "7846",                      # Indústrias Romi
+    "FESA4":  "7595",                      # Ferbasa
+    "ENEV3":  "21490",                     # Eneva
+    "VBBR3":  "26271",                     # Vibra Energia
+    "AURE3":  "26611",                     # Auren Energia
+    "BPAC11": "22610",                     # BTG Pactual
+    "ABCB4":  "22349",                     # Banco ABC Brasil
+    "BBSE3":  "23159",                     # BB Seguridade
+    "CXSE3":  "26034",                     # Caixa Seguridade
+    "EQTL3":  "22608",                     # Equatorial
+    "TAEE11": "20656",                     # Taesa
+    "TRPL4":  "18112",                     # ISA CTEEP
+    "LWSA3":  "23388",                     # Locaweb
+    "CASH3":  "26190",                     # Méliuz
+    "MOVI3":  "25917",                     # Movida
+    "VAMO3":  "26017",                     # Vamos
+    "INTB3":  "26433",                     # Intelbras
+    "PLPL3":  "23990",                     # Plano e Plano
+    "CMIN3":  "26239",                     # CSN Mineração
+    "CBAV3":  "26301",                     # CBA (Companhia Brasileira de Alumínio)
+    "ZAMP3":  "26050",                     # Zamp (Burger King BR)
+    "VIVA3":  "26115",                     # Vivara
+    "ONCO3":  "26328",                     # Oncoclínicas
+    "ENGI11": "20524",                     # Energisa
+    "FLRY3":  "21008",                     # Fleury
+    "ODPV3":  "20559",                     # Odontoprev
+    "CAML3":  "23647",                     # Camil
+    "CRFB3":  "24686",                     # Carrefour BR
+    "ARZZ3":  "23329",                     # Arezzo
+    "SBFG3":  "24376",                     # Grupo SBF (Centauro)
+    "ANIM3":  "23280",                     # Ânima Educação
+    "YDUQ3":  "20338",                     # YDUQS (era Estácio)
+    "CEAB3":  "25411",                     # C&A
+    "PARD3":  "21806",                     # IHPardini
+    "QUAL3":  "20613",                     # Qualicorp
+    "RAIL3":  "22276",                     # Rumo
 }
 
 
@@ -961,3 +1031,144 @@ def get_multiplos_historicos_cvm(ticker: str, anos: int = 10) -> list[dict]:
             "_fonte":    "cvm",
         })
     return resultados
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Histórico trimestral no schema canônico do health_engine
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
+    """
+    Extrai histórico trimestral CVM (ITR + Q4 do DFP) no formato canônico
+    do `historico_trimestral` salvo em fundamentals_cache.dados_json. Lista
+    de dicts ordenada do mais recente para o mais antigo. Cada dict tem:
+
+        periodo, receita, lucro, ebit, gross, ativos_totais, patrimonio,
+        ativos_circ, passivos_circ, divida_total, cfo, capex, fcf
+
+    Difere do nosso histórico-yfinance em duas coisas:
+    1. ebitda não está disponível (CVM não consolida depreciação separada
+       no padrão das contas usadas) — preenchemos com None.
+    2. shares e passivos_totais não são extraídos aqui (vêm do yfinance).
+
+    Retorna [] se ticker não está mapeado (no _STATIC nem via name-matching)
+    ou se download CVM falhar.
+    """
+    tk_raiz = ticker.upper().replace(".SA", "")
+    if not ticker.upper().endswith(".SA"):
+        return []
+
+    cd_cvm = get_cvm_code(tk_raiz)
+    if not cd_cvm:
+        logger.info(f"[cvm] {tk_raiz} — CD_CVM não encontrado")
+        return []
+
+    import datetime as _dt
+    ano_atual = _dt.date.today().year
+    anos_zip  = range(ano_atual, ano_atual - anos - 1, -1)
+
+    dados_por_data: dict[str, dict] = {}
+
+    for year in anos_zip:
+        try:
+            dfs_itr = _parse_zip(_ITR_URL, year)
+        except Exception:
+            dfs_itr = {}
+        try:
+            dfs_dfp = _parse_zip(_DFP_URL, year)
+        except Exception:
+            dfs_dfp = {}
+
+        for dfs, is_q4_source in [(dfs_itr, False), (dfs_dfp, True)]:
+            if not dfs:
+                continue
+            ref_df = dfs.get("DRE") or dfs.get("BPA")
+            if ref_df is None:
+                continue
+            mask = (
+                (ref_df["CD_CVM"].str.strip() == str(cd_cvm)) &
+                (ref_df["ORDEM_EXERC"].str.strip() == "ÚLTIMO")
+            )
+            datas = ref_df[mask]["DT_REFER"].str.strip().unique()
+            for dt in datas:
+                if dt in dados_por_data:
+                    continue
+                if is_q4_source:
+                    try:
+                        ts = pd.Timestamp(dt)
+                        if ts.month != 12:
+                            continue
+                    except Exception:
+                        continue
+                linha: dict = {}
+                for tipo, cd, chave in [
+                    ("DRE", _C_RECEITA,    "receita"),
+                    ("DRE", _C_LUC_BRUTO,  "luc_bruto"),
+                    ("DRE", _C_EBIT,       "ebit"),
+                    ("DRE", _C_LUC_LIQ,    "luc_liq"),
+                    ("BPA", _C_ATIVO_TOT,  "ativo_tot"),
+                    ("BPA", _C_ATIVO_CIRC, "ativo_circ"),
+                    ("BPP", _C_PASS_CIRC,  "pass_circ"),
+                    ("BPP", _C_PL,         "pl"),
+                    ("DFC", _C_OP_CF,      "op_cf"),
+                    ("DFC", _C_INV_CF,     "inv_cf"),
+                ]:
+                    linha[chave] = _extrair(dfs.get(tipo), cd_cvm, cd, dt)
+                linha["divida"]    = _extrair_divida(dfs.get("BPP"), cd_cvm, dt)
+                linha["is_anual"]  = is_q4_source
+                dados_por_data[dt] = linha
+
+    if not dados_por_data:
+        return []
+
+    # Anualização de fluxos (ITR reporta acumulado do exercício)
+    datas_ord = sorted(dados_por_data.keys(), reverse=True)
+    historico: list[dict] = []
+    for dt_str in datas_ord:
+        d = dados_por_data[dt_str]
+        try:
+            ts = pd.Timestamp(dt_str)
+            if d.get("is_anual"):
+                ann = 1.0
+            elif ts.month <= 3:
+                ann = 4.0       # Q1: acumulado é 1 trimestre
+            elif ts.month <= 6:
+                ann = 2.0       # Q2: acumulado é 2 trimestres
+            elif ts.month <= 9:
+                ann = 4.0 / 3.0  # Q3: acumulado é 3 trimestres
+            else:
+                ann = 1.0
+        except Exception:
+            ann = 1.0
+
+        receita    = (d.get("receita")   or 0) * ann or None
+        luc_bruto  = (d.get("luc_bruto") or 0) * ann or None
+        ebit       = (d.get("ebit")      or 0) * ann or None
+        lucro      = (d.get("luc_liq")   or 0) * ann or None
+        op_cf      = (d.get("op_cf")     or 0) * ann or None
+        inv_cf     = (d.get("inv_cf")    or 0) * ann or None
+        fcf        = (op_cf + inv_cf) if (op_cf is not None and inv_cf is not None) else None
+        # capex em magnitude (inv_cf vem negativo no DFC)
+        capex      = -abs(inv_cf) if inv_cf is not None else None
+
+        historico.append({
+            "periodo":         dt_str,
+            "receita":         receita,
+            "lucro":           lucro,
+            "ebitda":          None,            # não disponível no padrão CVM puro
+            "ebit":            ebit,
+            "gross":           luc_bruto,
+            "opex":            None,
+            "ativos_totais":   d.get("ativo_tot"),
+            "passivos_totais": None,
+            "patrimonio":      d.get("pl"),
+            "ativos_circ":     d.get("ativo_circ"),
+            "passivos_circ":   d.get("pass_circ"),
+            "divida_total":    d.get("divida"),
+            "shares":          None,            # vem do yfinance
+            "cfo":             op_cf,
+            "capex":           capex,
+            "fcf":             fcf,
+            "_fonte":          "cvm",
+        })
+    return historico

@@ -112,8 +112,20 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     ticker_yf = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
     enriquecer_com_yfinance(data, ticker_yf, logger=logger)
 
-    # Histórico trimestral (DRE + balanço + DFC) — viabiliza Piotroski YoY no health_engine
-    historico = coletar_historico_trimestral(ticker_yf, logger=logger)
+    # Histórico trimestral — prioridade: CVM oficial (DRE+balanço+DFC desde 2010)
+    # se ticker está mapeado/encontrado pelo cvm_client. Cai para yfinance se vazio.
+    historico = []
+    try:
+        from utils.cvm_client import get_historico_trimestral_cvm
+        historico = get_historico_trimestral_cvm(ticker_yf, anos=3)
+        if historico:
+            logger.info(f"[sync_br] {ticker_yf} → histórico CVM ({len(historico)} trimestres)")
+    except Exception as e:
+        logger.debug(f"[sync_br] CVM falhou {ticker_yf}: {e}")
+
+    if not historico:
+        historico = coletar_historico_trimestral(ticker_yf, logger=logger)
+
     if historico:
         data["historico_trimestral"] = historico
 

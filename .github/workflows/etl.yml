@@ -34,6 +34,10 @@ jobs:
   sync-br:
     name: Sincronizar Ativos Brasil (B3 + FIIs)
     runs-on: ubuntu-latest
+    # Cold-start CVM (download de ZIPs DFP+ITR dos últimos 4 anos, ~300MB
+    # em memória global do processo) acontece no 1º ticker; depois fica
+    # cacheado in-memory para os demais. timeout 60min cobre folga.
+    timeout-minutes: 60
     if: github.event.schedule == '0 6 * * *' || github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
