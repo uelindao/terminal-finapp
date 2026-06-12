@@ -171,6 +171,42 @@ def transform_fmp(ticker: str) -> dict | None:
     return data
 
 
+def sync_dividends_incremental(tickers: list[str]) -> tuple[int, int, int]:
+    """
+    Sync incremental de dividendos via yf.Ticker.dividends. Para cada ticker:
+    - Consulta data do último dividendo cacheado
+    - Se vazio: baixa histórico completo (desde IPO)
+    - Se cache existente: baixa apenas pagamentos posteriores
+
+    Retorna (n_tickers_ok, n_tickers_skip_uptodate, n_linhas_total).
+    """
+    import time
+    from utils.yf_enrichment import coletar_dividendos_yfinance
+    from scripts.supabase_helper import (
+        upsert_dividend_history_batch, get_last_dividend_date,
+    )
+
+    ok = 0
+    skip = 0
+    total = 0
+    for i, ticker in enumerate(tickers, 1):
+        try:
+            desde = get_last_dividend_date(ticker)
+            divs = coletar_dividendos_yfinance(ticker, desde=desde, logger=logger)
+            if not divs:
+                skip += 1
+                continue
+            n = upsert_dividend_history_batch(divs)
+            total += n
+            ok += 1
+            if i % 25 == 0:
+                print(f"  [div] {i}/{len(tickers)} processados, acum {total} pagamentos")
+            time.sleep(0.2)  # gentle com yfinance
+        except Exception as e:
+            logger.warning(f"[div] {ticker} falhou: {e}")
+    return ok, skip, total
+
+
 def _get_yf_close(hist):
     """Extrai DataFrame de Close de um yfinance MultiIndex (lida com ambos formatos)."""
     import pandas as pd
@@ -416,6 +452,17 @@ def main():
         sync_earnings_revisions(sb_rev, tickers_rev, setores_map)
     except Exception as e:
         logger.error(f"earnings revisions falhou: {e}")
+
+    # ── Dividendos pagos (incremental) ──────────────────────────────────────
+    # Para tickers que sincronizaram fundamentos com sucesso. Sync incremental
+    # baixa só pagamentos novos quando já existe cache (~50ms/ticker), histórico
+    # completo no cold-start (~500ms/ticker).
+    print("[sync_us] sincronizando dividendos...")
+    try:
+        d_ok, d_skip, d_total = sync_dividends_incremental(tickers_com_hist)
+        print(f"[sync_us] dividendos: {d_ok} tickers ok, {d_skip} sem novos, {d_total} pagamentos novos")
+    except Exception as e:
+        logger.error(f"dividendos falhou: {e}")
 
     _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
     log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)

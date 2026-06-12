@@ -408,6 +408,37 @@ def get_price_history_batch(tickers: list[str], dias: int = 252) -> "pd.DataFram
     return pivot
 
 
+def get_dividend_history(ticker: str, dias: int | None = None) -> "pd.DataFrame":
+    """
+    Lê histórico de dividendos da tabela dividend_history.
+
+    Retorna DataFrame com colunas data_pagamento (Timestamp), valor (float),
+    tipo (str). Ordenado do mais antigo para o mais recente.
+
+    `dias`: opcional. Se passado, limita aos últimos N dias corridos.
+    """
+    import pandas as pd
+    sb = get_supabase()
+    try:
+        q = sb.table('dividend_history').select(
+            'data_pagamento, valor, tipo'
+        ).eq('ticker', ticker).order('data_pagamento', desc=False)
+        res = q.execute()
+    except Exception as e:
+        logger.warning(f"[db] get_dividend_history {ticker}: {e}")
+        return pd.DataFrame()
+    rows = res.data or []
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df['data_pagamento'] = pd.to_datetime(df['data_pagamento'])
+    df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+    if dias is not None:
+        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=dias)
+        df = df[df['data_pagamento'] >= cutoff]
+    return df.reset_index(drop=True)
+
+
 def get_historico_trimestral(ticker: str) -> list[dict]:
     """
     Lê histórico trimestral (5-8 trimestres de DRE+balanço+DFC) de

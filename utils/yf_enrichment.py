@@ -174,6 +174,73 @@ def _extrair_serie(df, nomes_candidatos: list[str]) -> dict:
     return out
 
 
+def coletar_dividendos_yfinance(
+    ticker_yf: str,
+    desde: str | None = None,
+    logger=None,
+) -> list[dict]:
+    """
+    Coleta dividendos pagos via yf.Ticker.dividends.
+
+    Retorna lista de dicts no formato {ticker, data_pagamento (YYYY-MM-DD),
+    valor (float > 0), tipo}. yfinance traz histórico completo desde a IPO
+    do ativo — passa 'desde' (YYYY-MM-DD) para sync incremental.
+
+    Para FIIs brasileiros (sufixo `11.SA`), tipo='rendimento'. Caso contrário,
+    tipo='dividendo' (yfinance não separa dividendo de JCP em ações BR).
+    """
+    try:
+        import yfinance as yf
+        serie = yf.Ticker(ticker_yf).dividends
+    except Exception as e:
+        if logger:
+            logger.debug(f"[yf_div] {ticker_yf} indisponível: {e}")
+        return []
+
+    if serie is None or serie.empty:
+        return []
+
+    # Detecta FII brasileiro pelo sufixo (ticker termina em 11.SA mas não index)
+    is_fii = (
+        ticker_yf.endswith("11.SA")
+        and ticker_yf not in {"BOVA11.SA", "SMAL11.SA", "IVVB11.SA"}
+    )
+    tipo_padrao = "rendimento" if is_fii else "dividendo"
+
+    desde_dt = None
+    if desde:
+        try:
+            from datetime import datetime
+            desde_dt = datetime.strptime(desde, "%Y-%m-%d").date()
+        except Exception:
+            desde_dt = None
+
+    out = []
+    for idx, val in serie.items():
+        try:
+            f = float(val)
+            if f != f or f <= 0:
+                continue
+        except (ValueError, TypeError):
+            continue
+        try:
+            data_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+            if desde_dt is not None:
+                from datetime import datetime
+                d = datetime.strptime(data_str, "%Y-%m-%d").date()
+                if d <= desde_dt:
+                    continue
+        except Exception:
+            continue
+        out.append({
+            "ticker":         ticker_yf,
+            "data_pagamento": data_str,
+            "valor":          round(f, 6),
+            "tipo":           tipo_padrao,
+        })
+    return out
+
+
 def coletar_historico_trimestral(ticker_yf: str, max_periodos: int = 8, logger=None) -> list[dict]:
     """
     Coleta últimos N trimestres de DRE + Balanço + DFC via yfinance.

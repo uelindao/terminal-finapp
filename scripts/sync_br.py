@@ -309,6 +309,19 @@ def main():
 
     sync_health_scores(tickers_com_hist, hist_dict, macro_ctx, quality_map=quality_map)
 
+    # ── Dividendos pagos (incremental) ──────────────────────────────────────
+    # FIIs pagam mensal → histórico é volumoso (60+ pagamentos por ticker em 5 anos).
+    # Sync incremental baixa só pagamentos novos quando já existe cache.
+    print("[sync_br] sincronizando dividendos...")
+    try:
+        from scripts.sync_us import sync_dividends_incremental
+        # Tickers BR no yfinance precisam de .SA — tickers_com_hist já vem do
+        # SCREENER_B3+FII+BR_INDICES (todos com sufixo .SA)
+        d_ok, d_skip, d_total = sync_dividends_incremental(tickers_com_hist)
+        print(f"[sync_br] dividendos: {d_ok} tickers ok, {d_skip} sem novos, {d_total} pagamentos novos")
+    except Exception as e:
+        logger.error(f"dividendos falhou: {e}")
+
     _err = f"precos: {p_fail} falha" if p_fail > 0 else ""
     log_etl_finish(log_id, ok=ok, fail=fail, error_msg=_err)
     print(f"[sync_br] fim — fund. {ok}/{fail}, precos {p_ok}/{p_fail}")

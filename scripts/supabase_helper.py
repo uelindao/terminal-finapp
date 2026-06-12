@@ -105,6 +105,39 @@ def get_last_price_history_date(ticker: str) -> str | None:
     return None
 
 
+def upsert_dividend_history_batch(rows: list[dict], chunk_size: int = 500) -> int:
+    """
+    Upsert em lote de dividendos pagos na tabela dividend_history.
+    Cada `row` deve ter: ticker, data_pagamento (YYYY-MM-DD), valor, tipo.
+    on_conflict (ticker, data_pagamento) — idempotente.
+    """
+    if not rows:
+        return 0
+    sb = get_client()
+    total = 0
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i:i + chunk_size]
+        sb.table("dividend_history").upsert(
+            chunk, on_conflict="ticker,data_pagamento"
+        ).execute()
+        total += len(chunk)
+    return total
+
+
+def get_last_dividend_date(ticker: str) -> str | None:
+    """Retorna data do último dividendo cacheado para sync incremental."""
+    sb = get_client()
+    try:
+        res = sb.table("dividend_history").select("data_pagamento").eq(
+            "ticker", ticker
+        ).order("data_pagamento", desc=True).limit(1).execute()
+        if res.data:
+            return res.data[0]["data_pagamento"]
+    except Exception:
+        pass
+    return None
+
+
 def upsert_macro(indicator: str, value: float, label: str = "",
                   unit: str = "", source: str = "") -> None:
     """Faz upsert de um indicador macro na macro_cache."""
