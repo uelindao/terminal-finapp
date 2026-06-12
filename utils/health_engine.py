@@ -939,16 +939,20 @@ def _calc_nd_do_historico(historico: list[dict], is_br: bool) -> tuple[int, floa
 
 def _calc_icr_do_historico(historico: list[dict]) -> tuple[int, float | None]:
     """
-    Interest Coverage Ratio = EBIT / Interest Expense, a partir do cache.
-    Mesma tabela de pontuação de calcular_health_score: ≥5x = 5, ≥3x = 3,
-    ≥1.5x = 1, ≥1x = 0, <1x = −8.
+    Interest Coverage Ratio = EBIT / |Interest Expense|, a partir do cache.
+    Aceita interest_expense com qualquer sinal (yfinance traz negativo do DRE;
+    CVM traz positivo via abs(res_fin)). Mesma tabela de pontuação de
+    calcular_health_score: ≥5x = 5, ≥3x = 3, ≥1.5x = 1, ≥1x = 0, <1x = −8.
     """
     if not historico:
         return 0, None
     t0 = historico[0]
     ebit = _safe_g(t0, "ebit")
     int_exp = _safe_g(t0, "interest_expense")
-    if ebit is None or int_exp is None or int_exp <= 0:
+    if ebit is None or int_exp is None:
+        return 0, None
+    int_exp = abs(int_exp)
+    if int_exp <= 0:
         return 0, None
     icr = ebit / int_exp
     if icr >= 5.0:
