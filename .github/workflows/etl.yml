@@ -14,6 +14,8 @@ on:
     - cron: '0 0 * * *'
     # A cada 2h — dados macro (Selic, VIX, cambio)
     - cron: '0 */2 * * *'
+    # Domingo 03:00 UTC — historico OHLCV semanal (incremental)
+    - cron: '0 3 * * 0'
   workflow_dispatch:  # permite execucao manual
 
 concurrency:
@@ -83,6 +85,34 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FMP_API_KEY_2: ${{ secrets.FMP_API_KEY_2 }}
+
+  sync-price-history:
+    name: Sincronizar Historico OHLCV (semanal)
+    runs-on: ubuntu-latest
+    # Roda domingo 03:00 UTC ou manualmente.
+    # Cold-start inicial leva ~20min; runs incrementais ~5min.
+    if: github.event.schedule == '0 3 * * 0' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase yfinance pandas numpy
+
+      - name: Executar sync_price_history
+        run: python scripts/sync_price_history.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
   sync-macro:
     name: Sincronizar Dados Macro

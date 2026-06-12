@@ -351,6 +351,63 @@ def get_todos_fundamentos_cache() -> dict:
     return out
 
 
+def get_price_history(ticker: str, dias: int = 252) -> "pd.DataFrame":
+    """
+    Lê histórico OHLCV de price_history. Retorna DataFrame com índice de datas
+    e colunas open/high/low/close/volume. Vazio se não há cache.
+
+    `dias`: limita aos últimos N dias úteis (padrão 252 = 1 ano). Passe um
+    valor grande (>5000) para pegar histórico inteiro.
+    """
+    import pandas as pd
+    sb = get_supabase()
+    try:
+        res = sb.table('price_history').select(
+            'data, open, high, low, close, volume'
+        ).eq('ticker', ticker).order('data', desc=True).limit(dias).execute()
+    except Exception as e:
+        logger.warning(f"[db] get_price_history {ticker}: {e}")
+        return pd.DataFrame()
+    rows = res.data or []
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df['data'] = pd.to_datetime(df['data'])
+    df = df.set_index('data').sort_index()
+    return df
+
+
+def get_price_history_batch(tickers: list[str], dias: int = 252) -> "pd.DataFrame":
+    """
+    Lê preços de fechamento (Close ajustado) para múltiplos tickers de uma vez.
+    Retorna DataFrame com índice de datas e uma coluna por ticker.
+
+    Mais eficiente que múltiplos get_price_history quando precisar de matriz
+    de retornos (beta, correlação, VaR, fatores).
+    """
+    import pandas as pd
+    if not tickers:
+        return pd.DataFrame()
+    sb = get_supabase()
+    try:
+        res = sb.table('price_history').select(
+            'ticker, data, close'
+        ).in_('ticker', tickers).order('data', desc=False).execute()
+    except Exception as e:
+        logger.warning(f"[db] get_price_history_batch falhou: {e}")
+        return pd.DataFrame()
+    rows = res.data or []
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df['data'] = pd.to_datetime(df['data'])
+    pivot = df.pivot(index='data', columns='ticker', values='close')
+    # Limita aos últimos N dias
+    if dias and len(pivot) > dias:
+        pivot = pivot.tail(dias)
+    return pivot
+
+
 def get_historico_trimestral(ticker: str) -> list[dict]:
     """
     Lê histórico trimestral (5-8 trimestres de DRE+balanço+DFC) de

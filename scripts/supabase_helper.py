@@ -65,6 +65,46 @@ def upsert_price(ticker: str, price_data: dict) -> None:
     ).execute()
 
 
+def upsert_price_history_batch(rows: list[dict], chunk_size: int = 500) -> int:
+    """
+    Upsert em lote de barras OHLCV diárias na tabela price_history.
+    Cada `row` deve ter as chaves: ticker, data (YYYY-MM-DD), open, high, low, close, volume.
+    Retorna o número total de linhas processadas.
+
+    Faz chunking para evitar payload >1MB no Supabase. on_conflict (ticker,data)
+    sobrescreve barras existentes (útil em revisões de close por split/dividendo).
+    """
+    if not rows:
+        return 0
+    sb = get_client()
+    total = 0
+    for i in range(0, len(rows), chunk_size):
+        chunk = rows[i:i + chunk_size]
+        sb.table("price_history").upsert(
+            chunk, on_conflict="ticker,data"
+        ).execute()
+        total += len(chunk)
+    return total
+
+
+def get_last_price_history_date(ticker: str) -> str | None:
+    """
+    Retorna a data (YYYY-MM-DD) da barra mais recente de `ticker` em price_history,
+    ou None se não há dados. Usado para sync incremental — baixa só do dia seguinte
+    em diante.
+    """
+    sb = get_client()
+    try:
+        res = sb.table("price_history").select("data").eq("ticker", ticker).order(
+            "data", desc=True
+        ).limit(1).execute()
+        if res.data:
+            return res.data[0]["data"]
+    except Exception:
+        pass
+    return None
+
+
 def upsert_macro(indicator: str, value: float, label: str = "",
                   unit: str = "", source: str = "") -> None:
     """Faz upsert de um indicador macro na macro_cache."""
