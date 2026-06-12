@@ -25,6 +25,7 @@ env:
   SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
   BRAPI_TOKEN: ${{ secrets.BRAPI_TOKEN }}
   FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+  FMP_API_KEY_2: ${{ secrets.FMP_API_KEY_2 }}
   FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
 
 jobs:
@@ -57,7 +58,9 @@ jobs:
   sync-us:
     name: Sincronizar Ativos EUA
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 0 * * *' || github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
+    # Roda apenas às 00:00 UTC (após fechamento EUA) — evita estouro de quota FMP
+    # 233 tickers × 2 calls = 466 req/run. 2 keys × 250/dia = 500 req/dia → só 1 run/dia
+    if: github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +82,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FMP_API_KEY_2: ${{ secrets.FMP_API_KEY_2 }}
 
   sync-macro:
     name: Sincronizar Dados Macro
