@@ -2715,7 +2715,116 @@ with tab_risco:
                 st.caption("em desenvolvimento — em breve nesta aba.")
 
             with st.expander("💰 projeção de dividendos 12m", expanded=False):
-                st.caption("em desenvolvimento — em breve nesta aba.")
+                st.markdown(
+                    "*projeta os próximos 12 pagamentos por ticker replicando o padrão "
+                    "histórico × crescimento yoy (cap ±10%). lê do cache dividend_history "
+                    "— sem chamadas yfinance.*"
+                )
+                from utils.dividend_projection import projetar_dividendos_carteira
+
+                # Constrói {ticker_base: quantidade} a partir de ativos_alocados
+                _quantidades: dict[str, float] = {}
+                for _tk_orig, _dados_pos in ativos_alocados.items():
+                    _qtd = float(_dados_pos.get("quantidade") or 0)
+                    if _qtd <= 0:
+                        continue
+                    _tk_base = mapear_ticker_base(_tk_orig)
+                    _quantidades[_tk_base] = _quantidades.get(_tk_base, 0) + _qtd
+
+                with st.spinner("projetando dividendos..."):
+                    _proj = projetar_dividendos_carteira(
+                        _quantidades,
+                        valor_carteira=_valor_total,
+                    )
+
+                if _proj.renda_total_12m <= 0:
+                    st.info(
+                        "sem histórico de dividendos suficiente no cache para projetar. "
+                        "verifique se o ETL `sync_br` / `sync_us` já populou a tabela "
+                        "`dividend_history`."
+                    )
+                else:
+                    # Header — 3 cards
+                    _cd1, _cd2, _cd3 = st.columns(3)
+                    with _cd1:
+                        metric_card(
+                            "renda esperada 12m",
+                            f"R$ {_proj.renda_total_12m:,.0f}".replace(",", "."),
+                            sublabel=f"≈ R$ {_proj.renda_total_12m/12:,.0f}/mês".replace(",", "."),
+                        )
+                    with _cd2:
+                        metric_card(
+                            "yield projetado",
+                            f"{_proj.dy_projetado_pct:.2f}%",
+                            sublabel="sobre o valor atual da carteira",
+                        )
+                    with _cd3:
+                        _n_pagantes = sum(1 for v in _proj.por_ticker.values() if v > 0)
+                        metric_card(
+                            "ativos pagantes",
+                            f"{_n_pagantes}",
+                            sublabel=f"de {len(_quantidades)} posições",
+                        )
+
+                    # Calendário mensal (plotly)
+                    import plotly.graph_objects as go
+                    _meses = list(_proj.por_mes.keys())
+                    _valores = list(_proj.por_mes.values())
+                    _fig_cal = go.Figure(go.Bar(
+                        x=_meses,
+                        y=_valores,
+                        marker_color="#16a34a",
+                        text=[f"R$ {v:,.0f}".replace(",", ".") if v > 0 else ""
+                              for v in _valores],
+                        textposition="outside",
+                        hovertemplate="<b>%{x}</b><br>R$ %{y:,.0f}<extra></extra>",
+                    ))
+                    _fig_cal.update_layout(
+                        title="calendário projetado (12 meses)",
+                        xaxis_title="",
+                        yaxis_title="R$",
+                        height=320,
+                        showlegend=False,
+                        margin=dict(t=40, b=20, l=0, r=0),
+                        template="plotly_dark",
+                    )
+                    st.plotly_chart(_fig_cal, use_container_width=True)
+
+                    # Top contribuidores
+                    st.markdown("##### top contribuidores 12m")
+                    _top = sorted(
+                        [(t, v) for t, v in _proj.por_ticker.items() if v > 0],
+                        key=lambda x: x[1], reverse=True,
+                    )[:10]
+                    if _top:
+                        _linhas_tabela = []
+                        for _tk, _val in _top:
+                            _det = _proj.detalhes_ticker.get(_tk, {})
+                            _linhas_tabela.append({
+                                "ticker": _tk,
+                                "renda 12m (R$)": f"{_val:,.0f}".replace(",", "."),
+                                "freq.": _det.get('freq', 'n/d'),
+                                "n pag. 12m": _det.get('n_payments_12m', 0),
+                                "growth yoy": f"{_det.get('growth', 0)*100:+.1f}%",
+                                "% do total": f"{_val/_proj.renda_total_12m*100:.1f}%",
+                            })
+                        st.dataframe(
+                            _linhas_tabela,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    # Sumário em linguagem natural
+                    _maior_mes = max(_proj.por_mes.items(), key=lambda x: x[1])
+                    st.info(
+                        f"💡 projeção total de **R$ {_proj.renda_total_12m:,.0f}** "
+                        f"em 12 meses ({_proj.dy_projetado_pct:.2f}% sobre R$ "
+                        f"{_proj.valor_carteira:,.0f}). o mês de **{_maior_mes[0]}** "
+                        f"concentra o maior pagamento estimado (R$ {_maior_mes[1]:,.0f}). "
+                        f"premissas: padrão dos últimos 12m × crescimento yoy "
+                        f"(cap ±10% para evitar extrapolação)."
+                        .replace(",", ".")
+                    )
 
 # ==========================================
 # tab 4: stress test
