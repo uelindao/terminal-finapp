@@ -24,6 +24,7 @@ from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, _cores as _chart_cores
 from utils.logger import get_logger
+from utils.price_history import obter_close_carteira
 
 logger = get_logger(__name__)
 
@@ -46,13 +47,16 @@ page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, b
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_betas(tickers_tuple: tuple) -> dict:
-    """Calcula beta de cada ativo contra IBOV e S&P500 usando 1 ano de dados."""
+    """Calcula beta de cada ativo contra IBOV e S&P500 usando 1 ano de dados.
+    Lê preços do cache Supabase (price_history); cai para yfinance se vazio."""
     tickers = list(tickers_tuple)
     betas = {}
     try:
         benchmarks = ["^BVSP", "^GSPC"]
         todos = list(set([mapear_ticker_base(t) for t in tickers] + benchmarks))
-        hist = yf.download(todos, period="1y", auto_adjust=True, progress=False)['Close']
+        hist = obter_close_carteira(tuple(todos), periodo="1y")
+        if hist.empty:
+            raise ValueError("histórico vazio (cache + yfinance falhou)")
         if isinstance(hist, pd.Series):
             hist = hist.to_frame()
         rets = hist.pct_change().dropna()
@@ -104,19 +108,13 @@ def calcular_matriz_correlacao(tickers_tuple: tuple, periodo: str = "1y") -> dic
 
     try:
         tickers_base = [mapear_ticker_base(t) for t in tickers]
-        hist = yf.download(
-            tickers_base,
-            period=periodo,
-            auto_adjust=True,
-            progress=False,
-        )['Close']
+        hist = obter_close_carteira(tuple(tickers_base), periodo=periodo)
+
+        if hist.empty:
+            return resultado
 
         if isinstance(hist, pd.Series):
             hist = hist.to_frame(name=tickers_base[0])
-
-        # Remove timezone e normaliza
-        if getattr(hist.index, 'tz', None) is not None:
-            hist.index = hist.index.tz_localize(None)
 
         # Retornos diários
         rets = hist.pct_change().dropna()
@@ -232,18 +230,10 @@ def calcular_performance_vs_benchmarks(
 
         _todos = _todos_tickers + list(_benchmarks.values())
 
-        _hist = yf.download(
-            _todos,
-            period=periodo,
-            auto_adjust=True,
-            progress=False,
-        )['Close']
+        _hist = obter_close_carteira(tuple(_todos), periodo=periodo)
 
         if isinstance(_hist, pd.Series):
             _hist = _hist.to_frame(name=_todos[0])
-
-        if getattr(_hist.index, 'tz', None) is not None:
-            _hist.index = _hist.index.tz_localize(None)
 
         _hist = _hist.dropna(how='all')
 

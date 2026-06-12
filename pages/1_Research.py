@@ -320,10 +320,10 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
         with st.spinner("sincronizando matriz de múltiplos..."):
             dados_comp = []
             try:
-                hist_all = yf.download(ativos_comp, period="10y", progress=False)['Close']
+                from utils.price_history import obter_close_carteira
+                hist_all = obter_close_carteira(tuple(ativos_comp), periodo="10y")
                 if isinstance(hist_all, pd.Series): hist_all = hist_all.to_frame(name=ativos_comp[0])
                 hist_all = hist_all.ffill().dropna(how='all')
-                if hist_all.index.tz is not None: hist_all.index = hist_all.index.tz_localize(None)
             except: hist_all = pd.DataFrame()
             
             for t in ativos_comp:
@@ -612,15 +612,11 @@ def carregar_dados_ativo(tk):
     acao = yf.Ticker(tk)
 
     # ── histórico: bloco isolado — falha aqui é fatal ──────────────────────
+    # Lê do cache Supabase (price_history); cai pra yfinance ao vivo se vazio.
     hist = pd.DataFrame()
     try:
-        hist = acao.history(period="10y", auto_adjust=True)
-        # yfinance >=0.2.x pode retornar MultiIndex; achata para índice simples
-        if isinstance(hist.columns, pd.MultiIndex):
-            hist.columns = hist.columns.get_level_values(0)
-        # remove timezone do índice para compatibilidade com plotly/pandas
-        if not hist.empty and getattr(hist.index, "tz", None) is not None:
-            hist.index = hist.index.tz_localize(None)
+        from utils.price_history import obter_ohlcv_ativo
+        hist = obter_ohlcv_ativo(tk, periodo="10y")
     except Exception:
         pass  # hist permanece vazio — tratado logo abaixo
 
@@ -1637,7 +1633,8 @@ with tab_analise:
     if _beta_tab is None and df_hist is not None and len(df_hist) >= 60:
         try:
             _bench_t = "^BVSP" if t_base.endswith('.SA') else "^GSPC"
-            _h_bench = yf.Ticker(_bench_t).history(period="1y", auto_adjust=True)
+            from utils.price_history import obter_ohlcv_ativo
+            _h_bench = obter_ohlcv_ativo(_bench_t, periodo="1y")
             if not _h_bench.empty:
                 _r_a = df_hist['Close'].pct_change().dropna()
                 _r_b = _h_bench['Close'].pct_change().dropna()
