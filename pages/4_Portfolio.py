@@ -1024,9 +1024,10 @@ if '_pending_entrada' in st.session_state:
     # quando forem renderizados ainda nesta execução
 
 # 4. criação das tabs
-tab_posicoes, tab_concentracao, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
+tab_posicoes, tab_concentracao, tab_risco, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
     "💼 posições & p&l",
     "📊 concentração",
+    "📐 risco",
     "⚡ stress test",
     "📊 backtesting",
     "📝 diário de decisões",
@@ -2503,7 +2504,221 @@ with tab_concentracao:
                 st.warning("dados insuficientes para calcular correlação.")
 
 # ==========================================
-# tab 3: stress test
+# tab 3: risco institucional (VaR, Brinson, fatores, dividendos)
+# ==========================================
+with tab_risco:
+    section_title("📐 risco institucional do portfólio")
+
+    if not ativos_alocados:
+        empty_state(
+            "💼",
+            "sem posições para analisar",
+            "adicione posições na aba 'posições & p&l' antes de calcular risco.",
+        )
+    else:
+        # Constrói carteira a partir das posições da aba principal.
+        # ativos_alocados[t] = {'quantidade', 'preco_medio', 'peso'}; live_data[t] = preço atual.
+        _pesos_carteira: dict[str, float] = {}
+        _valor_total = 0.0
+        for _tk_orig, _dados_pos in ativos_alocados.items():
+            _qtd = float(_dados_pos.get("quantidade") or 0)
+            _preco_atual = float(live_data.get(_tk_orig) or 0)
+            _valor = _qtd * _preco_atual
+            if _valor <= 0:
+                continue
+            _tk_base = mapear_ticker_base(_tk_orig)
+            _pesos_carteira[_tk_base] = _pesos_carteira.get(_tk_base, 0) + _valor
+            _valor_total += _valor
+
+        if _valor_total <= 0 or not _pesos_carteira:
+            empty_state(
+                "📊",
+                "valor da carteira indisponível",
+                "verifique se as cotações ao vivo foram carregadas na aba 'posições & p&l'.",
+            )
+        else:
+            # Normaliza pesos
+            _pesos_carteira = {t: v / _valor_total for t, v in _pesos_carteira.items()}
+
+            # ── Seção VaR ───────────────────────────────────────────────
+            with st.expander("📉 value-at-risk (VaR e CVaR)", expanded=True):
+                st.markdown(
+                    "*VaR responde: 'em um dia ruim típico (1 em 20 ou 1 em 100), "
+                    "quanto a carteira pode perder?'. CVaR responde: 'se passar do VaR, "
+                    "qual a perda média esperada na cauda?'.*"
+                )
+
+                _col_periodo, _col_horizonte = st.columns([1, 1])
+                with _col_periodo:
+                    _periodo_var = st.selectbox(
+                        "janela de retornos",
+                        options=["1y", "2y", "3y", "5y"],
+                        index=1,
+                        key="var_periodo",
+                        help="histórico usado para calcular a distribuição de retornos diários",
+                    )
+                with _col_horizonte:
+                    _label_horizonte = st.selectbox(
+                        "horizonte",
+                        options=["1 dia", "5 dias (semanal)", "21 dias (mensal)"],
+                        index=0,
+                        key="var_horizonte",
+                        help="perda projetada no horizonte selecionado (escala pela raiz do tempo)",
+                    )
+                    _horizonte_dias = {"1 dia": 1, "5 dias (semanal)": 5,
+                                        "21 dias (mensal)": 21}[_label_horizonte]
+
+                with st.spinner("calculando risco..."):
+                    from utils.price_history import obter_close_carteira
+                    from utils.risk_var import calcular_risco_carteira, formatar_perda
+
+                    _precos_var = obter_close_carteira(
+                        tuple(_pesos_carteira.keys()),
+                        periodo=_periodo_var,
+                    )
+                    _resultado = calcular_risco_carteira(
+                        _pesos_carteira,
+                        _precos_var,
+                        valor_carteira=_valor_total,
+                        horizonte_dias=_horizonte_dias,
+                    )
+
+                if _resultado is None:
+                    st.warning(
+                        f"dados insuficientes (precisa ≥ 60 dias de histórico para "
+                        f"{len(_pesos_carteira)} ativos). tente um período maior."
+                    )
+                else:
+                    _r = _resultado
+                    # Header com vol anual + número de observações
+                    _c_meta1, _c_meta2, _c_meta3 = st.columns(3)
+                    with _c_meta1:
+                        metric_card(
+                            "vol anualizada",
+                            f"{_r.vol_anual*100:.1f}%",
+                            sublabel=f"σ diária: {_r.vol_diaria*100:.2f}%",
+                        )
+                    with _c_meta2:
+                        metric_card(
+                            "observações",
+                            f"{_r.n_observacoes}",
+                            sublabel=f"janela: {_periodo_var}",
+                        )
+                    with _c_meta3:
+                        _fat_label = "🚨 fat tails detectado" if _r.fat_tails else "✅ caudas normais"
+                        _fat_desc = (
+                            "histórico > 30% pior que paramétrico — distribuição assimétrica"
+                            if _r.fat_tails
+                            else "histórico próximo à hipótese normal"
+                        )
+                        metric_card("perfil de caudas", _fat_label, sublabel=_fat_desc)
+
+                    st.markdown(f"#### perda esperada em **{_label_horizonte.split(' ')[0]} dia(s)**")
+
+                    # VaR 95% e 99% lado a lado
+                    _col1, _col2 = st.columns(2)
+
+                    with _col1:
+                        st.markdown("##### confiança 95% (1 dia ruim em 20)")
+                        _p95_pct, _p95_brl = formatar_perda(_r.var_95_pct, _valor_total)
+                        _p95p_pct, _p95p_brl = formatar_perda(_r.var_95_param_pct, _valor_total)
+                        _c95_pct, _c95_brl = formatar_perda(_r.cvar_95_pct, _valor_total)
+                        metric_card(
+                            "VaR histórico",
+                            f"-{_p95_pct}",
+                            sublabel=f"perda de {_p95_brl}",
+                        )
+                        metric_card(
+                            "VaR paramétrico",
+                            f"-{_p95p_pct}",
+                            sublabel=f"hipótese normal: {_p95p_brl}",
+                        )
+                        metric_card(
+                            "CVaR (expected shortfall)",
+                            f"-{_c95_pct}",
+                            sublabel=f"perda média se passar do VaR: {_c95_brl}",
+                        )
+
+                    with _col2:
+                        st.markdown("##### confiança 99% (1 dia ruim em 100)")
+                        _p99_pct, _p99_brl = formatar_perda(_r.var_99_pct, _valor_total)
+                        _p99p_pct, _p99p_brl = formatar_perda(_r.var_99_param_pct, _valor_total)
+                        _c99_pct, _c99_brl = formatar_perda(_r.cvar_99_pct, _valor_total)
+                        metric_card(
+                            "VaR histórico",
+                            f"-{_p99_pct}",
+                            sublabel=f"perda de {_p99_brl}",
+                        )
+                        metric_card(
+                            "VaR paramétrico",
+                            f"-{_p99p_pct}",
+                            sublabel=f"hipótese normal: {_p99p_brl}",
+                        )
+                        metric_card(
+                            "CVaR (expected shortfall)",
+                            f"-{_c99_pct}",
+                            sublabel=f"perda média se passar do VaR: {_c99_brl}",
+                        )
+
+                    # Histograma da distribuição de retornos
+                    st.markdown("##### distribuição de retornos diários da carteira")
+                    _rets_pct = _r.retornos_diarios * 100
+                    _fig = go.Figure()
+                    _fig.add_trace(go.Histogram(
+                        x=_rets_pct,
+                        nbinsx=60,
+                        marker_color=_chart_cores.get("accent", "#FF9900"),
+                        opacity=0.85,
+                        name="retornos diários",
+                    ))
+                    _fig.add_vline(
+                        x=_r.var_95_pct * 100,
+                        line=dict(color="#ffaa33", width=2, dash="dash"),
+                        annotation_text=f"VaR 95%: {_r.var_95_pct*100:.2f}%",
+                        annotation_position="top left",
+                    )
+                    _fig.add_vline(
+                        x=_r.var_99_pct * 100,
+                        line=dict(color="#ff3030", width=2, dash="dash"),
+                        annotation_text=f"VaR 99%: {_r.var_99_pct*100:.2f}%",
+                        annotation_position="top left",
+                    )
+                    _fig.update_layout(
+                        **base_layout(),
+                        height=350,
+                        xaxis_title="retorno diário (%)",
+                        yaxis_title="frequência",
+                        showlegend=False,
+                    )
+                    st.plotly_chart(_fig, use_container_width=True)
+
+                    # Sumário em linguagem natural
+                    _diag = ""
+                    if _r.fat_tails:
+                        _diag = (
+                            f" o histograma mostra **fat tails** — a distribuição empírica "
+                            f"é mais severa que a normal. Use o VaR histórico como referência, "
+                            f"não o paramétrico."
+                        )
+                    st.info(
+                        f"📐 com 95% de confiança, a carteira perde no máximo "
+                        f"**{_p95_pct}** ({_p95_brl}) em {_label_horizonte}. "
+                        f"se passar disso, a perda média esperada é **{_c95_pct}** "
+                        f"({_c95_brl}).{_diag}"
+                    )
+
+            # ── Placeholders das demais seções (próximos commits) ─────────
+            with st.expander("📊 decomposição brinson (atribuição por setor)", expanded=False):
+                st.caption("em desenvolvimento — em breve nesta aba.")
+
+            with st.expander("🎯 exposição a fatores fama-french", expanded=False):
+                st.caption("em desenvolvimento — em breve nesta aba.")
+
+            with st.expander("💰 projeção de dividendos 12m", expanded=False):
+                st.caption("em desenvolvimento — em breve nesta aba.")
+
+# ==========================================
+# tab 4: stress test
 # ==========================================
 with tab_stress:
     section_title("⚡ stress test de portfólio")
