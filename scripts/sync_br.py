@@ -74,7 +74,8 @@ def fetch_brapi(ticker: str) -> dict | None:
 
 
 def transform_brapi(raw: dict, ticker: str) -> dict:
-    """Transforma resposta BRAPI em dict padrao para fundamentals_cache."""
+    """Transforma resposta BRAPI em dict padrao para fundamentals_cache.
+    Após mapear BRAPI, enriquece com yfinance.info para preencher lacunas."""
     fd = raw.get("fundamentalData") or {}
 
     dy = _sf(fd.get("dividendYield") or raw.get("dividendYield"))
@@ -89,7 +90,7 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     if margem is not None and abs(margem) < 2.0:
         margem = margem * 100
 
-    return {
+    data = {
         "ticker":        ticker,
         "nome":          (raw.get("longName") or raw.get("shortName") or "").lower(),
         "setor":         (fd.get("sector") or raw.get("sector") or "").lower(),
@@ -105,6 +106,13 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
         "data_quality":  85,
         "_raw":          raw,
     }
+
+    # Fallback yfinance.info — ticker BR no yfinance precisa do sufixo .SA
+    from utils.yf_enrichment import enriquecer_com_yfinance
+    ticker_yf = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+    enriquecer_com_yfinance(data, ticker_yf, logger=logger)
+
+    return data
 
 
 def _get_yf_close(hist):

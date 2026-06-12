@@ -120,15 +120,12 @@ def fetch_fmp_ratios(ticker: str) -> dict | None:
 
 def transform_fmp(ticker: str) -> dict | None:
     """Transforma dados FMP em dict padrao para fundamentals_cache.
-    Usa apenas profile + ratios-ttm (2 chamadas/ticker) para respeitar free tier.
+    Usa profile + ratios-ttm (2 calls FMP) e completa lacunas com yfinance.info.
     """
     profile = fetch_fmp_profile(ticker)
     ratios = fetch_fmp_ratios(ticker)
 
-    if not profile and not ratios:
-        return None
-
-    data = {}
+    data: dict = {}
 
     if profile:
         data["nome"] = (profile.get("companyName") or "").lower()
@@ -156,6 +153,15 @@ def transform_fmp(ticker: str) -> dict | None:
     data["ticker"] = ticker
     data["data_quality"] = 80
     data["_raw"] = {"profile": profile, "ratios": ratios}
+
+    # Fallback yfinance.info para campos que FMP não trouxe (free tier deixa
+    # buracos especialmente em ROE, margem, P/VP, DY, EV/EBITDA).
+    from utils.yf_enrichment import enriquecer_com_yfinance
+    enriquecer_com_yfinance(data, ticker, logger=logger)
+
+    # Se mesmo após fallback não temos nada útil (preço + market_cap), descarta
+    if data.get("preco") is None and data.get("market_cap") is None:
+        return None
 
     return data
 
