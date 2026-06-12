@@ -156,8 +156,13 @@ def transform_fmp(ticker: str) -> dict | None:
 
     # Fallback yfinance.info para campos que FMP não trouxe (free tier deixa
     # buracos especialmente em ROE, margem, P/VP, DY, EV/EBITDA).
-    from utils.yf_enrichment import enriquecer_com_yfinance
+    from utils.yf_enrichment import enriquecer_com_yfinance, coletar_historico_trimestral
     enriquecer_com_yfinance(data, ticker, logger=logger)
+
+    # Histórico trimestral (DRE + balanço + DFC) — viabiliza Piotroski YoY no health_engine
+    historico = coletar_historico_trimestral(ticker, logger=logger)
+    if historico:
+        data["historico_trimestral"] = historico
 
     # Se mesmo após fallback não temos nada útil (preço + market_cap), descarta
     if data.get("preco") is None and data.get("market_cap") is None:

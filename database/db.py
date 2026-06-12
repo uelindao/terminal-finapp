@@ -351,6 +351,37 @@ def get_todos_fundamentos_cache() -> dict:
     return out
 
 
+def get_historico_trimestral(ticker: str) -> list[dict]:
+    """
+    Lê histórico trimestral (5-8 trimestres de DRE+balanço+DFC) de
+    fundamentals_cache.dados_json['historico_trimestral'].
+
+    Retorna lista de dicts ordenada do mais recente para o mais antigo. Cada
+    dict tem 'periodo' (YYYY-MM-DD) e as métricas canônicas (receita, lucro,
+    ebitda, ativos_totais, patrimonio, divida_total, cfo, capex, fcf, shares, ...).
+    Retorna [] se ticker não tem cache ou não tem histórico.
+    """
+    sb = get_supabase()
+    try:
+        rows = sb.table('fundamentals_cache').select('dados_json').eq('ticker', ticker).limit(1).execute().data
+    except Exception as e:
+        logger.warning(f"[db] get_historico_trimestral falhou {ticker}: {e}")
+        return []
+    if not rows:
+        return []
+    raw = rows[0].get('dados_json')
+    if not raw:
+        return []
+    try:
+        dados = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return []
+    hist = dados.get('historico_trimestral')
+    if not isinstance(hist, list):
+        return []
+    return hist
+
+
 # ==========================================
 # GESTÃO DE WATCHLISTS (COLEÇÕES)
 # ==========================================

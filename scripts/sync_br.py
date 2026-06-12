@@ -108,9 +108,14 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     }
 
     # Fallback yfinance.info — ticker BR no yfinance precisa do sufixo .SA
-    from utils.yf_enrichment import enriquecer_com_yfinance
+    from utils.yf_enrichment import enriquecer_com_yfinance, coletar_historico_trimestral
     ticker_yf = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
     enriquecer_com_yfinance(data, ticker_yf, logger=logger)
+
+    # Histórico trimestral (DRE + balanço + DFC) — viabiliza Piotroski YoY no health_engine
+    historico = coletar_historico_trimestral(ticker_yf, logger=logger)
+    if historico:
+        data["historico_trimestral"] = historico
 
     return data
 

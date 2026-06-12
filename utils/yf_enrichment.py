@@ -115,3 +115,108 @@ def enriquecer_com_yfinance(dados: dict, ticker_yf: str, logger=None) -> dict:
             logger.debug(f"[yf_enrich] {ticker_yf} preencheu {len(preenchidos)} campos: {preenchidos}")
 
     return dados
+
+
+# ── Histórico trimestral ─────────────────────────────────────────────────────
+# Mapeia métricas canônicas → possíveis nomes em yfinance.quarterly_*.
+# Quando há múltiplas opções, usa a primeira que existir no DataFrame.
+_MAP_INCOME = {
+    "receita":   ["Total Revenue", "Operating Revenue"],
+    "lucro":     ["Net Income", "Net Income Common Stockholders",
+                  "Net Income From Continuing Operation Net Minority Interest"],
+    "ebitda":    ["EBITDA", "Normalized EBITDA"],
+    "ebit":      ["EBIT", "Operating Income"],
+    "gross":     ["Gross Profit"],
+    "opex":      ["Operating Expense"],
+}
+_MAP_BALANCE = {
+    "ativos_totais":      ["Total Assets"],
+    "passivos_totais":    ["Total Liabilities Net Minority Interest", "Total Liab"],
+    "patrimonio":         ["Stockholders Equity", "Common Stock Equity",
+                            "Total Equity Gross Minority Interest"],
+    "ativos_circ":        ["Current Assets"],
+    "passivos_circ":      ["Current Liabilities"],
+    "divida_total":       ["Total Debt"],
+    "shares":             ["Ordinary Shares Number", "Share Issued"],
+}
+_MAP_CASHFLOW = {
+    "cfo":   ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"],
+    "capex": ["Capital Expenditure"],
+    "fcf":   ["Free Cash Flow"],
+}
+
+
+def _extrair_serie(df, nomes_candidatos: list[str]) -> dict:
+    """Acha a 1ª linha do DataFrame que match algum nome candidato (case-insensitive).
+    Retorna {data_str: valor} para cada coluna (trimestre) onde o valor não é NaN."""
+    if df is None or df.empty:
+        return {}
+    # Normaliza nomes do índice pra busca
+    idx_norm = {str(i).strip().lower(): i for i in df.index}
+    linha = None
+    for cand in nomes_candidatos:
+        chave = cand.strip().lower()
+        if chave in idx_norm:
+            linha = df.loc[idx_norm[chave]]
+            break
+    if linha is None:
+        return {}
+    out = {}
+    for col, val in linha.items():
+        try:
+            f = float(val)
+            if f != f:  # NaN
+                continue
+            data_str = col.strftime("%Y-%m-%d") if hasattr(col, "strftime") else str(col)
+            out[data_str] = f
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def coletar_historico_trimestral(ticker_yf: str, max_periodos: int = 8, logger=None) -> list[dict]:
+    """
+    Coleta últimos N trimestres de DRE + Balanço + DFC via yfinance.
+    Retorna lista de dicts (mais recente primeiro), com chave 'periodo' (YYYY-MM-DD)
+    e métricas canônicas. yfinance hoje devolve ~5 trimestres em ações large cap;
+    em small caps pode devolver 2-4. Quem consome trata None como ausente.
+
+    Custo: 3 chamadas HTTP por ticker, ~200-400ms. Use sleep externo em batch.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker_yf)
+        qf = t.quarterly_financials
+        qb = t.quarterly_balance_sheet
+        qc = t.quarterly_cashflow
+    except Exception as e:
+        if logger:
+            logger.debug(f"[yf_quart] {ticker_yf} indisponível: {e}")
+        return []
+
+    # Coleta cada métrica como {data: valor}
+    series: dict[str, dict] = {}
+    for nome, candidatos in _MAP_INCOME.items():
+        series[nome] = _extrair_serie(qf, candidatos)
+    for nome, candidatos in _MAP_BALANCE.items():
+        series[nome] = _extrair_serie(qb, candidatos)
+    for nome, candidatos in _MAP_CASHFLOW.items():
+        series[nome] = _extrair_serie(qc, candidatos)
+
+    # União das datas observadas, ordenadas desc
+    datas = set()
+    for s in series.values():
+        datas.update(s.keys())
+    if not datas:
+        return []
+    datas_ord = sorted(datas, reverse=True)[:max_periodos]
+
+    # Materializa lista de dicts por período
+    historico = []
+    for data in datas_ord:
+        registro = {"periodo": data}
+        for nome, s in series.items():
+            registro[nome] = s.get(data)
+        historico.append(registro)
+    return historico
+
