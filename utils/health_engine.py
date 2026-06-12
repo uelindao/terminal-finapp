@@ -791,6 +791,177 @@ def _detectar_segmento_fii(ticker: str, dados: dict) -> str:
     return 'hibrido'
 
 
+def _safe_g(d, k):
+    """Lê chave numérica de um dict do historico_trimestral, retornando float ou None."""
+    v = d.get(k) if d else None
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _calc_roic_do_historico(historico: list[dict], is_br: bool,
+                            macro_context: dict) -> tuple[int, float | None]:
+    """
+    Calcula ROIC vs WACC a partir do trimestre mais recente do cache.
+    Espelha calcular_roic() mas sem depender de yfinance.Ticker.
+    NOPAT = EBIT × (1 − tax); Capital Investido = Ativos − Passivos Circ.
+    """
+    if not historico:
+        return 0, None
+    t0 = historico[0]
+    ebit = _safe_g(t0, "ebit")
+    ativos = _safe_g(t0, "ativos_totais")
+    passivos_circ = _safe_g(t0, "passivos_circ")
+    if ebit is None or ativos is None or passivos_circ is None:
+        return 0, None
+    tax = 0.34 if is_br else 0.21
+    nopat = ebit * (1 - tax)
+    ic = ativos - passivos_circ
+    if ic <= 0:
+        return 0, None
+    roic = (nopat / ic) * 100
+    selic = macro_context.get('selic', 10.5)
+    if is_br:
+        ke = selic + 7.5
+        kd = selic * (1 - 0.34)
+        wacc = 0.60 * ke + 0.40 * kd
+    else:
+        rf = macro_context.get('treasury_10y', 4.5)
+        ke = rf + 5.5
+        kd = rf * (1 - 0.21)
+        wacc = 0.60 * ke + 0.40 * kd
+    wacc = max(6.0, min(25.0, wacc))
+    if roic > wacc * 1.5:
+        return 8, roic
+    elif roic > wacc:
+        return 5, roic
+    elif roic >= 0:
+        return 2, roic
+    return -4, roic
+
+
+def _calc_crescimento_do_historico(historico: list[dict]) -> tuple[int, dict]:
+    """
+    Crescimento de receita e lucro YoY (T0 vs T-4) a partir do cache.
+    Espelha pontuação de calcular_crescimento(): receita +15%/+5%/-, lucro +20%/+5%.
+    """
+    if not historico or len(historico) < 5:
+        return 0, {'alertas': [], 'rev_growth': None, 'earnings_growth': None}
+    t0, t4 = historico[0], historico[4]
+    receita_0 = _safe_g(t0, "receita")
+    receita_4 = _safe_g(t4, "receita")
+    lucro_0   = _safe_g(t0, "lucro")
+    lucro_4   = _safe_g(t4, "lucro")
+
+    score = 0
+    alertas: list[str] = []
+    rev_g: float | None = None
+    earn_g: float | None = None
+
+    if receita_0 is not None and receita_4 not in (None, 0):
+        rev_g = (receita_0 - receita_4) / abs(receita_4)
+        if rev_g > 0.15:
+            score += 7
+        elif rev_g > 0.05:
+            score += 4
+        elif rev_g < 0:
+            score -= 4
+            alertas.append("⚠️ receita em queda (sinal de deterioração).")
+
+    if lucro_0 is not None and lucro_4 not in (None, 0):
+        earn_g = (lucro_0 - lucro_4) / abs(lucro_4)
+        if earn_g > 0.20:
+            score += 5
+        elif earn_g > 0.05:
+            score += 3
+        elif earn_g < 0 and rev_g is not None and rev_g < 0:
+            alertas.append("🚨 compressão de margem e queda de receita simultâneas.")
+
+    # Qualidade do crescimento: receita caindo mas lucro expandindo (reestruturação)
+    if rev_g is not None and rev_g < 0 and earn_g is not None and earn_g > 0.10:
+        score += 3
+        alertas.append(
+            "💡 receita em queda mas lucro crescendo — "
+            "possível reestruturação e expansão de margem."
+        )
+    # Compressão de margem (receita crescendo + lucro caindo)
+    if rev_g is not None and rev_g > 0.05 and earn_g is not None and earn_g < -0.10:
+        score -= 3
+        alertas.append(
+            "⚠️ receita crescendo mas lucro caindo — "
+            "compressão de margem. crescimento de baixa qualidade."
+        )
+
+    return score, {
+        'alertas': alertas,
+        'rev_growth': rev_g,
+        'earnings_growth': earn_g,
+    }
+
+
+def _calc_nd_do_historico(historico: list[dict], is_br: bool) -> tuple[int, float | None]:
+    """
+    Net Debt / EBITDA a partir do trimestre mais recente do cache.
+    Usa (divida_total − cash) / ebitda quando há cash; cai para
+    divida_total / ebitda (gross debt — conservador) quando ausente.
+
+    Fallback: CVM não publica EBITDA — quando ausente, usa EBIT como
+    denominador (mais conservador, sobreestima alavancagem em ~15-20%).
+    """
+    if not historico:
+        return 0, None
+    t0 = historico[0]
+    divida = _safe_g(t0, "divida_total")
+    cash = _safe_g(t0, "cash")
+    ebitda = _safe_g(t0, "ebitda")
+    if ebitda is None or ebitda <= 0:
+        ebitda = _safe_g(t0, "ebit")
+    if divida is None or ebitda is None or ebitda <= 0:
+        return 0, None
+    net_debt = divida - cash if cash is not None else divida
+    nd_ebitda = net_debt / ebitda
+
+    lim_cons = 1.5 if is_br else 2.0
+    lim_mod  = 3.0 if is_br else 3.5
+    lim_ag   = 4.5 if is_br else 5.0
+
+    if nd_ebitda < 0:
+        return 5, nd_ebitda
+    elif nd_ebitda <= lim_cons:
+        return 4, nd_ebitda
+    elif nd_ebitda <= lim_mod:
+        return 2, nd_ebitda
+    elif nd_ebitda <= lim_ag:
+        return 0, nd_ebitda
+    return -6, nd_ebitda
+
+
+def _calc_icr_do_historico(historico: list[dict]) -> tuple[int, float | None]:
+    """
+    Interest Coverage Ratio = EBIT / Interest Expense, a partir do cache.
+    Mesma tabela de pontuação de calcular_health_score: ≥5x = 5, ≥3x = 3,
+    ≥1.5x = 1, ≥1x = 0, <1x = −8.
+    """
+    if not historico:
+        return 0, None
+    t0 = historico[0]
+    ebit = _safe_g(t0, "ebit")
+    int_exp = _safe_g(t0, "interest_expense")
+    if ebit is None or int_exp is None or int_exp <= 0:
+        return 0, None
+    icr = ebit / int_exp
+    if icr >= 5.0:
+        return 5, icr
+    elif icr >= 3.0:
+        return 3, icr
+    elif icr >= 1.5:
+        return 1, icr
+    elif icr >= 1.0:
+        return 0, icr
+    return -8, icr
+
+
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None, force: bool = False) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
@@ -1181,16 +1352,18 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
             # ── Net Debt / EBITDA — métrica complementar de alavancagem ──────
+            # Prefere cache; usa (divida_total − cash) / ebitda; fallback yfinance live
             score_nd = 0
+            nd_ebitda: float | None = None
             try:
-                if acao is not None:
+                if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+                    score_nd, nd_ebitda = _calc_nd_do_historico(historico_trim, is_br)
+                elif acao is not None:
                     _bs_nd  = acao.balance_sheet
                     _fin_nd = acao.financials
-
                     _total_debt = None
                     _cash       = None
                     _ebitda     = None
-
                     for _nome in ['Total Debt', 'Long Term Debt And Capital '
                                   'Lease Obligation']:
                         if _bs_nd is not None and _nome in _bs_nd.index:
@@ -1199,7 +1372,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             if pd.notna(_v):
                                 _total_debt = float(_v)
                             break
-
                     for _nome in ['Cash And Cash Equivalents',
                                   'Cash Cash Equivalents And Short Term Investments']:
                         if _bs_nd is not None and _nome in _bs_nd.index:
@@ -1208,7 +1380,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             if pd.notna(_v):
                                 _cash = float(_v)
                             break
-
                     for _nome in ['EBITDA', 'Normalized EBITDA']:
                         if _fin_nd is not None and _nome in _fin_nd.index:
                             _v = _fin_nd.loc[_nome, _fin_nd.columns[0]]
@@ -1216,41 +1387,39 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             if pd.notna(_v):
                                 _ebitda = float(_v)
                             break
-
                     if _total_debt is not None and _cash is not None \
                        and _ebitda is not None and _ebitda > 0:
-                        _net_debt = _total_debt - _cash
-                        nd_ebitda = _net_debt / _ebitda
-
+                        nd_ebitda = (_total_debt - _cash) / _ebitda
                         _lim_cons = 1.5 if is_br else 2.0
                         _lim_mod  = 3.0 if is_br else 3.5
                         _lim_ag   = 4.5 if is_br else 5.0
+                        if nd_ebitda < 0:        score_nd = 5
+                        elif nd_ebitda <= _lim_cons: score_nd = 4
+                        elif nd_ebitda <= _lim_mod:  score_nd = 2
+                        elif nd_ebitda <= _lim_ag:   score_nd = 0
+                        else:                        score_nd = -6
 
-                        if nd_ebitda < 0:
-                            score_nd = 5
-                            alertas.append(
-                                f"✅ caixa líquido positivo "
-                                f"(net debt/ebitda: {nd_ebitda:.1f}x)."
-                            )
-                        elif nd_ebitda <= _lim_cons:
-                            score_nd = 4
-                        elif nd_ebitda <= _lim_mod:
-                            score_nd = 2
-                        elif nd_ebitda <= _lim_ag:
-                            score_nd = 0
-                            alertas.append(
-                                f"⚠️ alavancagem elevada "
-                                f"(net debt/ebitda: {nd_ebitda:.1f}x)."
-                            )
-                        else:
-                            score_nd = -6
-                            alertas.append(
-                                f"🚨 alavancagem crítica "
-                                f"(net debt/ebitda: {nd_ebitda:.1f}x). "
-                                f"risco de refinanciamento em juros altos."
-                            )
-
-                        breakdown['Net Debt / EBITDA'] = f"{nd_ebitda:.1f}x"
+                if nd_ebitda is not None:
+                    breakdown['Net Debt / EBITDA'] = f"{nd_ebitda:.1f}x"
+                    _lim_cons2 = 1.5 if is_br else 2.0
+                    _lim_mod2  = 3.0 if is_br else 3.5
+                    _lim_ag2   = 4.5 if is_br else 5.0
+                    if nd_ebitda < 0:
+                        alertas.append(
+                            f"✅ caixa líquido positivo "
+                            f"(net debt/ebitda: {nd_ebitda:.1f}x)."
+                        )
+                    elif _lim_mod2 < nd_ebitda <= _lim_ag2:
+                        alertas.append(
+                            f"⚠️ alavancagem elevada "
+                            f"(net debt/ebitda: {nd_ebitda:.1f}x)."
+                        )
+                    elif nd_ebitda > _lim_ag2:
+                        alertas.append(
+                            f"🚨 alavancagem crítica "
+                            f"(net debt/ebitda: {nd_ebitda:.1f}x). "
+                            f"risco de refinanciamento em juros altos."
+                        )
             except Exception as e:
                 logger.debug(f"[health_engine] falha ao calcular net debt/ebitda: {e}")
 
@@ -1280,21 +1449,23 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             score_r_final = max(0, score_r)
 
             # ── Interest Coverage Ratio (EBIT / Despesas Financeiras) ────────
+            # Prefere cache; fallback yfinance live
             score_icr = 0
+            icr_val: float | None = None
             try:
-                if acao is not None:
+                if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+                    score_icr, icr_val = _calc_icr_do_historico(historico_trim)
+                elif acao is not None:
                     _fin_icr = acao.financials
                     if _fin_icr is not None and not _fin_icr.empty:
                         _ebit_icr = None
                         _int_exp_icr = None
-
                         for _nome in ['EBIT']:
                             if _nome in _fin_icr.index:
                                 _v = _fin_icr.loc[_nome, _fin_icr.columns[0]]
                                 if isinstance(_v, pd.Series): _v = _v.iloc[0]
                                 if pd.notna(_v): _ebit_icr = float(_v)
                                 break
-
                         for _nome in ['Interest Expense',
                                       'Interest Expense Non Operating']:
                             if _nome in _fin_icr.index:
@@ -1303,34 +1474,27 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                                 if pd.notna(_v):
                                     _int_exp_icr = abs(float(_v))
                                 break
-
                         if _ebit_icr is not None and _int_exp_icr is not None \
                            and _int_exp_icr > 0:
-                            icr = _ebit_icr / _int_exp_icr
+                            icr_val = _ebit_icr / _int_exp_icr
+                            if icr_val >= 5.0:   score_icr = 5
+                            elif icr_val >= 3.0: score_icr = 3
+                            elif icr_val >= 1.5: score_icr = 1
+                            elif icr_val >= 1.0: score_icr = 0
+                            else:                score_icr = -8
 
-                            if icr >= 5.0:
-                                score_icr = 5
-                            elif icr >= 3.0:
-                                score_icr = 3
-                            elif icr >= 1.5:
-                                score_icr = 1
-                            elif icr >= 1.0:
-                                score_icr = 0
-                                alertas.append(
-                                    f"⚠️ cobertura de juros baixa "
-                                    f"(icr: {icr:.1f}x) — "
-                                    f"lucro mal cobre as despesas financeiras."
-                                )
-                            else:
-                                score_icr = -8
-                                alertas.append(
-                                    f"🚨 cobertura de juros crítica "
-                                    f"(icr: {icr:.1f}x) — "
-                                    f"ebit insuficiente para cobrir juros."
-                                )
-
-                            breakdown['Interest Coverage (EBIT/JurosExp)'] = \
-                                f"{icr:.1f}x"
+                if icr_val is not None:
+                    breakdown['Interest Coverage (EBIT/JurosExp)'] = f"{icr_val:.1f}x"
+                    if 1.0 <= icr_val < 1.5:
+                        alertas.append(
+                            f"⚠️ cobertura de juros baixa (icr: {icr_val:.1f}x) — "
+                            f"lucro mal cobre as despesas financeiras."
+                        )
+                    elif icr_val < 1.0:
+                        alertas.append(
+                            f"🚨 cobertura de juros crítica (icr: {icr_val:.1f}x) — "
+                            f"ebit insuficiente para cobrir juros."
+                        )
             except Exception as e:
                 logger.debug(f"[health_engine] falha ao calcular ICR: {e}")
 
@@ -1354,18 +1518,27 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 alertas.append(f"🚨 balanço fraco (piotroski f-score: {f_score}/9). risco de deterioração fundamentalista.")
 
             # --- Crescimento de Receita e Lucro (máx 15pts) ---
+            # Prefere cache (T0 vs T-4); cai para calcular_crescimento (yfinance/info)
             score_crescimento = 0
-            if acao is not None:
+            if isinstance(historico_trim, list) and len(historico_trim) >= 5:
+                score_crescimento, detalhes_cresc = _calc_crescimento_do_historico(historico_trim)
+                alertas.extend(detalhes_cresc.get('alertas', []))
+            elif acao is not None:
                 score_crescimento, detalhes_cresc = calcular_crescimento(acao, info)
                 alertas.extend(detalhes_cresc.get('alertas', []))
 
             # --- ROIC vs WACC (máx 12pts) ---
+            # Prefere cache (historico_trimestral); cai para yfinance live quando ausente
             score_roic = 0
             roic_valor: float | None = None
-            if acao is not None:
+            if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+                score_roic, roic_valor = _calc_roic_do_historico(
+                    historico_trim, is_br, macro_context
+                )
+            elif acao is not None:
                 score_roic, roic_valor = calcular_roic(acao, info, is_br, is_us, macro_context)
-                if roic_valor is not None and roic_valor < 0:
-                    alertas.append("🚨 ROIC negativo — empresa destruindo capital dos acionistas.")
+            if roic_valor is not None and roic_valor < 0:
+                alertas.append("🚨 ROIC negativo — empresa destruindo capital dos acionistas.")
 
             # --- Momentum 12-1m (máx 10pts, mín −8pts) ---
             score_momentum = 0

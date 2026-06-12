@@ -128,6 +128,7 @@ _MAP_INCOME = {
     "ebit":      ["EBIT", "Operating Income"],
     "gross":     ["Gross Profit"],
     "opex":      ["Operating Expense"],
+    "interest_expense": ["Interest Expense", "Interest Expense Non Operating"],
 }
 _MAP_BALANCE = {
     "ativos_totais":      ["Total Assets"],
@@ -137,6 +138,8 @@ _MAP_BALANCE = {
     "ativos_circ":        ["Current Assets"],
     "passivos_circ":      ["Current Liabilities"],
     "divida_total":       ["Total Debt"],
+    "cash":               ["Cash And Cash Equivalents",
+                           "Cash Cash Equivalents And Short Term Investments"],
     "shares":             ["Ordinary Shares Number", "Share Issued"],
 }
 _MAP_CASHFLOW = {

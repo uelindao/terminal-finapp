@@ -50,8 +50,9 @@ _C_RES_FIN   = "3.06"   # Resultado Financeiro (líquido)
 _C_LUC_LIQ   = "3.11"   # Lucro ou Prejuízo do Período
 
 # BPA (Balanço Patrimonial — Ativo)
-_C_ATIVO_TOT  = "1"     # Ativo Total
-_C_ATIVO_CIRC = "1.01"  # Ativo Circulante
+_C_ATIVO_TOT  = "1"        # Ativo Total
+_C_ATIVO_CIRC = "1.01"     # Ativo Circulante
+_C_CAIXA      = "1.01.01"  # Caixa e Equivalentes de Caixa
 
 # BPP (Balanço Patrimonial — Passivo + PL)
 _C_PASS_CIRC = "2.01"   # Passivo Circulante
@@ -1043,13 +1044,17 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
     do `historico_trimestral` salvo em fundamentals_cache.dados_json. Lista
     de dicts ordenada do mais recente para o mais antigo. Cada dict tem:
 
-        periodo, receita, lucro, ebit, gross, ativos_totais, patrimonio,
-        ativos_circ, passivos_circ, divida_total, cfo, capex, fcf
+        periodo, receita, lucro, ebit, gross, interest_expense,
+        ativos_totais, patrimonio, ativos_circ, passivos_circ,
+        divida_total, cash, cfo, capex, fcf
 
     Difere do nosso histórico-yfinance em duas coisas:
     1. ebitda não está disponível (CVM não consolida depreciação separada
        no padrão das contas usadas) — preenchemos com None.
     2. shares e passivos_totais não são extraídos aqui (vêm do yfinance).
+
+    interest_expense é proxy: abs(res_fin) quando res_fin < 0 (despesa
+    financeira líquida do trimestre).
 
     Retorna [] se ticker não está mapeado (no _STATIC nem via name-matching)
     ou se download CVM falhar.
@@ -1105,9 +1110,11 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
                     ("DRE", _C_RECEITA,    "receita"),
                     ("DRE", _C_LUC_BRUTO,  "luc_bruto"),
                     ("DRE", _C_EBIT,       "ebit"),
+                    ("DRE", _C_RES_FIN,    "res_fin"),
                     ("DRE", _C_LUC_LIQ,    "luc_liq"),
                     ("BPA", _C_ATIVO_TOT,  "ativo_tot"),
                     ("BPA", _C_ATIVO_CIRC, "ativo_circ"),
+                    ("BPA", _C_CAIXA,      "caixa"),
                     ("BPP", _C_PASS_CIRC,  "pass_circ"),
                     ("BPP", _C_PL,         "pl"),
                     ("DFC", _C_OP_CF,      "op_cf"),
@@ -1144,31 +1151,37 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
         receita    = (d.get("receita")   or 0) * ann or None
         luc_bruto  = (d.get("luc_bruto") or 0) * ann or None
         ebit       = (d.get("ebit")      or 0) * ann or None
+        res_fin    = (d.get("res_fin")   or 0) * ann or None
         lucro      = (d.get("luc_liq")   or 0) * ann or None
         op_cf      = (d.get("op_cf")     or 0) * ann or None
         inv_cf     = (d.get("inv_cf")    or 0) * ann or None
         fcf        = (op_cf + inv_cf) if (op_cf is not None and inv_cf is not None) else None
         # capex em magnitude (inv_cf vem negativo no DFC)
         capex      = -abs(inv_cf) if inv_cf is not None else None
+        # despesa financeira (proxy: res_fin é receitas-despesas; quando negativo,
+        # o módulo aproxima as despesas líquidas de juros)
+        int_exp    = abs(res_fin) if (res_fin is not None and res_fin < 0) else None
 
         historico.append({
-            "periodo":         dt_str,
-            "receita":         receita,
-            "lucro":           lucro,
-            "ebitda":          None,            # não disponível no padrão CVM puro
-            "ebit":            ebit,
-            "gross":           luc_bruto,
-            "opex":            None,
-            "ativos_totais":   d.get("ativo_tot"),
-            "passivos_totais": None,
-            "patrimonio":      d.get("pl"),
-            "ativos_circ":     d.get("ativo_circ"),
-            "passivos_circ":   d.get("pass_circ"),
-            "divida_total":    d.get("divida"),
-            "shares":          None,            # vem do yfinance
-            "cfo":             op_cf,
-            "capex":           capex,
-            "fcf":             fcf,
-            "_fonte":          "cvm",
+            "periodo":          dt_str,
+            "receita":          receita,
+            "lucro":            lucro,
+            "ebitda":           None,            # não disponível no padrão CVM puro
+            "ebit":             ebit,
+            "gross":            luc_bruto,
+            "opex":             None,
+            "interest_expense": int_exp,
+            "ativos_totais":    d.get("ativo_tot"),
+            "passivos_totais":  None,
+            "patrimonio":       d.get("pl"),
+            "ativos_circ":      d.get("ativo_circ"),
+            "passivos_circ":    d.get("pass_circ"),
+            "divida_total":     d.get("divida"),
+            "cash":             d.get("caixa"),
+            "shares":           None,            # vem do yfinance
+            "cfo":              op_cf,
+            "capex":            capex,
+            "fcf":              fcf,
+            "_fonte":           "cvm",
         })
     return historico
