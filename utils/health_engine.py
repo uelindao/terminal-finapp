@@ -381,6 +381,125 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
         return 0, {}
 
 
+def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_br: bool = False):
+    """
+    Calcula F-Score Piotroski a partir do histórico trimestral já cacheado
+    (fundamentals_cache.dados_json['historico_trimestral']).
+
+    Compara T0 (último trimestre) vs T-4 (mesmo trimestre 1 ano atrás) — janela
+    YoY trimestral, mais responsiva que a comparação anual do calcular_piotroski
+    legado e independe de yfinance.Ticker ao vivo.
+
+    Retorna (score 0-9, dict de detalhamento). Devolve (0, {}) se histórico
+    insuficiente (precisa de ao menos 5 trimestres).
+    """
+    if not historico or len(historico) < 5:
+        return 0, {}
+
+    try:
+        t0 = historico[0]
+        t4 = historico[4]
+
+        def _g(d, k):
+            v = d.get(k) if d else None
+            try:
+                return float(v) if v is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        # Métricas T0
+        receita_0 = _g(t0, "receita")
+        lucro_0 = _g(t0, "lucro")
+        ebitda_0 = _g(t0, "ebitda")
+        gross_0 = _g(t0, "gross")
+        ativos_0 = _g(t0, "ativos_totais")
+        ativos_circ_0 = _g(t0, "ativos_circ")
+        passivos_circ_0 = _g(t0, "passivos_circ")
+        divida_0 = _g(t0, "divida_total")
+        cfo_0 = _g(t0, "cfo")
+        shares_0 = _g(t0, "shares")
+
+        # Métricas T-4 (1 ano atrás)
+        receita_4 = _g(t4, "receita")
+        lucro_4 = _g(t4, "lucro")
+        gross_4 = _g(t4, "gross")
+        ativos_4 = _g(t4, "ativos_totais")
+        ativos_circ_4 = _g(t4, "ativos_circ")
+        passivos_circ_4 = _g(t4, "passivos_circ")
+        divida_4 = _g(t4, "divida_total")
+        shares_4 = _g(t4, "shares")
+
+        # Derivados
+        roa_0 = (lucro_0 / ativos_0) if (lucro_0 is not None and ativos_0 and ativos_0 > 0) else None
+        roa_4 = (lucro_4 / ativos_4) if (lucro_4 is not None and ativos_4 and ativos_4 > 0) else None
+        margem_bruta_0 = (gross_0 / receita_0) if (gross_0 is not None and receita_0 and receita_0 > 0) else None
+        margem_bruta_4 = (gross_4 / receita_4) if (gross_4 is not None and receita_4 and receita_4 > 0) else None
+        giro_0 = (receita_0 / ativos_0) if (receita_0 is not None and ativos_0 and ativos_0 > 0) else None
+        giro_4 = (receita_4 / ativos_4) if (receita_4 is not None and ativos_4 and ativos_4 > 0) else None
+        alav_0 = (divida_0 / ativos_0) if (divida_0 is not None and ativos_0 and ativos_0 > 0) else None
+        alav_4 = (divida_4 / ativos_4) if (divida_4 is not None and ativos_4 and ativos_4 > 0) else None
+        liq_0 = (ativos_circ_0 / passivos_circ_0) if (ativos_circ_0 is not None and passivos_circ_0 and passivos_circ_0 > 0) else None
+        liq_4 = (ativos_circ_4 / passivos_circ_4) if (ativos_circ_4 is not None and passivos_circ_4 and passivos_circ_4 > 0) else None
+
+        # Setores financeiros: F5/F6 são distorcidos (alavancagem estrutural)
+        setor_lower = (setor or "").lower()
+        is_financial = any(x in setor_lower for x in [
+            'financial', 'bank', 'insurance', 'financeiro',
+            'bancário', 'seguro', 'crédito'
+        ])
+
+        # F1: ROA > 0
+        f1 = 1 if (roa_0 is not None and roa_0 > 0) else 0
+        # F2: CFO > 0
+        f2 = 1 if (cfo_0 is not None and cfo_0 > 0) else 0
+        # F3: ΔROA > 0
+        f3 = 1 if (roa_0 is not None and roa_4 is not None and roa_0 > roa_4) else 0
+        # F4: CFO > Lucro (accruals saudáveis)
+        f4 = 1 if (cfo_0 is not None and lucro_0 is not None and cfo_0 > lucro_0) else 0
+        # F5: ΔAlavancagem < 0 (não aplicável a financeiras)
+        if is_financial:
+            f5 = None
+        else:
+            f5 = 1 if (alav_0 is not None and alav_4 is not None and alav_0 < alav_4) else 0
+        # F6: ΔLiquidez > 0 (não aplicável a financeiras)
+        if is_financial:
+            f6 = None
+        else:
+            f6 = 1 if (liq_0 is not None and liq_4 is not None and liq_0 > liq_4) else 0
+        # F7: Não emitiu ações novas (tolerância 1%)
+        if shares_0 is not None and shares_4 is not None:
+            f7 = 1 if shares_0 <= shares_4 * 1.01 else 0
+        else:
+            f7 = 1  # padrão otimista quando não tem dado
+        # F8: ΔMargem bruta > 0
+        f8 = 1 if (margem_bruta_0 is not None and margem_bruta_4 is not None
+                    and margem_bruta_0 > margem_bruta_4) else 0
+        # F9: ΔGiro de ativos > 0
+        f9 = 1 if (giro_0 is not None and giro_4 is not None and giro_0 > giro_4) else 0
+
+        criterios = [f1, f2, f3, f4, f5, f6, f7, f8, f9]
+        validos = [c for c in criterios if c is not None]
+        total = sum(validos)
+        if 0 < len(validos) < 9:
+            total = round((total / len(validos)) * 9)
+
+        detalhamento = {
+            "F1 ROA positivo":              f1,
+            "F2 FCF positivo":              f2,
+            "F3 ROA crescendo":             f3,
+            "F4 qualidade lucro (FCF>ROA)": f4,
+            "F5 dívida reduzindo":          f5 if f5 is not None else "n/a (financeiro)",
+            "F6 liquidez melhorando":       f6 if f6 is not None else "n/a (financeiro)",
+            "F7 sem diluição":              f7,
+            "F8 margem bruta crescendo":    f8,
+            "F9 giro de ativos crescendo":  f9,
+        }
+        return total, detalhamento
+    except Exception as e:
+        logger.warning(f"[health_engine] piotroski do histórico falhou: {e}")
+        return 0, {}
+
+
 def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
     """
     Pilar de Crescimento de Receita e Lucro (máx 15pts).
@@ -1006,7 +1125,14 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             # setor_yf precisa ser definido antes de calcular_piotroski
             setor_yf = (info.get('sector', '') or dados_base.get('setor', '')).lower()
 
-            if acao is not None:
+            # Prefere histórico trimestral do cache (ETL → fundamentals_cache) — independe
+            # de yfinance ao vivo e tem janela YoY trimestral mais responsiva.
+            historico_trim = dados_base.get('historico_trimestral')
+            if isinstance(historico_trim, list) and len(historico_trim) >= 5:
+                f_score, f_detalhamento = calcular_piotroski_do_historico(
+                    historico_trim, setor_yf, is_br=ticker.endswith('.SA')
+                )
+            elif acao is not None:
                 f_score, f_detalhamento = calcular_piotroski(acao, setor_yf, is_br=ticker.endswith('.SA'))
             else:
                 f_score, f_detalhamento = 0, {}
