@@ -289,20 +289,39 @@ def salvar_fundamento_cache(ticker: str, dados: dict):
         logger.warning(f"[db] falha ao salvar cache de fundamentos para {ticker}: {e}")
 
 
+_FUNDAMENTALS_EXTENDED_OK: bool | None = None  # None=ainda não testado, True=ok, False=falha conhecida
+
+
 def get_todos_fundamentos_cache() -> dict:
     """
     Lê fundamentals_cache. Combina o JSON legado (dados_json) com as colunas
     novas do ETL (data_quality_pct, updated_at, source) para que o app enxergue
     os dois fluxos de gravação.
+
+    Memoiza o resultado de schema (existência das colunas ETL): após a 1ª falha,
+    as chamadas seguintes vão direto ao fallback sem re-logar — evita spam quando
+    o ALTER TABLE ainda não foi aplicado e a função é chamada N vezes (ETL).
     """
+    global _FUNDAMENTALS_EXTENDED_OK
     sb = get_supabase()
-    try:
-        rows = sb.table('fundamentals_cache').select(
-            'ticker, dados_json, data_quality_pct, updated_at, source'
-        ).execute().data
-    except Exception as e:
-        # Coluna nova pode não existir ainda (ALTER TABLE não rodado): tenta fallback
-        logger.warning(f"[db] falha select estendido: {e} — tentando fallback")
+
+    rows = None
+    if _FUNDAMENTALS_EXTENDED_OK is not False:
+        try:
+            rows = sb.table('fundamentals_cache').select(
+                'ticker, dados_json, data_quality_pct, updated_at, source'
+            ).execute().data
+            _FUNDAMENTALS_EXTENDED_OK = True
+        except Exception as e:
+            if _FUNDAMENTALS_EXTENDED_OK is None:
+                logger.warning(
+                    f"[db] colunas estendidas (data_quality_pct/updated_at/source) "
+                    f"indisponíveis em fundamentals_cache: {e}. Usando fallback. "
+                    f"Rode os ALTER TABLE do supabase_setup.sql para habilitar."
+                )
+            _FUNDAMENTALS_EXTENDED_OK = False
+
+    if rows is None:
         try:
             rows = sb.table('fundamentals_cache').select('ticker, dados_json').execute().data
         except Exception as e2:
@@ -701,6 +720,9 @@ def get_health_scores():
     return rows
 
 
+_HEALTH_DATA_QUALITY_OK: bool | None = None  # None=desconhecido, True=ok, False=coluna ausente
+
+
 def salvar_health_score(ticker, score, alertas_payload, data_quality_pct=None):
     """
     Guarda o score no banco de dados.
@@ -710,19 +732,28 @@ def salvar_health_score(ticker, score, alertas_payload, data_quality_pct=None):
     indisponível em vez do legado fallback silencioso=50.
 
     data_quality_pct: % de campos críticos preenchidos no cálculo (0-100), opcional.
+    Memoiza ausência da coluna após 1ª falha — evita spam de WARNING em ETL.
     """
+    global _HEALTH_DATA_QUALITY_OK
     if not isinstance(alertas_payload, str):
         alertas_payload = json.dumps(alertas_payload)
     payload = {'ticker': ticker, 'score': score, 'alertas_venda': alertas_payload}
-    if data_quality_pct is not None:
+    if data_quality_pct is not None and _HEALTH_DATA_QUALITY_OK is not False:
         payload['data_quality_pct'] = data_quality_pct
     sb = get_supabase()
     try:
         sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
+        if 'data_quality_pct' in payload:
+            _HEALTH_DATA_QUALITY_OK = True
     except Exception as e:
         # Coluna nova pode não existir ainda; tenta novamente sem ela
         if data_quality_pct is not None and 'data_quality_pct' in str(e):
-            logger.warning(f"[db] coluna data_quality_pct ausente — retry sem ela ({ticker})")
+            if _HEALTH_DATA_QUALITY_OK is None:
+                logger.warning(
+                    f"[db] coluna health_scores.data_quality_pct ausente — "
+                    f"continuando sem ela. Rode os ALTER TABLE do supabase_setup.sql."
+                )
+            _HEALTH_DATA_QUALITY_OK = False
             payload.pop('data_quality_pct', None)
             sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
         else:
