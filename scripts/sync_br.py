@@ -25,7 +25,14 @@ from scripts.supabase_helper import (
 from utils.tickers import SCREENER_B3, FII_TODOS, BR_INDICES, BRASIL_TODOS
 
 BRAPI_BASE = "https://brapi.dev/api"
-BRAPI_TOKEN = os.environ.get("BRAPI_TOKEN", "")
+# BRAPI_TOKEN: inicializado em _init_brapi_token() para permitir fallback ao secrets.toml
+BRAPI_TOKEN = ""
+
+
+def _init_brapi_token():
+    from scripts.supabase_helper import _get_secret
+    global BRAPI_TOKEN
+    BRAPI_TOKEN = _get_secret("BRAPI_TOKEN")
 
 # Campos críticos esperados no dict de fundamentos (chaves reais dos transforms)
 CAMPOS_CRITICOS = [
@@ -256,6 +263,7 @@ def sync_health_scores(tickers_ok: list[str], hist_dict: dict, macro_ctx: dict,
 
 
 def main():
+    _init_brapi_token()
     print(f"[sync_br] inicio — {len(BRASIL_TODOS)} tickers")
 
     log_id = log_etl_start("sync_br")

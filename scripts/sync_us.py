@@ -46,9 +46,10 @@ def calcular_data_quality(fundamentals: dict) -> float:
 
 
 def _init_keys():
+    from scripts.supabase_helper import _get_secret
     global FMP_KEYS
-    k1 = os.environ.get("FMP_API_KEY", "")
-    k2 = os.environ.get("FMP_API_KEY_2", "")
+    k1 = _get_secret("FMP_API_KEY")
+    k2 = _get_secret("FMP_API_KEY_2")
     if k1:
         FMP_KEYS.append(k1)
     if k2:

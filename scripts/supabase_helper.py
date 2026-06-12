@@ -1,7 +1,8 @@
 """
 supabase_helper.py
 Helpers de conexao Supabase para scripts standalone (fora do Streamlit).
-Usa SUPABASE_URL e SUPABASE_SERVICE_KEY de variaveis de ambiente.
+Lê SUPABASE_URL e SUPABASE_SERVICE_KEY de variáveis de ambiente; quando
+ausentes, cai para .streamlit/secrets.toml (uso local).
 """
 
 import os
@@ -10,15 +11,37 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+def _get_secret(*nomes: str) -> str:
+    """Resolve uma chave em env vars, depois em st.secrets (top-level e [supabase])."""
+    for nome in nomes:
+        val = os.environ.get(nome, "")
+        if val:
+            return val
+    try:
+        import streamlit as st
+        for nome in nomes:
+            val = st.secrets.get(nome) or ""
+            if val:
+                return val
+        sub = st.secrets.get("supabase") or {}
+        for nome in nomes:
+            val = sub.get(nome) or ""
+            if val:
+                return val
+    except Exception:
+        pass
+    return ""
+
+
 def get_client():
     from supabase import create_client
 
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    url = _get_secret("SUPABASE_URL")
+    key = _get_secret("SUPABASE_SERVICE_KEY", "SUPABASE_KEY")
     if not url or not key:
         raise ValueError(
             "SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar definidas "
-            "como variaveis de ambiente ou no .env"
+            "como variaveis de ambiente ou em .streamlit/secrets.toml"
         )
     return create_client(url, key)
 
