@@ -1,0 +1,30 @@
+# ============================================================================
+# Finterminal — config.toml
+# ----------------------------------------------------------------------------
+# Sincroniza o tema interno do Streamlit (topbar, primary color, base) com a
+# paleta padrão do design system custom (tema "dark"). Quando o usuário troca
+# de tema na sidebar, o CSS injetado em utils/themes.py:get_tema_css()
+# sobrescreve as variáveis :root — o config.toml só evita o flicker inicial
+# e a faixa preta default conflitante no topo.
+#
+# IMPORTANTE: não defina `font` aqui — as fontes são gerenciadas dinamicamente
+# pelo sistema de temas (Google Fonts importadas por tema/picker).
+# ============================================================================
+
+[theme]
+base                     = "dark"
+primaryColor             = "#FF8C00"
+backgroundColor          = "#13141E"
+secondaryBackgroundColor = "#1C1D2B"
+textColor                = "#F0F2FF"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Streamlit Cloud já lida com upload limit; este é o default local
+maxUploadSize = 50
+
+[client]
+# showErrorDetails: erros visíveis ajudam debug (memo: erros silenciosos = risco crítico)
+showErrorDetails = true
