@@ -1,0 +1,41 @@
+name: Morning Brief — Diário 8h BRT
+
+on:
+  schedule:
+    # 11:00 UTC = 8:00 BRT (sem horário de verão). Dias úteis (seg-sex).
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: morning-brief
+  cancel-in-progress: false
+
+jobs:
+  enviar-brief:
+    name: Gerar e enviar Morning Brief
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install requests supabase yfinance pandas numpy python-bcb fredapi scipy
+
+      - name: Executar morning_brief
+        run: python scripts/morning_brief.py
+        env:
+          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FRED_API_KEY:        ${{ secrets.FRED_API_KEY }}
+          EMAIL_REMETENTE:     ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_APP_PASSWORD:  ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_DESTINATARIO:  ${{ secrets.EMAIL_DESTINATARIO }}

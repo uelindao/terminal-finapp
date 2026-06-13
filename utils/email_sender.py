@@ -1,12 +1,82 @@
+import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import streamlit as st
 from datetime import datetime
 import threading
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _ler_credenciais_email() -> tuple[str, str, str]:
+    """
+    Resolve credenciais de email: env vars primeiro, st.secrets como fallback.
+    Permite uso tanto no app (Streamlit) quanto em scripts/ETL.
+
+    Env vars suportadas (alias do Gmail app password):
+        EMAIL_REMETENTE, EMAIL_APP_PASSWORD, EMAIL_DESTINATARIO
+    """
+    rem = os.environ.get("EMAIL_REMETENTE", "")
+    pwd = os.environ.get("EMAIL_APP_PASSWORD", "")
+    dst = os.environ.get("EMAIL_DESTINATARIO", "")
+    if rem and pwd and dst:
+        return rem, pwd, dst
+    try:
+        import streamlit as st
+        sec = st.secrets.get("email") or {}
+        rem = rem or sec.get("remetente") or ""
+        pwd = pwd or sec.get("app_password") or ""
+        dst = dst or sec.get("destinatario") or ""
+    except Exception:
+        pass
+    return rem, pwd, dst
+
+
+def enviar_email_html(
+    assunto: str,
+    html: str,
+    destinatario: str | None = None,
+    sincrono: bool = True,
+) -> bool:
+    """
+    Envio genérico de email HTML para scripts/ETL (sem dependência de streamlit no path).
+    Credenciais via _ler_credenciais_email (env vars ou st.secrets).
+
+    `sincrono=True` aguarda envio (recomendado para ETL/cron — falha aparece no log).
+    `sincrono=False` dispara em thread (para UI Streamlit, não bloqueia interação).
+    """
+    rem, pwd, dst_default = _ler_credenciais_email()
+    if not rem or not pwd:
+        logger.error("[email_sender] credenciais ausentes — EMAIL_REMETENTE/APP_PASSWORD")
+        return False
+    dst = destinatario or dst_default
+    if not dst:
+        logger.error("[email_sender] destinatário ausente")
+        return False
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = assunto
+    msg['From']    = rem
+    msg['To']      = dst
+    msg.attach(MIMEText(html, 'html'))
+
+    if sincrono:
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+                smtp.login(rem, pwd)
+                smtp.sendmail(rem, dst, msg.as_string())
+            logger.info(f"[email_sender] enviado para {dst}: {assunto[:60]}")
+            return True
+        except Exception as e:
+            logger.error(f"[email_sender] falha SMTP síncrona: {e}")
+            return False
+    else:
+        threading.Thread(
+            target=_enviar_assincrono, args=(msg, rem, pwd, dst), daemon=True,
+        ).start()
+        return True
+
 
 def _enviar_assincrono(msg, remetente, app_password, destinatario):
     """Função interna que roda em uma thread separada para não bloquear a UI."""
@@ -23,10 +93,11 @@ def enviar_alerta_email(ticker: str, score: float, alertas: list[str]) -> bool:
     Retorna True (o envio em si ocorre em background).
     """
     try:
+        import streamlit as st
         remetente    = st.secrets["email"]["remetente"]
         app_password = st.secrets["email"]["app_password"]
         destinatario = st.secrets["email"]["destinatario"]
-    except KeyError:
+    except (KeyError, Exception):
         return False  # Configuração de email não encontrada
 
     assunto = f"⚠️ FinTerminal — Alerta de Venda: {ticker} (Score: {score:.0f}/100)"
@@ -89,10 +160,11 @@ def enviar_relatorio_semanal(dados_carteira: list[dict]) -> bool:
     dados_carteira: lista de dicts com ticker, score, var_1d, var_1m, alertas
     """
     try:
+        import streamlit as st
         remetente    = st.secrets["email"]["remetente"]
         app_password = st.secrets["email"]["app_password"]
         destinatario = st.secrets["email"]["destinatario"]
-    except KeyError:
+    except (KeyError, Exception):
         return False
 
     assunto = f"📊 FinTerminal — Relatório Semanal | {datetime.now().strftime('%d/%m/%Y')}"
