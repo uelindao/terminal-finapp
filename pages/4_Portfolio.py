@@ -2894,7 +2894,166 @@ with tab_risco:
                     st.info(_veredito)
 
             with st.expander("🎯 exposição a fatores fama-french", expanded=False):
-                st.caption("em desenvolvimento — em breve nesta aba.")
+                st.markdown(
+                    "*regressão dos retornos da carteira sobre 3 fatores estilo "
+                    "Fama-French. **β_MKT** mede sensibilidade ao mercado, **β_SMB** "
+                    "tilt para small vs large caps, **β_HML** tilt para value vs "
+                    "growth. **alpha** é o retorno não explicado pelos fatores. "
+                    "fatores construídos do próprio universo do screener — sem "
+                    "dependência externa.*"
+                )
+
+                from utils.risk_factors import (
+                    construir_fatores_sinteticos, regressao_fama_french,
+                )
+                from utils.risk_var import calcular_retornos_carteira
+                from utils.tickers import SCREENER_B3 as _SC_B3, SCREENER_US as _SC_US
+
+                _periodo_ff = st.selectbox(
+                    "janela de regressão",
+                    options=["1y", "2y", "3y"],
+                    index=1,
+                    key="ff_periodo",
+                    help="histórico usado na regressão. mais longo = betas mais estáveis",
+                )
+
+                # Mercado dominante para escolher screener e rf
+                _n_br_ff = sum(1 for t in _pesos_carteira if t.endswith(".SA"))
+                _eh_br_ff = _n_br_ff >= (len(_pesos_carteira) - _n_br_ff)
+                _screener_ff = _SC_B3 if _eh_br_ff else _SC_US
+                _rf_anual = 0.1475 if _eh_br_ff else 0.045  # Selic vs T-10y
+
+                _cache_ff = get_todos_fundamentos_cache()
+                _mc_ff = {
+                    t: float(d.get("market_cap") or 0)
+                    for t, d in _cache_ff.items() if d.get("market_cap")
+                }
+                _pvp_ff = {
+                    t: float(d.get("p/vp") or 0)
+                    for t, d in _cache_ff.items() if d.get("p/vp")
+                }
+                _universo_ff = sorted(
+                    [t for t in _screener_ff if t in _mc_ff],
+                    key=lambda t: -_mc_ff[t],
+                )[:50]
+                _todos_ff = list(set(list(_pesos_carteira.keys()) + _universo_ff))
+
+                with st.spinner("rodando regressão fama-french..."):
+                    _precos_ff = obter_close_carteira(
+                        tuple(_todos_ff),
+                        periodo=_periodo_ff,
+                    )
+                    _fatores = construir_fatores_sinteticos(
+                        _universo_ff, _mc_ff, _pvp_ff, _precos_ff,
+                        rf_anual=_rf_anual,
+                    )
+                    _rets_cart = calcular_retornos_carteira(_pesos_carteira, _precos_ff)
+                    _ff = regressao_fama_french(_rets_cart, _fatores)
+
+                if _ff is None:
+                    st.warning(
+                        "dados insuficientes (precisa ≥ 60 dias de retornos + fatores). "
+                        "tente um período maior."
+                    )
+                else:
+                    # Header: alpha + R² + N obs
+                    _fc1, _fc2, _fc3 = st.columns(3)
+                    with _fc1:
+                        _alpha_emoji = (
+                            "🟢" if (_ff.alpha_anual > 0 and _ff.pvalue_alpha < 0.10) else
+                            "🔴" if (_ff.alpha_anual < 0 and _ff.pvalue_alpha < 0.10) else
+                            "⚪"
+                        )
+                        metric_card(
+                            "alpha anualizado",
+                            f"{_alpha_emoji} {_ff.alpha_anual*100:+.2f}%",
+                            sublabel=f"p-valor: {_ff.pvalue_alpha:.3f}",
+                        )
+                    with _fc2:
+                        metric_card(
+                            "R² do modelo",
+                            f"{_ff.r_squared*100:.1f}%",
+                            sublabel="variância explicada pelos fatores",
+                        )
+                    with _fc3:
+                        metric_card(
+                            "observações",
+                            f"{_ff.n_obs}",
+                            sublabel=f"janela: {_periodo_ff}",
+                        )
+
+                    # 3 betas
+                    st.markdown("##### exposições (betas)")
+                    _bb1, _bb2, _bb3 = st.columns(3)
+                    with _bb1:
+                        metric_card(
+                            "β mercado",
+                            f"{_ff.beta_mkt:+.2f}",
+                            sublabel=f"sens. ao mercado · p={_ff.pvalue_mkt:.3f}",
+                        )
+                    with _bb2:
+                        _smb_label = "small caps" if _ff.beta_smb > 0 else "large caps"
+                        metric_card(
+                            "β SMB",
+                            f"{_ff.beta_smb:+.2f}",
+                            sublabel=f"tilt: {_smb_label} · p={_ff.pvalue_smb:.3f}",
+                        )
+                    with _bb3:
+                        _hml_label = "value" if _ff.beta_hml > 0 else "growth"
+                        metric_card(
+                            "β HML",
+                            f"{_ff.beta_hml:+.2f}",
+                            sublabel=f"tilt: {_hml_label} · p={_ff.pvalue_hml:.3f}",
+                        )
+
+                    # Gráfico de barras dos betas com intervalo de confiança 95%
+                    import plotly.graph_objects as go
+                    _fig_betas = go.Figure()
+                    _nomes = ["β mercado", "β SMB (smalls)", "β HML (value)"]
+                    _vals = [_ff.beta_mkt, _ff.beta_smb, _ff.beta_hml]
+                    _ses = [_ff.se_mkt, _ff.se_smb, _ff.se_hml]
+                    _fig_betas.add_trace(go.Bar(
+                        x=_nomes, y=_vals,
+                        error_y=dict(type="data", array=[1.96 * s for s in _ses]),
+                        marker_color=["#3b82f6", "#f59e0b", "#10b981"],
+                        text=[f"{v:+.2f}" for v in _vals],
+                        textposition="outside",
+                    ))
+                    _fig_betas.update_layout(
+                        title="exposições aos fatores (intervalo 95%)",
+                        yaxis_title="beta",
+                        height=320,
+                        showlegend=False,
+                        margin=dict(t=40, b=20, l=0, r=0),
+                        template="plotly_dark",
+                    )
+                    _fig_betas.add_hline(y=0, line_width=1, line_color="#666")
+                    st.plotly_chart(_fig_betas, use_container_width=True)
+
+                    # Sumário em linguagem natural
+                    _interp_mkt = (
+                        "defensiva (menos sensível que o mercado)" if _ff.beta_mkt < 0.9 else
+                        "agressiva (mais sensível que o mercado)" if _ff.beta_mkt > 1.1 else
+                        "alinhada com o mercado"
+                    )
+                    _interp_smb = (
+                        "**small caps**" if _ff.beta_smb > 0.2 else
+                        "**large caps**" if _ff.beta_smb < -0.2 else
+                        "**neutro em tamanho**"
+                    )
+                    _interp_hml = (
+                        "**value** (P/VP baixo)" if _ff.beta_hml > 0.2 else
+                        "**growth** (P/VP alto)" if _ff.beta_hml < -0.2 else
+                        "**neutro em estilo**"
+                    )
+                    _alpha_sig = "significativo" if _ff.pvalue_alpha < 0.10 else "não-significativo"
+                    st.info(
+                        f"🎯 carteira é **{_interp_mkt}** (β={_ff.beta_mkt:.2f}), com tilt "
+                        f"para {_interp_smb} e {_interp_hml}. alpha anualizado: "
+                        f"**{_ff.alpha_anual*100:+.2f}%** ({_alpha_sig} estatisticamente "
+                        f"a 90%). os fatores explicam **{_ff.r_squared*100:.0f}%** da "
+                        f"variância dos retornos da carteira."
+                    )
 
             with st.expander("💰 projeção de dividendos 12m", expanded=False):
                 st.markdown(
