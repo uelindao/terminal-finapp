@@ -1,8 +1,10 @@
 """
-utils/components.py — v4.0
+utils/components.py — v4.1
 Componentes HTML do design system.
-Fontes: Inter/system-ui para UI, Courier New para dados numéricos.
+Fase 3a: 100% tokens — sem hex/font hardcoded; usa var(--font-{title,ui,data})
+e var(--text-*)/--space-*/--ls-*. Cores via var(--bg-*/--text-*/--accent/etc).
 """
+import warnings as _warnings
 import streamlit as st
 import time
 
@@ -37,21 +39,21 @@ def handle_ticker_nav():
 def page_header(titulo: str, subtitulo: str = ""):
     """Header compacto de página."""
     st.markdown(
-        f'<div style="margin-bottom: 16px;">'
+        f'<div style="margin-bottom: var(--space-4);">'
         f'<div style="'
-        f'font-family: var(--font-title, "Courier New", monospace); '
-        f'font-size: 1.3rem; '
+        f'font-family: var(--font-title); '
+        f'font-size: var(--text-lg); '
         f'font-weight: 700; '
         f'color: var(--accent); '
-        f'letter-spacing: 0.05em;">'
+        f'letter-spacing: var(--ls-wide);">'
         f'{titulo}</div>'
         + (
             f'<div style="'
-            f'font-family: Courier New, monospace; '
-            f'font-size: 0.75rem; '
-            f'color: #444; '
+            f'font-family: var(--font-ui); '
+            f'font-size: var(--text-sm); '
+            f'color: var(--text-muted); '
             f'margin-top: 2px; '
-            f'letter-spacing: 0.05em;">'
+            f'letter-spacing: var(--ls-wide);">'
             f'{subtitulo}</div>'
             if subtitulo else ''
         ) +
@@ -61,18 +63,18 @@ def page_header(titulo: str, subtitulo: str = ""):
 
 
 def section_title(titulo: str):
-    """Título de seção com barra de acento âmbar à esquerda."""
+    """Título de seção com barra do acento à esquerda."""
     st.markdown(
         f'<div style="'
-        f'font-family: Courier New, monospace; '
-        f'font-size: 0.72rem; '
+        f'font-family: var(--font-ui); '
+        f'font-size: var(--text-xs); '
         f'color: var(--accent); '
         f'text-transform: uppercase; '
-        f'letter-spacing: 0.12em; '
+        f'letter-spacing: var(--ls-wider); '
         f'font-weight: 600; '
         f'border-left: 2px solid var(--accent); '
-        f'padding-left: 8px; '
-        f'margin: 16px 0 8px 0;">'
+        f'padding-left: var(--space-2); '
+        f'margin: var(--space-4) 0 var(--space-2) 0;">'
         f'{titulo}'
         f'</div>',
         unsafe_allow_html=True,
@@ -159,7 +161,7 @@ def metric_card(
         f'{label}{_fonte_badge(data_source)}</div>'
 
         f'<div style="'
-        f'font-family:Courier New; '
+        f'font-family:var(--font-data); '
         f'font-size:{_sz_valor}; '
         f'font-weight:700; '
         f'color:{_c["valor"]}; '
@@ -169,7 +171,7 @@ def metric_card(
 
         + (
             f'<div style="'
-            f'font-family:Courier New; '
+            f'font-family:var(--font-data); '
             f'font-size:{_sz_sub}; '
             f'color:{_c["sublabel"]};">'
             f'{sublabel}</div>'
@@ -418,16 +420,24 @@ def watchlist_row(
     )
 
 
-# Mantido para compatibilidade retroativa com páginas que ainda o usam
+# DEPRECATED — preferir watchlist_row() para layouts de lista densa.
+# Emite DeprecationWarning quando chamado. Será removido após migração das
+# páginas que ainda importam (busca: grep -rn "watchlist_card" pages/).
 def watchlist_card(ticker: str, nome: str, preco: float,
                    var_1d: float, moeda: str = "R$",
                    health_score: float = None,
                    alertas: list = None,
                    earnings_info: dict = None):
     """
-    Card legado da watchlist.
-    Prefer watchlist_row() para layouts de lista densa.
+    [DEPRECATED] Card legado da watchlist — use watchlist_row() em vez deste.
+    Será removido no PR de cleanup pós-Fase 6.
     """
+    _warnings.warn(
+        "watchlist_card() está obsoleto — use watchlist_row() (mais denso, "
+        "alinhado com o design system v5). Será removido após Fase 6.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     cor_var   = "var(--bull)" if var_1d >= 0 else "var(--bear)"
     seta      = "▲" if var_1d >= 0 else "▼"
     tem_alert = bool(alertas)
@@ -660,71 +670,71 @@ def inject_ui_enhancements():
         #finterm-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);
             z-index:99998;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);}}
         #finterm-overlay.active{{display:flex;align-items:flex-start;
-            justify-content:center;padding-top:14vh;animation:ft-fade .12s ease;}}
-        #finterm-palette{{background:#1C1D2B;border:1px solid #353755;border-radius:14px;
-            width:min(620px,92vw);box-shadow:0 24px 64px rgba(0,0,0,.65),
-            0 0 0 1px rgba(255,140,0,.18);overflow:hidden;
+            justify-content:center;padding-top:14vh;animation:ft-fade var(--motion-fast) var(--ease-out);}}
+        #finterm-palette{{background:var(--bg-surface);border:1px solid var(--border-normal);
+            border-radius:var(--radius-lg);width:min(620px,92vw);
+            box-shadow:var(--shadow-xl),0 0 0 1px var(--accent-border);overflow:hidden;
             animation:ft-slide .16s cubic-bezier(.16,1,.3,1);}}
         #finterm-input{{width:100%;background:transparent;border:none;
-            border-bottom:1px solid #2A2C3E;padding:16px 20px;
-            color:#F0F2FF;font-size:1rem;font-family:'Inter',system-ui;
+            border-bottom:1px solid var(--border-subtle);padding:var(--space-4) var(--space-5);
+            color:var(--text-primary);font-size:var(--text-md);font-family:var(--font-ui);
             outline:none;box-sizing:border-box;}}
-        #finterm-input::placeholder{{color:#6B7280;}}
-        #finterm-hint{{padding:5px 20px;font-size:.62rem;color:#6B7280;
-            font-family:'Inter',system-ui;border-bottom:1px solid #2A2C3E;
+        #finterm-input::placeholder{{color:var(--text-muted);}}
+        #finterm-hint{{padding:5px var(--space-5);font-size:var(--text-xs);color:var(--text-muted);
+            font-family:var(--font-ui);border-bottom:1px solid var(--border-subtle);
             display:flex;gap:14px;align-items:center;}}
-        .ft-k{{background:#23243A;border:1px solid #353755;border-radius:4px;
-            padding:1px 5px;font-family:'Courier New',monospace;
-            font-size:.6rem;color:#9CA3B8;margin-right:2px;}}
+        .ft-k{{background:var(--bg-elevated);border:1px solid var(--border-normal);border-radius:var(--radius-sm);
+            padding:1px 5px;font-family:var(--font-data);
+            font-size:.6rem;color:var(--text-secondary);margin-right:2px;}}
         #finterm-results{{max-height:340px;overflow-y:auto;padding:6px;}}
         #finterm-results::-webkit-scrollbar{{width:4px;}}
-        #finterm-results::-webkit-scrollbar-thumb{{background:#353755;border-radius:2px;}}
-        .ft-section{{font-size:.58rem;color:#6B7280;padding:6px 14px 2px;
-            text-transform:uppercase;letter-spacing:.1em;
-            font-family:'Inter',system-ui;}}
-        .ft-item{{display:flex;align-items:center;gap:12px;padding:10px 14px;
-            border-radius:8px;cursor:pointer;transition:background .08s;
-            font-family:'Inter',system-ui;}}
-        .ft-item:hover,.ft-item.sel{{background:#23243A;}}
+        #finterm-results::-webkit-scrollbar-thumb{{background:var(--border-normal);border-radius:2px;}}
+        .ft-section{{font-size:.58rem;color:var(--text-muted);padding:6px 14px 2px;
+            text-transform:uppercase;letter-spacing:var(--ls-wide);
+            font-family:var(--font-ui);}}
+        .ft-item{{display:flex;align-items:center;gap:var(--space-3);padding:10px 14px;
+            border-radius:var(--radius-sm);cursor:pointer;transition:background var(--motion-fast);
+            font-family:var(--font-ui);}}
+        .ft-item:hover,.ft-item.sel{{background:var(--bg-elevated);}}
         .ft-icon{{font-size:.95rem;width:22px;text-align:center;flex-shrink:0;}}
         .ft-main{{flex:1;min-width:0;}}
-        .ft-ticker{{font-family:'Courier New',monospace;font-size:.88rem;
-            font-weight:600;color:#F0F2FF;}}
-        .ft-desc{{font-size:.68rem;color:#6B7280;margin-top:1px;}}
-        .ft-badge{{font-size:.6rem;padding:2px 7px;border-radius:4px;
-            background:#2A2C3E;color:#9CA3B8;flex-shrink:0;
-            font-family:'Courier New',monospace;}}
-        .ft-badge.page{{background:rgba(255,140,0,.12);color:#FF8C00;}}
-        #finterm-footer{{padding:8px 20px;border-top:1px solid #2A2C3E;
-            display:flex;gap:16px;align-items:center;font-size:.62rem;
-            color:#6B7280;font-family:'Inter',system-ui;}}
+        .ft-ticker{{font-family:var(--font-data);font-size:var(--text-sm);
+            font-weight:600;color:var(--text-primary);}}
+        .ft-desc{{font-size:.68rem;color:var(--text-muted);margin-top:1px;}}
+        .ft-badge{{font-size:.6rem;padding:2px 7px;border-radius:var(--radius-sm);
+            background:var(--border-subtle);color:var(--text-secondary);flex-shrink:0;
+            font-family:var(--font-data);}}
+        .ft-badge.page{{background:var(--pill-accent-bg);color:var(--accent);}}
+        #finterm-footer{{padding:var(--space-2) var(--space-5);border-top:1px solid var(--border-subtle);
+            display:flex;gap:var(--space-4);align-items:center;font-size:var(--text-xs);
+            color:var(--text-muted);font-family:var(--font-ui);}}
         #finterm-toasts{{position:fixed;top:20px;right:20px;z-index:99999;
-            display:flex;flex-direction:column;gap:8px;pointer-events:none;}}
-        .ft-toast{{background:#1C1D2B;border:1px solid #353755;border-radius:10px;
+            display:flex;flex-direction:column;gap:var(--space-2);pointer-events:none;}}
+        .ft-toast{{background:var(--bg-surface);border:1px solid var(--border-normal);border-radius:var(--radius-md);
             padding:12px 16px;min-width:240px;max-width:340px;
-            box-shadow:0 8px 32px rgba(0,0,0,.4);display:flex;
+            box-shadow:var(--shadow-lg);display:flex;
             align-items:flex-start;gap:10px;animation:ft-tin .22s ease;
             pointer-events:all;overflow:hidden;position:relative;
-            font-family:'Inter',system-ui;}}
+            font-family:var(--font-ui);}}
         .ft-toast.out{{animation:ft-tout .18s ease forwards;}}
         .ft-toast-icon{{font-size:.95rem;flex-shrink:0;margin-top:1px;}}
-        .ft-toast-msg{{font-size:.8rem;color:#F0F2FF;line-height:1.4;}}
+        .ft-toast-msg{{font-size:var(--text-sm);color:var(--text-primary);line-height:1.4;}}
         .ft-bar-wrap{{position:absolute;bottom:0;left:0;right:0;height:2px;
             background:rgba(255,255,255,.08);}}
         .ft-bar{{height:100%;transition:width linear;width:100%;}}
-        .ft-toast.success{{border-left:3px solid #10B981;}}
-        .ft-toast.success .ft-bar{{background:#10B981;}}
-        .ft-toast.error{{border-left:3px solid #EF4444;}}
-        .ft-toast.error .ft-bar{{background:#EF4444;}}
-        .ft-toast.warning{{border-left:3px solid #F59E0B;}}
-        .ft-toast.warning .ft-bar{{background:#F59E0B;}}
-        .ft-toast.info{{border-left:3px solid #3B82F6;}}
-        .ft-toast.info .ft-bar{{background:#3B82F6;}}
+        .ft-toast.success{{border-left:3px solid var(--bull);}}
+        .ft-toast.success .ft-bar{{background:var(--bull);}}
+        .ft-toast.error{{border-left:3px solid var(--bear);}}
+        .ft-toast.error .ft-bar{{background:var(--bear);}}
+        .ft-toast.warning{{border-left:3px solid var(--amber);}}
+        .ft-toast.warning .ft-bar{{background:var(--amber);}}
+        .ft-toast.info{{border-left:3px solid var(--info);}}
+        .ft-toast.info .ft-bar{{background:var(--info);}}
         .ft-hint-badge{{position:fixed;bottom:76px;right:20px;z-index:9998;
-            background:#1C1D2B;border:1px solid #353755;border-radius:8px;
-            padding:8px 12px;font-size:.65rem;color:#9CA3B8;
-            font-family:'Inter',system-ui;pointer-events:none;
-            box-shadow:0 4px 16px rgba(0,0,0,.3);
+            background:var(--bg-surface);border:1px solid var(--border-normal);border-radius:var(--radius-sm);
+            padding:var(--space-2) var(--space-3);font-size:.65rem;color:var(--text-secondary);
+            font-family:var(--font-ui);pointer-events:none;
+            box-shadow:var(--shadow-md);
             animation:ft-badge-show 4s ease 1.5s both;}}
         @keyframes ft-fade  {{from{{opacity:0}}to{{opacity:1}}}}
         @keyframes ft-slide {{from{{opacity:0;transform:translateY(-14px) scale(.97)}}
@@ -757,7 +767,7 @@ def inject_ui_enhancements():
             '  </div>' +
             '  <div id="finterm-results"></div>' +
             '  <div id="finterm-footer">' +
-            '    <span style="color:#FF8C00;font-weight:600;">⚡ FINTERMINAL</span>' +
+            '    <span style="color:var(--accent);font-weight:600;">⚡ FINTERMINAL</span>' +
             '    <span style="margin-left:auto;">Alt+1–6 navegação rápida de páginas</span>' +
             '  </div>' +
             '</div>';
@@ -769,7 +779,7 @@ def inject_ui_enhancements():
 
         var hb = doc.createElement('div');
         hb.className = 'ft-hint-badge';
-        hb.innerHTML = '<span style="color:#FF8C00">Ctrl+K</span> command palette';
+        hb.innerHTML = '<span style="color:var(--accent)">Ctrl+K</span> command palette';
         doc.body.appendChild(hb);
     }}
 
@@ -880,8 +890,8 @@ def inject_ui_enhancements():
                 }});
             }}
             if (!pageHits.length && !tickerHits.length) {{
-                html = '<div style="padding:24px;text-align:center;color:#6B7280;' +
-                    'font-size:.8rem;font-family:Inter,system-ui;">nenhum resultado para \\"' + q + '\\"</div>';
+                html = '<div style="padding:24px;text-align:center;color:var(--text-muted);' +
+                    'font-size:var(--text-sm);font-family:var(--font-ui);">nenhum resultado para \\"' + q + '\\"</div>';
             }}
         }}
 
@@ -1312,13 +1322,13 @@ def tooltip(chave: str = "", texto_custom: str = "") -> None:
     st.markdown(
         f'<span title="{_texto_esc}" style="'
         f'cursor:help;'
-        f'color:#444;'
-        f'font-size:0.65rem;'
-        f'border:1px solid #2a2a2a;'
+        f'color:var(--text-muted);'
+        f'font-size:var(--text-xs);'
+        f'border:1px solid var(--border-normal);'
         f'border-radius:50%;'
         f'padding:0 5px;'
         f'margin-left:4px;'
-        f'font-family:Courier New;'
+        f'font-family:var(--font-data);'
         f'user-select:none;'
         f'vertical-align:middle;'
         f'">?</span>',
@@ -1330,9 +1340,14 @@ def label_com_tooltip(
     texto: str,
     chave: str = "",
     texto_custom: str = "",
-    cor: str = "#555",
+    cor: str | None = None,
     tamanho: str = "0.72rem",
 ) -> None:
+    """
+    cor: None (padrão) usa var(--text-secondary). Passe um CSS color custom
+    apenas se precisar destacar o label (ex: 'var(--accent)').
+    """
+    _cor = cor if cor else "var(--text-secondary)"
     _texto_tt = TOOLTIPS.get(chave, texto_custom)
     _tt_esc = (
         _texto_tt
@@ -1342,15 +1357,15 @@ def label_com_tooltip(
 
     _tt_html = (
         f' <span title="{_tt_esc}" style="'
-        f'cursor:help;color:#333;font-size:0.6rem;'
-        f'border:1px solid #2a2a2a;border-radius:50%;'
+        f'cursor:help;color:var(--text-muted);font-size:0.6rem;'
+        f'border:1px solid var(--border-normal);border-radius:50%;'
         f'padding:0 4px;margin-left:2px;'
-        f'font-family:Courier New;user-select:none;">?</span>'
+        f'font-family:var(--font-data);user-select:none;">?</span>'
     ) if _tt_esc else ""
 
     st.markdown(
-        f'<div style="font-family:Courier New;'
-        f'font-size:{tamanho};color:{cor};'
+        f'<div style="font-family:var(--font-ui);'
+        f'font-size:{tamanho};color:{_cor};'
         f'margin-bottom:4px;">'
         f'{texto}{_tt_html}'
         f'</div>',
@@ -1372,8 +1387,8 @@ def metric_card_compact(
     _COR_MAP = {
         "bull":  ("var(--bull)",  "var(--bull-soft)"),
         "bear":  ("var(--bear)",  "var(--bear-soft)"),
-        "amber": ("var(--amber)", "rgba(217,119,6,.10)"),
-        "info":  ("var(--info)",  "var(--accent-soft)"),
+        "amber": ("var(--amber)", "var(--amber-soft)"),
+        "info":  ("var(--info)",  "var(--info-soft)"),
         "muted": ("var(--text-muted)", "transparent"),
     }
     cor_val, cor_bg = _COR_MAP.get(cor, _COR_MAP["info"])
@@ -1490,15 +1505,15 @@ def data_quality_badge(quality_pct: float | None, fonte: str = "", atualizado_em
     import html as _html
     if quality_pct is None:
         # Estado "N/D" precisa ser visível — antes era cinza-pálido e se perdia no fundo
-        cor_bg, cor_fg, label = "rgba(150,150,150,0.30)", "#bbb", "DADOS N/D"
+        cor_bg, cor_fg, label = "var(--pill-muted-bg)", "var(--text-muted)", "DADOS N/D"
     elif quality_pct >= 85:
-        cor_bg, cor_fg, label = "rgba(46,204,113,0.25)", "var(--bull)", f"DADOS {int(quality_pct)}%"
+        cor_bg, cor_fg, label = "var(--pill-bull-bg)", "var(--bull)", f"DADOS {int(quality_pct)}%"
     elif quality_pct >= 60:
-        cor_bg, cor_fg, label = "rgba(241,196,15,0.28)", "var(--amber)", f"DADOS {int(quality_pct)}%"
+        cor_bg, cor_fg, label = "var(--pill-amber-bg)", "var(--amber)", f"DADOS {int(quality_pct)}%"
     elif quality_pct >= 30:
-        cor_bg, cor_fg, label = "rgba(255,140,0,0.28)", "var(--accent)", f"DADOS {int(quality_pct)}%"
+        cor_bg, cor_fg, label = "var(--pill-accent-bg)", "var(--accent)", f"DADOS {int(quality_pct)}%"
     else:
-        cor_bg, cor_fg, label = "rgba(231,76,60,0.28)", "var(--bear)", f"DADOS {int(quality_pct)}%"
+        cor_bg, cor_fg, label = "var(--pill-bear-bg)", "var(--bear)", f"DADOS {int(quality_pct)}%"
 
     tooltip_parts = []
     if fonte:
@@ -1509,11 +1524,11 @@ def data_quality_badge(quality_pct: float | None, fonte: str = "", atualizado_em
 
     return (
         f'<span title="{tooltip}" style="'
-        f'display:inline-block; padding:3px 9px; border-radius:6px; '
+        f'display:inline-block; padding:3px 9px; border-radius:var(--radius-sm); '
         f'background:{cor_bg}; color:{cor_fg}; '
-        f'font-family:Courier New,monospace; font-size:0.7rem; '
-        f'font-weight:700; letter-spacing:0.06em; margin-left:8px; '
-        f'vertical-align:middle; border:1px solid {cor_bg.replace("0.30","0.55").replace("0.25","0.55").replace("0.28","0.55")};">'
+        f'font-family:var(--font-data); font-size:var(--text-xs); '
+        f'font-weight:700; letter-spacing:var(--ls-wide); margin-left:var(--space-2); '
+        f'vertical-align:middle; border:1px solid {cor_fg};">'
         f'◆ {label}'
         f'</span>'
     )
