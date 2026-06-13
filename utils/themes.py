@@ -395,6 +395,172 @@ TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DESIGN TOKENS v2 — escala compartilhada (Fase 1)
+# Espaçamento, tipografia, motion são iguais em todos os temas.
+# Radius e cores vêm de cada tema (preserva identidade).
+# ══════════════════════════════════════════════════════════════════════════════
+
+TOKENS_BASE: dict[str, str] = {
+    # Espaçamento — escala 4/8/12/16/20/24/32/40
+    "--space-0": "0",
+    "--space-1": "4px",
+    "--space-2": "8px",
+    "--space-3": "12px",
+    "--space-4": "16px",
+    "--space-5": "20px",
+    "--space-6": "24px",
+    "--space-7": "32px",
+    "--space-8": "40px",
+
+    # Tipografia — escala harmônica
+    "--text-xs":   "0.7rem",
+    "--text-sm":   "0.8rem",
+    "--text-base": "0.9rem",
+    "--text-md":   "1rem",
+    "--text-lg":   "1.2rem",
+    "--text-xl":   "1.5rem",
+    "--text-2xl":  "2rem",
+    "--text-3xl":  "2.8rem",
+
+    # Letter-spacing — uppercase labels estilo Bloomberg
+    "--ls-tight":  "-0.01em",
+    "--ls-normal": "0",
+    "--ls-wide":   "0.08em",
+    "--ls-wider":  "0.12em",
+
+    # Motion
+    "--motion-fast":   "120ms",
+    "--motion-normal": "200ms",
+    "--motion-slow":   "320ms",
+    "--ease-out":      "cubic-bezier(.22,.61,.36,1)",
+    "--ease-in-out":   "cubic-bezier(.65,0,.35,1)",
+
+    # Radius extra (xl) para cards grandes / modais — cada tema mantém sm/md/lg próprios
+    "--radius-xl": "20px",
+
+    # Glass blur (compartilhado — surface-glass varia por tema)
+    "--glass-blur": "blur(16px) saturate(160%)",
+}
+
+
+# Paletas de séries para charts (Plotly) — 8 cores qualitativas por tema.
+# Pensadas para boa separação visual e razoável para daltonismo.
+CHART_PALETTES: dict[str, list[str]] = {
+    "dark":     ["#FF8C00", "#3B82F6", "#10B981", "#A855F7", "#F59E0B", "#06B6D4", "#EC4899", "#94A3B8"],
+    "navy":     ["#F97316", "#38BDF8", "#22C55E", "#A78BFA", "#FBBF24", "#06B6D4", "#F472B6", "#94A3B8"],
+    "emerald":  ["#10B981", "#34D399", "#60A5FA", "#FBBF24", "#FB7185", "#A78BFA", "#06B6D4", "#90B89F"],
+    "graphite": ["#60A5FA", "#818CF8", "#4ADE80", "#FBBF24", "#F87171", "#A78BFA", "#06B6D4", "#A3A3A3"],
+    "cyber":    ["#A855F7", "#EC4899", "#06B6D4", "#34D399", "#FBBF24", "#F472B6", "#60A5FA", "#9788C0"],
+    "light":    ["#2563EB", "#059669", "#D97706", "#DC2626", "#9333EA", "#0891B2", "#DB2777", "#475569"],
+    "papel":    ["#FF6900", "#1A7F4B", "#B45309", "#1D4ED8", "#7C3AED", "#0E7490", "#BE185D", "#475569"],
+    "amber":    ["#FF8C00", "#FBBF24", "#4ADE80", "#38BDF8", "#A78BFA", "#F87171", "#22D3EE", "#A8A8A8"],
+    "verde":    ["#00E676", "#4ADE80", "#FBBF24", "#38BDF8", "#A78BFA", "#F87171", "#22D3EE", "#A8A8A8"],
+}
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """#RRGGBB ou #RGB → (r, g, b). Retorna (0,0,0) para entradas inválidas."""
+    h = hex_color.lstrip("#").strip()
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return (0, 0, 0)
+    try:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    """#RRGGBB + alpha → 'rgba(r, g, b, a)'. Se já for rgba(...), devolve como veio."""
+    if not hex_color or not hex_color.startswith("#"):
+        return hex_color
+    r, g, b = _hex_to_rgb(hex_color)
+    return f"rgba({r}, {g}, {b}, {alpha:.3f})"
+
+
+def _compute_derived(vars: dict, is_light: bool, tema_id: str) -> dict[str, str]:
+    """
+    Tokens derivados das cores semânticas do tema:
+    gradient do acento, glass surfaces, pill backgrounds, sombras, cores de chart.
+    Mantém retrocompatibilidade — só adiciona, não sobrescreve nada existente.
+    """
+    accent     = vars.get("--accent", "#FF8C00")
+    accent_hov = vars.get("--accent-hover", accent)
+    bg_surface = vars.get("--bg-surface", "#1C1D2B")
+    bg_elev    = vars.get("--bg-elevated", bg_surface)
+
+    bull  = vars.get("--bull",  "#10B981")
+    bear  = vars.get("--bear",  "#EF4444")
+    amber = vars.get("--amber", "#F59E0B")
+    info  = vars.get("--info",  "#3B82F6")
+
+    # Sombras — mais sutis em claro, mais profundas em escuro
+    if is_light:
+        shadows = {
+            "--shadow-sm": "0 1px 2px rgba(15,23,42,0.06), 0 1px 1px rgba(15,23,42,0.04)",
+            "--shadow-md": "0 4px 12px rgba(15,23,42,0.08), 0 2px 4px rgba(15,23,42,0.04)",
+            "--shadow-lg": "0 12px 28px rgba(15,23,42,0.10), 0 4px 10px rgba(15,23,42,0.06)",
+            "--shadow-xl": "0 24px 48px rgba(15,23,42,0.14), 0 8px 18px rgba(15,23,42,0.08)",
+        }
+    else:
+        shadows = {
+            "--shadow-sm": "0 1px 2px rgba(0,0,0,0.32), 0 1px 1px rgba(0,0,0,0.18)",
+            "--shadow-md": "0 6px 16px rgba(0,0,0,0.42), 0 2px 6px rgba(0,0,0,0.22)",
+            "--shadow-lg": "0 18px 36px rgba(0,0,0,0.50), 0 6px 14px rgba(0,0,0,0.30)",
+            "--shadow-xl": "0 32px 60px rgba(0,0,0,0.58), 0 10px 24px rgba(0,0,0,0.38)",
+        }
+
+    # Paleta de chart por tema (com fallback pro dark)
+    palette = CHART_PALETTES.get(tema_id, CHART_PALETTES["dark"])
+    chart_vars = {f"--chart-{i+1}": cor for i, cor in enumerate(palette)}
+
+    derived: dict[str, str] = {
+        # Gradient do acento — usado em CTAs, KPI ativo, item sidebar selecionado
+        "--accent-gradient":        f"linear-gradient(135deg, {accent} 0%, {accent_hov} 100%)",
+        "--accent-gradient-strong": f"linear-gradient(135deg, {accent_hov} 0%, {accent} 100%)",
+
+        # Glass surfaces — tema Glass usa pleno; outros temas podem usar em overlays
+        "--surface-glass":        _rgba(bg_surface, 0.62),
+        "--surface-glass-strong": _rgba(bg_surface, 0.82),
+
+        # Pill backgrounds — mini-ícone colorido no canto do KPI (ref 1)
+        "--pill-bull-bg":   _rgba(bull,   0.16),
+        "--pill-bear-bg":   _rgba(bear,   0.16),
+        "--pill-amber-bg":  _rgba(amber,  0.16),
+        "--pill-info-bg":   _rgba(info,   0.16),
+        "--pill-accent-bg": _rgba(accent, 0.16),
+        "--pill-muted-bg":  bg_elev,
+
+        # Chart tokens — grid sutil, eixo, fundo do tooltip
+        "--chart-grid":        _rgba(vars.get("--text-muted", "#6B7280"), 0.20),
+        "--chart-axis":        vars.get("--text-muted", "#6B7280"),
+        "--chart-tooltip-bg":  _rgba(bg_elev, 0.96),
+        "--chart-tooltip-bd":  vars.get("--border-normal", bg_elev),
+    }
+
+    return {**derived, **shadows, **chart_vars}
+
+
+def get_design_tokens() -> dict[str, str]:
+    """
+    Snapshot dos tokens efetivos do tema ativo (base + tema + derivados).
+    Útil para consumo Python — ex.: gerar cores de série pro Plotly.
+    """
+    tema_id = get_tema_ativo()
+    tema    = TEMAS.get(tema_id, TEMAS["dark"])
+    is_lt   = tema.get("is_light", False)
+    derived = _compute_derived(tema["vars"], is_lt, tema_id)
+    return {**TOKENS_BASE, **tema["vars"], **derived}
+
+
+def get_chart_palette() -> list[str]:
+    """Paleta de 8 cores qualitativas do tema ativo (uso em Plotly)."""
+    tema_id = get_tema_ativo()
+    return list(CHART_PALETTES.get(tema_id, CHART_PALETTES["dark"]))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HELPERS — TEMA
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -510,7 +676,12 @@ def get_tema_css() -> str:
         "--font-data":  f_data["css"],
     }
 
-    all_vars = {**tema["vars"], **font_vars}
+    # Tokens derivados (gradient, glass, pills, sombras, chart-1..8)
+    is_light_t   = tema.get("is_light", False)
+    derived_vars = _compute_derived(tema["vars"], is_light_t, tema_id)
+
+    # Ordem: base (espaçamento/tipografia/motion) → tema (cores) → derivados → fontes
+    all_vars = {**TOKENS_BASE, **tema["vars"], **derived_vars, **font_vars}
     vars_str = "\n".join(f"        {k}: {v};" for k, v in all_vars.items())
 
     light_overrides = ""

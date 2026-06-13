@@ -71,6 +71,7 @@ def aplicar_tema():
        ═══════════════════════════════════════════════════ */
 
     :root {
+        /* — Cores semânticas — */
         --bg-base:       #13141E;
         --bg-surface:    #1C1D2B;
         --bg-elevated:   #23243A;
@@ -97,10 +98,84 @@ def aplicar_tema():
         --amber:     #F59E0B;
         --info:      #3B82F6;
 
+        /* — Radius (override por tema; xl novo p/ cards grandes) — */
         --radius-sm: 6px;
         --radius-md: 10px;
         --radius-lg: 14px;
+        --radius-xl: 20px;
 
+        /* — Espaçamento (tokens v2 — Fase 1) — */
+        --space-0: 0;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 20px;
+        --space-6: 24px;
+        --space-7: 32px;
+        --space-8: 40px;
+
+        /* — Tipografia (escala harmônica) — */
+        --text-xs:   0.7rem;
+        --text-sm:   0.8rem;
+        --text-base: 0.9rem;
+        --text-md:   1rem;
+        --text-lg:   1.2rem;
+        --text-xl:   1.5rem;
+        --text-2xl:  2rem;
+        --text-3xl:  2.8rem;
+
+        /* — Letter-spacing — */
+        --ls-tight:  -0.01em;
+        --ls-normal: 0;
+        --ls-wide:   0.08em;
+        --ls-wider:  0.12em;
+
+        /* — Motion — */
+        --motion-fast:   120ms;
+        --motion-normal: 200ms;
+        --motion-slow:   320ms;
+        --ease-out:      cubic-bezier(.22,.61,.36,1);
+        --ease-in-out:   cubic-bezier(.65,0,.35,1);
+
+        /* — Gradient do acento (CTAs, KPI ativo, sidebar selecionado) — */
+        --accent-gradient:        linear-gradient(135deg, #FF8C00 0%, #FF6B00 100%);
+        --accent-gradient-strong: linear-gradient(135deg, #FF6B00 0%, #FF8C00 100%);
+
+        /* — Glass surfaces — */
+        --surface-glass:        rgba(28, 29, 43, 0.62);
+        --surface-glass-strong: rgba(28, 29, 43, 0.82);
+        --glass-blur:           blur(16px) saturate(160%);
+
+        /* — Pill backgrounds (mini-ícone colorido em KPIs) — */
+        --pill-bull-bg:   rgba(16, 185, 129, 0.16);
+        --pill-bear-bg:   rgba(239, 68, 68, 0.16);
+        --pill-amber-bg:  rgba(245, 158, 11, 0.16);
+        --pill-info-bg:   rgba(59, 130, 246, 0.16);
+        --pill-accent-bg: rgba(255, 140, 0, 0.16);
+        --pill-muted-bg:  #23243A;
+
+        /* — Sombras — */
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.32), 0 1px 1px rgba(0,0,0,0.18);
+        --shadow-md: 0 6px 16px rgba(0,0,0,0.42), 0 2px 6px rgba(0,0,0,0.22);
+        --shadow-lg: 0 18px 36px rgba(0,0,0,0.50), 0 6px 14px rgba(0,0,0,0.30);
+        --shadow-xl: 0 32px 60px rgba(0,0,0,0.58), 0 10px 24px rgba(0,0,0,0.38);
+
+        /* — Chart tokens (Plotly) — */
+        --chart-1: #FF8C00;
+        --chart-2: #3B82F6;
+        --chart-3: #10B981;
+        --chart-4: #A855F7;
+        --chart-5: #F59E0B;
+        --chart-6: #06B6D4;
+        --chart-7: #EC4899;
+        --chart-8: #94A3B8;
+        --chart-grid:       rgba(107, 114, 128, 0.20);
+        --chart-axis:       #6B7280;
+        --chart-tooltip-bg: rgba(35, 36, 58, 0.96);
+        --chart-tooltip-bd: #353755;
+
+        /* — Fontes (override por tema) — */
         --font-title: 'Space Grotesk', 'Inter', system-ui, sans-serif;
         --font-ui:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
         --font-data:  'JetBrains Mono', 'Courier New', monospace;
