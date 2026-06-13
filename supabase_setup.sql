@@ -91,3 +91,22 @@ CREATE TABLE IF NOT EXISTS earnings_revisions (
 );
 CREATE INDEX IF NOT EXISTS idx_er_setor ON earnings_revisions(setor);
 CREATE INDEX IF NOT EXISTS idx_er_capturado ON earnings_revisions(capturado_em DESC);
+
+-- ── Alertas Disparados (Trilha 4.3 — alertas inteligentes por mudança) ───────
+-- Rodar manualmente no Supabase SQL Editor antes do próximo recalc_health_scores.
+CREATE TABLE IF NOT EXISTS alertas_disparados (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    ticker TEXT NOT NULL,
+    tipo TEXT NOT NULL,             -- 'queda_score_7d' | 'salto_dy_30d' | 'variacao_semanal'
+    valor_atual REAL,
+    valor_anterior REAL,
+    delta REAL,
+    mensagem TEXT,
+    disparado_em TIMESTAMPTZ DEFAULT now(),
+    visualizado BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_alertas_user ON alertas_disparados(user_id, disparado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_alertas_ticker_tipo ON alertas_disparados(ticker, tipo, disparado_em DESC);
+
+COMMENT ON TABLE alertas_disparados IS 'Alertas inteligentes detectados pelo motor utils/alertas_mudanca.py — disparos de mudança (queda de score, salto DY, variação semanal). Anti-duplicata: pula se já há registro do mesmo (ticker, tipo) nas últimas 24h.';

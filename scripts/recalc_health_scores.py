@@ -68,9 +68,32 @@ def main():
     macro = _macro_context()
     print(f"[recalc] {len(tickers)} tickers | macro: {macro}")
 
+    # Lê fundamentos uma vez para extrair DY% por ticker (alimenta alertas)
+    skip_alertas = "--no-alerts" in sys.argv
+    fund_map: dict[str, dict] = {}
+    if not skip_alertas:
+        try:
+            rows = sb.table("fundamentals_cache").select("ticker, dados_json").execute().data or []
+            import json as _json
+            for row in rows:
+                raw = row.get("dados_json")
+                if isinstance(raw, str):
+                    try:
+                        d = _json.loads(raw)
+                    except Exception:
+                        d = {}
+                elif isinstance(raw, dict):
+                    d = raw
+                else:
+                    d = {}
+                fund_map[row["ticker"]] = d
+        except Exception as e:
+            print(f"[recalc] aviso: falha ao ler fundamentals para alertas — {e}")
+
     ok = 0
     skip = 0
     fail = 0
+    alertas_total = 0
 
     for i, ticker in enumerate(tickers, 1):
         try:
@@ -80,14 +103,34 @@ def main():
                 print(f"  [{i}/{len(tickers)}] {ticker} SKIP (score=None)")
                 skip += 1
             else:
-                print(f"  [{i}/{len(tickers)}] {ticker} score={score}")
+                # Roda detectores de alerta (não bloqueia o recalc)
+                if not skip_alertas:
+                    try:
+                        from utils.alertas_mudanca import avaliar_ticker
+                        dy_pct = fund_map.get(ticker, {}).get("dy%")
+                        try:
+                            dy_pct = float(dy_pct) if dy_pct is not None else None
+                        except (TypeError, ValueError):
+                            dy_pct = None
+                        n_alert = avaliar_ticker(
+                            sb, ticker, score=float(score), dy_pct=dy_pct,
+                        )
+                        if n_alert:
+                            alertas_total += n_alert
+                            print(f"  [{i}/{len(tickers)}] {ticker} score={score} 🚨 {n_alert} alertas")
+                        else:
+                            print(f"  [{i}/{len(tickers)}] {ticker} score={score}")
+                    except Exception as e:
+                        print(f"  [{i}/{len(tickers)}] {ticker} score={score} (alertas falharam: {e})")
+                else:
+                    print(f"  [{i}/{len(tickers)}] {ticker} score={score}")
                 ok += 1
         except Exception as e:
             print(f"  [{i}/{len(tickers)}] {ticker} FAIL: {e}")
             fail += 1
         time.sleep(0.05)
 
-    print(f"\n[recalc] fim — ok: {ok} | skip: {skip} | fail: {fail}")
+    print(f"\n[recalc] fim — ok: {ok} | skip: {skip} | fail: {fail} | alertas: {alertas_total}")
 
 
 if __name__ == "__main__":
