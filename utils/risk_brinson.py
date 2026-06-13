@@ -40,34 +40,126 @@ class ResultadoBrinson:
     # {setor: {peso_p, peso_b, ret_p, ret_b, alloc, sel, inter}}
 
 
-def _normalizar_setor(s: str) -> str:
-    """Padroniza nomes de setor para agregação consistente."""
+# Variantes EN (yfinance/FMP) e PT (BRAPI/B3 granular) → setor canônico macro
+_MAPA_SETOR = {
+    # Tecnologia
+    'technology': 'tecnologia',
+    'information technology': 'tecnologia',
+    'tecnologia da informação': 'tecnologia',
+    'software': 'tecnologia',
+    'hardware e equipamentos': 'tecnologia',
+    'programas e serviços': 'tecnologia',
+    # Comunicação
+    'communication services': 'comunicação',
+    'communications': 'comunicação',
+    'telecomunicações': 'comunicação',
+    'mídia': 'comunicação',
+    # Consumo cíclico / discricionário
+    'consumer cyclical': 'consumo cíclico',
+    'consumer discretionary': 'consumo cíclico',
+    'comércio': 'consumo cíclico',
+    'comércio e distribuição': 'consumo cíclico',
+    'tecidos, vestuário e calçados': 'consumo cíclico',
+    'utilidades domésticas': 'consumo cíclico',
+    'viagens e lazer': 'consumo cíclico',
+    'automóveis e motocicletas': 'consumo cíclico',
+    'hotéis e restaurantes': 'consumo cíclico',
+    'mídia impressa': 'consumo cíclico',
+    'diversos': 'consumo cíclico',
+    'construção civil': 'consumo cíclico',
+    # Consumo defensivo / staples
+    'consumer defensive': 'consumo defensivo',
+    'consumer staples': 'consumo defensivo',
+    'alimentos processados': 'consumo defensivo',
+    'bebidas': 'consumo defensivo',
+    'produtos de uso pessoal e de limpeza': 'consumo defensivo',
+    'comércio e distribuição (cons. básico)': 'consumo defensivo',
+    'agropecuária': 'consumo defensivo',
+    # Energia
+    'energy': 'energia',
+    'petróleo, gás e biocombustíveis': 'energia',
+    'petróleo e gás': 'energia',
+    # Financeiro
+    'financial services': 'financeiro',
+    'financials': 'financeiro',
+    'intermediários financeiros': 'financeiro',
+    'previdência e seguros': 'financeiro',
+    'serviços financeiros diversos': 'financeiro',
+    'holdings diversificadas': 'financeiro',
+    # Saúde
+    'healthcare': 'saúde',
+    'health care': 'saúde',
+    'comércio e distribuição (saúde)': 'saúde',
+    # Industrial
+    'industrials': 'industrial',
+    'máquinas e equipamentos': 'industrial',
+    'material de transporte': 'industrial',
+    'transporte': 'industrial',
+    'serviços diversos': 'industrial',
+    'construção e engenharia': 'industrial',
+    'serviços educacionais': 'industrial',
+    # Materiais básicos
+    'basic materials': 'materiais básicos',
+    'materials': 'materiais básicos',
+    'mineração': 'materiais básicos',
+    'siderurgia e metalurgia': 'materiais básicos',
+    'papel e celulose': 'materiais básicos',
+    'químicos': 'materiais básicos',
+    'madeira e papel': 'materiais básicos',
+    'embalagens': 'materiais básicos',
+    # Imobiliário (REIT/FII operacional)
+    'real estate': 'imobiliário',
+    'exploração de imóveis': 'imobiliário',
+    'incorporação': 'imobiliário',
+    # Utilities (energia elétrica + saneamento + gás)
+    'utilities': 'utilities',
+    'energia elétrica': 'utilities',
+    'água e saneamento': 'utilities',
+    'gás': 'utilities',
+}
+
+# Lookup por ticker para os principais quando o setor cache está vazio
+_TICKERS_SETOR_OVERRIDE = {
+    'PETR3.SA': 'energia', 'PETR4.SA': 'energia', 'PRIO3.SA': 'energia',
+    'VALE3.SA': 'materiais básicos', 'CSNA3.SA': 'materiais básicos',
+    'USIM5.SA': 'materiais básicos', 'GGBR4.SA': 'materiais básicos',
+    'ITUB3.SA': 'financeiro', 'ITUB4.SA': 'financeiro',
+    'BBDC3.SA': 'financeiro', 'BBDC4.SA': 'financeiro',
+    'BBAS3.SA': 'financeiro', 'SANB11.SA': 'financeiro',
+    'BPAC11.SA': 'financeiro', 'BBSE3.SA': 'financeiro',
+    'ITSA4.SA': 'financeiro',
+    'WEGE3.SA': 'industrial', 'EMBR3.SA': 'industrial',
+    'RAIL3.SA': 'industrial',
+    'MGLU3.SA': 'consumo cíclico', 'LREN3.SA': 'consumo cíclico',
+    'RENT3.SA': 'consumo cíclico', 'AMER3.SA': 'consumo cíclico',
+    'ABEV3.SA': 'consumo defensivo', 'JBSS3.SA': 'consumo defensivo',
+    'BRFS3.SA': 'consumo defensivo', 'NTCO3.SA': 'consumo defensivo',
+    'ELET3.SA': 'utilities', 'ELET6.SA': 'utilities',
+    'CMIG3.SA': 'utilities', 'CMIG4.SA': 'utilities',
+    'CPLE6.SA': 'utilities', 'EGIE3.SA': 'utilities',
+    'EQTL3.SA': 'utilities', 'SBSP3.SA': 'utilities',
+    'RADL3.SA': 'saúde', 'HAPV3.SA': 'saúde', 'RDOR3.SA': 'saúde',
+    'VIVT3.SA': 'comunicação', 'TIMS3.SA': 'comunicação',
+    'TOTS3.SA': 'tecnologia',
+    'B3SA3.SA': 'financeiro',
+    'SUZB3.SA': 'materiais básicos', 'KLBN11.SA': 'materiais básicos',
+}
+
+
+def _normalizar_setor(s: str, ticker: str = "") -> str:
+    """Padroniza nomes de setor para agregação consistente.
+    Aceita ticker opcional para usar override quando o setor cache está vazio."""
+    if not s and ticker and ticker in _TICKERS_SETOR_OVERRIDE:
+        return _TICKERS_SETOR_OVERRIDE[ticker]
     if not s:
         return "outros"
     s = str(s).strip().lower()
-    # Mapeamento de variações conhecidas (yfinance/brapi/fmp) → canônico
-    mapa = {
-        'technology': 'tecnologia',
-        'information technology': 'tecnologia',
-        'tecnologia da informação': 'tecnologia',
-        'communication services': 'comunicação',
-        'communications': 'comunicação',
-        'consumer cyclical': 'consumo cíclico',
-        'consumer discretionary': 'consumo cíclico',
-        'consumer defensive': 'consumo defensivo',
-        'consumer staples': 'consumo defensivo',
-        'energy': 'energia',
-        'financial services': 'financeiro',
-        'financials': 'financeiro',
-        'healthcare': 'saúde',
-        'health care': 'saúde',
-        'industrials': 'industrial',
-        'basic materials': 'materiais básicos',
-        'materials': 'materiais básicos',
-        'real estate': 'imobiliário',
-        'utilities': 'utilities',
-    }
-    return mapa.get(s, s)
+    if s in _MAPA_SETOR:
+        return _MAPA_SETOR[s]
+    # Fallback: aplica override do ticker se há informação setor vaga
+    if ticker and ticker in _TICKERS_SETOR_OVERRIDE:
+        return _TICKERS_SETOR_OVERRIDE[ticker]
+    return s
 
 
 def _retornos_periodo(precos: pd.DataFrame) -> pd.Series:
@@ -126,7 +218,7 @@ def calcular_brinson(
     for tk, peso in pesos_carteira.items():
         if peso <= 0 or tk not in rets.index:
             continue
-        setor = _normalizar_setor(setores.get(tk, ""))
+        setor = _normalizar_setor(setores.get(tk, ""), ticker=tk)
         d = por_setor_carteira.setdefault(setor, {'peso': 0.0, 'peso_x_ret': 0.0})
         d['peso'] += peso
         d['peso_x_ret'] += peso * float(rets[tk])
@@ -135,7 +227,7 @@ def calcular_brinson(
     por_setor_bench: dict[str, dict] = {}
     for tk in bench_tickers:
         peso_b = pesos_bench[tk]
-        setor = _normalizar_setor(setores.get(tk, ""))
+        setor = _normalizar_setor(setores.get(tk, ""), ticker=tk)
         d = por_setor_bench.setdefault(setor, {'peso': 0.0, 'peso_x_ret': 0.0})
         d['peso'] += peso_b
         d['peso_x_ret'] += peso_b * float(rets[tk])

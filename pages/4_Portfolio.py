@@ -3342,6 +3342,121 @@ with tab_stress:
                         stream         = True,
                     )
 
+        # ── Stress setorial (sensibilidades pré-definidas por setor) ────────
+        st.markdown("---")
+        section_title("🎯 stress setorial (sensibilidades pré-definidas)")
+        st.markdown(
+            "<div style='font-family:var(--font-ui,sans-serif);font-size:0.78rem;"
+            "color:var(--text-muted);margin-bottom:12px;'>"
+            "diferente do stress por beta (que aplica choque uniforme via β_IBOV/β_SP), "
+            "aqui cada cenário tem <b>impacto setorial específico</b> baseado em literatura macro. "
+            "ex.: copom +200bps ajuda banco mas penaliza varejo/construção; usd +10% beneficia "
+            "exportadoras (vale, petro, suzano) e prejudica importadoras (varejo).</div>",
+            unsafe_allow_html=True,
+        )
+
+        from utils.portfolio_stress import (
+            calcular_stress_setorial, CENARIOS as _CENARIOS_SETOR,
+        )
+
+        cenario_set_sel = st.selectbox(
+            "cenário setorial:",
+            list(_CENARIOS_SETOR.keys()),
+            key="stress_setorial_cenario",
+        )
+
+        # Constrói pesos e setores a partir das posições
+        from database.db import get_todos_fundamentos_cache as _gt_cache
+        _cache_st = _gt_cache()
+        _setores_st = {t: d.get("setor") or "" for t, d in _cache_st.items()}
+
+        _pesos_st: dict[str, float] = {}
+        _valor_total_st = 0.0
+        for _tk, _dados in ativos_stress.items():
+            _qtd = float(_dados.get("quantidade") or 0)
+            _pm = float(_dados.get("preco_medio") or 0)
+            _v = _qtd * _pm
+            if _v <= 0:
+                continue
+            _pesos_st[_tk] = _v
+            _valor_total_st += _v
+        if _valor_total_st > 0:
+            _pesos_st = {t: v / _valor_total_st for t, v in _pesos_st.items()}
+
+        _r_set = calcular_stress_setorial(
+            _pesos_st, _setores_st, cenario_set_sel, _valor_total_st,
+        )
+
+        if _r_set is None:
+            st.info("não foi possível calcular o stress setorial.")
+        else:
+            _emoji_imp = "🔴" if _r_set.impacto_total_pct < -3 else ("🟠" if _r_set.impacto_total_pct < 0 else "🟢")
+            _cs1, _cs2, _cs3 = st.columns(3)
+            with _cs1:
+                metric_card(
+                    "patrimônio atual",
+                    fmt_numero(_r_set.valor_carteira, "R$ "),
+                )
+            with _cs2:
+                metric_card(
+                    "patrimônio estressado",
+                    fmt_numero(_r_set.valor_carteira + _r_set.impacto_total_brl, "R$ "),
+                    f"{_r_set.impacto_total_pct:+.2f}%",
+                    "bear" if _r_set.impacto_total_pct < 0 else "bull",
+                )
+            with _cs3:
+                metric_card(
+                    f"{_emoji_imp} impacto total",
+                    fmt_numero(_r_set.impacto_total_brl, "R$ "),
+                    cenario_set_sel,
+                    "bear" if _r_set.impacto_total_pct < 0 else "bull",
+                )
+
+            # Tabela por posição
+            st.markdown("##### impacto por posição")
+            _df_pos = pd.DataFrame(_r_set.por_posicao)
+            if not _df_pos.empty:
+                st.dataframe(
+                    _df_pos.rename(columns={
+                        "ticker": "ticker",
+                        "setor": "setor",
+                        "peso_pct": "peso (%)",
+                        "impacto_setor_pct": "impacto setor (%)",
+                        "contribuicao_pct": "contribuição (pp)",
+                        "contribuicao_brl": "contribuição (R$)",
+                    }).style.format({
+                        "peso (%)": "{:.1f}%",
+                        "impacto setor (%)": "{:+.1f}%",
+                        "contribuição (pp)": "{:+.2f}pp",
+                        "contribuição (R$)": "R$ {:+,.0f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
+            # Gráfico por setor
+            st.markdown("##### impacto por setor (R$)")
+            _df_setor = pd.DataFrame(_r_set.por_setor)
+            if not _df_setor.empty:
+                _df_setor["contribuicao_brl"] = _df_setor["contribuicao_pct"] / 100 * _r_set.valor_carteira
+                _df_setor = _df_setor.sort_values("contribuicao_brl")
+                _cc_set = _chart_cores()
+                fig_st_set = go.Figure(go.Bar(
+                    x=_df_setor["contribuicao_brl"],
+                    y=_df_setor["setor"],
+                    orientation="h",
+                    marker_color=[_cc_set["bear"] if v < 0 else _cc_set["bull"]
+                                  for v in _df_setor["contribuicao_brl"]],
+                    text=[f"R$ {v:+,.0f}".replace(",", ".") for v in _df_setor["contribuicao_brl"]],
+                    textposition="outside",
+                    hovertemplate="<b>%{y}</b><br>contribuição: R$ %{x:+,.0f}<extra></extra>",
+                ))
+                fig_st_set.add_vline(x=0, line_color=_cc_set["border"], line_width=1)
+                fig_st_set.update_layout(**base_layout(
+                    height=max(280, len(_df_setor) * 36 + 60),
+                    title="contribuição por setor",
+                ))
+                st.plotly_chart(fig_st_set, use_container_width=True, config={'responsive': True})
+
 # ==========================================
 # tab 3: backtesting
 # ==========================================
