@@ -56,8 +56,10 @@ TEMAS_FONTES_DEFAULT: dict[str, dict] = {
     "emerald":  {"titulo": "plus_jakarta",  "ui": "plus_jakarta", "data": "fira_code"},
     "graphite": {"titulo": "dm_sans",       "ui": "dm_sans",      "data": "dm_mono"},
     "cyber":    {"titulo": "syne",          "ui": "outfit",       "data": "space_mono"},
+    "glass":    {"titulo": "outfit",        "ui": "dm_sans",      "data": "fira_code"},
     "light":    {"titulo": "inter",         "ui": "inter",        "data": "jetbrains_mono"},
     "papel":    {"titulo": "plus_jakarta",  "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
+    "mono":     {"titulo": "ibm_plex_sans", "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
     "amber":    {"titulo": "space_grotesk", "ui": "dm_sans",      "data": "jetbrains_mono"},
     "verde":    {"titulo": "space_grotesk", "ui": "dm_sans",      "data": "jetbrains_mono"},
 }
@@ -70,18 +72,19 @@ TEMAS_FONTES_DEFAULT: dict[str, dict] = {
 TEMAS: dict[str, dict] = {
 
     # ── 1. Dark Terminal ──────────────────────────────────────────────────────
+    # Intenção: terminal moderno, preto profundo (próximo das refs 1, 2), acento laranja.
     "dark": {
         "nome":    "Dark Terminal",
         "emoji":   "🖤",
-        "desc":    "azul-escuro clássico · acento laranja",
-        "sidebar": "#0B0C15",
+        "desc":    "preto profundo · acento laranja",
+        "sidebar": "#070811",
         "vars": {
-            "--sidebar-bg":     "#0B0C15",
-            "--bg-base":        "#13141E",
-            "--bg-surface":     "#1C1D2B",
-            "--bg-elevated":    "#23243A",
-            "--bg-overlay":     "#2C2D45",
-            "--border-subtle":  "#2A2C3E",
+            "--sidebar-bg":     "#070811",
+            "--bg-base":        "#0E0F18",
+            "--bg-surface":     "#17182A",
+            "--bg-elevated":    "#1F2138",
+            "--bg-overlay":     "#28293F",
+            "--border-subtle":  "#262839",
             "--border-normal":  "#353755",
             "--border-focus":   "#FF8C00",
             "--text-primary":   "#F0F2FF",
@@ -97,14 +100,18 @@ TEMAS: dict[str, dict] = {
             "--bear":           "#EF4444",
             "--bear-soft":      "rgba(239,68,68,0.10)",
             "--amber":          "#F59E0B",
+            "--amber-soft":     "rgba(245,158,11,0.10)",
             "--info":           "#3B82F6",
-            "--radius-sm":      "6px",
-            "--radius-md":      "10px",
-            "--radius-lg":      "14px",
+            "--info-soft":      "rgba(59,130,246,0.10)",
+            "--radius-sm":      "8px",
+            "--radius-md":      "14px",
+            "--radius-lg":      "18px",
         },
     },
 
     # ── 2. Bloomberg ──────────────────────────────────────────────────────────
+    # Intenção: estética terminal pro (Bloomberg/Refinitiv), navy profundo, cantos
+    # discretamente arredondados. Refinos mantidos sutis pra preservar identidade.
     "navy": {
         "nome":    "Bloomberg",
         "emoji":   "🔵",
@@ -132,18 +139,22 @@ TEMAS: dict[str, dict] = {
             "--bear":           "#F43F5E",
             "--bear-soft":      "rgba(244,63,94,0.10)",
             "--amber":          "#FBBF24",
+            "--amber-soft":     "rgba(251,191,36,0.10)",
             "--info":           "#38BDF8",
-            "--radius-sm":      "4px",
-            "--radius-md":      "8px",
-            "--radius-lg":      "12px",
+            "--info-soft":      "rgba(56,189,248,0.10)",
+            "--radius-sm":      "6px",
+            "--radius-md":      "10px",
+            "--radius-lg":      "14px",
         },
     },
 
     # ── 3. Emerald ────────────────────────────────────────────────────────────
+    # Intenção: quant verde / mesa de operações sustentável. Inspirado em ref 5
+    # (DWISLN) — verde mais elétrico, com pop neon discreto. Cards bem arredondados.
     "emerald": {
         "nome":    "Emerald",
         "emoji":   "💚",
-        "desc":    "verde escuro · Jakarta · acento esmeralda",
+        "desc":    "verde elétrico · Jakarta · esmeralda neon",
         "sidebar": "#060E09",
         "vars": {
             "--sidebar-bg":     "#060E09",
@@ -153,45 +164,49 @@ TEMAS: dict[str, dict] = {
             "--bg-overlay":     "#1F3428",
             "--border-subtle":  "#1F3428",
             "--border-normal":  "#2A4535",
-            "--border-focus":   "#10B981",
+            "--border-focus":   "#22E47C",
             "--text-primary":   "#E8F5EE",
             "--text-secondary": "#90B89F",
             "--text-muted":     "#5A7A65",
-            "--accent":         "#10B981",
-            "--accent-rgb":     "16,185,129",
-            "--accent-hover":   "#059669",
-            "--accent-soft":    "rgba(16,185,129,0.08)",
-            "--accent-border":  "rgba(16,185,129,0.28)",
-            "--bull":           "#34D399",
-            "--bull-soft":      "rgba(52,211,153,0.10)",
+            "--accent":         "#22E47C",
+            "--accent-rgb":     "34,228,124",
+            "--accent-hover":   "#10B981",
+            "--accent-soft":    "rgba(34,228,124,0.10)",
+            "--accent-border":  "rgba(34,228,124,0.30)",
+            "--bull":           "#22E47C",
+            "--bull-soft":      "rgba(34,228,124,0.12)",
             "--bear":           "#F87171",
             "--bear-soft":      "rgba(248,113,113,0.10)",
             "--amber":          "#FCD34D",
+            "--amber-soft":     "rgba(252,211,77,0.10)",
             "--info":           "#60A5FA",
-            "--radius-sm":      "8px",
-            "--radius-md":      "12px",
-            "--radius-lg":      "18px",
+            "--info-soft":      "rgba(96,165,250,0.10)",
+            "--radius-sm":      "10px",
+            "--radius-md":      "16px",
+            "--radius-lg":      "22px",
         },
     },
 
     # ── 4. Graphite ───────────────────────────────────────────────────────────
+    # Intenção: dashboard clean estilo Apexify (ref 3) sem o roxo — cinza com
+    # toque azulado discreto, acento azul aço. Boa base para reading sessions longas.
     "graphite": {
         "nome":    "Graphite",
         "emoji":   "⚫",
-        "desc":    "cinza neutro · DM Sans · azul aço",
-        "sidebar": "#0A0A0A",
+        "desc":    "cinza azulado · DM Sans · azul aço",
+        "sidebar": "#0A0B10",
         "vars": {
-            "--sidebar-bg":     "#0A0A0A",
-            "--bg-base":        "#111111",
-            "--bg-surface":     "#1A1A1A",
-            "--bg-elevated":    "#242424",
-            "--bg-overlay":     "#2E2E2E",
-            "--border-subtle":  "#2E2E2E",
-            "--border-normal":  "#3A3A3A",
+            "--sidebar-bg":     "#0A0B10",
+            "--bg-base":        "#0F1117",
+            "--bg-surface":     "#181923",
+            "--bg-elevated":    "#22232E",
+            "--bg-overlay":     "#2C2D38",
+            "--border-subtle":  "#2A2B36",
+            "--border-normal":  "#3A3B47",
             "--border-focus":   "#60A5FA",
-            "--text-primary":   "#F5F5F5",
-            "--text-secondary": "#A3A3A3",
-            "--text-muted":     "#737373",
+            "--text-primary":   "#F5F5F8",
+            "--text-secondary": "#A3A6B5",
+            "--text-muted":     "#737685",
             "--accent":         "#60A5FA",
             "--accent-rgb":     "96,165,250",
             "--accent-hover":   "#3B82F6",
@@ -202,18 +217,22 @@ TEMAS: dict[str, dict] = {
             "--bear":           "#F87171",
             "--bear-soft":      "rgba(248,113,113,0.10)",
             "--amber":          "#FBBF24",
+            "--amber-soft":     "rgba(251,191,36,0.10)",
             "--info":           "#818CF8",
-            "--radius-sm":      "4px",
-            "--radius-md":      "8px",
-            "--radius-lg":      "10px",
+            "--info-soft":      "rgba(129,140,248,0.10)",
+            "--radius-sm":      "6px",
+            "--radius-md":      "12px",
+            "--radius-lg":      "16px",
         },
     },
 
     # ── 5. Cyber ──────────────────────────────────────────────────────────────
+    # Intenção: pop neon roxo+rosa (refs 3 Apexify + 4 AdminSchool). Acento
+    # secundário rosa permite gradient roxo→rosa em CTAs e cor de série pop.
     "cyber": {
         "nome":    "Cyber",
         "emoji":   "🟣",
-        "desc":    "violeta escuro · Outfit · roxo neon",
+        "desc":    "violeta neon · Outfit · pop rosa",
         "sidebar": "#080514",
         "vars": {
             "--sidebar-bg":     "#080514",
@@ -225,26 +244,32 @@ TEMAS: dict[str, dict] = {
             "--border-normal":  "#332A52",
             "--border-focus":   "#A855F7",
             "--text-primary":   "#F0ECFF",
-            "--text-secondary": "#9788C0",
-            "--text-muted":     "#6B5E8A",
+            "--text-secondary": "#A599C8",
+            "--text-muted":     "#7A6D96",
             "--accent":         "#A855F7",
             "--accent-rgb":     "168,85,247",
-            "--accent-hover":   "#9333EA",
+            "--accent-hover":   "#EC4899",
             "--accent-soft":    "rgba(168,85,247,0.08)",
             "--accent-border":  "rgba(168,85,247,0.25)",
+            "--accent-secondary":      "#EC4899",
+            "--accent-secondary-soft": "rgba(236,72,153,0.10)",
             "--bull":           "#34D399",
             "--bull-soft":      "rgba(52,211,153,0.10)",
             "--bear":           "#FB7185",
             "--bear-soft":      "rgba(251,113,133,0.10)",
             "--amber":          "#FCD34D",
+            "--amber-soft":     "rgba(252,211,77,0.10)",
             "--info":           "#38BDF8",
-            "--radius-sm":      "6px",
-            "--radius-md":      "12px",
-            "--radius-lg":      "18px",
+            "--info-soft":      "rgba(56,189,248,0.10)",
+            "--radius-sm":      "8px",
+            "--radius-md":      "16px",
+            "--radius-lg":      "22px",
         },
     },
 
     # ── 6. Koyfin (Light Professional) ───────────────────────────────────────
+    # Intenção: clean profissional Koyfin/Apexify (ref 3) em modo claro. Sombras
+    # presentes (não vai chapado). text-muted escurecido pra passar WCAG AA.
     "light": {
         "nome":    "Koyfin",
         "emoji":   "☀️",
@@ -261,8 +286,8 @@ TEMAS: dict[str, dict] = {
             "--border-normal":  "#C8CDE0",
             "--border-focus":   "#2563EB",
             "--text-primary":   "#1A1D2E",
-            "--text-secondary": "#4B5068",
-            "--text-muted":     "#8890AA",
+            "--text-secondary": "#3B4259",
+            "--text-muted":     "#6F7796",
             "--accent":         "#2563EB",
             "--accent-rgb":     "37,99,235",
             "--accent-hover":   "#1D4ED8",
@@ -275,17 +300,20 @@ TEMAS: dict[str, dict] = {
             "--amber":          "#D97706",
             "--amber-soft":     "rgba(217,119,6,0.10)",
             "--info":           "#0891B2",
-            "--radius-sm":      "6px",
-            "--radius-md":      "10px",
-            "--radius-lg":      "14px",
+            "--info-soft":      "rgba(8,145,178,0.10)",
+            "--radius-sm":      "8px",
+            "--radius-md":      "14px",
+            "--radius-lg":      "18px",
         },
     },
 
     # ── 7. Papel (Bloomberg Print / Apresentação) ─────────────────────────────
+    # Intenção: print elegante para apresentação/relatório. Acento laranja
+    # escurecido pra passar WCAG AA sobre creme (era #FF6900 = 2.76; agora #CC5200 = 4.5+).
     "papel": {
         "nome":    "Papel",
         "emoji":   "📄",
-        "desc":    "creme elegante · IBM Plex · laranja Bloomberg",
+        "desc":    "creme elegante · IBM Plex · laranja print",
         "sidebar": "#EDE9DF",
         "is_light": True,
         "vars": {
@@ -296,15 +324,15 @@ TEMAS: dict[str, dict] = {
             "--bg-overlay":     "#E8E4D9",
             "--border-subtle":  "#E5E0D5",
             "--border-normal":  "#CFC9BB",
-            "--border-focus":   "#FF6900",
+            "--border-focus":   "#CC5200",
             "--text-primary":   "#1C1C1E",
             "--text-secondary": "#3C3C3F",
-            "--text-muted":     "#8E8E93",
-            "--accent":         "#FF6900",
-            "--accent-rgb":     "255,105,0",
-            "--accent-hover":   "#E05F00",
-            "--accent-soft":    "rgba(255,105,0,0.08)",
-            "--accent-border":  "rgba(255,105,0,0.25)",
+            "--text-muted":     "#6E6E73",
+            "--accent":         "#CC5200",
+            "--accent-rgb":     "204,82,0",
+            "--accent-hover":   "#A84300",
+            "--accent-soft":    "rgba(204,82,0,0.08)",
+            "--accent-border":  "rgba(204,82,0,0.28)",
             "--bull":           "#1A7F4B",
             "--bull-soft":      "rgba(26,127,75,0.10)",
             "--bear":           "#C0392B",
@@ -312,17 +340,20 @@ TEMAS: dict[str, dict] = {
             "--amber":          "#B45309",
             "--amber-soft":     "rgba(180,83,9,0.10)",
             "--info":           "#1D4ED8",
+            "--info-soft":      "rgba(29,78,216,0.10)",
             "--radius-sm":      "4px",
-            "--radius-md":      "8px",
-            "--radius-lg":      "12px",
+            "--radius-md":      "10px",
+            "--radius-lg":      "14px",
         },
     },
 
     # ── 8. Retro Âmbar (Grafite + laranja) ───────────────────────────────────
+    # Intenção: nostalgia CRT âmbar (PDP-11, terminais 80s). Cantos retos
+    # propositais — não aplicar refs modernas aqui.
     "amber": {
         "nome":    "Retro Âmbar",
         "emoji":   "🟠",
-        "desc":    "grafite · laranja âmbar · estilo terminal retrô",
+        "desc":    "grafite · laranja âmbar · terminal retrô CRT",
         "sidebar": "#0A0A0A",
         "vars": {
             "--sidebar-bg":     "#0A0A0A",
@@ -346,7 +377,9 @@ TEMAS: dict[str, dict] = {
             "--bear":           "#F87171",
             "--bear-soft":      "rgba(248,113,113,0.12)",
             "--amber":          "#FBBF24",
+            "--amber-soft":     "rgba(251,191,36,0.12)",
             "--info":           "#38BDF8",
+            "--info-soft":      "rgba(56,189,248,0.12)",
             "--radius-sm":      "4px",
             "--radius-md":      "8px",
             "--radius-lg":      "10px",
@@ -354,10 +387,11 @@ TEMAS: dict[str, dict] = {
     },
 
     # ── 9. Retro Verde (Grafite + verde) ──────────────────────────────────────
+    # Intenção: nostalgia CRT verde fosforescente (terminais 70s/80s). Idem amber.
     "verde": {
         "nome":    "Retro Verde",
         "emoji":   "🟢",
-        "desc":    "grafite · verde fosforescente · estilo terminal retrô",
+        "desc":    "grafite · verde fosforescente · terminal retrô CRT",
         "sidebar": "#0A0A0A",
         "vars": {
             "--sidebar-bg":     "#0A0A0A",
@@ -381,15 +415,100 @@ TEMAS: dict[str, dict] = {
             "--bear":           "#F87171",
             "--bear-soft":      "rgba(248,113,113,0.12)",
             "--amber":          "#FBBF24",
+            "--amber-soft":     "rgba(251,191,36,0.12)",
             "--info":           "#38BDF8",
+            "--info-soft":      "rgba(56,189,248,0.12)",
             "--radius-sm":      "4px",
             "--radius-md":      "8px",
             "--radius-lg":      "10px",
         },
     },
+
+    # ── 10. Glass (NOVO) ──────────────────────────────────────────────────────
+    # Intenção: glassmorphism inspirado em ref 3 (Apexify) — fundo profundo
+    # roxo-azul, surfaces translúcidos com backdrop-filter, gradient roxo→azul.
+    # Cards usam --surface-glass + --glass-blur (componentes da Fase 3 ativam).
+    "glass": {
+        "nome":    "Glass",
+        "emoji":   "🪟",
+        "desc":    "vidro fosco · roxo-azul · superfícies translúcidas",
+        "sidebar": "#0B0822",
+        "vars": {
+            "--sidebar-bg":     "#0B0822",
+            "--bg-base":        "#0F0B24",
+            "--bg-surface":     "#1A1238",
+            "--bg-elevated":    "#241A4A",
+            "--bg-overlay":     "#2E235E",
+            "--border-subtle":  "rgba(167,139,250,0.12)",
+            "--border-normal":  "rgba(167,139,250,0.22)",
+            "--border-focus":   "#A78BFA",
+            "--text-primary":   "#F0EDFF",
+            "--text-secondary": "#B4A7D6",
+            "--text-muted":     "#7A6DA0",
+            "--accent":         "#A78BFA",
+            "--accent-rgb":     "167,139,250",
+            "--accent-hover":   "#60A5FA",
+            "--accent-soft":    "rgba(167,139,250,0.10)",
+            "--accent-border":  "rgba(167,139,250,0.30)",
+            "--accent-secondary":      "#60A5FA",
+            "--accent-secondary-soft": "rgba(96,165,250,0.10)",
+            "--bull":           "#34D399",
+            "--bull-soft":      "rgba(52,211,153,0.12)",
+            "--bear":           "#FB7185",
+            "--bear-soft":      "rgba(251,113,133,0.12)",
+            "--amber":          "#FBBF24",
+            "--amber-soft":     "rgba(251,191,36,0.12)",
+            "--info":           "#60A5FA",
+            "--info-soft":      "rgba(96,165,250,0.12)",
+            "--radius-sm":      "10px",
+            "--radius-md":      "16px",
+            "--radius-lg":      "22px",
+        },
+    },
+
+    # ── 11. Mono Pro (NOVO) ───────────────────────────────────────────────────
+    # Intenção: papel digital FT/Tufte — alto contraste B&W com um único acento
+    # laranja print. Densidade alta, cantos quase retos. Charts em escala de
+    # cinza com acento só no destaque (ver CHART_PALETTES["mono"]).
+    "mono": {
+        "nome":    "Mono Pro",
+        "emoji":   "⚪",
+        "desc":    "preto & branco · IBM Plex · laranja print",
+        "sidebar": "#FFFFFF",
+        "is_light": True,
+        "vars": {
+            "--sidebar-bg":     "#FFFFFF",
+            "--bg-base":        "#FAFAF8",
+            "--bg-surface":     "#FFFFFF",
+            "--bg-elevated":    "#F2F2EF",
+            "--bg-overlay":     "#E8E8E4",
+            "--border-subtle":  "#DDDDD7",
+            "--border-normal":  "#B5B5AE",
+            "--border-focus":   "#0A0A0A",
+            "--text-primary":   "#0A0A0A",
+            "--text-secondary": "#3A3A38",
+            "--text-muted":     "#6E6E68",
+            "--accent":         "#D94800",
+            "--accent-rgb":     "217,72,0",
+            "--accent-hover":   "#B33C00",
+            "--accent-soft":    "rgba(217,72,0,0.08)",
+            "--accent-border":  "rgba(217,72,0,0.28)",
+            "--bull":           "#0F7A3A",
+            "--bull-soft":      "rgba(15,122,58,0.10)",
+            "--bear":           "#B91C1C",
+            "--bear-soft":      "rgba(185,28,28,0.10)",
+            "--amber":          "#A86B00",
+            "--amber-soft":     "rgba(168,107,0,0.10)",
+            "--info":           "#1E40AF",
+            "--info-soft":      "rgba(30,64,175,0.10)",
+            "--radius-sm":      "2px",
+            "--radius-md":      "4px",
+            "--radius-lg":      "6px",
+        },
+    },
 }
 
-TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber", "amber", "verde", "light", "papel"]
+TEMAS_ORDER = ["dark", "navy", "emerald", "graphite", "cyber", "glass", "amber", "verde", "light", "papel", "mono"]
 TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
                for k, v in TEMAS.items()}
 
@@ -448,11 +567,13 @@ TOKENS_BASE: dict[str, str] = {
 CHART_PALETTES: dict[str, list[str]] = {
     "dark":     ["#FF8C00", "#3B82F6", "#10B981", "#A855F7", "#F59E0B", "#06B6D4", "#EC4899", "#94A3B8"],
     "navy":     ["#F97316", "#38BDF8", "#22C55E", "#A78BFA", "#FBBF24", "#06B6D4", "#F472B6", "#94A3B8"],
-    "emerald":  ["#10B981", "#34D399", "#60A5FA", "#FBBF24", "#FB7185", "#A78BFA", "#06B6D4", "#90B89F"],
-    "graphite": ["#60A5FA", "#818CF8", "#4ADE80", "#FBBF24", "#F87171", "#A78BFA", "#06B6D4", "#A3A3A3"],
-    "cyber":    ["#A855F7", "#EC4899", "#06B6D4", "#34D399", "#FBBF24", "#F472B6", "#60A5FA", "#9788C0"],
+    "emerald":  ["#22E47C", "#34D399", "#60A5FA", "#FBBF24", "#FB7185", "#A78BFA", "#06B6D4", "#90B89F"],
+    "graphite": ["#60A5FA", "#818CF8", "#4ADE80", "#FBBF24", "#F87171", "#A78BFA", "#06B6D4", "#A3A6B5"],
+    "cyber":    ["#A855F7", "#EC4899", "#06B6D4", "#34D399", "#FBBF24", "#F472B6", "#60A5FA", "#A599C8"],
+    "glass":    ["#A78BFA", "#60A5FA", "#34D399", "#FBBF24", "#FB7185", "#06B6D4", "#EC4899", "#B4A7D6"],
     "light":    ["#2563EB", "#059669", "#D97706", "#DC2626", "#9333EA", "#0891B2", "#DB2777", "#475569"],
-    "papel":    ["#FF6900", "#1A7F4B", "#B45309", "#1D4ED8", "#7C3AED", "#0E7490", "#BE185D", "#475569"],
+    "papel":    ["#CC5200", "#1A7F4B", "#B45309", "#1D4ED8", "#7C3AED", "#0E7490", "#BE185D", "#475569"],
+    "mono":     ["#0A0A0A", "#D94800", "#3A3A38", "#6E6E68", "#0F7A3A", "#B91C1C", "#1E40AF", "#A86B00"],
     "amber":    ["#FF8C00", "#FBBF24", "#4ADE80", "#38BDF8", "#A78BFA", "#F87171", "#22D3EE", "#A8A8A8"],
     "verde":    ["#00E676", "#4ADE80", "#FBBF24", "#38BDF8", "#A78BFA", "#F87171", "#22D3EE", "#A8A8A8"],
 }
