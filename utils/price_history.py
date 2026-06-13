@@ -66,8 +66,13 @@ def obter_close_carteira(
     if df_yf.empty:
         return df_cache
 
-    # Combina: preenche colunas faltantes do cache com yfinance
+    # Combina: preenche colunas faltantes do cache com yfinance.
+    # combine_first une os índices das duas fontes — corta para a janela
+    # solicitada para não devolver dados muito antigos vindos do cache.
     df = df_cache.combine_first(df_yf)
+    if not df.empty:
+        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=int(dias * 1.4))
+        df = df[df.index >= cutoff]
     return df
 
 

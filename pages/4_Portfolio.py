@@ -2707,9 +2707,191 @@ with tab_risco:
                         f"({_c95_brl}).{_diag}"
                     )
 
-            # ── Placeholders das demais seções (próximos commits) ─────────
+            # ── Decomposição Brinson ──────────────────────────────────────
             with st.expander("📊 decomposição brinson (atribuição por setor)", expanded=False):
-                st.caption("em desenvolvimento — em breve nesta aba.")
+                st.markdown(
+                    "*decompõe o retorno excessivo vs benchmark em três efeitos: "
+                    "**alocação** (peso setorial diferente do mercado), **seleção** "
+                    "(ativos melhores que a média do setor) e **interação** (cruzamento). "
+                    "soma = retorno carteira − retorno benchmark.*"
+                )
+
+                from utils.tickers import SCREENER_B3, SCREENER_US
+                from utils.risk_brinson import calcular_brinson
+                from utils.price_history import obter_close_carteira
+                from database.db import get_todos_fundamentos_cache
+
+                _periodo_br = st.selectbox(
+                    "janela de comparação",
+                    options=["3m", "6m", "1y", "2y"],
+                    index=2,
+                    key="brinson_periodo",
+                    help="período usado para calcular retornos da carteira e do benchmark",
+                )
+
+                # Detecta mercado dominante na carteira (BR vs US)
+                _n_br = sum(1 for t in _pesos_carteira if t.endswith(".SA"))
+                _n_us = len(_pesos_carteira) - _n_br
+                _eh_br = _n_br >= _n_us
+
+                # Universo do benchmark — top-50 por market cap para limitar download
+                _cache_fund = get_todos_fundamentos_cache()
+                _setores = {t: d.get("setor") or "" for t, d in _cache_fund.items()}
+                _mkt_caps = {
+                    t: float(d.get("market_cap") or 0)
+                    for t, d in _cache_fund.items() if d.get("market_cap")
+                }
+
+                _screener = SCREENER_B3 if _eh_br else SCREENER_US
+                # FII fora — Brinson é sobre ações
+                _universo = [
+                    t for t in _screener
+                    if t in _mkt_caps and not (t.endswith("11.SA") and t in _cache_fund and "fii" in str(_cache_fund.get(t, {}).get("setor", "")).lower())
+                ]
+                _universo_top = sorted(_universo, key=lambda t: -_mkt_caps[t])[:50]
+
+                # Tickers necessários = carteira + universo
+                _todos_tickers = list(set(list(_pesos_carteira.keys()) + _universo_top))
+
+                with st.spinner("calculando atribuição brinson..."):
+                    _precos_br = obter_close_carteira(
+                        tuple(_todos_tickers),
+                        periodo=_periodo_br,
+                    )
+                    _bri = calcular_brinson(
+                        pesos_carteira=_pesos_carteira,
+                        universo_benchmark=_universo_top,
+                        setores=_setores,
+                        market_caps=_mkt_caps,
+                        precos=_precos_br,
+                    )
+
+                if _bri is None:
+                    st.warning(
+                        "dados insuficientes para decomposição brinson. precisa de "
+                        "preços (price_history) + setor + market_cap no cache para "
+                        "ambos carteira e universo do benchmark."
+                    )
+                else:
+                    _bench_label = "IBOV proxy" if _eh_br else "S&P 500 proxy"
+                    # Header — retornos
+                    _bc1, _bc2, _bc3 = st.columns(3)
+                    with _bc1:
+                        metric_card(
+                            "retorno carteira",
+                            f"{_bri.retorno_carteira*100:+.2f}%",
+                            sublabel=f"janela: {_periodo_br}",
+                        )
+                    with _bc2:
+                        metric_card(
+                            f"retorno {_bench_label}",
+                            f"{_bri.retorno_benchmark*100:+.2f}%",
+                            sublabel=f"top-{len(_universo_top)} por mkt cap",
+                        )
+                    with _bc3:
+                        _excess = _bri.retorno_excessivo * 100
+                        _excess_emoji = "🟢" if _excess > 0 else "🔴"
+                        metric_card(
+                            "retorno excessivo",
+                            f"{_excess_emoji} {_excess:+.2f}pp",
+                            sublabel="carteira − benchmark",
+                        )
+
+                    # 3 efeitos
+                    st.markdown("##### efeitos Brinson")
+                    _ec1, _ec2, _ec3 = st.columns(3)
+                    with _ec1:
+                        metric_card(
+                            "alocação",
+                            f"{_bri.allocation*100:+.2f}pp",
+                            sublabel="peso setorial vs mercado",
+                        )
+                    with _ec2:
+                        metric_card(
+                            "seleção",
+                            f"{_bri.selection*100:+.2f}pp",
+                            sublabel="picks dentro de cada setor",
+                        )
+                    with _ec3:
+                        metric_card(
+                            "interação",
+                            f"{_bri.interaction*100:+.2f}pp",
+                            sublabel="cruzamento (geralmente pequeno)",
+                        )
+
+                    # Waterfall: benchmark → alocação → seleção → interação → carteira
+                    import plotly.graph_objects as go
+                    _fig_wf = go.Figure(go.Waterfall(
+                        name="brinson",
+                        orientation="v",
+                        measure=["absolute", "relative", "relative", "relative", "total"],
+                        x=[_bench_label, "alocação", "seleção", "interação", "carteira"],
+                        y=[
+                            _bri.retorno_benchmark * 100,
+                            _bri.allocation * 100,
+                            _bri.selection * 100,
+                            _bri.interaction * 100,
+                            _bri.retorno_carteira * 100,
+                        ],
+                        text=[
+                            f"{_bri.retorno_benchmark*100:+.2f}%",
+                            f"{_bri.allocation*100:+.2f}pp",
+                            f"{_bri.selection*100:+.2f}pp",
+                            f"{_bri.interaction*100:+.2f}pp",
+                            f"{_bri.retorno_carteira*100:+.2f}%",
+                        ],
+                        textposition="outside",
+                        increasing={"marker": {"color": "#16a34a"}},
+                        decreasing={"marker": {"color": "#dc2626"}},
+                        totals={"marker": {"color": "#2563eb"}},
+                    ))
+                    _fig_wf.update_layout(
+                        title="benchmark → carteira: decomposição dos efeitos",
+                        yaxis_title="%",
+                        height=380,
+                        showlegend=False,
+                        margin=dict(t=40, b=20, l=0, r=0),
+                        template="plotly_dark",
+                    )
+                    st.plotly_chart(_fig_wf, use_container_width=True)
+
+                    # Tabela por setor
+                    st.markdown("##### atribuição por setor")
+                    _linhas_setor = []
+                    for s, d in sorted(
+                        _bri.por_setor.items(),
+                        key=lambda x: -(x[1]['alloc'] + x[1]['sel'])
+                    ):
+                        _linhas_setor.append({
+                            "setor": s,
+                            "peso carteira": f"{d['peso_p']*100:.1f}%",
+                            "peso bench": f"{d['peso_b']*100:.1f}%",
+                            "ret carteira": f"{d['ret_p']*100:+.1f}%" if d['peso_p'] > 0 else "—",
+                            "ret bench": f"{d['ret_b']*100:+.1f}%" if d['peso_b'] > 0 else "—",
+                            "alocação": f"{d['alloc']*100:+.2f}pp",
+                            "seleção": f"{d['sel']*100:+.2f}pp",
+                        })
+                    st.dataframe(_linhas_setor, use_container_width=True, hide_index=True)
+
+                    # Sumário em linguagem natural
+                    _dominante = "alocação" if abs(_bri.allocation) > abs(_bri.selection) else "seleção"
+                    _veredito = (
+                        f"a carteira **{'superou' if _bri.retorno_excessivo > 0 else 'ficou atrás do'}** "
+                        f"o {_bench_label} em **{abs(_bri.retorno_excessivo)*100:.2f}pp** "
+                        f"na janela de {_periodo_br}. o componente dominante foi **{_dominante}** "
+                        f"({(_bri.allocation if _dominante == 'alocação' else _bri.selection)*100:+.2f}pp). "
+                    )
+                    if _dominante == "alocação":
+                        _veredito += (
+                            "o resultado veio principalmente de **pesar setores diferentes** do mercado — "
+                            "decisão top-down (setorial)."
+                        )
+                    else:
+                        _veredito += (
+                            "o resultado veio principalmente de **escolher ativos melhores** dentro de "
+                            "cada setor — decisão bottom-up (picking)."
+                        )
+                    st.info(_veredito)
 
             with st.expander("🎯 exposição a fatores fama-french", expanded=False):
                 st.caption("em desenvolvimento — em breve nesta aba.")
