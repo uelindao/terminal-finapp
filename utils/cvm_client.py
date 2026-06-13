@@ -545,7 +545,12 @@ def _get_dfp_series(
             continue
 
         # Descobrir datas disponíveis para esta empresa neste ZIP
-        ref_df = dfs.get("DRE") or dfs.get("BPA") or dfs.get("BPP")
+        # DataFrame não tem truth-value — checa explicitamente
+        ref_df = dfs.get("DRE")
+        if ref_df is None:
+            ref_df = dfs.get("BPA")
+        if ref_df is None:
+            ref_df = dfs.get("BPP")
         if ref_df is None:
             continue
         mask_cvm = ref_df["CD_CVM"].str.strip() == str(cd_cvm)
@@ -746,7 +751,10 @@ def _get_itr_series(
         for dfs, is_q4 in [(dfs_itr, False), (dfs_dfp, True)]:
             if not dfs:
                 continue
-            ref_df = dfs.get("DRE") or dfs.get("BPA")
+            # DataFrame não tem truth-value — checa explicitamente
+            ref_df = dfs.get("DRE")
+            if ref_df is None:
+                ref_df = dfs.get("BPA")
             if ref_df is None:
                 continue
             mask = (
@@ -1087,7 +1095,10 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
         for dfs, is_q4_source in [(dfs_itr, False), (dfs_dfp, True)]:
             if not dfs:
                 continue
-            ref_df = dfs.get("DRE") or dfs.get("BPA")
+            # DataFrame não tem truth-value — checa explicitamente com None
+            ref_df = dfs.get("DRE")
+            if ref_df is None:
+                ref_df = dfs.get("BPA")
             if ref_df is None:
                 continue
             mask = (

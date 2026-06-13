@@ -1,7 +1,8 @@
 """
 sync_us.py — ETL de ativos dos EUA
 Fontes: FMP (Financial Modeling Prep) + yfinance (fallback precos)
-FMP free tier: ~500 req/dia (2 chaves × 250). Usa 2 calls/ticker (profile + ratios-ttm) = ~466 calls
+FMP free tier: ~500 req/dia (2 chaves × 250). Usa 1 call/ticker (profile) = ~233 calls/dia.
+Múltiplos (P/L, P/VP, DY, ROE, margem, EV/EBITDA) vêm via yfinance.info no enrichment.
 
 Execucao:
   SUPABASE_URL=... SUPABASE_SERVICE_KEY=... FMP_API_KEY=... python scripts/sync_us.py
@@ -111,20 +112,15 @@ def fetch_fmp_key_metrics(ticker: str) -> dict | None:
     return None
 
 
-def fetch_fmp_ratios(ticker: str) -> dict | None:
-    """Fetch TTM ratios from FMP."""
-    data = _fmp_get("ratios-ttm", {"symbol": ticker})
-    if isinstance(data, list) and data:
-        return data[0]
-    return None
-
-
 def transform_fmp(ticker: str) -> dict | None:
     """Transforma dados FMP em dict padrao para fundamentals_cache.
-    Usa profile + ratios-ttm (2 calls FMP) e completa lacunas com yfinance.info.
+
+    FMP free tier: usa apenas /profile (gratuito) para nome/setor/mkt_cap/beta.
+    O endpoint /ratios-ttm virou paywall (HTTP 402) — todos os múltiplos
+    (P/L, P/VP, DY, ROE, margem, EV/EBITDA) vêm agora via yfinance.info
+    no enriquecer_com_yfinance() abaixo.
     """
     profile = fetch_fmp_profile(ticker)
-    ratios = fetch_fmp_ratios(ticker)
 
     data: dict = {}
 
@@ -134,26 +130,9 @@ def transform_fmp(ticker: str) -> dict | None:
         data["market_cap"] = _sf(profile.get("mktCap"))
         data["beta"] = _sf(profile.get("beta"))
 
-    if ratios:
-        data["p/l"] = _sf(ratios.get("priceToEarningsRatioTTM") or ratios.get("peRatioTTM"))
-        data["p/vp"] = _sf(ratios.get("priceToBookRatioTTM") or ratios.get("pbRatioTTM"))
-        data["dy%"] = _sf(ratios.get("dividendYieldTTM"))
-        margem = _sf(ratios.get("netProfitMarginTTM"))
-        if margem is not None:
-            if abs(margem) < 2:
-                margem = margem * 100
-        data["margem%"] = margem
-        data["ev/ebitda"] = _sf(ratios.get("enterpriseValueMultipleTTM")
-                                 or ratios.get("enterpriseValueOverEBITDATTM"))
-        roe_r = _sf(ratios.get("returnOnEquity"))
-        if roe_r is not None:
-            if abs(roe_r) < 2:
-                roe_r = roe_r * 100
-            data["roe%"] = roe_r
-
     data["ticker"] = ticker
     data["data_quality"] = 80
-    data["_raw"] = {"profile": profile, "ratios": ratios}
+    data["_raw"] = {"profile": profile}
 
     # Fallback yfinance.info para campos que FMP não trouxe (free tier deixa
     # buracos especialmente em ROE, margem, P/VP, DY, EV/EBITDA).

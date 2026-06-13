@@ -1320,6 +1320,39 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             ev_ebitda = safe_float(dados_base.get('ev/ebitda')) or safe_float(info.get('enterpriseToEbitda'))
             debt_equity = safe_float(info.get('debtToEquity'))
 
+            # Bancos e financeiras não têm EBIT/EBITDA convencional —
+            # ROIC, Net Debt/EBITDA e ICR ficam zerados. Detecta para aplicar
+            # pontuação proxy baseada em ROE/qualidade.
+            # Robustez: setor cache nem sempre preenchido (ex.: ITUB4) — combina
+            # com lista de tickers conhecidos + heurística de nome.
+            _setor_bank_keywords = [
+                'financial', 'bank', 'insurance', 'financeiro',
+                'bancário', 'seguro', 'crédito', 'intermediários financeiros',
+                'previdência',
+            ]
+            _tickers_financeiros_br = {
+                'ITUB3.SA','ITUB4.SA','BBDC3.SA','BBDC4.SA','BBAS3.SA',
+                'BPAC11.SA','SANB3.SA','SANB4.SA','SANB11.SA','BBSE3.SA',
+                'IRBR3.SA','BMGB4.SA','BPAN4.SA','ABCB4.SA','BRSR3.SA',
+                'BRSR5.SA','BRSR6.SA','ITSA3.SA','ITSA4.SA','PSSA3.SA',
+                'CIEL3.SA','PORT3.SA','PINE4.SA',
+            }
+            _tickers_financeiros_us = {
+                'JPM','BAC','WFC','C','GS','MS','USB','PNC','TFC',
+                'BLK','AXP','SCHW','SPGI','CME','ICE',
+                'BRK-A','BRK-B','BX','KKR','APO','BK','NTRS',
+                'AIG','MET','PRU','ALL','TRV','CB','HIG','PGR',
+                'V','MA','PYPL','SQ','COIN',
+            }
+            _nome_lower = str(dados_base.get('nome') or info.get('longName') or '').lower()
+            _is_financial_acao = (
+                any(x in setor_yf for x in _setor_bank_keywords)
+                or ticker in _tickers_financeiros_br
+                or ticker in _tickers_financeiros_us
+                or any(w in _nome_lower for w in ['banco', 'bank', 'seguro', 'insurance',
+                                                    'financeira', 'financial', 'previdência'])
+            )
+
             # --- Qualidade e Rentabilidade (máx 15pts) ---
             score_q = 0
             if roe is not None:
@@ -1356,11 +1389,15 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
             # ── Net Debt / EBITDA — métrica complementar de alavancagem ──────
-            # Prefere cache; usa (divida_total − cash) / ebitda; fallback yfinance live
+            # Prefere cache; usa (divida_total − cash) / ebitda; fallback yfinance live.
+            # Bancos: pontuação neutra (alavancagem é estrutural, não risco discricionário).
             score_nd = 0
             nd_ebitda: float | None = None
             try:
-                if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+                if _is_financial_acao:
+                    score_nd = 3  # neutro positivo — alavancagem inerente ao modelo
+                    breakdown['Net Debt / EBITDA'] = "n/a (banco/financeira)"
+                elif isinstance(historico_trim, list) and len(historico_trim) >= 1:
                     score_nd, nd_ebitda = _calc_nd_do_historico(historico_trim, is_br)
                 elif acao is not None:
                     _bs_nd  = acao.balance_sheet
@@ -1453,11 +1490,15 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             score_r_final = max(0, score_r)
 
             # ── Interest Coverage Ratio (EBIT / Despesas Financeiras) ────────
-            # Prefere cache; fallback yfinance live
+            # Prefere cache; fallback yfinance live.
+            # Bancos: ICR não aplicável (toda a operação é financeira). Pontuação neutra.
             score_icr = 0
             icr_val: float | None = None
             try:
-                if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+                if _is_financial_acao:
+                    score_icr = 2  # neutro — métrica não aplicável
+                    breakdown['Interest Coverage (EBIT/JurosExp)'] = "n/a (banco/financeira)"
+                elif isinstance(historico_trim, list) and len(historico_trim) >= 1:
                     score_icr, icr_val = _calc_icr_do_historico(historico_trim)
                 elif acao is not None:
                     _fin_icr = acao.financials
@@ -1532,10 +1573,17 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 alertas.extend(detalhes_cresc.get('alertas', []))
 
             # --- ROIC vs WACC (máx 12pts) ---
-            # Prefere cache (historico_trimestral); cai para yfinance live quando ausente
+            # Prefere cache (historico_trimestral); cai para yfinance live quando ausente.
+            # Bancos: pontuação proxy via ROE (EBIT/EBITDA não fazem sentido).
             score_roic = 0
             roic_valor: float | None = None
-            if isinstance(historico_trim, list) and len(historico_trim) >= 1:
+            if _is_financial_acao and roe is not None:
+                if roe > 18:    score_roic = 7  # ROE alto = banco bem rentável
+                elif roe > 12:  score_roic = 5
+                elif roe > 6:   score_roic = 3
+                elif roe > 0:   score_roic = 1
+                else:           score_roic = -4
+            elif isinstance(historico_trim, list) and len(historico_trim) >= 1:
                 score_roic, roic_valor = _calc_roic_do_historico(
                     historico_trim, is_br, macro_context
                 )
