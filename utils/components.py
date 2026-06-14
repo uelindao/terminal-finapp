@@ -1532,3 +1532,469 @@ def data_quality_badge(quality_pct: float | None, fonte: str = "", atualizado_em
         f'◆ {label}'
         f'</span>'
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DESIGN SYSTEM v5 — componentes novos (Fase 3b)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Componentes 100% tokens, prontos para uso nas refatorações de página.
+# Sem hex/font hardcoded. Cada um documenta uso e parâmetros.
+#
+# Convenção de tons: bull/bear/amber/info/accent/muted — mapeiam para os
+# pares (fg, pill-bg, border) calibrados em todos os 11 temas.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_TONES = {
+    "bull":   {"fg": "var(--bull)",        "bg": "var(--pill-bull-bg)",   "bd": "var(--bull)"},
+    "bear":   {"fg": "var(--bear)",        "bg": "var(--pill-bear-bg)",   "bd": "var(--bear)"},
+    "amber":  {"fg": "var(--amber)",       "bg": "var(--pill-amber-bg)",  "bd": "var(--amber)"},
+    "info":   {"fg": "var(--info)",        "bg": "var(--pill-info-bg)",   "bd": "var(--info)"},
+    "accent": {"fg": "var(--accent)",      "bg": "var(--pill-accent-bg)", "bd": "var(--accent)"},
+    "muted":  {"fg": "var(--text-muted)",  "bg": "var(--pill-muted-bg)",  "bd": "var(--border-normal)"},
+}
+
+
+def _tone(t: str) -> dict:
+    return _TONES.get(t, _TONES["muted"])
+
+
+# ── 1. Chip / chip_status ─────────────────────────────────────────────────────
+
+def chip(label: str, tone: str = "muted", icon: str = "") -> str:
+    """
+    HTML de chip inline (Bloomberg-style). Para filtros, tags, badges em linhas.
+    Retorna string — use com st.markdown(..., unsafe_allow_html=True).
+
+    Ex: st.markdown(chip("BR", "info") + chip("FII", "accent"), unsafe_allow_html=True)
+    """
+    t = _tone(tone)
+    ic = f'<span style="margin-right:4px;">{icon}</span>' if icon else ''
+    return (
+        f'<span style="display:inline-flex;align-items:center;'
+        f'background:{t["bg"]};color:{t["fg"]};'
+        f'border:1px solid {t["bd"]};border-radius:999px;'
+        f'padding:2px 10px;margin-right:4px;'
+        f'font-family:var(--font-ui);font-size:var(--text-xs);'
+        f'font-weight:600;letter-spacing:var(--ls-wide);'
+        f'text-transform:uppercase;line-height:1.5;">{ic}{label}</span>'
+    )
+
+
+def chip_status(label: str, tone: str = "muted") -> str:
+    """
+    Variante de chip com dot colorido (status visual em tabelas).
+    Use para colunas como Status (Compra/Venda/Espera) em data_table.
+    """
+    t = _tone(tone)
+    return (
+        f'<span style="display:inline-flex;align-items:center;gap:6px;'
+        f'background:{t["bg"]};color:{t["fg"]};'
+        f'border-radius:var(--radius-sm);padding:3px 10px;'
+        f'font-family:var(--font-ui);font-size:var(--text-xs);'
+        f'font-weight:600;line-height:1.4;">'
+        f'<span style="width:6px;height:6px;border-radius:50%;'
+        f'background:{t["fg"]};flex-shrink:0;"></span>{label}</span>'
+    )
+
+
+# ── 2. Info box ───────────────────────────────────────────────────────────────
+
+def info_box(tipo: str, texto: str, titulo: str = "", icone: str = "") -> None:
+    """
+    Caixa de aviso inline — mais leve que status_card.
+    tipo: bull (sucesso) | bear (perigo) | amber (aviso) | info (info)
+    """
+    t = _tone(tipo)
+    default_icons = {"bull": "✓", "bear": "✕", "amber": "⚠", "info": "ⓘ"}
+    ic = icone or default_icons.get(tipo, "ⓘ")
+    titulo_html = (
+        f'<div style="font-weight:600;font-size:var(--text-sm);'
+        f'color:{t["fg"]};margin-bottom:3px;">{titulo}</div>'
+        if titulo else ""
+    )
+    st.markdown(
+        f'<div style="display:flex;gap:var(--space-3);'
+        f'background:{t["bg"]};border-left:3px solid {t["bd"]};'
+        f'border-radius:var(--radius-sm);'
+        f'padding:var(--space-3) var(--space-4);'
+        f'margin:var(--space-2) 0;font-family:var(--font-ui);">'
+        f'<span style="color:{t["fg"]};font-size:var(--text-md);'
+        f'flex-shrink:0;line-height:1.3;">{ic}</span>'
+        f'<div style="flex:1;min-width:0;">{titulo_html}'
+        f'<div style="color:var(--text-secondary);font-size:var(--text-sm);'
+        f'line-height:1.5;">{texto}</div></div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── 3. Inline sparkline (SVG puro) ────────────────────────────────────────────
+
+def inline_sparkline(
+    serie: list[float],
+    tone: str = "auto",
+    largura: int = 80,
+    altura: int = 24,
+) -> str:
+    """
+    SVG inline de sparkline mini (estilo Bloomberg). Retorna string HTML.
+    tone:
+      "auto"  → bull se serie[-1] >= serie[0], bear caso contrário
+      bull|bear|amber|info|accent|muted
+    """
+    if not serie:
+        return ""
+    vals = [float(v) for v in serie if v is not None]
+    if len(vals) < 2:
+        return ""
+    if tone == "auto":
+        tone = "bull" if vals[-1] >= vals[0] else "bear"
+    cor = _tone(tone)["fg"]
+    vmin, vmax = min(vals), max(vals)
+    rng = (vmax - vmin) or 1.0
+    pts = " ".join(
+        f"{i * largura / (len(vals) - 1):.1f},"
+        f"{altura - ((v - vmin) / rng) * altura:.1f}"
+        for i, v in enumerate(vals)
+    )
+    return (
+        f'<svg width="{largura}" height="{altura}" '
+        f'viewBox="0 0 {largura} {altura}" '
+        f'style="vertical-align:middle;overflow:visible;">'
+        f'<polyline points="{pts}" fill="none" stroke="{cor}" '
+        f'stroke-width="1.5" stroke-linecap="round" '
+        f'stroke-linejoin="round"/></svg>'
+    )
+
+
+# ── 4. Gradient CTA button ────────────────────────────────────────────────────
+
+def _inject_once(key: str, css: str) -> None:
+    """Helper: injeta um bloco de CSS uma vez por sessão."""
+    if key not in st.session_state:
+        st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
+        st.session_state[key] = True
+
+
+def gradient_cta_button(
+    label: str,
+    key: str,
+    icone: str = "",
+    largura_full: bool = False,
+) -> bool:
+    """
+    Botão de ação principal com gradient do acento (refs 3 Apexify, 5 DWISLN).
+    Use para CTAs (Conectar, Salvar, Aplicar). Retorna True quando clicado.
+    """
+    _inject_once(
+        "_cta_css_v5",
+        'div.ft-cta-wrap+div .stButton button{'
+        '  background:var(--accent-gradient) !important;'
+        '  color:#fff !important;border:none !important;'
+        '  border-radius:var(--radius-md) !important;'
+        '  padding:var(--space-3) var(--space-5) !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-sm) !important;'
+        '  font-weight:600 !important;'
+        '  letter-spacing:var(--ls-wide) !important;'
+        '  box-shadow:var(--shadow-md) !important;'
+        '  transition:transform var(--motion-fast) var(--ease-out),'
+        '             box-shadow var(--motion-fast) var(--ease-out) !important;}'
+        'div.ft-cta-wrap+div .stButton button:hover{'
+        '  transform:translateY(-1px) !important;'
+        '  box-shadow:var(--shadow-lg) !important;}'
+        'div.ft-cta-wrap+div .stButton button:active{transform:translateY(0) !important;}'
+    )
+    label_full = f"{icone}  {label}" if icone else label
+    st.markdown('<div class="ft-cta-wrap"></div>', unsafe_allow_html=True)
+    return st.button(label_full, key=key, use_container_width=largura_full)
+
+
+# ── 5. Metric card v2 (com mini-pill de ícone e estado ativo) ────────────────
+
+def metric_card_v2(
+    label:       str,
+    valor:       str,
+    sublabel:    str = "",
+    delta_tone:  str = "muted",
+    icon_pill:   str = "",
+    icon_tone:   str = "info",
+    ativo:       bool = False,
+    sparkline:   list[float] | None = None,
+    data_source: str = "",
+) -> None:
+    """
+    KPI card v2 — Fase 3b. Diferenças vs metric_card:
+      • mini-pill colorida com ícone à esquerda (ref 1 manufacturing)
+      • estado `ativo` = fundo com gradient do acento (refs 3 Apexify, 5 DWISLN)
+      • sparkline opcional inline abaixo do valor
+
+    delta_tone: colore barra esquerda + valor (bull/bear/amber/info/accent/muted)
+    icon_tone:  colore só a mini-pill do ícone
+    """
+    d = _tone(delta_tone)
+    i = _tone(icon_tone)
+
+    icone_pill_html = ""
+    if icon_pill:
+        icone_pill_html = (
+            f'<div style="display:inline-flex;align-items:center;'
+            f'justify-content:center;width:34px;height:34px;'
+            f'border-radius:var(--radius-sm);background:{i["bg"]};'
+            f'color:{i["fg"]};font-size:var(--text-md);'
+            f'flex-shrink:0;">{icon_pill}</div>'
+        )
+
+    spark_html = (
+        f'<div style="margin-top:var(--space-2);opacity:0.85;">'
+        f'{inline_sparkline(sparkline, tone=delta_tone, largura=140, altura=28)}'
+        f'</div>'
+        if sparkline else ""
+    )
+
+    sub_html = (
+        f'<div style="font-family:var(--font-data);font-size:var(--text-xs);'
+        f'color:{d["fg"] if delta_tone != "muted" else "var(--text-muted)"};'
+        f'margin-top:3px;">{sublabel}</div>'
+        if sublabel else ""
+    )
+
+    if ativo:
+        bg_main   = "var(--accent-gradient)"
+        cor_label = "rgba(255,255,255,0.85)"
+        cor_valor = "#fff"
+        bd_left   = "transparent"
+        sombra    = "var(--shadow-lg)"
+    else:
+        bg_main   = "var(--bg-surface)"
+        cor_label = "var(--text-muted)"
+        cor_valor = d["fg"] if delta_tone != "muted" else "var(--text-primary)"
+        bd_left   = d["fg"] if delta_tone != "muted" else "var(--border-subtle)"
+        sombra    = "var(--shadow-sm)"
+
+    st.markdown(
+        f'<div style="background:{bg_main};'
+        f'border:1px solid var(--border-subtle);'
+        f'border-left:3px solid {bd_left};'
+        f'border-radius:var(--radius-md);'
+        f'padding:var(--space-4);box-shadow:{sombra};'
+        f'transition:transform var(--motion-normal) var(--ease-out),'
+        f'box-shadow var(--motion-normal) var(--ease-out);'
+        f'margin-bottom:var(--space-2);min-height:96px;">'
+        f'<div style="display:flex;align-items:flex-start;gap:var(--space-3);">'
+        f'{icone_pill_html}'
+        f'<div style="flex:1;min-width:0;">'
+        f'<div style="font-family:var(--font-ui);font-size:var(--text-xs);'
+        f'color:{cor_label};text-transform:uppercase;'
+        f'letter-spacing:var(--ls-wide);margin-bottom:4px;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+        f'{label}{_fonte_badge(data_source)}</div>'
+        f'<div style="font-family:var(--font-data);font-size:var(--text-xl);'
+        f'font-weight:700;color:{cor_valor};line-height:1.1;">{valor}</div>'
+        f'{sub_html}'
+        f'</div></div>'
+        f'{spark_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── 6. KPI grid ───────────────────────────────────────────────────────────────
+
+def kpi_grid(items: list[dict], cols: int = 4) -> None:
+    """
+    Grade responsiva de KPIs. Cada item é dict com chaves de metric_card_v2:
+      {label, valor, sublabel?, delta_tone?, icon_pill?, icon_tone?,
+       ativo?, sparkline?, data_source?}
+
+    Faz wrap automático em `cols` colunas.
+    """
+    if not items:
+        return
+    n = max(1, min(cols, len(items)))
+    colunas = st.columns(n, gap="small")
+    for idx, item in enumerate(items):
+        with colunas[idx % n]:
+            metric_card_v2(
+                label       = item.get("label", ""),
+                valor       = item.get("valor", "—"),
+                sublabel    = item.get("sublabel", ""),
+                delta_tone  = item.get("delta_tone", "muted"),
+                icon_pill   = item.get("icon_pill", ""),
+                icon_tone   = item.get("icon_tone", "info"),
+                ativo       = item.get("ativo", False),
+                sparkline   = item.get("sparkline"),
+                data_source = item.get("data_source", ""),
+            )
+
+
+# ── 7. Tabs pill ──────────────────────────────────────────────────────────────
+
+def tabs_pill(labels: list[str], key: str, default: str | None = None) -> str:
+    """
+    Tabs em pill (ref 2 Virtus). Retorna o label selecionado. Persiste em
+    session_state[key]. Use no topo de seções com múltiplas visões.
+
+    Ex: aba = tabs_pill(["Visão", "Posições", "Risco"], key="pf_tabs")
+        if aba == "Posições": ...
+    """
+    if not labels:
+        return ""
+    current = st.session_state.get(key) or default or labels[0]
+    if current not in labels:
+        current = labels[0]
+
+    _inject_once(
+        "_tabspill_css_v5",
+        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button{'
+        '  background:transparent !important;'
+        '  border:1px solid transparent !important;'
+        '  border-radius:999px !important;'
+        '  color:var(--text-secondary) !important;'
+        '  padding:6px 14px !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-sm) !important;'
+        '  font-weight:500 !important;'
+        '  width:100% !important;'
+        '  box-shadow:none !important;'
+        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
+        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button:hover{'
+        '  background:var(--bg-overlay) !important;'
+        '  color:var(--text-primary) !important;}'
+        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
+        '  background:var(--accent-gradient) !important;'
+        '  color:#fff !important;font-weight:600 !important;'
+        '  border-color:transparent !important;'
+        '  box-shadow:var(--shadow-sm) !important;}'
+    )
+
+    st.markdown('<div data-ftpill="1"></div>', unsafe_allow_html=True)
+    cols = st.columns(len(labels), gap="small")
+    for i, lab in enumerate(labels):
+        with cols[i]:
+            if st.button(
+                lab,
+                key=f"{key}__t{i}",
+                type=("primary" if lab == current else "secondary"),
+                use_container_width=True,
+            ):
+                st.session_state[key] = lab
+                st.rerun()
+    return current
+
+
+# ── 8. Period selector ────────────────────────────────────────────────────────
+
+def period_selector(
+    opcoes: list[str],
+    key: str,
+    default: str | None = None,
+    label: str = "período",
+) -> str:
+    """
+    Dropdown compacto no canto superior direito de cards (ref 1 "Monthly ▼").
+    Retorna o valor selecionado. Persiste em session_state[key].
+    """
+    if not opcoes:
+        return ""
+    _inject_once(
+        "_periodsel_css_v5",
+        'div[data-ftperiod="1"]+div [data-testid="stSelectbox"] label{'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-xs) !important;'
+        '  color:var(--text-muted) !important;'
+        '  text-transform:uppercase !important;'
+        '  letter-spacing:var(--ls-wide) !important;'
+        '  margin-bottom:0 !important;}'
+        'div[data-ftperiod="1"]+div [data-testid="stSelectbox"]>div>div{'
+        '  background:var(--bg-elevated) !important;'
+        '  border:1px solid var(--border-subtle) !important;'
+        '  border-radius:999px !important;'
+        '  min-height:30px !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-sm) !important;}'
+    )
+    idx = opcoes.index(default) if default in opcoes else 0
+    st.markdown('<div data-ftperiod="1"></div>', unsafe_allow_html=True)
+    return st.selectbox(label, opcoes, index=idx, key=key, label_visibility="collapsed")
+
+
+# ── 9. Breadcrumb ─────────────────────────────────────────────────────────────
+
+def breadcrumb(itens: list[tuple[str, str | None]]) -> None:
+    """
+    Trilha de navegação (ref 5 DWISLN "Dashboards / Overview").
+    itens: lista de (label, url_ou_None). O último item sempre vem destacado
+    (atual), independentemente de ter URL.
+
+    Ex: breadcrumb([("Home", "/"), ("Research", "/Research"), ("PETR4", None)])
+    """
+    if not itens:
+        return
+    partes = []
+    for i, (label, href) in enumerate(itens):
+        eh_ultimo = (i == len(itens) - 1)
+        if eh_ultimo:
+            partes.append(
+                f'<span style="color:var(--text-primary);font-weight:600;">{label}</span>'
+            )
+        elif href:
+            partes.append(
+                f'<a href="{href}" style="color:var(--text-secondary);'
+                f'text-decoration:none;">{label}</a>'
+            )
+        else:
+            partes.append(
+                f'<span style="color:var(--text-secondary);">{label}</span>'
+            )
+
+    sep = (
+        '<span style="color:var(--text-muted);margin:0 8px;'
+        'font-family:var(--font-ui);">/</span>'
+    )
+    st.markdown(
+        f'<div style="font-family:var(--font-ui);font-size:var(--text-sm);'
+        f'display:flex;align-items:center;flex-wrap:wrap;'
+        f'padding:var(--space-1) 0;margin-bottom:var(--space-3);">'
+        f'{sep.join(partes)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── 10. Empty state v2 ────────────────────────────────────────────────────────
+
+def empty_state_v2(
+    titulo: str,
+    descricao: str,
+    icone: str = "📭",
+    cta_label: str = "",
+    cta_key: str = "empty_cta",
+    on_click_msg: str = "",
+) -> bool:
+    """
+    Estado vazio enriquecido — ícone grande, texto, CTA opcional com gradient.
+    Retorna True se CTA foi clicado.
+    """
+    st.markdown(
+        f'<div style="text-align:center;padding:var(--space-8) var(--space-6);'
+        f'background:var(--bg-surface);border:1px dashed var(--border-normal);'
+        f'border-radius:var(--radius-lg);margin:var(--space-4) 0;">'
+        f'<div style="font-size:2.6rem;margin-bottom:var(--space-3);'
+        f'opacity:0.4;line-height:1;">{icone}</div>'
+        f'<div style="font-family:var(--font-ui);font-size:var(--text-md);'
+        f'font-weight:600;color:var(--text-primary);'
+        f'margin-bottom:var(--space-1);">{titulo}</div>'
+        f'<div style="font-family:var(--font-ui);font-size:var(--text-sm);'
+        f'color:var(--text-muted);max-width:380px;margin:0 auto;'
+        f'line-height:1.6;">{descricao}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    if cta_label:
+        c1, c2, c3 = st.columns([2, 1, 2])
+        with c2:
+            if gradient_cta_button(cta_label, key=cta_key, largura_full=True):
+                if on_click_msg:
+                    st.toast(on_click_msg)
+                return True
+    return False
