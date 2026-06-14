@@ -652,12 +652,17 @@ def calcular_roic(
 
                 wacc_ref = max(6.0, min(25.0, wacc_ref))
 
+                # Gate de custo de capital: ROIC >> 0 mas < WACC ainda
+                # destrói valor econômico (não cobre o custo exigido pelos
+                # provedores de capital). Mantém simetria com _calc_roic_do_historico.
                 if roic_valor > wacc_ref * 1.5:
                     score_roic = 8
                 elif roic_valor > wacc_ref:
                     score_roic = 5
-                elif roic_valor >= 0:
+                elif roic_valor > wacc_ref * 0.5:
                     score_roic = 2
+                elif roic_valor >= 0:
+                    score_roic = -1
                 else:
                     score_roic = -4   # alerta adicionado pelo chamador
 
@@ -832,12 +837,16 @@ def _calc_roic_do_historico(historico: list[dict], is_br: bool,
         kd = rf * (1 - 0.21)
         wacc = 0.60 * ke + 0.40 * kd
     wacc = max(6.0, min(25.0, wacc))
+    # Calibração com gate de custo de capital: ROIC positivo mas << WACC
+    # ainda destrói valor econômico (não cobre custo de capital exigido).
     if roic > wacc * 1.5:
         return 8, roic
     elif roic > wacc:
         return 5, roic
+    elif roic > wacc * 0.5:
+        return 2, roic    # cobre pelo menos metade do custo de capital
     elif roic >= 0:
-        return 2, roic
+        return -1, roic   # positivo mas longe do custo: subutiliza capital
     return -4, roic
 
 
@@ -871,11 +880,18 @@ def _calc_crescimento_do_historico(historico: list[dict]) -> tuple[int, dict]:
 
     if lucro_0 is not None and lucro_4 not in (None, 0):
         earn_g = (lucro_0 - lucro_4) / abs(lucro_4)
+        # Thresholds simétricos aos positivos (>20%: +5, >5%: +3, <-5%: -3, <-20%: -5).
         if earn_g > 0.20:
             score += 5
         elif earn_g > 0.05:
             score += 3
-        elif earn_g < 0 and rev_g is not None and rev_g < 0:
+        elif earn_g < -0.20:
+            score -= 5
+            alertas.append(f"🚨 lucro caindo {earn_g*100:.0f}% YoY — colapso de rentabilidade.")
+        elif earn_g < -0.05:
+            score -= 3
+            alertas.append(f"⚠️ lucro caindo {earn_g*100:.0f}% YoY — deterioração de rentabilidade.")
+        if earn_g < 0 and rev_g is not None and rev_g < 0:
             alertas.append("🚨 compressão de margem e queda de receita simultâneas.")
 
     # Qualidade do crescimento: receita caindo mas lucro expandindo (reestruturação)

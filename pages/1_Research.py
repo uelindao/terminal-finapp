@@ -898,25 +898,36 @@ if len(historico) >= 3:
             'yield_atrativo':        'Dividend yield atrativo (FII)',
         }
 
-        # Separa pilares com pontos e sem pontos
+        # Separa pilares com pontuação numérica de sub-rows informacionais
+        # (ex.: "↳ ROIC = 3.0%", "↳ Momentum 12-1m = +51.6%" — strings que não
+        # contribuem com pontos, mas detalham os pilares). Sub-rows entram em
+        # uma lista expansível abaixo do gráfico, em vez de virar barra zerada.
         _itens_bd = []
+        _itens_info = []  # [(label_curto, valor_str)]
         for k, v in _breakdown_vis.items():
-            try:
-                pontos = float(v)
-            except (TypeError, ValueError):
-                # Tenta extrair número de strings como "8/10" ou "sim"
-                if isinstance(v, str) and '/' in v:
-                    try:
-                        pontos = float(v.split('/')[0])
-                    except Exception:
-                        pontos = 1.0 if v.lower() in ('sim', 'yes', 'true', '✅') else 0.0
-                elif isinstance(v, bool):
-                    pontos = float(v)
-                else:
-                    pontos = 0.0
-
             label = _label_map.get(k, k.replace('_', ' '))
-            _itens_bd.append({'label': label, 'pontos': pontos, 'chave': k})
+            # 1) numérico direto?
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
+                continue
+            if isinstance(v, bool):
+                _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
+                continue
+            # 2) string "X/Y" → pontuação fracionada (Piotroski legacy)
+            if isinstance(v, str) and '/' in v and v.count('/') == 1:
+                try:
+                    _itens_bd.append({'label': label, 'pontos': float(v.split('/')[0]),
+                                      'chave': k})
+                    continue
+                except Exception:
+                    pass
+            # 3) string "sim"/"yes"/"✅"
+            if isinstance(v, str) and v.lower() in ('sim', 'yes', 'true', '✅'):
+                _itens_bd.append({'label': label, 'pontos': 1.0, 'chave': k})
+                continue
+            # 4) qualquer outra string = item informacional (não vai pro gráfico)
+            if v is not None and v != '':
+                _itens_info.append((label.lstrip('↳ ').strip(), str(v)))
 
         if _itens_bd:
             # Ordena: maiores pontos primeiro
@@ -977,6 +988,26 @@ if len(historico) >= 3:
                 f'</div>',
                 unsafe_allow_html=True,
             )
+
+            # ── Detalhes informacionais (valores absolutos dos sub-rows) ──
+            # ROIC%, momentum%, retorno último mês — não somam pontos, só explicam
+            if _itens_info:
+                with st.expander("📊 detalhes informacionais dos pilares", expanded=False):
+                    _linhas_info = "".join(
+                        f'<div style="display:flex; justify-content:space-between; '
+                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle);">'
+                        f'<span style="color:var(--text-muted); font-size:0.78rem;">{_html_safe}</span>'
+                        f'<span style="color:var(--text); font-family:var(--font-mono); font-size:0.78rem;">{_val_safe}</span>'
+                        f'</div>'
+                        for _html_safe, _val_safe in (
+                            (str(lbl).replace('<', '&lt;'), str(val).replace('<', '&lt;'))
+                            for lbl, val in _itens_info
+                        )
+                    )
+                    st.markdown(
+                        f'<div style="font-family:var(--font-ui,sans-serif);">{_linhas_info}</div>',
+                        unsafe_allow_html=True,
+                    )
 
 # ── SEÇÃO: VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
 def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: str = "×"):
