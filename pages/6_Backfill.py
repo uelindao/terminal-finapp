@@ -49,6 +49,23 @@ try:
 except Exception:
     pass
 
+# ── Aviso: página opcional desde a entrada do ETL diário ─────────────────────
+st.info(
+    "ℹ️ **Esta página tornou-se opcional** desde que o ETL diário "
+    "(`recalc_health_scores.py`) passou a popular `health_score_history` "
+    "automaticamente — 1 ponto por ticker por dia. Em ~6 meses de operação "
+    "contínua você terá os 180 dias de histórico que o gráfico do Research usa.\n\n"
+    "**Quando ainda vale rodar o backfill:**\n"
+    "- Preencher **profundidade histórica** (anos atrás) para um ticker específico — "
+    "útil pra ver como PETR4 estava em 2018, por exemplo.\n"
+    "- Acelerar o detector de alertas `queda_score_7d` no primeiro mês "
+    "(sem backfill ele só dispara após 7 dias de recalcs diários).\n\n"
+    "**Quando NÃO vale:**\n"
+    "- Você só usa o gráfico de 180d → o ETL diário já entrega isso organicamente.\n"
+    "- Sua cota FMP é limitada → cada lote de 30 tickers consome ~300 chamadas.",
+    icon="ℹ️",
+)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # FUNÇÕES CORE (sem dependência de arquivo local — tudo via banco)
 # ──────────────────────────────────────────────────────────────────────────────
