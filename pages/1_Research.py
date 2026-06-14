@@ -82,7 +82,11 @@ def buscar_ativo_yahoo(query):
 # GESTÃO DE ESTADO E SIDEBAR
 # ==========================================
 if 'research_ticker' not in st.session_state:
-    st.session_state['research_ticker'] = "PETR4.SA"
+    # Suporta abertura em nova aba via ?research_ticker=TICKER
+    _qt = st.query_params.get("research_ticker")
+    st.session_state['research_ticker'] = _qt if _qt else "PETR4.SA"
+    if _qt:
+        st.query_params.clear()
 
 if 'research_ticker_externo' in st.session_state:
     st.session_state['research_ticker'] = st.session_state.pop('research_ticker_externo')
