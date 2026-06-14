@@ -1553,7 +1553,7 @@ with tab_posicoes:
                         ))
 
                     _fig_perf.add_hline(
-                        y=100, line_color='#333',
+                        y=100, line_color=_chart_cores()["muted"],
                         line_dash='dash', line_width=1,
                     )
 
@@ -1562,7 +1562,7 @@ with tab_posicoes:
                         title=f"performance comparada — base 100 ({_periodo_perf})",
                     )
                     _lay_perf.update(
-                        yaxis=dict(title='base 100', showgrid=True, gridcolor='#2A2C3E'),
+                        yaxis=dict(title='base 100', showgrid=True, gridcolor=_chart_cores()["border"]),
                         xaxis=dict(showgrid=False),
                     )
                     _fig_perf.update_layout(**_lay_perf)
@@ -3898,13 +3898,13 @@ with tab_backtest:
                             customdata=[t.get('retorno_trade', 0) for t in _vend],
                         ))
 
-                    _fig_bt.add_hline(y=100, line_color='#333', line_dash='dash', line_width=1)
+                    _fig_bt.add_hline(y=100, line_color=_chart_cores()["muted"], line_dash='dash', line_width=1)
 
                     _lay_bt = base_layout(
                         height=420,
                         title=f"backtesting — {_bt_ticker_label} | entrada ≥{_bt_entrada} | saída <{_bt_saida}",
                     )
-                    _lay_bt.update(yaxis=dict(title='base 100', showgrid=True, gridcolor='#2A2C3E'))
+                    _lay_bt.update(yaxis=dict(title='base 100', showgrid=True, gridcolor=_chart_cores()["border"]))
                     _fig_bt.update_layout(**_lay_bt)
                     st.plotly_chart(_fig_bt, use_container_width=True, config={'responsive': True})
                     st.caption(
@@ -3964,7 +3964,7 @@ with tab_backtest:
                             fillcolor='rgba(255,153,0,0.03)',
                             line_width=0,
                             annotation_text='zona neutra',
-                            annotation_font_color='#333',
+                            annotation_font_color=_chart_cores()["muted"],
                             annotation_font_size=8,
                         )
 
@@ -3977,7 +3977,7 @@ with tab_backtest:
                                 title='score',
                                 range=[0, 105],
                                 showgrid=True,
-                                gridcolor='#2A2C3E',
+                                gridcolor=_chart_cores()["border"],
                             ),
                         )
                         _fig_score_bt.update_layout(**_lay_sc)
@@ -4026,13 +4026,13 @@ with tab_backtest:
                             name='drawdown',
                             hovertemplate='%{x}<br>drawdown: %{y:.1f}%<extra></extra>',
                         ))
-                        _fig_ocean.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
+                        _fig_ocean.add_hline(y=0, line_color=_chart_cores()["muted"], line_dash='dash', line_width=1)
                         _lay_ocean = base_layout(
                             height=180,
                             title="⛰️ underwater — drawdown da estratégia",
                         )
                         _lay_ocean.update(
-                            yaxis=dict(title='drawdown %', showgrid=True, gridcolor='#2A2C3E'),
+                            yaxis=dict(title='drawdown %', showgrid=True, gridcolor=_chart_cores()["border"]),
                             margin=dict(t=40, b=20),
                         )
                         _fig_ocean.update_layout(**_lay_ocean)
@@ -4081,14 +4081,14 @@ with tab_backtest:
                                 name='rolling sharpe (252d)',
                                 hovertemplate='%{x}<br>sharpe: %{y:.2f}<extra></extra>',
                             ))
-                        _fig_roll_sharpe.add_hline(y=0, line_color='#333', line_dash='dash', line_width=1)
+                        _fig_roll_sharpe.add_hline(y=0, line_color=_chart_cores()["muted"], line_dash='dash', line_width=1)
                         _fig_roll_sharpe.add_hline(y=1, line_color=_cc_bt["bull"], line_dash='dot', line_width=1)
                         _lay_roll = base_layout(
                             height=180,
                             title="📉 rolling sharpe — janela 252 pregões",
                         )
                         _lay_roll.update(
-                            yaxis=dict(title='sharpe', showgrid=True, gridcolor='#2A2C3E'),
+                            yaxis=dict(title='sharpe', showgrid=True, gridcolor=_chart_cores()["border"]),
                             margin=dict(t=40, b=20),
                         )
                         _fig_roll_sharpe.update_layout(**_lay_roll)

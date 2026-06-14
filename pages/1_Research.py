@@ -1782,7 +1782,7 @@ with tab_analise:
                         )
                         _lay_div.update(
                             xaxis=dict(showgrid=False, tickangle=-45, tickfont=dict(size=9)),
-                            yaxis=dict(showgrid=True, gridcolor="#2A2C3E", title="r$ por cota"),
+                            yaxis=dict(showgrid=True, gridcolor=_chart_cores()["border"], title="r$ por cota"),
                             margin=dict(l=60, r=20, t=40, b=60),
                         )
                         _fig_div.update_layout(**_lay_div)
@@ -2109,16 +2109,16 @@ with tab_analise:
 
         _fig_fii_sens.add_hline(
             y=_pvp_atual,
-            line_color="#888",
+            line_color=_chart_cores()["muted"],
             line_dash="dash",
             line_width=1,
             annotation_text=f"p/vp mercado ({_pvp_atual:.2f}×)",
-            annotation_font_color="#888",
+            annotation_font_color=_chart_cores()["muted"],
             annotation_font_size=9,
         )
         _fig_fii_sens.add_hline(
             y=1.0,
-            line_color="#333",
+            line_color=_chart_cores()["muted"],
             line_dash="dot",
             line_width=1,
         )
@@ -2128,8 +2128,8 @@ with tab_analise:
             title="p/vp justo por yield real e spread de risco (ntn-b fixo)",
         )
         _lay_fii.update(
-            xaxis=dict(title="yield real do fii (% a.a.)", showgrid=True, gridcolor="#2A2C3E"),
-            yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor="#2A2C3E"),
+            xaxis=dict(title="yield real do fii (% a.a.)", showgrid=True, gridcolor=_chart_cores()["border"]),
+            yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor=_chart_cores()["border"]),
         )
         _fig_fii_sens.update_layout(**_lay_fii)
         st.plotly_chart(_fig_fii_sens, use_container_width=True, config={'responsive': True})
