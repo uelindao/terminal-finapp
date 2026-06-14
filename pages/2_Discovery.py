@@ -833,17 +833,7 @@ with tab_screen:
                 )
 
             # ── Tabela principal ─────────────────────────────────
-            cols_display = ['ticker', 'nome', 'health', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
-            df_display   = df_res[['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']].copy()
-
-            # PROBLEMA 3: Barra de health como texto (evita cor invertida do ProgressColumn)
-            df_display.insert(2, 'health', df_res['score'].apply(
-                lambda s: (
-                    f"{'█' * (int(s) // 10)}{'░' * (10 - int(s) // 10)} {int(s)}"
-                    if s and s > 0 else "— n/c"
-                )
-            ))
-            df_display = df_display.drop(columns=['score'])
+            df_display = df_res[['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']].copy()
 
             for col in ['p/l', 'p/vp', 'roe%', 'dy%', 'margem%']:
                 if col in df_display.columns:
@@ -851,10 +841,30 @@ with tab_screen:
                         lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
                     )
 
+            def _health_bar_html(s) -> str:
+                """Barra CSS de progresso para o health score."""
+                try:
+                    s = int(s)
+                except (TypeError, ValueError):
+                    return '<span style="color:var(--text-muted);">— n/c</span>'
+                if s <= 0:
+                    return '<span style="color:var(--text-muted);">— n/c</span>'
+                _cor = ("#2ecc71" if s >= 65 else ("#f39c12" if s >= 40 else "#e74c3c"))
+                _pct = min(s, 100)
+                return (
+                    f'<div style="display:flex;align-items:center;gap:8px;min-width:140px;">'
+                    f'<div style="flex:1;background:var(--border-subtle,rgba(255,255,255,0.1));'
+                    f'border-radius:3px;height:6px;overflow:hidden;">'
+                    f'<div style="width:{_pct}%;height:100%;background:{_cor};border-radius:3px;"></div>'
+                    f'</div>'
+                    f'<span style="font-family:var(--font-mono,monospace);font-size:0.8rem;'
+                    f'color:{_cor};min-width:26px;">{s}</span>'
+                    f'</div>'
+                )
+
             # Tabela HTML com links no ticker — abre Research em nova aba
-            _cc_sc = _chart_cores() if '_chart_cores' in dir() else {}
             _header_cols = ["Ticker", "Nome", "Health Score", "P/L", "P/VP", "ROE %", "DY %", "Margem %"]
-            _data_cols   = ['ticker', 'nome', 'health', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
+            _data_cols   = ['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
 
             _thead = "".join(
                 f'<th style="padding:8px 12px;text-align:left;font-size:0.7rem;'
@@ -867,21 +877,23 @@ with tab_screen:
                 _tk_full  = df_res.loc[_row.name, '_ticker_full'] if _row.name in df_res.index else _row['ticker']
                 _tk_label = _row['ticker']
                 _url      = f"/Research?research_ticker={_tk_full}"
-                _cells = f'<td style="padding:8px 12px;white-space:nowrap;">' \
-                         f'<a href="{_url}" target="_blank" ' \
-                         f'style="color:var(--accent);font-family:var(--font-mono,monospace);' \
-                         f'font-weight:600;font-size:0.82rem;text-decoration:none;" ' \
-                         f'onmouseover="this.style.textDecoration=\'underline\'" ' \
-                         f'onmouseout="this.style.textDecoration=\'none\'">{_tk_label}</a></td>'
+                _cells = (
+                    f'<td style="padding:8px 12px;white-space:nowrap;">'
+                    f'<a href="{_url}" target="_blank" '
+                    f'style="color:var(--accent);font-family:var(--font-mono,monospace);'
+                    f'font-weight:600;font-size:0.82rem;text-decoration:none;" '
+                    f'onmouseover="this.style.textDecoration=\'underline\'" '
+                    f'onmouseout="this.style.textDecoration=\'none\'">{_tk_label}</a></td>'
+                )
                 for col in _data_cols[1:]:
                     _val = _row.get(col, "—")
-                    _is_health = col == 'health'
-                    _style = (
-                        'font-family:var(--font-mono,monospace);font-size:0.78rem;'
-                        if _is_health else
-                        'font-size:0.82rem;color:var(--text-secondary,#ccc);'
-                    )
-                    _cells += f'<td style="padding:8px 12px;{_style}">{_val}</td>'
+                    if col == 'score':
+                        _cells += f'<td style="padding:8px 12px;min-width:160px;">{_health_bar_html(_val)}</td>'
+                    else:
+                        _cells += (
+                            f'<td style="padding:8px 12px;font-size:0.82rem;'
+                            f'color:var(--text-secondary,#ccc);white-space:nowrap;">{_val}</td>'
+                        )
                 _rows_html += (
                     f'<tr style="border-bottom:1px solid var(--border-subtle);" '
                     f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
