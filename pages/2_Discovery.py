@@ -851,30 +851,55 @@ with tab_screen:
                         lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
                     )
 
-            st.caption("clique em uma linha para abrir no research →")
-            _sel_screener = st.dataframe(
-                df_display,
-                use_container_width=True,
-                hide_index=True,
-                selection_mode="single-row",
-                on_select="rerun",
-                key="df_screener_quant",
-                column_config={
-                    'ticker': st.column_config.TextColumn("Ticker", width="small"),
-                    'nome':   st.column_config.TextColumn("Nome",   width="medium"),
-                    'health': st.column_config.TextColumn("Health Score", width="medium"),
-                    'p/l':    st.column_config.TextColumn("P/L",   width="small"),
-                    'p/vp':   st.column_config.TextColumn("P/VP",  width="small"),
-                    'roe%':   st.column_config.TextColumn("ROE %", width="small"),
-                    'dy%':    st.column_config.TextColumn("DY %",  width="small"),
-                    'margem%':st.column_config.TextColumn("Margem %", width="small"),
-                },
+            # Tabela HTML com links no ticker — abre Research em nova aba
+            _cc_sc = _chart_cores() if '_chart_cores' in dir() else {}
+            _header_cols = ["Ticker", "Nome", "Health Score", "P/L", "P/VP", "ROE %", "DY %", "Margem %"]
+            _data_cols   = ['ticker', 'nome', 'health', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
+
+            _thead = "".join(
+                f'<th style="padding:8px 12px;text-align:left;font-size:0.7rem;'
+                f'color:var(--text-muted);text-transform:uppercase;'
+                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{h}</th>'
+                for h in _header_cols
             )
-            if _sel_screener and _sel_screener.selection.rows:
-                _row_idx = _sel_screener.selection.rows[0]
-                _sel_ticker = df_res.iloc[_row_idx]['_ticker_full']
-                st.session_state['research_ticker_externo'] = _sel_ticker
-                st.switch_page("pages/1_Research.py")
+            _rows_html = ""
+            for _, _row in df_display.iterrows():
+                _tk_full  = df_res.loc[_row.name, '_ticker_full'] if _row.name in df_res.index else _row['ticker']
+                _tk_label = _row['ticker']
+                _url      = f"/Research?research_ticker={_tk_full}"
+                _cells = f'<td style="padding:8px 12px;white-space:nowrap;">' \
+                         f'<a href="{_url}" target="_blank" ' \
+                         f'style="color:var(--accent);font-family:var(--font-mono,monospace);' \
+                         f'font-weight:600;font-size:0.82rem;text-decoration:none;" ' \
+                         f'onmouseover="this.style.textDecoration=\'underline\'" ' \
+                         f'onmouseout="this.style.textDecoration=\'none\'">{_tk_label}</a></td>'
+                for col in _data_cols[1:]:
+                    _val = _row.get(col, "—")
+                    _is_health = col == 'health'
+                    _style = (
+                        'font-family:var(--font-mono,monospace);font-size:0.78rem;'
+                        if _is_health else
+                        'font-size:0.82rem;color:var(--text-secondary,#ccc);'
+                    )
+                    _cells += f'<td style="padding:8px 12px;{_style}">{_val}</td>'
+                _rows_html += (
+                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                    f'onmouseout="this.style.background=\'transparent\'">'
+                    f'{_cells}</tr>'
+                )
+
+            st.markdown(
+                f'<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">'
+                f'clique no ticker para abrir no research em nova aba ↗</div>'
+                f'<div style="overflow-x:auto;">'
+                f'<table style="width:100%;border-collapse:collapse;'
+                f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_thead}</tr></thead>'
+                f'<tbody>{_rows_html}</tbody>'
+                f'</table></div>',
+                unsafe_allow_html=True,
+            )
 
             # ── adicionar à watchlist ────────────────────────────────────────
             section_title("➕ adicionar à watchlist")
