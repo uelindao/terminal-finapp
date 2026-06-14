@@ -587,8 +587,22 @@ with tab_screen:
         _cor_amb  = "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
 
         _selic_val = _mc.get("selic")
-        _ipca_val  = _mc.get("ipca")
-        _selic_r_scr = round(_selic_val - (_ipca_val or 0), 1) if _selic_val and _ipca_val else None
+        # ipca_12m (% aa) vem do macro_cache; ipca do session_state é mensal — não usar.
+        _ipca_12m = _mc.get("ipca_12m")
+        if _ipca_12m is None:
+            try:
+                from database.db import get_all_macro_cache
+                _mc_cache = {r["indicator"]: r["value"] for r in (get_all_macro_cache() or [])}
+                _ipca_12m = _mc_cache.get("ipca_12m")
+                if _ipca_12m is not None:
+                    _ipca_12m = float(_ipca_12m)
+            except Exception:
+                _ipca_12m = None
+        # Fisher: selic_real = (1 + selic/100) / (1 + ipca_12m/100) - 1
+        if _selic_val and _ipca_12m:
+            _selic_r_scr = round(((1 + _selic_val / 100) / (1 + _ipca_12m / 100) - 1) * 100, 1)
+        else:
+            _selic_r_scr = None
         _cor_selic_r = "var(--bear)" if (_selic_r_scr or 0) > 8 else ("var(--amber)" if (_selic_r_scr or 0) > 4 else "var(--bull)")
 
         st.markdown(
