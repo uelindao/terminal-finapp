@@ -1409,3 +1409,11 @@ def aplicar_tema():
         st.markdown(get_tema_css(), unsafe_allow_html=True)
     except Exception:
         pass
+
+    # Fase 4: registra templates Plotly por tema e aplica o do tema ativo
+    # como default. Afeta TODO go.Figure() criado depois desta chamada.
+    try:
+        from utils.charts import aplicar_template_ativo
+        aplicar_template_ativo()
+    except Exception:
+        pass

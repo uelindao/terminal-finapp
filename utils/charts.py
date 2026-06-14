@@ -2,8 +2,13 @@
 utils/charts.py
 Templates e funções de gráfico padronizadas.
 Garante consistência visual em todo o app — cores seguem o tema ativo.
+
+Fase 4: registra templates Plotly por tema (pio.templates) e expõe paletas
+de série + fontes do tema. Páginas devem passar cores via _cores() e _palette(),
+não hardcoded.
 """
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
 import streamlit as st
 
@@ -35,25 +40,149 @@ def _cores() -> dict:
         }
 
 
+def _palette() -> list[str]:
+    """8 cores qualitativas do tema ativo (substitui CORES_SERIES hardcoded)."""
+    try:
+        from utils.themes import get_chart_palette
+        return get_chart_palette()
+    except Exception:
+        return list(CORES_SERIES)
+
+
+def _font_family_ui() -> str:
+    """String CSS de font-family UI do tema ativo (literal, Plotly não aceita var(--*))."""
+    try:
+        from utils.themes import get_fontes_ativas, FONTES_UI
+        fa = get_fontes_ativas()
+        return FONTES_UI.get(fa["ui"], FONTES_UI["inter"])["css"]
+    except Exception:
+        return "'Inter', system-ui, -apple-system, sans-serif"
+
+
+def _font_family_data() -> str:
+    """String CSS de font-family monospace (dados) do tema ativo."""
+    try:
+        from utils.themes import get_fontes_ativas, FONTES_DATA
+        fa = get_fontes_ativas()
+        return FONTES_DATA.get(fa["data"], FONTES_DATA["jetbrains_mono"])["css"]
+    except Exception:
+        return "'JetBrains Mono', 'Courier New', monospace"
+
+
+# ── Templates Plotly por tema (registrados em pio.templates) ──────────────────
+
+def _template_para_tema(tema_id: str) -> "go.layout.Template":
+    """Constrói um Template Plotly completo a partir das cores+fontes de um tema."""
+    from utils.themes import TEMAS, get_chart_palette, FONTES_UI, FONTES_DATA, TEMAS_FONTES_DEFAULT
+
+    if tema_id not in TEMAS:
+        tema_id = "dark"
+    t       = TEMAS[tema_id]["vars"]
+    palette = list(get_chart_palette()) if tema_id == _ativo_id() else CORES_SERIES
+
+    # Para palette do tema solicitado (sem depender do ativo)
+    from utils.themes import CHART_PALETTES
+    palette = CHART_PALETTES.get(tema_id, CHART_PALETTES.get("dark", CORES_SERIES))
+
+    fontes  = TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+    font_ui   = FONTES_UI.get(fontes["ui"],   FONTES_UI["inter"])["css"]
+    font_data = FONTES_DATA.get(fontes["data"], FONTES_DATA["jetbrains_mono"])["css"]
+
+    border  = t.get("--border-subtle", "#2A2C3E")
+    surface = t.get("--bg-surface",    "#1C1D2B")
+    elev    = t.get("--bg-elevated",   "#23243A")
+    muted   = t.get("--text-muted",    "#6B7280")
+    text    = t.get("--text-primary",  "#F0F2FF")
+    bull    = t.get("--bull",          "#10B981")
+    bear    = t.get("--bear",          "#EF4444")
+
+    return go.layout.Template(
+        layout=dict(
+            colorway      = palette,
+            paper_bgcolor = surface,
+            plot_bgcolor  = surface,
+            font          = dict(family=font_ui, color=muted, size=11),
+            hovermode     = "x unified",
+            hoverlabel    = dict(
+                bgcolor    = elev,
+                bordercolor= border,
+                font       = dict(family=font_ui, color=text, size=11),
+            ),
+            legend = dict(
+                orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+                font=dict(color=muted, size=10, family=font_ui),
+                bgcolor="rgba(0,0,0,0)", borderwidth=0,
+            ),
+            xaxis = dict(
+                showgrid=True, gridcolor=border, gridwidth=1,
+                zeroline=False, linecolor=border,
+                tickfont=dict(family=font_ui, size=10, color=muted),
+            ),
+            yaxis = dict(
+                showgrid=True, gridcolor=border, gridwidth=1,
+                zeroline=False, linecolor=border,
+                tickfont=dict(family=font_ui, size=10, color=muted),
+            ),
+            colorscale = dict(
+                # bear (vermelho) -> muted -> bull (verde) — divergente
+                diverging=[[0.0, bear], [0.5, muted], [1.0, bull]],
+                # bull sequencial (do claro ao escuro)
+                sequential=[[0.0, surface], [1.0, bull]],
+                sequentialminus=[[0.0, bear], [1.0, surface]],
+            ),
+        )
+    )
+
+
+def _ativo_id() -> str:
+    try:
+        from utils.themes import get_tema_ativo
+        return get_tema_ativo()
+    except Exception:
+        return "dark"
+
+
+def registrar_templates() -> None:
+    """Registra um template Plotly para cada tema em pio.templates."""
+    from utils.themes import TEMAS_ORDER
+    for tid in TEMAS_ORDER:
+        nome = f"finterminal_{tid}"
+        if nome not in pio.templates:
+            pio.templates[nome] = _template_para_tema(tid)
+
+
+def aplicar_template_ativo() -> None:
+    """
+    Aplica o template do tema ativo como pio.templates.default.
+    Chame uma vez por sessão (após aplicar_tema). Afeta TODO go.Figure() e
+    plotly.express criados depois da chamada.
+    """
+    registrar_templates()
+    pio.templates.default = f"finterminal_{_ativo_id()}"
+
+
 def base_layout(height: int = 400, title: str = "") -> dict:
-    """Retorna o layout base para qualquer gráfico (cores dinâmicas por tema)."""
-    c = _cores()
+    """Retorna o layout base para qualquer gráfico (cores+fontes dinâmicas por tema)."""
+    c     = _cores()
+    fu    = _font_family_ui()
+    fd    = _font_family_data()
     layout = dict(
         paper_bgcolor=c["surface"],
         plot_bgcolor=c["surface"],
-        font=dict(family="Inter, system-ui, sans-serif", color=c["muted"], size=11),
+        font=dict(family=fu, color=c["muted"], size=11),
         margin=dict(l=0, r=0, t=30 if title else 12, b=0),
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor=c["elevated"],
             bordercolor=c["border"],
-            font=dict(family="Inter, system-ui, sans-serif", color=c["text"], size=11),
+            font=dict(family=fu, color=c["text"], size=11),
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
             xanchor="right",  x=1,
-            font=dict(color=c["muted"], size=10, family="Inter, system-ui, sans-serif"),
+            font=dict(color=c["muted"], size=10, family=fu),
             bgcolor="rgba(0,0,0,0)", borderwidth=0,
         ),
         height=height,
@@ -61,7 +190,7 @@ def base_layout(height: int = 400, title: str = "") -> dict:
     if title:
         layout["title"] = dict(
             text=title,
-            font=dict(color=c["muted"], size=11, family="Courier New"),
+            font=dict(color=c["muted"], size=11, family=fd),
             x=0,
         )
     return layout
@@ -69,14 +198,15 @@ def base_layout(height: int = 400, title: str = "") -> dict:
 
 def _axis() -> dict:
     """Retorna estilo de eixo para o tema ativo."""
-    c = _cores()
+    c  = _cores()
+    fu = _font_family_ui()
     return dict(
         showgrid=True,
         gridcolor=c["border"],
         gridwidth=1,
         zeroline=False,
         linecolor=c["border"],
-        tickfont=dict(family="Inter, system-ui, sans-serif", size=10, color=c["muted"]),
+        tickfont=dict(family=fu, size=10, color=c["muted"]),
     )
 
 
@@ -310,7 +440,7 @@ def barras_verticais(
         marker_color=cores,
         text=text_vals,
         textposition="outside",
-        textfont=dict(size=9, color=c["muted"], family="Courier New"),
+        textfont=dict(size=9, color=c["muted"], family=_font_family_data()),
         hovertemplate="%{x}<br><b>%{y:+.2f}</b><extra></extra>",
     ))
     fig.add_hline(y=0, line_color=c["border"], line_width=1)
@@ -322,8 +452,8 @@ def base100(df, titulo="", height=400):
     """Performance comparada em base 100."""
     c = _cores()
     fig = go.Figure()
-    cores_seq = [c["accent"], c["info"], c["bull"], c["amber"], c["bear"],
-                 "#8B5CF6", "#06B6D4", "#EC4899"]
+    # Fase 4: paleta de séries vem do tema ativo (não mais 3 cores hardcoded)
+    cores_seq = _palette()
 
     for i, col in enumerate(df.columns):
         retorno = df[col].iloc[-1] - 100

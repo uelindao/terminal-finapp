@@ -1790,7 +1790,7 @@ with tab_global:
                 fig_slope = go.Figure()
                 fig_slope.add_hrect(y0=-5, y1=0, fillcolor="rgba(231,76,60,0.08)", line_width=0, layer="below")
                 fig_slope.add_hrect(y0=0, y1=5, fillcolor="rgba(46,204,113,0.08)", line_width=0, layer="below")
-                fig_slope.add_hline(y=0, line_color="#666", line_width=1, line_dash="dot")
+                fig_slope.add_hline(y=0, line_color=_chart_cores()["muted"], line_width=1, line_dash="dot")
                 fig_slope.add_trace(go.Scatter(
                     x=df_slope["data"], y=df_slope["slope_10y_2y"],
                     mode="lines", name="T10Y - T2Y (pp)",
@@ -2122,7 +2122,7 @@ with tab_global:
                             ),
                         ))
                         _fig_ecb.add_hline(
-                            y=0, line_color='#333',
+                            y=0, line_color=_chart_cores()["muted"],
                             line_dash='dash', line_width=1,
                         )
                         _lay_ecb = base_layout(
@@ -2790,7 +2790,7 @@ with tab_global:
                         line=dict(color=_CORES_CESTA.get(_k, "#888"), width=1, dash="dot"),
                         hovertemplate=f"{_NOMES_CESTA.get(_k,'?')}: %{{y:.1f}}<extra></extra>",
                     ))
-                _fig_cesta.add_hline(y=100, line_color="#333", line_dash="dash", line_width=1)
+                _fig_cesta.add_hline(y=100, line_color=_chart_cores()["muted"], line_dash="dash", line_width=1)
                 _fig_cesta.update_layout(**base_layout(height=280, title="cesta de exportação brasileira (base 100)"))
                 st.plotly_chart(_fig_cesta, use_container_width=True, config={'responsive': True})
                 _ret_cesta = float(_cesta_idx.iloc[-1]) - 100
@@ -2992,7 +2992,7 @@ with tab_global:
                             _fig_c = go.Figure()
                             _fig_c.add_trace(go.Scatter(x=_b100_c.index, y=_b100_c.values, name=_nm, line=dict(color=_cor, width=2), hovertemplate=f'{_nm}: %{{y:.1f}}<extra></extra>'))
                             _fig_c.add_trace(go.Scatter(x=_b100_b.index, y=_b100_b.values, name=_bn, line=dict(color='#555', width=1.5, dash='dot'), hovertemplate=f'{_bn}: %{{y:.1f}}<extra></extra>'))
-                            _fig_c.add_hline(y=100, line_color='#333', line_dash='dash', line_width=1)
+                            _fig_c.add_hline(y=100, line_color=_chart_cores()["muted"], line_dash='dash', line_width=1)
                             _fig_c.update_layout(**base_layout(height=220, title=f"{_nm} vs {_bn} (base 100)"))
                             st.plotly_chart(_fig_c, use_container_width=True, config={'responsive': True})
                             _ret_b = (float(_hist_b.iloc[-1]) / float(_hist_b.iloc[0]) - 1) * 100
