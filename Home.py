@@ -38,6 +38,8 @@ from utils.components import (
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
     tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url,
+    # Fase 6 — shell visual da Home
+    topbar, side_panel,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -337,8 +339,20 @@ def buscar_ativo_yahoo(query):
         return []
 
 # ==========================================
-# HEADER E PAINÉIS DE UTILIZADOR
+# HEADER E PAINÉIS DE UTILIZADOR (Fase 6 — shell visual)
 # ==========================================
+# Topbar fina sticky com breadcrumb + sync + user (substitui o page_header
+# simples). Page_header preservado abaixo como hero textual.
+_user_top = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", None), ("home", None)],
+    user_name=_user_top.get('username', '') or _user_top.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+    show_search=True,
+    show_sync=True,
+    show_user=True,
+)
+
 page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
 
 # Placeholder para market pulse bar — preenchido após carregar índices (linha ~865)
@@ -511,10 +525,10 @@ if _tickers_earn:
                         f'</div>'
 
                         f'<div style="text-align:right;">'
-                        f'<div style="font-family:Courier New;'
+                        f'<div style="font-family:var(--font-data);'
                         f'font-size:0.72rem;color:{_cor_ep};'
                         f'font-weight:600;">{_urgencia}</div>'
-                        f'<div style="font-family:Courier New;'
+                        f'<div style="font-family:var(--font-data);'
                         f'font-size:0.65rem;color:{_cor_hs};">'
                         f'hs: {_hs_ep}/100</div>'
                         f'</div>'
@@ -532,8 +546,8 @@ if _tickers_earn:
                         st.switch_page("pages/1_Research.py")
             else:
                 st.markdown(
-                    '<div style="font-family:Courier New;'
-                    'font-size:0.72rem;color:#333;padding:8px 0;">'
+                    '<div style="font-family:var(--font-data);'
+                    'font-size:0.72rem;color:var(--text-muted);padding:8px 0;">'
                     'nenhum resultado nos próximos 14 dias.'
                     '</div>',
                     unsafe_allow_html=True,
@@ -541,9 +555,10 @@ if _tickers_earn:
 
         with _earn_cols[1]:
             st.markdown(
-                '<div style="font-family:Courier New;'
-                'font-size:0.68rem;color:#555;'
-                'margin-bottom:8px;font-weight:600;">'
+                '<div style="font-family:var(--font-ui);'
+                'font-size:0.68rem;color:var(--text-muted);'
+                'margin-bottom:8px;font-weight:600;'
+                'text-transform:uppercase;letter-spacing:var(--ls-wide);">'
                 '📋 reportaram recentemente (30 dias)</div>',
                 unsafe_allow_html=True,
             )
@@ -655,30 +670,30 @@ if _tickers_wl_home:
                 f'flex-wrap:wrap;">'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:#444;">RSI</div>'
-                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'<div style="font-size:0.58rem;color:var(--text-muted);">RSI</div>'
+                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
                 f'color:{"var(--bull)" if 35 <= _opp["rsi"] <= 55 else "var(--amber)"};">'
                 f'{_opp["rsi"]:.0f}</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:#444;">5d</div>'
-                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'<div style="font-size:0.58rem;color:var(--text-muted);">5d</div>'
+                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
                 f'color:{"var(--bull)" if _opp["ret_5d"] >= 0 else "var(--bear)"};">'
                 f'{_opp["ret_5d"]:+.1f}%</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:#444;">3m</div>'
-                f'<div style="font-family:Courier New;font-size:0.75rem;'
+                f'<div style="font-size:0.58rem;color:var(--text-muted);">3m</div>'
+                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
                 f'color:{"var(--bull)" if _opp["ret_3m"] >= 0 else "var(--bear)"};">'
                 f'{_opp["ret_3m"]:+.1f}%</div>'
                 f'</div>'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:#444;">topo</div>'
-                f'<div style="font-family:Courier New;font-size:0.75rem;'
-                f'color:#888;">'
+                f'<div style="font-size:0.58rem;color:var(--text-muted);">topo</div>'
+                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
+                f'color:var(--text-secondary);">'
                 f'{_opp["dist_top"]:.0f}%</div>'
                 f'</div>'
 
@@ -720,7 +735,7 @@ if _tickers_wl_home:
                     f'<span style="font-size:0.68rem;color:{_bcor};'
                     f'font-family:var(--font-data);font-weight:600;">{_bstr}</span>'
                     f'</div>'
-                    f'<div style="background:#111;border-radius:2px;'
+                    f'<div style="background:var(--bg-overlay);border-radius:2px;'
                     f'height:2px;margin-bottom:5px;">'
                     f'<div style="background:{_bcor};border-radius:2px;'
                     f'height:2px;width:{_bpct}%;"></div>'
@@ -733,8 +748,10 @@ if _tickers_wl_home:
 
         if _opps_br:
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.72rem; '
-                'color:#555; margin:8px 0 4px 0;">🇧🇷 brasil</div>',
+                '<div style="font-family:var(--font-ui); font-size:0.72rem; '
+                'color:var(--text-muted); margin:8px 0 4px 0;'
+                'text-transform:uppercase; letter-spacing:var(--ls-wide);">'
+                '🇧🇷 brasil</div>',
                 unsafe_allow_html=True,
             )
             _cols_br = st.columns(min(len(_opps_br), 3))
@@ -744,8 +761,10 @@ if _tickers_wl_home:
 
         if _opps_eua:
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.72rem; '
-                'color:#555; margin:12px 0 4px 0;">🇺🇸 eua</div>',
+                '<div style="font-family:var(--font-ui); font-size:0.72rem; '
+                'color:var(--text-muted); margin:12px 0 4px 0;'
+                'text-transform:uppercase; letter-spacing:var(--ls-wide);">'
+                '🇺🇸 eua</div>',
                 unsafe_allow_html=True,
             )
             _cols_eua = st.columns(min(len(_opps_eua), 3))
@@ -1152,7 +1171,7 @@ with col_gauge_mac:
     st.plotly_chart(fig_mac, use_container_width=True, config={'responsive': True})
 
     st.markdown(
-        f'<div style="text-align:center; font-family:Courier New; font-size:1.1rem; '
+        f'<div style="text-align:center; font-family:var(--font-data); font-size:1.1rem; '
         f'color:{ambiente["cor"]}; font-weight:bold; margin-top:-16px; '
         f'letter-spacing:0.1em;">{ambiente["label"]}</div>',
         unsafe_allow_html=True,
@@ -1188,7 +1207,7 @@ with col_sinais_mac:
         _f = fontes_sem.get(_k)
         if _f:
             _ic = "📦" if _f == "cache" else "📡"
-            _badges.append(f'<span style="font-size:0.6rem; color:#555; margin-right:8px;">{_ic} {_k}</span>')
+            _badges.append(f'<span style="font-size:0.6rem; color:var(--text-muted); margin-right:8px;">{_ic} {_k}</span>')
     if _badges:
         st.markdown(
             f'<div style="text-align:center; padding:2px 0 6px;">{"".join(_badges)}</div>',
@@ -1414,13 +1433,13 @@ def modal_cfg_watchlist():
 def _dialog_remover_varios(tickers: tuple, watchlist_id: int):
     n = len(tickers)
     st.markdown(
-        f'<div style="font-family:Courier New; font-size:0.9rem; color:#ccc; padding:4px 0 8px;">'
-        f'remover <strong style="color:#FF1744;">{n} ativo{"s" if n > 1 else ""}</strong> da watchlist?</div>',
+        f'<div style="font-family:var(--font-ui); font-size:0.9rem; color:var(--text-secondary); padding:4px 0 8px;">'
+        f'remover <strong style="color:var(--bear);">{n} ativo{"s" if n > 1 else ""}</strong> da watchlist?</div>',
         unsafe_allow_html=True,
     )
     for _tk in tickers:
         st.markdown(
-            f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; padding:1px 0;">• {_tk.replace(".SA","")}</div>',
+            f'<div style="font-family:var(--font-data); font-size:0.75rem; color:var(--text-muted); padding:1px 0;">• {_tk.replace(".SA","")}</div>',
             unsafe_allow_html=True,
         )
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1438,7 +1457,7 @@ def _dialog_remover_varios(tickers: tuple, watchlist_id: int):
 def _dialog_remover_ativo(ticker: str, watchlist_id: int):
     _label = ticker.replace('.SA', '').upper()
     st.markdown(
-        f'<div style="font-family:Courier New; font-size:0.9rem; color:#ccc; padding:8px 0;">'
+        f'<div style="font-family:var(--font-data); font-size:0.9rem; color:var(--text-secondary); padding:8px 0;">'
         f'remover <strong style="color:var(--amber);">{_label}</strong> da watchlist?</div>',
         unsafe_allow_html=True,
     )
@@ -1498,8 +1517,8 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
                 cor_v = "var(--bull)" if v.startswith('+') else ("var(--bear)" if v.startswith('-') else "var(--text-muted)")
                 st.markdown(
                     f"<div style='display:flex; justify-content:space-between; "
-                    f"padding:3px 0; font-family:Courier New; font-size:0.72rem;'>"
-                    f"<span style='color:#444;'>{pilar.lower()}</span>"
+                    f"padding:3px 0; font-family:var(--font-data); font-size:0.72rem;'>"
+                    f"<span style='color:var(--text-muted);'>{pilar.lower()}</span>"
                     f"<span style='color:{cor_v};'>{v}</span></div>",
                     unsafe_allow_html=True,
                 )
@@ -1510,7 +1529,7 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
         st.markdown("<br>**🚨 contexto & alertas:**", unsafe_allow_html=True)
         for a in alertas_lista:
             st.markdown(
-                f"<div style='font-size:0.8rem; color:#aaa; margin-bottom:4px; "
+                f"<div style='font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px; "
                 f"padding-left:10px; border-left:2px solid #444;'>{a}</div>",
                 unsafe_allow_html=True,
             )
@@ -1822,7 +1841,7 @@ else:
     with col_tag3:
         _n_grupos = len(tags_disponiveis) if tags_disponiveis else 1
         st.markdown(
-            f'<div style="font-family:Courier New; font-size:0.75rem; color:#555; '
+            f'<div style="font-family:var(--font-data); font-size:0.75rem; color:var(--text-muted); '
             f'padding-top:8px; text-align:right;">'
             f'{len(watchlist)} ativos | {_n_grupos} grupo{"s" if _n_grupos != 1 else ""}</div>',
             unsafe_allow_html=True,
@@ -1838,7 +1857,7 @@ else:
     if st.session_state.get('modo_editar_tags'):
         with st.expander("🏷️ gerenciar tags dos ativos", expanded=True):
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.75rem; color:#555; margin-bottom:12px;">'
+                '<div style="font-family:var(--font-data); font-size:0.75rem; color:var(--text-muted); margin-bottom:12px;">'
                 'organize seus ativos por tese de investimento. '
                 'ex: <code>dividendos br</code>, <code>tech eua</code>, <code>fiis logística</code></div>',
                 unsafe_allow_html=True,
@@ -1851,7 +1870,7 @@ else:
                 'defensivo', 'especulativo',
             ]
             st.markdown(
-                '<div style="font-family:Courier New; font-size:0.68rem; color:#444; margin-bottom:10px;">'
+                '<div style="font-family:var(--font-data); font-size:0.68rem; color:var(--text-muted); margin-bottom:10px;">'
                 'sugeridas: ' +
                 ' | '.join(f'<code>{_t}</code>' for _t in _tags_sugeridas[:6]) +
                 '</div>',
@@ -1959,7 +1978,7 @@ else:
     for mercado, ativos in mercados_dict.items():
         # Header do grupo de mercado
         st.markdown(
-            f'<div style="font-family:Courier New;'
+            f'<div style="font-family:var(--font-data);'
             f' font-size:0.60rem; font-weight:bold;'
             f' color:var(--text-muted); text-transform:uppercase;'
             f' letter-spacing:0.14em; padding:8px 0 4px;">'
@@ -2045,7 +2064,7 @@ else:
         with _cb1:
             st.markdown(
                 f'<div style="background:#1a0505; border:1px solid #FF1744; border-radius:6px;'
-                f' padding:10px 16px; font-family:Courier New; font-size:0.8rem; color:#FF6B6B;">'
+                f' padding:10px 16px; font-family:var(--font-data); font-size:0.8rem; color:var(--bear);">'
                 f'🗑 selecionados: <strong>{_labels}</strong></div>',
                 unsafe_allow_html=True,
             )
@@ -2154,7 +2173,7 @@ with st.expander("📋 histórico de envios", expanded=False):
             dt_h = datetime.fromisoformat(h['enviado_em'])
             tickers_h = h['tickers_incluidos'].split(',') if h['tickers_incluidos'] else []
             st.markdown(
-                f'<div style="font-family:Courier New; font-size:0.8rem; color:#888; padding:6px 0; border-bottom:1px solid #1e1e1e;">'
+                f'<div style="font-family:var(--font-data); font-size:0.8rem; color:var(--text-muted); padding:6px 0; border-bottom:1px solid var(--border-subtle);">'
                 f'📧 {dt_h.strftime("%d/%m/%Y %H:%M")} — {len(tickers_h)} ativos incluídos</div>',
                 unsafe_allow_html=True
             )
