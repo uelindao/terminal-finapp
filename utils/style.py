@@ -179,7 +179,13 @@ def aplicar_tema():
         --font-title: 'Space Grotesk', 'Inter', system-ui, sans-serif;
         --font-ui:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
         --font-data:  'JetBrains Mono', 'Courier New', monospace;
+        /* alias de compat para tabelas HTML que usam var(--font-mono) */
+        --font-mono:  'JetBrains Mono', 'Courier New', monospace;
         --sidebar-bg: #0B0C15;
+
+        /* alias de compat para row:hover em tabelas HTML (Discovery, Configuracoes,
+           Backfill). Override por tema vem de _compute_derived em themes.py. */
+        --bg-hover: rgba(255, 255, 255, 0.06);
     }
 
     /* ═══════════════════════════════════════════════════

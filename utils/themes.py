@@ -658,6 +658,15 @@ def _compute_derived(vars: dict, is_light: bool, tema_id: str) -> dict[str, str]
         "--chart-axis":        vars.get("--text-muted", "#6B7280"),
         "--chart-tooltip-bg":  _rgba(bg_elev, 0.96),
         "--chart-tooltip-bd":  vars.get("--border-normal", bg_elev),
+
+        # Aliases de compat para padrões adotados em pages/* fora da Fase 3:
+        # - --font-mono usado por tabelas HTML em Discovery/Configuracoes/Backfill
+        #   (referencia commit a21c5ae). Mantém alias estável para --font-data
+        #   sem precisar refatorar páginas.
+        # - --bg-hover usado em row:hover de tabelas HTML. Derivado a partir
+        #   de text-primary com alpha baixo — funciona automaticamente em
+        #   temas claros (rgba preto sutil) e escuros (rgba branco sutil).
+        "--bg-hover":  _rgba(vars.get("--text-primary", "#F0F2FF"), 0.06),
     }
 
     return {**derived, **shadows, **chart_vars}
@@ -665,14 +674,27 @@ def _compute_derived(vars: dict, is_light: bool, tema_id: str) -> dict[str, str]
 
 def get_design_tokens() -> dict[str, str]:
     """
-    Snapshot dos tokens efetivos do tema ativo (base + tema + derivados).
+    Snapshot dos tokens efetivos do tema ativo
+    (base + tema + derivados + fontes ativas).
     Útil para consumo Python — ex.: gerar cores de série pro Plotly.
     """
     tema_id = get_tema_ativo()
     tema    = TEMAS.get(tema_id, TEMAS["dark"])
     is_lt   = tema.get("is_light", False)
     derived = _compute_derived(tema["vars"], is_lt, tema_id)
-    return {**TOKENS_BASE, **tema["vars"], **derived}
+
+    fontes   = get_fontes_ativas()
+    f_titulo = FONTES_TITULO.get(fontes["titulo"], FONTES_TITULO["space_grotesk"])
+    f_ui     = FONTES_UI.get(fontes["ui"],         FONTES_UI["inter"])
+    f_data   = FONTES_DATA.get(fontes["data"],      FONTES_DATA["jetbrains_mono"])
+    font_vars = {
+        "--font-title": f_titulo["css"],
+        "--font-ui":    f_ui["css"],
+        "--font-data":  f_data["css"],
+        "--font-mono":  f_data["css"],  # alias de compat
+    }
+
+    return {**TOKENS_BASE, **tema["vars"], **derived, **font_vars}
 
 
 def get_chart_palette() -> list[str]:
@@ -791,10 +813,14 @@ def get_tema_css() -> str:
     font_import = _build_gf_import(f_titulo, f_ui, f_data)
 
     # Variáveis de fonte sobrescrevem o :root
+    # --font-mono é alias de compat para tabelas HTML em Discovery/Configuracoes/
+    # Backfill que usam var(--font-mono) (introduzido fora da Fase 3). Mantém
+    # o mesmo valor de --font-data sem precisar refatorar páginas.
     font_vars = {
         "--font-title": f_titulo["css"],
         "--font-ui":    f_ui["css"],
         "--font-data":  f_data["css"],
+        "--font-mono":  f_data["css"],
     }
 
     # Tokens derivados (gradient, glass, pills, sombras, chart-1..8)
