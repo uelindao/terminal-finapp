@@ -1998,3 +1998,397 @@ def empty_state_v2(
                     st.toast(on_click_msg)
                 return True
     return False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DESIGN SYSTEM v5 — SHELL (Fase 5)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Topbar fina + sidebar redesenhada + side panel lateral. Pensados para
+# coexistir com o auto-discovery atual de pages/* (sem st.navigation) — a
+# migração ficará por conta de streamlit_app.py opcional.
+#
+# Os 3 componentes abaixo são puro HTML/CSS (sem dependência de Streamlit
+# routing) — funcionam em qualquer página chamando a função.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def topbar(
+    breadcrumb_itens: list[tuple[str, str | None]] | None = None,
+    *,
+    show_search: bool = True,
+    show_user: bool = True,
+    show_sync: bool = True,
+    user_name: str = "",
+    sync_label: str = "",
+) -> None:
+    """
+    Barra superior fina sticky (ref 5 DWISLN).
+
+    Slots:
+      - esquerda: breadcrumb (lista de (label, href|None))
+      - centro:   atalho de busca Ctrl+K (visual — abre o command_palette via JS)
+      - direita:  indicador sync + user badge + toggle tema (compacto)
+
+    Use no topo de cada página (após aplicar_tema), antes do page_header.
+    """
+    _inject_once(
+        "_topbar_css_v5",
+        '.ft-topbar{position:sticky;top:0;z-index:998;'
+        '  display:flex;align-items:center;gap:var(--space-4);'
+        '  padding:var(--space-2) var(--space-4);'
+        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border-bottom:1px solid var(--border-subtle);'
+        '  margin:calc(-1 * var(--space-4)) calc(-1 * var(--space-4)) var(--space-4);'
+        '  font-family:var(--font-ui);font-size:var(--text-sm);}'
+        '.ft-topbar-left{flex:1;display:flex;align-items:center;'
+        '  gap:var(--space-2);min-width:0;overflow:hidden;}'
+        '.ft-topbar-center{flex:0 0 auto;display:flex;align-items:center;}'
+        '.ft-topbar-right{flex:1;display:flex;align-items:center;'
+        '  justify-content:flex-end;gap:var(--space-3);}'
+        '.ft-topbar-search-btn{display:inline-flex;align-items:center;gap:6px;'
+        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
+        '  border-radius:999px;padding:5px 12px;color:var(--text-muted);'
+        '  font-size:var(--text-xs);cursor:pointer;'
+        '  transition:all var(--motion-fast) var(--ease-out);}'
+        '.ft-topbar-search-btn:hover{border-color:var(--accent-border);'
+        '  color:var(--text-secondary);}'
+        '.ft-topbar-search-btn kbd{font-family:var(--font-data);'
+        '  background:var(--bg-base);border:1px solid var(--border-normal);'
+        '  border-radius:var(--radius-sm);padding:1px 5px;font-size:.6rem;'
+        '  color:var(--text-secondary);margin-left:4px;}'
+        '.ft-topbar-pill{display:inline-flex;align-items:center;gap:6px;'
+        '  background:var(--pill-muted-bg);border:1px solid var(--border-subtle);'
+        '  border-radius:999px;padding:4px 10px;font-size:var(--text-xs);'
+        '  color:var(--text-secondary);}'
+        '.ft-topbar-pill .dot{width:6px;height:6px;border-radius:50%;'
+        '  background:var(--bull);box-shadow:0 0 6px var(--bull);}'
+        '.ft-topbar-pill.warn .dot{background:var(--amber);box-shadow:0 0 6px var(--amber);}'
+        '.ft-topbar-user{display:inline-flex;align-items:center;gap:6px;'
+        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
+        '  border-radius:999px;padding:3px 4px 3px 10px;font-size:var(--text-xs);'
+        '  color:var(--text-secondary);}'
+        '.ft-topbar-user .avatar{display:inline-flex;align-items:center;'
+        '  justify-content:center;width:22px;height:22px;border-radius:50%;'
+        '  background:var(--accent-gradient);color:#fff;'
+        '  font-weight:700;font-size:.7rem;}'
+        '@media (max-width:900px){.ft-topbar-center{display:none;}}'
+    )
+
+    # ── Slot esquerda: breadcrumb ────────────────────────────────────────────
+    left_html = ""
+    if breadcrumb_itens:
+        partes = []
+        for i, (label, href) in enumerate(breadcrumb_itens):
+            is_last = (i == len(breadcrumb_itens) - 1)
+            if is_last:
+                partes.append(
+                    f'<span style="color:var(--text-primary);font-weight:600;'
+                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+                    f'{label}</span>'
+                )
+            elif href:
+                partes.append(
+                    f'<a href="{href}" style="color:var(--text-secondary);'
+                    f'text-decoration:none;">{label}</a>'
+                )
+            else:
+                partes.append(
+                    f'<span style="color:var(--text-secondary);">{label}</span>'
+                )
+        sep = (
+            '<span style="color:var(--text-muted);"'
+            ' aria-hidden="true">/</span>'
+        )
+        left_html = sep.join(partes)
+    else:
+        left_html = (
+            '<span style="color:var(--text-muted);font-size:var(--text-xs);'
+            'text-transform:uppercase;letter-spacing:var(--ls-wide);">'
+            '⚡ finterminal</span>'
+        )
+
+    # ── Slot centro: busca / Ctrl+K ──────────────────────────────────────────
+    center_html = ""
+    if show_search:
+        center_html = (
+            '<div class="ft-topbar-search-btn" '
+            'onclick="window.parent.postMessage({type:\'finterm-open-palette\'},\'*\');" '
+            'title="abrir command palette (Ctrl+K)">'
+            '<span>🔍 buscar</span><kbd>Ctrl+K</kbd></div>'
+        )
+
+    # ── Slot direita: sync + user ────────────────────────────────────────────
+    right_parts = []
+    if show_sync:
+        _sl = sync_label or "ativo"
+        right_parts.append(
+            f'<span class="ft-topbar-pill" title="status de sincronização">'
+            f'<span class="dot"></span>{_sl}</span>'
+        )
+    if show_user:
+        nm = user_name or "usuário"
+        ini = (nm.strip()[:1] or "U").upper()
+        right_parts.append(
+            f'<span class="ft-topbar-user" title="conectado como {nm}">'
+            f'<span>{nm[:14]}</span><span class="avatar">{ini}</span></span>'
+        )
+
+    right_html = "".join(right_parts)
+
+    st.markdown(
+        f'<div class="ft-topbar">'
+        f'<div class="ft-topbar-left">{left_html}</div>'
+        f'<div class="ft-topbar-center">{center_html}</div>'
+        f'<div class="ft-topbar-right">{right_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def sidebar_nav_item(
+    label:    str,
+    page_path: str,
+    *,
+    icon:    str = "",
+    active:  bool = False,
+    badge:   str = "",
+    key:     str = "",
+) -> bool:
+    """
+    Item de navegação pill para usar dentro de st.sidebar (refs 2, 3).
+    Retorna True quando clicado (faz st.switch_page para `page_path` automaticamente).
+
+    Use:
+      with st.sidebar:
+          sidebar_nav_item("Research", "pages/1_Research.py",
+                           icon="🔬", active=(current=='Research'), badge="3")
+    """
+    _inject_once(
+        "_sidenav_css_v5",
+        'div[data-ftsidenav="1"]+div .stButton button{'
+        '  display:flex !important;align-items:center !important;'
+        '  justify-content:flex-start !important;gap:var(--space-3) !important;'
+        '  background:transparent !important;border:1px solid transparent !important;'
+        '  border-radius:var(--radius-md) !important;'
+        '  padding:8px 12px !important;width:100% !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-sm) !important;font-weight:500 !important;'
+        '  color:var(--text-secondary) !important;'
+        '  transition:all var(--motion-fast) var(--ease-out) !important;'
+        '  box-shadow:none !important;text-align:left !important;}'
+        'div[data-ftsidenav="1"]+div .stButton button:hover{'
+        '  background:var(--bg-overlay) !important;'
+        '  color:var(--text-primary) !important;}'
+        'div[data-ftsidenav="1"]+div .stButton button[kind="primary"]{'
+        '  background:var(--accent-gradient) !important;'
+        '  color:#fff !important;font-weight:600 !important;'
+        '  border-color:transparent !important;'
+        '  box-shadow:var(--shadow-sm) !important;}'
+    )
+
+    bk = key or f"nav__{page_path.replace('/', '_').replace('.', '_')}"
+    label_display = f"{icon} {label}" if icon else label
+    if badge:
+        label_display = f"{label_display}  ·  {badge}"
+
+    st.markdown('<div data-ftsidenav="1"></div>', unsafe_allow_html=True)
+    if st.button(
+        label_display,
+        key=bk,
+        type=("primary" if active else "secondary"),
+        use_container_width=True,
+    ):
+        try:
+            st.switch_page(page_path)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def side_panel(
+    secoes: list[dict],
+    *,
+    titulo: str = "",
+    largura: int = 320,
+) -> None:
+    """
+    Painel lateral direito (ref 5 DWISLN). Render fora do <main> via HTML.
+
+    secoes: lista de dicts {"titulo": str, "items": [str|dict, ...]}
+      Cada item pode ser:
+        - str   → renderiza como linha simples
+        - dict  → {"label": str, "valor": str, "tone": str, "icone": str}
+
+    Em viewports < 1280px o painel vira accordion compacto inline.
+    Use no FIM da página principal (após o conteúdo do main).
+    """
+    if not secoes:
+        return
+
+    _inject_once(
+        "_sidepanel_css_v5",
+        '.ft-side-panel{background:var(--bg-surface);'
+        '  border:1px solid var(--border-subtle);'
+        '  border-radius:var(--radius-lg);'
+        '  padding:var(--space-4);box-shadow:var(--shadow-sm);'
+        '  font-family:var(--font-ui);}'
+        '.ft-side-panel-title{font-size:var(--text-xs);'
+        '  color:var(--text-muted);text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);font-weight:600;'
+        '  margin-bottom:var(--space-3);}'
+        '.ft-side-section{border-top:1px solid var(--border-subtle);'
+        '  padding-top:var(--space-3);margin-top:var(--space-3);}'
+        '.ft-side-section:first-child{border-top:0;padding-top:0;margin-top:0;}'
+        '.ft-side-section h4{font-size:var(--text-sm);'
+        '  font-weight:600;color:var(--text-primary);'
+        '  margin:0 0 var(--space-2);}'
+        '.ft-side-item{display:flex;align-items:center;gap:var(--space-2);'
+        '  padding:5px 0;font-size:var(--text-sm);}'
+        '.ft-side-item-icon{flex:0 0 22px;font-size:var(--text-md);'
+        '  color:var(--text-muted);}'
+        '.ft-side-item-label{flex:1;color:var(--text-secondary);'
+        '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+        '.ft-side-item-val{font-family:var(--font-data);'
+        '  font-size:var(--text-xs);color:var(--text-primary);font-weight:600;}'
+        '.ft-side-item-val.bull{color:var(--bull);}'
+        '.ft-side-item-val.bear{color:var(--bear);}'
+        '.ft-side-item-val.amber{color:var(--amber);}'
+        '.ft-side-item-val.info{color:var(--info);}'
+        '.ft-side-item-val.accent{color:var(--accent);}'
+    )
+
+    def _render_item(item) -> str:
+        if isinstance(item, str):
+            return (
+                f'<div class="ft-side-item">'
+                f'<div class="ft-side-item-label">{item}</div></div>'
+            )
+        icone = item.get("icone", "")
+        label = item.get("label", "")
+        valor = item.get("valor", "")
+        tone  = item.get("tone", "")
+        ic = f'<div class="ft-side-item-icon">{icone}</div>' if icone else ''
+        vl = (
+            f'<div class="ft-side-item-val {tone}">{valor}</div>'
+            if valor else ''
+        )
+        return (
+            f'<div class="ft-side-item">{ic}'
+            f'<div class="ft-side-item-label">{label}</div>{vl}</div>'
+        )
+
+    secs_html = ""
+    for sec in secoes:
+        s_titulo = sec.get("titulo", "")
+        s_items  = sec.get("items", [])
+        items_html = "".join(_render_item(it) for it in s_items)
+        secs_html += (
+            f'<div class="ft-side-section">'
+            f'<h4>{s_titulo}</h4>{items_html}</div>'
+        )
+
+    titulo_html = (
+        f'<div class="ft-side-panel-title">{titulo}</div>' if titulo else ""
+    )
+    st.markdown(
+        f'<div class="ft-side-panel" style="max-width:{largura}px;">'
+        f'{titulo_html}{secs_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── Tabela HTML consolidada (opcional na Fase 5b) ────────────────────────────
+
+def html_table(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    aligns: list[str] | None = None,
+    classes: list[list[str]] | None = None,
+    sticky_header: bool = False,
+    caption: str = "",
+) -> None:
+    """
+    Tabela HTML consolidada — substitui o boilerplate de ~30 linhas por
+    chamada que se repetia em Discovery/Configurações/Backfill/Portfolio.
+
+    headers: list de labels do cabeçalho
+    rows:    list de rows, cada row é list de células (str HTML — pode conter
+             tags como <a>, <span> etc., os valores não são escapados)
+    aligns:  alinhamento por coluna ("left"|"right"|"center"). default left
+    classes: classes CSS opcionais por célula — list de lists matching rows
+    sticky_header: thead sticky no topo do container
+
+    Estilos centralizados em .ft-table (style.py). Tipografia/cores via tokens.
+    """
+    if not headers:
+        return
+
+    _inject_once(
+        "_htmltable_css_v5",
+        '.ft-table{width:100%;border-collapse:collapse;'
+        '  font-family:var(--font-ui);background:var(--bg-surface);'
+        '  border-radius:var(--radius-md);overflow:hidden;}'
+        '.ft-table thead th{padding:8px 12px;text-align:left;'
+        '  font-size:var(--text-xs);color:var(--text-muted);'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  border-bottom:1px solid var(--border-subtle);'
+        '  white-space:nowrap;font-weight:600;}'
+        '.ft-table.sticky thead th{position:sticky;top:0;'
+        '  background:var(--bg-surface);z-index:1;}'
+        '.ft-table tbody td{padding:8px 12px;font-size:var(--text-sm);'
+        '  color:var(--text-secondary);}'
+        '.ft-table tbody tr{border-bottom:1px solid var(--border-subtle);'
+        '  transition:background var(--motion-fast) var(--ease-out);}'
+        '.ft-table tbody tr:hover{background:var(--bg-hover);}'
+        '.ft-table tbody tr:last-child{border-bottom:0;}'
+        '.ft-table td.right,.ft-table th.right{text-align:right;}'
+        '.ft-table td.center,.ft-table th.center{text-align:center;}'
+        '.ft-table td.bull{color:var(--bull);}'
+        '.ft-table td.bear{color:var(--bear);}'
+        '.ft-table td.muted{color:var(--text-muted);}'
+        '.ft-table td.mono{font-family:var(--font-data);}'
+        '.ft-table-caption{font-size:var(--text-xs);'
+        '  color:var(--text-muted);margin-bottom:6px;}'
+        '.ft-table-wrap{overflow-x:auto;width:100%;}'
+    )
+
+    aligns = aligns or ["left"] * len(headers)
+    sticky_cls = " sticky" if sticky_header else ""
+
+    # Header
+    th_html = ""
+    for h, al in zip(headers, aligns):
+        cls = f' class="{al}"' if al != "left" else ""
+        th_html += f'<th{cls}>{h}</th>'
+
+    # Body
+    tr_html = ""
+    for ridx, row in enumerate(rows):
+        td_html = ""
+        for cidx, val in enumerate(row):
+            al = aligns[cidx] if cidx < len(aligns) else "left"
+            extras = []
+            if al != "left":
+                extras.append(al)
+            if classes and ridx < len(classes) and cidx < len(classes[ridx]):
+                extras += [c for c in classes[ridx][cidx].split() if c]
+            cls = f' class="{" ".join(extras)}"' if extras else ""
+            td_html += f'<td{cls}>{val}</td>'
+        tr_html += f'<tr>{td_html}</tr>'
+
+    caption_html = (
+        f'<div class="ft-table-caption">{caption}</div>' if caption else ""
+    )
+    st.markdown(
+        f'{caption_html}'
+        f'<div class="ft-table-wrap">'
+        f'<table class="ft-table{sticky_cls}">'
+        f'<thead><tr>{th_html}</tr></thead>'
+        f'<tbody>{tr_html}</tbody>'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
