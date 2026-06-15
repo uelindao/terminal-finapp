@@ -30,6 +30,8 @@ from utils.components import (
     empty_state, inject_keyboard_shortcuts,
     tooltip, label_com_tooltip, TOOLTIPS,
     data_quality_badge,
+    # Fase 6 — shell visual
+    topbar,
 )
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
@@ -125,7 +127,7 @@ with st.sidebar:
                     else:
                         st.warning("ativo não encontrado.")
         
-        st.markdown("<div style='text-align: center; color: #555; padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align: center; color: var(--text-muted); padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
         
         # --- LISTA PADRÃO COM PROTEÇÃO PARA ATIVOS EXTERNOS ---
         opcoes = get_opcoes_selectbox()
@@ -316,6 +318,16 @@ def calcular_crescimento_implicito(preco, eps, wacc, g_terminal, n_anos):
 # MODO 2: COMPARATIVO MULTI-ATIVOS
 # ==========================================
 if modo_pesquisa == "Comparativo (Múltiplos)":
+    _user_top_cmp = get_current_user() or {}
+    topbar(
+        breadcrumb_itens=[
+            ("⚡ finterminal", "/"),
+            ("research", None),
+            ("comparativo", None),
+        ],
+        user_name=_user_top_cmp.get('username', '') or _user_top_cmp.get('nome', '') or 'usuário',
+        sync_label="ao vivo",
+    )
     page_header("⚖️ comparativo de mercado", "análise relativa de múltiplos e performance em base 100.")
     
     if not ativos_comp:
@@ -710,6 +722,18 @@ nome_exibicao = info_dict.get('longName') or info_dict.get('shortName') or cache
 moeda = "r$" if ticker.endswith(".SA") else "$"
 setor_raw = cache_d.get('setor') or info_dict.get('sector')
 setor = "logística (fii)" if "logística" in str(setor_raw).lower() else (setor_raw if setor_raw else ("fundo imobiliário" if is_fii else "mercado global"))
+
+# Topbar fina sticky (Fase 6) — breadcrumb dinâmico com o ticker atual
+_user_top = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[
+        ("⚡ finterminal", "/"),
+        ("research", None),
+        (ticker.replace(".SA", "").lower(), None),
+    ],
+    user_name=_user_top.get('username', '') or _user_top.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+)
 
 page_header(f"🔬 {ticker.lower()}", f"{nome_exibicao.lower()} | {setor.lower()}")
 
