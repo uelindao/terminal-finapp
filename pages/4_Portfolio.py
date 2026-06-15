@@ -22,7 +22,7 @@ from utils.components import page_header, section_title, metric_card, status_car
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout, _cores as _chart_cores
+from utils.charts import base_layout, _cores as _chart_cores, _font_family_ui
 from utils.logger import get_logger
 from utils.price_history import obter_close_carteira
 
@@ -2400,10 +2400,10 @@ with tab_concentracao:
                 values=values,
                 hole=0.45,
                 textinfo='label+percent',
-                textfont=dict(family='Inter, system-ui, sans-serif', size=10, color=_chart_cores()["muted"]),
+                textfont=dict(family=_font_family_ui(), size=10, color=_chart_cores()["muted"]),
                 marker=dict(
                     colors=_cores_pizza[:len(labels)],
-                    line=dict(color='#050505', width=2),
+                    line=dict(color=_chart_cores()["surface"], width=2),
                 ),
                 hovertemplate='%{label}<br>%{value:.1f}%<extra></extra>',
             ))
@@ -2774,7 +2774,7 @@ with tab_risco:
                     _fig.add_trace(go.Histogram(
                         x=_rets_pct,
                         nbinsx=60,
-                        marker_color=_chart_cores.get("accent", "#FF9900"),
+                        marker_color=_chart_cores().get("accent", "#FF9900"),
                         opacity=0.85,
                         name="retornos diários",
                     ))
@@ -2958,7 +2958,6 @@ with tab_risco:
                         height=380,
                         showlegend=False,
                         margin=dict(t=40, b=20, l=0, r=0),
-                        template="plotly_dark",
                     )
                     st.plotly_chart(_fig_wf, use_container_width=True)
 
@@ -3159,9 +3158,8 @@ with tab_risco:
                         height=320,
                         showlegend=False,
                         margin=dict(t=40, b=20, l=0, r=0),
-                        template="plotly_dark",
                     )
-                    _fig_betas.add_hline(y=0, line_width=1, line_color="#666")
+                    _fig_betas.add_hline(y=0, line_width=1, line_color=_chart_cores()["muted"])
                     st.plotly_chart(_fig_betas, use_container_width=True)
 
                     # Sumário em linguagem natural
@@ -3261,7 +3259,6 @@ with tab_risco:
                         height=320,
                         showlegend=False,
                         margin=dict(t=40, b=20, l=0, r=0),
-                        template="plotly_dark",
                     )
                     st.plotly_chart(_fig_cal, use_container_width=True)
 
