@@ -1174,6 +1174,25 @@ with tab_ia:
 
             _cache_key_analise = f"{_cache_key_ia}_analise"
 
+            # ── Tenta cache do Supabase (TTL 1 dia, por modo+universo) ──────────
+            if not st.session_state.get(_cache_key_analise) and not _btn_rodar_ia:
+                try:
+                    from database.db import get_ai_analysis as _get_ai_disc
+                    _db_cache_disc = _get_ai_disc(
+                        tipo="discovery",
+                        ticker=None,
+                        user_id=None,
+                        modo=f"{_univ_ia}_{_modo_ia}",
+                    )
+                    if _db_cache_disc:
+                        st.session_state[_cache_key_analise] = _db_cache_disc['conteudo']
+                        st.caption(
+                            f"⚡ análise via cache supabase — gerada em "
+                            f"{str(_db_cache_disc.get('created_at',''))[:16].replace('T',' ')}"
+                        )
+                except Exception:
+                    pass
+
             if st.session_state.get(_cache_key_analise):
                 st.markdown(
                     f'<div style="font-family:var(--font-data,monospace);'
@@ -1199,71 +1218,84 @@ with tab_ia:
                     key="btn_gen_analise_ia_disc",
                 ):
                     _top5 = _resultados_ia[:5]
-                    _macro_ia = st.session_state.get(
-                        "macro_context", {}
-                    )
-                    _linhas_top5 = []
+                    _macro_ia = st.session_state.get("macro_context", {})
+
+                    # Enriquece top 5 com fundamentos do cache e setor
+                    from database.db import get_todos_fundamentos_cache as _gtc
+                    _cache_disc = _gtc() or {}
+
+                    _top_payload = []
                     for _r in _top5:
-                        _linhas_top5.append(
-                            f"- {_r['ticker']} ({_r['nome'][:20]}) "
-                            f"| mercado: {_r['mercado']} "
-                            f"| score: {_r['score_assim']:.0f}/100 "
-                            f"| health: {_r['score_hs']:.0f} "
-                            f"| rsi: {_r['rsi']:.0f} "
-                            f"| ret 5d: {_r['ret_5d']:+.1f}% "
-                            f"| ret 3m: {_r['ret_3m']:+.1f}% "
-                            f"| dist topo: {_r['dist_top']:.0f}%"
-                        )
+                        _tk = _r['ticker']
+                        _fd = _cache_disc.get(_tk) or _cache_disc.get(mapear_ticker_base(_tk)) or {}
+                        _alertas_curtos = ""
+                        try:
+                            _hs_row = next(
+                                (h for h in (get_health_scores() or [])
+                                 if h['ticker'] == _tk or h['ticker'] == mapear_ticker_base(_tk)),
+                                None,
+                            )
+                            if _hs_row:
+                                _als = _hs_row.get('alertas') or []
+                                if isinstance(_als, list) and _als:
+                                    _alertas_curtos = " | ".join(str(a)[:60] for a in _als[:3])
+                        except Exception:
+                            pass
+                        _top_payload.append({
+                            'ticker':       _tk,
+                            'nome':         _r.get('nome', ''),
+                            'mercado':      _r.get('mercado', ''),
+                            'setor':        _fd.get('setor', 'n/d'),
+                            'score':        _r.get('score_assim', 0),
+                            'q_score':      _r.get('score_hs', 0),
+                            'v_score':      _r.get('score_val', 0),
+                            't_score':      _r.get('score_timing', 0),
+                            'health_score': _r.get('score_hs', 'n/d'),
+                            'pl':           _fd.get('p/l', 'n/d'),
+                            'pvp':          _fd.get('p/vp', 'n/d'),
+                            'roe':          _fd.get('roe%', 'n/d'),
+                            'dy':           _fd.get('dy%', 'n/d'),
+                            'margem':       _fd.get('margem%', 'n/d'),
+                            'rsi':          _r.get('rsi', 'n/d'),
+                            'ret_5d':       _r.get('ret_5d', 0),
+                            'ret_3m':       _r.get('ret_3m', 0),
+                            'dist_top':     _r.get('dist_top', 0),
+                            'alertas_curtos': _alertas_curtos or "nenhum",
+                        })
 
-                    _modo_desc = {
-                        "entrada":   "melhor ponto de entrada",
-                        "dividendo": "renda e dividendos",
-                        "realizacao":"possível realização parcial",
-                    }.get(_modo_ia, _modo_ia)
-
-                    _prompt_ia_disc = (
-                        f"análise de oportunidades — "
-                        f"modo: {_modo_desc}\n\n"
-                        f"universo analisado: {_univ_ia}\n"
-                        f"regime macro: "
-                        f"{_macro_ia.get('label', '—')}\n"
-                        f"selic: {_macro_ia.get('selic', 10.75):.2f}%"
-                        f" | vix: {_macro_ia.get('vix', 15.0):.1f}\n\n"
-                        f"top {len(_top5)} ativos por score "
-                        f"quantitativo:\n"
-                        + "\n".join(_linhas_top5) +
-                        f"\n\nem 5 tópicos diretos (minúsculas):\n"
-                        f"1. qual desses ativos tem a tese mais "
-                        f"sólida para o regime macro atual? por quê?\n"
-                        f"2. qual representa o melhor risco/retorno "
-                        f"no modo '{_modo_desc}'?\n"
-                        f"3. qual deles tem o maior risco oculto "
-                        f"que o score quantitativo pode não capturar?\n"
-                        f"4. como o regime macro atual "
-                        f"({_macro_ia.get('label', '—')}) "
-                        f"afeta especificamente esses ativos?\n"
-                        f"5. se tivesse que escolher apenas um "
-                        f"agora, qual seria e com qual tese de 12 meses?"
+                    from utils.ai_prompts import build_discovery_prompt
+                    _prompt_ia_disc = build_discovery_prompt(
+                        top_ativos    = _top_payload,
+                        modo          = _modo_ia,
+                        universo      = _univ_ia,
+                        macro_context = _macro_ia,
                     )
 
-                    _system_ia_disc = (
-                        "você é um analista de investimentos "
-                        "especializado em mercados br e eua. "
-                        "use os dados quantitativos fornecidos. "
-                        "seja direto e específico. minúsculas. "
-                        "não repita os dados — interprete-os."
-                    )
-                    _us_ia_disc = st.session_state.get(
-                        'user_settings', {}
-                    )
+                    _us_ia_disc = st.session_state.get('user_settings', {})
                     _resposta_ia_disc = chamar_ia(
                         prompt_usuario = _prompt_ia_disc,
-                        system         = _system_ia_disc,
-                        max_tokens     = 700,
+                        system         = SYSTEM_ANALISTA,
+                        max_tokens     = 1200,
                         temperatura    = 0.3,
                         stream         = True,
                         user_settings  = _us_ia_disc,
                     )
+
+                    # ── Persiste no Supabase (TTL 1 dia) ──────────────────
+                    if _resposta_ia_disc:
+                        try:
+                            from database.db import save_ai_analysis
+                            save_ai_analysis(
+                                tipo="discovery",
+                                ticker=None,
+                                user_id=None,
+                                modo=f"{_univ_ia}_{_modo_ia}",
+                                conteudo=_resposta_ia_disc,
+                                modelo="auto",
+                                ttl_horas=24,
+                            )
+                        except Exception:
+                            pass
                     if _resposta_ia_disc:
                         st.session_state[_cache_key_analise] = (
                             _resposta_ia_disc

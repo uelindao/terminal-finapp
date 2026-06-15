@@ -1429,9 +1429,43 @@ with tab_fund:
 with tab_analise:
     section_title("🧠 análise ia — deepseek v4 pro")
 
-    # Exibe análise anterior se existir
+    # ── Tenta cache do Supabase (compartilhado entre sessões) ────────────
     _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
+    if not _cache_ia:
+        try:
+            from database.db import get_ai_analysis as _get_ai
+            _score_atual_ia = health_result.get('score') if isinstance(health_result, dict) else None
+            _db_cache = _get_ai(
+                tipo="research",
+                ticker=t_base,
+                user_id=None,                       # research é global
+                modo=None,
+                health_score_atual=_score_atual_ia,
+                health_threshold=10,
+            )
+            if _db_cache:
+                import datetime as _dtc
+                try:
+                    _dtt = _dtc.datetime.fromisoformat(str(_db_cache['created_at']).replace('Z','+00:00'))
+                    _ts_fmt = _dtt.strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    _ts_fmt = str(_db_cache['created_at'])[:16]
+                _cache_ia = {
+                    'texto':     _db_cache['conteudo'],
+                    'timestamp': _ts_fmt,
+                    'score':     _db_cache.get('health_score_snapshot') or '—',
+                    'macro':     'cache supabase',
+                    'fonte':     'db',
+                }
+                st.session_state[f"ia_cache_{t_base}"] = _cache_ia
+        except Exception as _e_cache_ia:
+            logging.getLogger(__name__).warning(f"[research] cache ai lookup: {_e_cache_ia}")
+
     if _cache_ia:
+        _fonte_tag = (
+            ' <span style="color:var(--accent);">⚡ cache</span>'
+            if _cache_ia.get('fonte') == 'db' else ''
+        )
         st.markdown(
             f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
             f'border-left:3px solid var(--accent); border-radius:6px; '
@@ -1441,7 +1475,7 @@ with tab_analise:
             f'color:var(--text-muted); margin-bottom:8px;">'
             f'📋 análise salva em {_cache_ia["timestamp"]} '
             f'| health score na época: {_cache_ia["score"]}/100 '
-            f'| regime: {_cache_ia["macro"]}'
+            f'| regime: {_cache_ia["macro"]}{_fonte_tag}'
             f'</div>'
 
             f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
@@ -1452,7 +1486,7 @@ with tab_analise:
             f'</div>',
             unsafe_allow_html=True,
         )
-        st.caption("análise da sessão anterior — clique em 'analisar' para atualizar.")
+        st.caption("análise instantânea via cache. clique em 'analisar' para forçar nova geração.")
     else:
         st.caption("nenhuma análise gerada ainda para este ativo.")
 
@@ -1493,24 +1527,76 @@ with tab_analise:
                 var_ia = (_p_hoje - _p_ant) / _p_ant * 100
 
         _impacto_setor_call = st.session_state.get("impacto_setor_ativo")
-        _prompt_ia = montar_prompt_ativo(
+
+        # ── Calcula indicadores técnicos e performance a partir de df_hist ────
+        _tec_data = {}
+        try:
+            if not df_hist.empty and len(df_hist) >= 20:
+                _close = df_hist['Close']
+                _delta = _close.diff()
+                _gain = _delta.where(_delta > 0, 0).rolling(14).mean()
+                _loss = (-_delta.where(_delta < 0, 0)).rolling(14).mean()
+                _rs = _gain / _loss
+                _rsi_v = (100 - 100 / (1 + _rs)).iloc[-1]
+                _tec_data['rsi'] = float(_rsi_v) if pd.notna(_rsi_v) else None
+
+                _hi52 = float(_close.tail(252).max()) if len(_close) >= 50 else float(_close.max())
+                _tec_data['dist_topo_52w'] = ((_close.iloc[-1] / _hi52) - 1) * 100 if _hi52 > 0 else None
+
+                if len(_close) >= 50:
+                    _tec_data['acima_mm50'] = bool(_close.iloc[-1] > _close.tail(50).mean())
+                if len(_close) >= 200:
+                    _tec_data['acima_mm200'] = bool(_close.iloc[-1] > _close.tail(200).mean())
+
+                def _ret_periodo(dias):
+                    if len(_close) <= dias:
+                        return None
+                    p0 = float(_close.iloc[-dias-1])
+                    p1 = float(_close.iloc[-1])
+                    return ((p1 / p0) - 1) * 100 if p0 > 0 else None
+
+                _tec_data['ret_1m'] = _ret_periodo(21)
+                _tec_data['ret_3m'] = _ret_periodo(63)
+                _tec_data['ret_6m'] = _ret_periodo(126)
+                _tec_data['ret_1y'] = _ret_periodo(252)
+
+                # Vol anualizada (últimos 252 dias)
+                _rets = _close.pct_change().dropna().tail(252)
+                if len(_rets) > 20:
+                    _tec_data['vol_anual'] = float(_rets.std() * (252 ** 0.5) * 100)
+        except Exception:
+            pass
+
+        # ── Monta peer data a partir de df_comp (peers já carregados) ─────────
+        _peer_payload = None
+        try:
+            if 'df_comp' in dir() and not df_comp.empty:
+                _peer_payload = df_comp.head(6).to_dict(orient='records')
+        except Exception:
+            _peer_payload = None
+
+        from utils.ai_prompts import build_research_prompt
+        _prompt_ia = build_research_prompt(
             ticker        = t_base,
             nome          = cache_d.get("nome", nome_exibicao),
             setor         = setor,
-            tipo_mercado  = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
+            mercado       = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
             fundamentos   = cache_d,
             health_result = health_result,
+            macro_context = macro_ctx,
             preco_atual   = preco_ia,
             var_1d        = var_ia,
-            macro_context = macro_ctx,
             multiplos_historicos = _medios,
             impacto_setor = _impacto_setor_call,
+            peer_data     = _peer_payload,
+            tecnico       = _tec_data,
+            dividendos    = None,
         )
 
         _resposta_ia = chamar_ia(
             prompt_usuario = _prompt_ia,
             system         = SYSTEM_ANALISTA,
-            max_tokens     = 1500,
+            max_tokens     = 1800,
             temperatura    = 0.3,
             stream         = True,
             thinking       = usar_thinking,
@@ -1525,6 +1611,26 @@ with tab_analise:
                 'score':     health_result.get('score', 50),
                 'macro':     macro_ctx.get('label', '—'),
             }
+            # ── Persiste no Supabase (compartilhado, TTL 7 dias) ─────────
+            try:
+                from database.db import save_ai_analysis, _hash_contexto
+                _hash_ctx = _hash_contexto(
+                    t_base, cache_d.get('p/l'), cache_d.get('roe%'),
+                    cache_d.get('dy%'), cache_d.get('ev/ebitda'),
+                    health_result.get('score'),
+                )
+                save_ai_analysis(
+                    tipo="research",
+                    ticker=t_base,
+                    user_id=None,                    # global
+                    conteudo=_resposta_ia,
+                    modelo="auto",
+                    contexto_hash=_hash_ctx,
+                    health_score_snapshot=int(health_result.get('score', 50)),
+                    ttl_horas=168,                   # 7 dias
+                )
+            except Exception as _e_save_ia:
+                logging.getLogger(__name__).warning(f"[research] save ai cache: {_e_save_ia}")
 
         st.session_state[f"ia_analise_{t_base}"] = True
 

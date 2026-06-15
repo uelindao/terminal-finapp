@@ -1617,3 +1617,173 @@ def get_ultimo_etl(job_name: str, dias: int = 7) -> dict | None:
     except Exception as e:
         logger.warning(f"[db] get_ultimo_etl: {e}")
         return None
+
+
+# ==========================================
+# AI ANALYSES CACHE — cache de análises IA
+# ==========================================
+
+def _hash_contexto(*partes) -> str:
+    """SHA1 dos inputs estáticos do prompt. Idempotente."""
+    import hashlib
+    h = hashlib.sha1()
+    for p in partes:
+        if p is None:
+            h.update(b"none")
+        else:
+            h.update(str(p).encode("utf-8", errors="ignore"))
+        h.update(b"|")
+    return h.hexdigest()
+
+
+def get_ai_analysis(
+    tipo: str,
+    ticker: str | None = None,
+    user_id: int | None = None,
+    modo: str | None = None,
+    health_score_atual: int | None = None,
+    health_threshold: int = 10,
+    contexto_hash: str | None = None,
+) -> dict | None:
+    """
+    Busca análise IA cacheada. Retorna None se:
+      - não existe
+      - expirou
+      - delta de health score > threshold
+      - contexto_hash diferente
+
+    Retorna dict {conteudo, created_at, modelo, health_score_snapshot} se hit.
+    """
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        q = (
+            sb.table("ai_analyses")
+            .select("conteudo, created_at, modelo, health_score_snapshot, contexto_hash")
+            .eq("tipo", tipo)
+            .gt("expires_at", now_iso)
+            .order("created_at", desc=True)
+            .limit(1)
+        )
+        if ticker is not None:
+            q = q.eq("ticker", ticker)
+        else:
+            q = q.is_("ticker", "null")
+        if user_id is not None:
+            q = q.eq("user_id", user_id)
+        else:
+            q = q.is_("user_id", "null")
+        if modo is not None:
+            q = q.eq("modo", modo)
+        else:
+            q = q.is_("modo", "null")
+
+        res = q.execute()
+        if not res.data:
+            return None
+
+        row = res.data[0]
+
+        # Invalidação por threshold de health score
+        if health_score_atual is not None and row.get("health_score_snapshot") is not None:
+            try:
+                _delta = abs(int(health_score_atual) - int(row["health_score_snapshot"]))
+                if _delta > health_threshold:
+                    return None
+            except (TypeError, ValueError):
+                pass
+
+        # Invalidação por contexto_hash
+        if contexto_hash is not None and row.get("contexto_hash"):
+            if contexto_hash != row["contexto_hash"]:
+                return None
+
+        return row
+    except Exception as e:
+        logger.warning(f"[db] get_ai_analysis: {e}")
+        return None
+
+
+def save_ai_analysis(
+    tipo: str,
+    conteudo: str,
+    ticker: str | None = None,
+    user_id: int | None = None,
+    modo: str | None = None,
+    modelo: str | None = None,
+    contexto_hash: str | None = None,
+    health_score_snapshot: int | None = None,
+    ttl_horas: int = 168,   # default 7 dias
+) -> bool:
+    """
+    Grava análise IA no cache. Retorna True se sucesso.
+
+    ttl_horas sugerido por tipo:
+      - research:   168 (7 dias)
+      - discovery:  24
+      - portfolio:  24
+    """
+    if not conteudo or len(conteudo.strip()) < 20:
+        return False
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timezone, timedelta
+        expires = (datetime.now(timezone.utc) + timedelta(hours=ttl_horas)).isoformat()
+
+        payload = {
+            "tipo":     tipo,
+            "ticker":   ticker,
+            "user_id":  user_id,
+            "modo":     modo,
+            "modelo":   modelo,
+            "conteudo": conteudo,
+            "contexto_hash": contexto_hash,
+            "health_score_snapshot": health_score_snapshot,
+            "expires_at": expires,
+        }
+        sb.table("ai_analyses").insert(payload).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"[db] save_ai_analysis: {e}")
+        return False
+
+
+def invalidar_ai_analyses(
+    tipo: str,
+    ticker: str | None = None,
+    user_id: int | None = None,
+    modo: str | None = None,
+) -> int:
+    """Força expiração imediata de cache para forçar regeneração. Retorna nº afetado."""
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timezone
+        passado = (datetime.now(timezone.utc)).isoformat()
+
+        q = sb.table("ai_analyses").update({"expires_at": passado}).eq("tipo", tipo)
+        if ticker is not None:
+            q = q.eq("ticker", ticker)
+        if user_id is not None:
+            q = q.eq("user_id", user_id)
+        if modo is not None:
+            q = q.eq("modo", modo)
+        res = q.execute()
+        return len(res.data or [])
+    except Exception as e:
+        logger.warning(f"[db] invalidar_ai_analyses: {e}")
+        return 0
+
+
+def cleanup_ai_analyses_expiradas(dias_antigas: int = 30) -> int:
+    """Remove entradas expiradas há mais de N dias. Rodar via ETL semanal."""
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timezone, timedelta
+        corte = (datetime.now(timezone.utc) - timedelta(days=dias_antigas)).isoformat()
+        res = sb.table("ai_analyses").delete().lt("expires_at", corte).execute()
+        return len(res.data or [])
+    except Exception as e:
+        logger.warning(f"[db] cleanup_ai_analyses_expiradas: {e}")
+        return 0

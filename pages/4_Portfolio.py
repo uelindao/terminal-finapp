@@ -1660,52 +1660,110 @@ with tab_posicoes:
                     )
 
                 st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── Exibe análise cacheada se houver ──────────────────────────
+                try:
+                    from database.db import get_ai_analysis as _get_ai_pf
+                    _uid_perf_view = st.session_state.get('user_id')
+                    _db_cache_pf = _get_ai_pf(
+                        tipo="portfolio",
+                        ticker=None,
+                        user_id=_uid_perf_view,
+                        modo=f"performance_{_periodo_perf}",
+                    )
+                    if _db_cache_pf:
+                        st.markdown(
+                            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
+                            f'border-left:3px solid var(--accent); border-radius:6px; padding:12px 16px; margin-bottom:12px;">'
+                            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.65rem; '
+                            f'color:var(--text-muted); margin-bottom:8px;">'
+                            f'⚡ análise via cache supabase '
+                            f'— gerada em {str(_db_cache_pf.get("created_at",""))[:16].replace("T"," ")}'
+                            f'</div>'
+                            f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
+                            f'color:var(--text-primary); line-height:1.7; white-space:pre-wrap;">'
+                            f'{_db_cache_pf["conteudo"]}'
+                            f'</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.caption("clique no botão abaixo para regenerar.")
+                except Exception:
+                    pass
+
                 if st.button(
                     "🧠 ia: analisar performance e sugerir ajustes",
                     key="btn_ia_perf",
                     type="secondary",
                     use_container_width=True,
                 ):
-                    _met_txt = "\n".join([
-                        f"- {nm}: retorno {mv['retorno']:+.2f}% | "
-                        f"vol {mv['vol']:.2f}% | "
-                        f"sharpe {mv['sharpe']:.2f} | "
-                        f"drawdown {mv['drawdown']:.2f}%"
-                        for nm, mv in _met.items()
-                    ])
                     _macro_perf = st.session_state.get('macro_context', {})
-                    _prompt_perf = (
-                        f"análise de performance da carteira:\n\n"
-                        f"período: {_periodo_perf}\n"
-                        f"regime macro: {_macro_perf.get('label','—')}\n\n"
-                        f"métricas comparativas:\n{_met_txt}\n\n"
-                        f"alpha vs cdi: {_alpha_cdi:+.2f}pp\n"
-                        f"alpha vs ibovespa: {_alpha_ibov:+.2f}pp\n\n"
-                        "em 4 tópicos diretos (minúsculas):\n"
-                        "1. a carteira está gerando alpha real ou "
-                        "perdendo para o benchmark passivo?\n"
-                        "2. o sharpe da carteira vs benchmarks indica "
-                        "risco bem remunerado?\n"
-                        "3. o drawdown máximo está adequado para o "
-                        "perfil de risco implícito?\n"
-                        "4. considerando o regime macro atual, "
-                        "que ajuste de alocação poderia melhorar "
-                        "o risco/retorno?"
+
+                    # ── Concentração setorial e exposição cambial ──────────
+                    _setor_conc = {}
+                    _fx_exp = {"br": 0.0, "us": 0.0}
+                    _top_positions = []
+                    try:
+                        from database.db import get_todos_fundamentos_cache as _gtc
+                        _cache_pf = _gtc() or {}
+                        _tot_v = sum((p.get('valor') or 0) for p in (st.session_state.get('pesos_ativos_cache') or []))
+                        for _p in (st.session_state.get('pesos_ativos_cache') or []):
+                            _tk = _p.get('ticker', '')
+                            _v = float(_p.get('valor') or 0)
+                            _fd_p = _cache_pf.get(_tk) or _cache_pf.get(mapear_ticker_base(_tk)) or {}
+                            _set = _fd_p.get('setor') or 'outros'
+                            _setor_conc[_set] = _setor_conc.get(_set, 0) + _v
+                            if _tk.endswith('.SA'):
+                                _fx_exp['br'] += _v
+                            else:
+                                _fx_exp['us'] += _v
+                            _top_positions.append(_p)
+                        if _tot_v > 0:
+                            _setor_conc = {k: v / _tot_v * 100 for k, v in _setor_conc.items()}
+                            _fx_exp = {k: v / _tot_v * 100 for k, v in _fx_exp.items()}
+                        # Ordena top por peso
+                        _top_positions = sorted(
+                            _top_positions, key=lambda x: -(x.get('peso_pct') or 0)
+                        )[:10]
+                    except Exception:
+                        pass
+
+                    from utils.ai_prompts import build_portfolio_performance_prompt
+                    _prompt_perf = build_portfolio_performance_prompt(
+                        metricas         = _met,
+                        posicoes_top     = _top_positions,
+                        setor_concentracao = _setor_conc,
+                        fx_exposicao     = _fx_exp,
+                        periodo          = _periodo_perf,
+                        macro_context    = _macro_perf,
+                        alpha_cdi        = _alpha_cdi,
+                        alpha_ibov       = _alpha_ibov,
                     )
-                    from utils.ai_client import chamar_ia
+                    from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
                     _us_perf = st.session_state.get('user_settings', {})
-                    chamar_ia(
+                    _resposta_perf = chamar_ia(
                         prompt_usuario=_prompt_perf,
-                        system=(
-                            "você é um gestor de portfólio quantitativo. "
-                            "analise os dados fornecidos. seja direto. "
-                            "minúsculas."
-                        ),
-                        max_tokens=600,
+                        system=SYSTEM_PORTFOLIO,
+                        max_tokens=1000,
                         temperatura=0.3,
                         stream=True,
                         user_settings=_us_perf,
                     )
+                    # ── Persiste no Supabase (TTL 1 dia, por user_id+periodo) ──
+                    if _resposta_perf:
+                        try:
+                            from database.db import save_ai_analysis
+                            _uid_perf = st.session_state.get('user_id')
+                            save_ai_analysis(
+                                tipo="portfolio",
+                                ticker=None,
+                                user_id=_uid_perf,
+                                modo=f"performance_{_periodo_perf}",
+                                conteudo=_resposta_perf,
+                                modelo="auto",
+                                ttl_horas=24,
+                            )
+                        except Exception:
+                            pass
 
         # ── persiste dados para o chat IA (tab_chat usa estes) ──
         st.session_state['pesos_ativos_cache'] = [
@@ -4983,9 +5041,81 @@ with tab_chat:
         st.session_state["chat_ctx_version"] = _ctx_version
 
     if _ctx_key not in st.session_state:
-        st.session_state[_ctx_key] = montar_contexto_carteira(
-            pesos_chat, live_chat, health_chat, metricas_chat
-        )
+        # Versão rica: concentração setorial, FX, health médio ponderado
+        try:
+            from utils.ai_prompts import build_portfolio_context_v2
+            from database.db import get_todos_fundamentos_cache as _gtc_v2
+            _cache_v2 = _gtc_v2() or {}
+
+            _enriched_v2 = []
+            _tot_v = 0.0
+            _hs_w_sum = 0.0
+            for _p in pesos_chat:
+                _tk = _p.get('ticker', '')
+                _tb = mapear_ticker_base(_tk)
+                _qtd = float(_p.get('quantidade') or 0)
+                _pm = float(_p.get('preco_medio') or _p.get('preço médio') or 0)
+                if _qtd <= 0:
+                    continue
+                _pa = float(
+                    _p.get('preco_atual') or
+                    live_chat.get(_tb, {}).get('preco') or
+                    live_chat.get(_tk, {}).get('preco') or 0
+                )
+                _valor = _pa * _qtd if _pa > 0 else _pm * _qtd
+                _tot_v += _valor
+                _hs = _p.get('health_score') or health_chat.get(_tb, {}).get('score') or 50
+                _pnl_pct = ((_pa / _pm - 1) * 100) if _pm > 0 and _pa > 0 else 0
+                _fd_p = _cache_v2.get(_tk) or _cache_v2.get(_tb) or {}
+                _enriched_v2.append({
+                    'ticker':       _tk,
+                    'qtd':          _qtd,
+                    'preco_medio':  _pm,
+                    'preco_atual':  _pa,
+                    'valor':        _valor,
+                    'health_score': _hs,
+                    'pnl_pct':      _pnl_pct,
+                    'setor':        _fd_p.get('setor', 'n/d'),
+                })
+
+            # Pesos relativos e métricas agregadas
+            _setor_conc = {}
+            _fx = {"br": 0.0, "us": 0.0}
+            for e in _enriched_v2:
+                if _tot_v > 0:
+                    e['peso_pct'] = e['valor'] / _tot_v * 100
+                else:
+                    e['peso_pct'] = 0
+                _set = e.get('setor') or 'outros'
+                _setor_conc[_set] = _setor_conc.get(_set, 0) + e['valor']
+                if e['ticker'].endswith('.SA'):
+                    _fx['br'] += e['valor']
+                else:
+                    _fx['us'] += e['valor']
+                try:
+                    _hs_w_sum += float(e['health_score']) * e['valor']
+                except (TypeError, ValueError):
+                    pass
+            if _tot_v > 0:
+                _setor_conc = {k: v / _tot_v * 100 for k, v in _setor_conc.items()}
+                _fx = {k: v / _tot_v * 100 for k, v in _fx.items()}
+                _hs_medio = _hs_w_sum / _tot_v if _hs_w_sum > 0 else None
+            else:
+                _hs_medio = None
+
+            st.session_state[_ctx_key] = build_portfolio_context_v2(
+                posicoes_enriched   = _enriched_v2,
+                metricas            = metricas_chat,
+                macro               = st.session_state.get("macro_context", {}),
+                setor_concentracao  = _setor_conc,
+                fx_exposicao        = _fx,
+                dy_carteira         = None,
+                health_medio        = _hs_medio,
+            )
+        except Exception:
+            st.session_state[_ctx_key] = montar_contexto_carteira(
+                pesos_chat, live_chat, health_chat, metricas_chat
+            )
 
     contexto_carteira = st.session_state[_ctx_key]
 
