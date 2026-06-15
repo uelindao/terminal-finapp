@@ -105,17 +105,17 @@ with tab_conta:
 
     ms1, ms2, ms3 = st.columns(3)
     with ms1:
-        st.metric("user id", f"#{user_id_atual}")
+        metric_card("user id", f"#{user_id_atual}")
     with ms2:
         wl_padrao_id   = get_watchlist_padrao()
         wls_all        = listar_watchlists()
         nome_wl_padrao = next((w['nome'] for w in wls_all if w['id'] == wl_padrao_id), "—")
-        st.metric("watchlist padrão", nome_wl_padrao)
+        metric_card("watchlist padrão", nome_wl_padrao)
     with ms3:
         pf_padrao_id   = get_portfolio_padrao()
         pfs_all        = listar_portfolios()
         nome_pf_padrao = next((p['nome'] for p in pfs_all if p['id'] == pf_padrao_id), "—")
-        st.metric("portfólio padrão", nome_pf_padrao)
+        metric_card("portfólio padrão", nome_pf_padrao)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 encerrar sessão", type="secondary"):
@@ -414,7 +414,39 @@ with tab_alertas:
             if 'criado_em' not in df_al.columns and 'created_at' in df_al.columns:
                 df_al['criado_em'] = df_al['created_at']
             show_cols = [c for c in ['ticker', 'tipo', 'threshold', 'criado_em'] if c in df_al.columns]
-            st.dataframe(df_al[show_cols], use_container_width=True, hide_index=True)
+            _df_al_s = df_al[show_cols]
+            _mn_al = 'var(--font-mono,monospace)'
+            _hdrs_al = "".join(
+                f'<th style="padding:7px 10px;text-align:{"right" if c=="threshold" else "left"};'
+                f'font-size:0.66rem;color:var(--text-muted);text-transform:uppercase;'
+                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                for c in _df_al_s.columns
+            )
+            _rows_al = ""
+            for _, row in _df_al_s.iterrows():
+                _cells_al = ""
+                for col in _df_al_s.columns:
+                    _v = row[col]
+                    _align = "right" if col == "threshold" else "left"
+                    if col == "ticker":
+                        _url_al = f"/Research?research_ticker={_v}"
+                        _cells_al += (f'<td style="padding:7px 10px;"><a href="{_url_al}" target="_blank" '
+                                      f'style="color:var(--accent);font-family:{_mn_al};font-weight:600;'
+                                      f'font-size:0.8rem;text-decoration:none;" '
+                                      f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
+                                      f'{str(_v).replace(".SA","")}</a></td>')
+                    else:
+                        _cells_al += (f'<td style="padding:7px 10px;text-align:{_align};">'
+                                      f'<span style="font-family:{_mn_al};font-size:0.8rem;">{_v}</span></td>')
+                _rows_al += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                             f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                             f'onmouseout="this.style.background=\'transparent\'">{_cells_al}</tr>')
+            st.markdown(
+                f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+                f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_hdrs_al}</tr></thead><tbody>{_rows_al}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
         else:
             st.caption("nenhum alerta de preço configurado.")
     except Exception as e:
@@ -695,12 +727,32 @@ with tab_ia:
 
     # ── Referência de providers ───────────────────────────────────────────────
     with st.expander("📋 referência de providers", expanded=False):
-        import pandas as _pd
-        _rows = [
+        _prov_rows = [
             {'provider': k, 'nome': v['label'], 'modelo padrão': v['model_default'], 'secret': v['secret_key']}
             for k, v in PROVIDERS.items()
         ]
-        st.dataframe(_pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+        _mn_pv = 'var(--font-mono,monospace)'
+        _prov_cols = ['provider', 'nome', 'modelo padrão', 'secret']
+        _hdrs_pv = "".join(
+            f'<th style="padding:7px 10px;text-align:left;font-size:0.66rem;color:var(--text-muted);'
+            f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+            for c in _prov_cols
+        )
+        _rows_pv = ""
+        for row in _prov_rows:
+            _cells_pv = "".join(
+                f'<td style="padding:7px 10px;"><span style="font-family:{_mn_pv};font-size:0.78rem;">{row[c]}</span></td>'
+                for c in _prov_cols
+            )
+            _rows_pv += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                         f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                         f'onmouseout="this.style.background=\'transparent\'">{_cells_pv}</tr>')
+        st.markdown(
+            f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+            f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+            f'<thead><tr>{_hdrs_pv}</tr></thead><tbody>{_rows_pv}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1104,7 +1156,31 @@ with tab_admin:
                 rows.append({'tabela': t, 'registros': count})
             except Exception:
                 rows.append({'tabela': t, 'registros': '—'})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        _mn_db = 'var(--font-mono,monospace)'
+        _hdrs_db = (
+            f'<th style="padding:7px 10px;text-align:left;font-size:0.66rem;color:var(--text-muted);'
+            f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">tabela</th>'
+            f'<th style="padding:7px 10px;text-align:right;font-size:0.66rem;color:var(--text-muted);'
+            f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">registros</th>'
+        )
+        _rows_db = ""
+        for r in rows:
+            _cnt = r['registros']
+            _cnt_color = "var(--text-primary)" if isinstance(_cnt, int) and _cnt > 0 else "var(--text-muted)"
+            _rows_db += (
+                f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                f'onmouseout="this.style.background=\'transparent\'">'
+                f'<td style="padding:7px 10px;"><span style="font-family:{_mn_db};font-size:0.8rem;">{r["tabela"]}</span></td>'
+                f'<td style="padding:7px 10px;text-align:right;"><span style="font-family:{_mn_db};font-size:0.8rem;color:{_cnt_color};">{_cnt}</span></td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+            f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+            f'<thead><tr>{_hdrs_db}</tr></thead><tbody>{_rows_db}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
         st.caption("banco: **Supabase (PostgreSQL)**")
     except Exception as e:
         st.warning(f"não foi possível carregar informações do banco: {e}")

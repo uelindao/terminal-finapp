@@ -401,27 +401,54 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             with c1:
                 st.markdown("**matriz de múltiplos quantitativos**")
                 if not df_comp.empty:
-                    st.dataframe(
-                        df_comp.style.format({
-                            "p/l":      lambda x: f"{x:.1f}" if pd.notna(x) else "—",
-                            "p/vp":     lambda x: f"{x:.2f}" if pd.notna(x) else "—",
-                            "roe%":     lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
-                            "dy%":      lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
-                            "mrg_liq%": lambda x: f"{x:.1f}%" if pd.notna(x) else "—",
-                            "ev/ebitda":lambda x: f"{x:.1f}" if pd.notna(x) else "—",
-                            "health":   lambda x: f"{int(x)}/100" if pd.notna(x) else "—",
-                        }).highlight_max(
-                            subset=['roe%', 'dy%', 'mrg_liq%', 'health'],
-                            color='#1a3a1a',
-                            axis=0,
-                        ).highlight_min(
-                            subset=['p/l', 'p/vp', 'ev/ebitda'],
-                            color='#1a3a1a',
-                            axis=0,
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                    def _peers_table_html(df: "pd.DataFrame") -> str:
+                        _cols = [c for c in ['ticker','nome','health','p/l','p/vp','roe%','dy%','mrg_liq%','ev/ebitda'] if c in df.columns]
+                        _mn = 'var(--font-mono,monospace)'
+                        # compute best/worst for highlighting
+                        _best_max = {c: df[c].max() for c in ['roe%','dy%','mrg_liq%','health'] if c in df.columns and df[c].notna().any()}
+                        _best_min = {c: df[c].min() for c in ['p/l','p/vp','ev/ebitda'] if c in df.columns and df[c].notna().any()}
+                        _hdrs = ""
+                        for col in _cols:
+                            _align = "left" if col in ('ticker','nome') else "right"
+                            _hdrs += f'<th style="padding:7px 10px;text-align:{_align};font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{col}</th>'
+                        _rows = ""
+                        for _, row in df.iterrows():
+                            _cells = ""
+                            for col in _cols:
+                                _v = row[col]
+                                _align = "left" if col in ('ticker','nome') else "right"
+                                _bg = ""
+                                if col in _best_max and pd.notna(_v) and _v == _best_max[col]:
+                                    _bg = "background:rgba(46,204,113,0.15);"
+                                elif col in _best_min and pd.notna(_v) and _v == _best_min[col]:
+                                    _bg = "background:rgba(46,204,113,0.15);"
+                                if col == 'ticker':
+                                    _tk_url = f"/Research?research_ticker={_v}"
+                                    _cell = (f'<a href="{_tk_url}" target="_blank" style="color:var(--accent);'
+                                             f'font-family:{_mn};font-weight:600;font-size:0.8rem;text-decoration:none;" '
+                                             f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
+                                             f'{str(_v).replace(".SA","")}</a>')
+                                elif col == 'nome':
+                                    _cell = f'<span style="color:var(--text-muted);font-size:0.78rem;">{str(_v)[:20] if pd.notna(_v) else "—"}</span>'
+                                elif col == 'health':
+                                    try:
+                                        _hi = int(_v)
+                                        _hc = "#2ecc71" if _hi >= 65 else ("#f39c12" if _hi >= 40 else "#e74c3c")
+                                        _cell = f'<span style="font-family:{_mn};font-size:0.8rem;color:{_hc};font-weight:600;">{_hi}</span>'
+                                    except (TypeError, ValueError):
+                                        _cell = '<span style="color:var(--text-muted);">—</span>'
+                                elif col in ('roe%','dy%','mrg_liq%'):
+                                    _cell = f'<span style="font-family:{_mn};font-size:0.8rem;">{_v:.1f}%</span>' if pd.notna(_v) else '<span style="color:var(--text-muted);">—</span>'
+                                else:
+                                    _cell = f'<span style="font-family:{_mn};font-size:0.8rem;">{_v:.1f}</span>' if pd.notna(_v) else '<span style="color:var(--text-muted);">—</span>'
+                                _cells += f'<td style="padding:7px 10px;text-align:{_align};{_bg}">{_cell}</td>'
+                            _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                                      f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                                      f'onmouseout="this.style.background=\'transparent\'">{_cells}</tr>')
+                        return (f'<div style="overflow-x:auto;">'
+                                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                                f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
+                    st.markdown(_peers_table_html(df_comp), unsafe_allow_html=True)
             with c2:
                 st.markdown("**performance relativa (base 100 — 10 anos)**")
                 if not hist_all.empty:
@@ -1844,7 +1871,36 @@ with tab_analise:
                                 'vs média': f"{(_val_f/_media_div - 1)*100:+.1f}%" if _media_div > 0 else "—",
                             })
                             _prev_val = _val_f
-                        st.dataframe(pd.DataFrame(_rows_div), use_container_width=True, hide_index=True)
+                        def _div_table_html(rows: list) -> str:
+                            _mn = 'var(--font-mono,monospace)'
+                            _hdrs = "".join(
+                                f'<th style="padding:7px 10px;text-align:{"left" if i==0 else "right"};'
+                                f'font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;'
+                                f'border-bottom:1px solid var(--border-subtle);">{h}</th>'
+                                for i, h in enumerate(['Data','Provento','vs anterior','vs média'])
+                            )
+                            _body = ""
+                            for r in rows:
+                                _va = r['vs anterior']
+                                _vm = r['vs média']
+                                _cv = "#2ecc71" if str(_va).startswith('+') else ("#e74c3c" if str(_va).startswith('-') else "var(--text-muted)")
+                                _cvm = "#2ecc71" if str(_vm).startswith('+') else ("#e74c3c" if str(_vm).startswith('-') else "var(--text-muted)")
+                                _body += (
+                                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                                    f'onmouseout="this.style.background=\'transparent\'">'
+                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.78rem;color:var(--text-muted);">{r["data"]}</td>'
+                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.82rem;font-weight:600;text-align:right;">{r["provento"]}</td>'
+                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cv};text-align:right;">{_va}</td>'
+                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cvm};text-align:right;">{_vm}</td>'
+                                    f'</tr>'
+                                )
+                            return (
+                                f'<div style="overflow-x:auto;">'
+                                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                                f'<thead><tr>{_hdrs}</tr></thead><tbody>{_body}</tbody></table></div>'
+                            )
+                        st.markdown(_div_table_html(_rows_div), unsafe_allow_html=True)
                     else:
                         st.info("nenhum provento encontrado nos últimos 24 meses.")
                 else:
@@ -2292,8 +2348,36 @@ with tab_analise:
                 dados_sens.append(linha)
                 
             df_sens = pd.DataFrame(dados_sens, index=[f"wacc {w}%" for w in cenarios_wacc])
-            
-            st.dataframe(df_sens, use_container_width=True, hide_index=False)
+
+            _mn_s = 'var(--font-mono,monospace)'
+            _g_cols = [f"g={g}%" for g in cenarios_g]
+            _hdrs_s = '<th style="padding:7px 10px;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">wacc \\ g</th>'
+            _hdrs_s += "".join(
+                f'<th style="padding:7px 10px;text-align:right;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                for c in _g_cols
+            )
+            _rows_s = ""
+            for idx_row, w_label in enumerate(df_sens.index):
+                _is_main = (w_label == f"wacc {wacc_pct}%")
+                _row_style = "background:rgba(99,179,237,0.08);" if _is_main else ""
+                _cells_s = f'<td style="padding:7px 10px;font-family:{_mn_s};font-size:0.78rem;font-weight:{"700" if _is_main else "400"};color:var(--text-muted);white-space:nowrap;">{w_label}</td>'
+                for gc in _g_cols:
+                    _v = df_sens.loc[w_label, gc]
+                    if _v == "—" or not isinstance(_v, (int, float)):
+                        _cells_s += f'<td style="padding:7px 10px;text-align:right;color:var(--text-muted);font-size:0.8rem;">—</td>'
+                    else:
+                        _is_cheap = _v > preco_input
+                        _bg = "background:rgba(46,204,113,0.15);" if _is_cheap else ""
+                        _cv = "#2ecc71" if _is_cheap else "var(--text-primary)"
+                        _cells_s += (f'<td style="padding:7px 10px;text-align:right;font-family:{_mn_s};font-size:0.8rem;color:{_cv};{_bg}">'
+                                     f'{moeda.upper()} {_v:,.2f}</td>')
+                _rows_s += f'<tr style="border-bottom:1px solid var(--border-subtle);{_row_style}">{_cells_s}</tr>'
+            st.markdown(
+                f'<div style="overflow-x:auto;">'
+                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_hdrs_s}</tr></thead><tbody>{_rows_s}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
             st.caption(f"valores em {moeda.upper()} | célula verde = subvalorizado vs preço atual de {preco_input} | linha destacada = wacc configurado acima.")
             
             fig = go.Figure()

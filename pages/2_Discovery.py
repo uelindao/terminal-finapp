@@ -474,19 +474,63 @@ with tab_mom:
 
         cols_mostrar = ['ticker', 'nome', 'setor', 'ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)', 'acima mm50', 'acima mm200', 'score momentum']
 
-        def colorir_momentum(val):
-            if isinstance(val, (int, float)):
-                if val > 0: return 'color: #00C853'
-                if val < 0: return 'color: #FF1744'
-            return ''
+        def _momentum_table_html(df: "pd.DataFrame") -> str:
+            _mn = 'var(--font-mono,monospace)'
+            _show = [c for c in cols_mostrar if c in df.columns]
+            _ret_cols = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)']
+            _hdrs = "".join(
+                f'<th style="padding:7px 9px;text-align:{"left" if c in ("ticker","nome","setor") else "right"};'
+                f'font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;'
+                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                for c in _show
+            )
+            _rows = ""
+            for _, row in df.iterrows():
+                _cells = ""
+                for col in _show:
+                    _v = row[col]
+                    _align = "left" if col in ("ticker","nome","setor") else "right"
+                    if col == 'ticker':
+                        _url = f"/Research?research_ticker={_v}"
+                        _cell = (f'<a href="{_url}" target="_blank" style="color:var(--accent);'
+                                 f'font-family:{_mn};font-weight:600;font-size:0.78rem;text-decoration:none;" '
+                                 f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
+                                 f'{str(_v).replace(".SA","")}</a>')
+                    elif col == 'nome':
+                        _cell = f'<span style="font-size:0.78rem;color:var(--text-muted);">{str(_v)[:18] if _v else "—"}</span>'
+                    elif col == 'setor':
+                        _cell = f'<span style="font-size:0.75rem;color:var(--text-muted);">{str(_v)[:14] if _v else "—"}</span>'
+                    elif col == 'score momentum':
+                        try:
+                            _si = int(float(_v))
+                            _sc = "#2ecc71" if _si >= 60 else ("#f39c12" if _si >= 30 else "#e74c3c")
+                            _cell = f'<span style="font-family:{_mn};font-size:0.8rem;font-weight:600;color:{_sc};">{_si}</span>'
+                        except (TypeError, ValueError):
+                            _cell = '<span style="color:var(--text-muted);">—</span>'
+                    elif col in ('acima mm50','acima mm200'):
+                        try:
+                            _bv = bool(_v)
+                            _cell = f'<span style="color:{"#2ecc71" if _bv else "#e74c3c"};font-size:0.8rem;">{"✓" if _bv else "✗"}</span>'
+                        except (TypeError, ValueError):
+                            _cell = '<span style="color:var(--text-muted);">—</span>'
+                    elif col in _ret_cols:
+                        try:
+                            _fv = float(_v)
+                            _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
+                            _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.2f}%</span>'
+                        except (TypeError, ValueError):
+                            _cell = '<span style="color:var(--text-muted);">—</span>'
+                    else:
+                        _cell = f'<span style="font-family:{_mn};font-size:0.78rem;">{_v}</span>'
+                    _cells += f'<td style="padding:7px 9px;text-align:{_align};">{_cell}</td>'
+                _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                          f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                          f'onmouseout="this.style.background=\'transparent\'">{_cells}</tr>')
+            return (f'<div style="overflow-x:auto;">'
+                    f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                    f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
 
-        st.dataframe(
-            df_m[cols_mostrar].style
-                .map(colorir_momentum, subset=['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)'])
-                .format({'ret 1m (%)': '{:+.2f}%', 'ret 3m (%)': '{:+.2f}%', 'ret 6m (%)': '{:+.2f}%', 'ret 1y (%)': '{:+.2f}%', 'dist. topo 52w (%)': '{:+.2f}%', 'score momentum': '{:.0f}'}),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.markdown(_momentum_table_html(df_m[cols_mostrar]), unsafe_allow_html=True)
 
         section_title("📊 mapa de retornos por janela temporal")
 
@@ -1068,24 +1112,62 @@ with tab_ia:
                 'rsi', '5d %', '3m %', 'topo %',
             ]
 
-            st.dataframe(
-                _df_ia.style.format({
-                    'score total':    '{:.0f}',
-                    'qualidade (hs)': '{:.0f}',
-                    'valuation':      '{:.0f}',
-                    'timing':         '{:.0f}',
-                    'rsi':            '{:.0f}',
-                    '5d %':           '{:+.1f}%',
-                    '3m %':           '{:+.1f}%',
-                    'topo %':         '{:.0f}%',
-                }).background_gradient(
-                    subset=['score total'],
-                    cmap='RdYlGn',
-                    vmin=30, vmax=85,
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            def _ia_table_html(df: "pd.DataFrame") -> str:
+                _mn = 'var(--font-mono,monospace)'
+                _num_cols = ['score total','qualidade (hs)','valuation','timing','rsi','5d %','3m %','topo %']
+                _hdrs = "".join(
+                    f'<th style="padding:7px 10px;text-align:{"left" if c in ("ticker","nome","mercado") else "right"};'
+                    f'font-size:0.66rem;color:var(--text-muted);text-transform:uppercase;'
+                    f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                    for c in df.columns
+                )
+                _rows = ""
+                for _, row in df.iterrows():
+                    _cells = ""
+                    for col in df.columns:
+                        _v = row[col]
+                        _align = "left" if col in ("ticker","nome","mercado") else "right"
+                        if col == 'ticker':
+                            _url = f"/Research?research_ticker={_v}"
+                            _cell = (f'<a href="{_url}" target="_blank" style="color:var(--accent);'
+                                     f'font-family:{_mn};font-weight:600;font-size:0.8rem;text-decoration:none;" '
+                                     f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
+                                     f'{str(_v).replace(".SA","")}</a>')
+                        elif col == 'nome':
+                            _cell = f'<span style="font-size:0.77rem;color:var(--text-muted);">{str(_v)[:18] if pd.notna(_v) else "—"}</span>'
+                        elif col == 'mercado':
+                            _cell = f'<span style="font-size:0.75rem;color:var(--text-muted);">{_v}</span>'
+                        elif col == 'score total':
+                            try:
+                                _si = int(float(_v))
+                                _sc = "#2ecc71" if _si >= 65 else ("#f39c12" if _si >= 45 else "#e74c3c")
+                                _cell = f'<span style="font-family:{_mn};font-size:0.85rem;font-weight:700;color:{_sc};">{_si}</span>'
+                            except (TypeError, ValueError):
+                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                        elif col in ('5d %','3m %'):
+                            try:
+                                _fv = float(_v)
+                                _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
+                                _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.1f}%</span>'
+                            except (TypeError, ValueError):
+                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                        elif col in _num_cols:
+                            try:
+                                _fv = float(_v)
+                                _cell = f'<span style="font-family:{_mn};font-size:0.78rem;">{_fv:.0f}</span>'
+                            except (TypeError, ValueError):
+                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                        else:
+                            _cell = f'<span style="font-size:0.78rem;">{_v}</span>'
+                        _cells += f'<td style="padding:7px 10px;text-align:{_align};">{_cell}</td>'
+                    _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                              f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                              f'onmouseout="this.style.background=\'transparent\'">{_cells}</tr>')
+                return (f'<div style="overflow-x:auto;">'
+                        f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                        f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
+
+            st.markdown(_ia_table_html(_df_ia), unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
             section_title("🤖 análise qualitativa — ia")
@@ -1497,20 +1579,50 @@ with tab_setorial:
             "topos seguidos de quedas bruscas = exaustão e possível reversão."
         )
 
+        def _rank_table_html(df: "pd.DataFrame") -> str:
+            if df is None or df.empty:
+                return '<span style="color:var(--text-muted);font-size:0.8rem;">sem dados</span>'
+            _mn = 'var(--font-mono,monospace)'
+            _hdrs = "".join(
+                f'<th style="padding:6px 8px;text-align:{"left" if i==0 else "right"};'
+                f'font-size:0.64rem;color:var(--text-muted);text-transform:uppercase;'
+                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                for i, c in enumerate(df.columns)
+            )
+            _rows = ""
+            for idx, (_, row) in enumerate(df.iterrows()):
+                _cells = ""
+                for i, (col, val) in enumerate(row.items()):
+                    _align = "left" if i == 0 else "right"
+                    if i == 0:
+                        _cell = f'<span style="font-size:0.78rem;">{val}</span>'
+                    else:
+                        try:
+                            _fv = float(val)
+                            _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
+                            _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.1f}%</span>'
+                        except (TypeError, ValueError):
+                            _cell = f'<span style="font-size:0.78rem;">{val}</span>'
+                    _cells += f'<td style="padding:6px 8px;text-align:{_align};">{_cell}</td>'
+                _bg = "background:rgba(46,204,113,0.08);" if idx == 0 else ""
+                _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);{_bg}" '
+                          f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                          f'onmouseout="this.style.background=\'{("rgba(46,204,113,0.08)" if idx==0 else "transparent")}\'">{_cells}</tr>')
+            return (f'<div style="overflow-x:auto;">'
+                    f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                    f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
+
         st.markdown("<br>", unsafe_allow_html=True)
         _rc1, _rc2, _rc3 = st.columns(3)
         with _rc1:
             st.markdown("**Ranking 3 meses**")
-            if rs.ranking_3m is not None:
-                st.dataframe(rs.ranking_3m, hide_index=True, use_container_width=True)
+            st.markdown(_rank_table_html(rs.ranking_3m), unsafe_allow_html=True)
         with _rc2:
             st.markdown("**Ranking 6 meses**")
-            if rs.ranking_6m is not None:
-                st.dataframe(rs.ranking_6m, hide_index=True, use_container_width=True)
+            st.markdown(_rank_table_html(rs.ranking_6m), unsafe_allow_html=True)
         with _rc3:
             st.markdown("**Ranking 12 meses**")
-            if rs.ranking_12m is not None:
-                st.dataframe(rs.ranking_12m, hide_index=True, use_container_width=True)
+            st.markdown(_rank_table_html(rs.ranking_12m), unsafe_allow_html=True)
         st.caption(
             "Δ rs (%) = variação percentual da rs line no período. "
             "valores positivos = setor venceu o spy no intervalo, negativos = perdeu. "
@@ -1550,14 +1662,41 @@ with tab_setorial:
             ).reset_index()
             breadth["breadth_pct"] = (breadth["n_pos"] / breadth["n_total"] * 100).round(1)
             breadth = breadth.sort_values("breadth_pct", ascending=False)
-            st.dataframe(
-                breadth.rename(columns={
-                    "setor": "Setor",
-                    "n_total": "N",
-                    "n_pos": "Pos",
-                    "breadth_pct": "% revisões positivas",
-                }),
-                use_container_width=True, hide_index=True,
+            _breadth_disp = breadth.rename(columns={
+                "setor": "Setor", "n_total": "N", "n_pos": "Pos", "breadth_pct": "% revisões positivas",
+            })
+            _mn_er = 'var(--font-mono,monospace)'
+            _hdrs_er = "".join(
+                f'<th style="padding:7px 10px;text-align:{"left" if c=="Setor" else "right"};'
+                f'font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;'
+                f'border-bottom:1px solid var(--border-subtle);">{c}</th>'
+                for c in _breadth_disp.columns
+            )
+            _rows_er = ""
+            for _, row in _breadth_disp.iterrows():
+                _pct = float(row['% revisões positivas'])
+                _bc = "#2ecc71" if _pct >= 60 else ("#f39c12" if _pct >= 40 else "#e74c3c")
+                _bar_w = min(_pct, 100)
+                _rows_er += (
+                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                    f'onmouseout="this.style.background=\'transparent\'">'
+                    f'<td style="padding:7px 10px;font-size:0.8rem;">{row["Setor"]}</td>'
+                    f'<td style="padding:7px 10px;font-family:{_mn_er};font-size:0.78rem;text-align:right;color:var(--text-muted);">{int(row["N"])}</td>'
+                    f'<td style="padding:7px 10px;font-family:{_mn_er};font-size:0.78rem;text-align:right;color:var(--text-muted);">{int(row["Pos"])}</td>'
+                    f'<td style="padding:7px 10px;min-width:140px;">'
+                    f'<div style="display:flex;align-items:center;gap:8px;">'
+                    f'<div style="flex:1;background:var(--border-subtle);border-radius:3px;height:5px;overflow:hidden;">'
+                    f'<div style="width:{_bar_w:.0f}%;height:100%;background:{_bc};border-radius:3px;"></div></div>'
+                    f'<span style="font-family:{_mn_er};font-size:0.8rem;color:{_bc};min-width:38px;text-align:right;">{_pct:.1f}%</span>'
+                    f'</div></td>'
+                    f'</tr>'
+                )
+            st.markdown(
+                f'<div style="overflow-x:auto;">'
+                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_hdrs_er}</tr></thead><tbody>{_rows_er}</tbody></table></div>',
+                unsafe_allow_html=True,
             )
         st.caption(
             "earnings revisions breadth = % de empresas por setor com revisão positiva "
@@ -1683,20 +1822,7 @@ with tab_radar:
                 'rsi', '5d %', '3m %', 'topo %',
             ]
 
-            st.dataframe(
-                _df_radar.style.format({
-                    'score total': '{:.0f}',
-                    'qualidade':   '{:.0f}',
-                    'valuation':   '{:.0f}',
-                    'timing':      '{:.0f}',
-                    'rsi':         '{:.0f}',
-                    '5d %':        '{:+.1f}%',
-                    '3m %':        '{:+.1f}%',
-                    'topo %':      '{:.0f}%',
-                }),
-                use_container_width=True,
-                hide_index=True,
-            )
+            st.markdown(_ia_table_html(_df_radar), unsafe_allow_html=True)
 
             _top1 = _resultado_radar[0]
             st.markdown("<br>", unsafe_allow_html=True)

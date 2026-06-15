@@ -791,13 +791,41 @@ with st.expander("🔍 detalhe por ticker", expanded=False):
         if _min_pts > 0:
             df_exib = df_exib[df_exib["pontos"] >= _min_pts]
 
-        st.dataframe(
-            df_exib.rename(columns={
-                "ticker": "ticker", "pontos": "pontos históricos",
-                "inicio": "primeiro score", "fim": "último score",
-            }),
-            use_container_width=True,
-            hide_index=True,
+        _df_cov = df_exib.rename(columns={
+            "ticker": "ticker", "pontos": "pontos históricos",
+            "inicio": "primeiro score", "fim": "último score",
+        })
+        _mn_cov = 'var(--font-mono,monospace)'
+        _hdrs_cov = "".join(
+            f'<th style="padding:7px 10px;text-align:{"right" if c=="pontos históricos" else "left"};'
+            f'font-size:0.66rem;color:var(--text-muted);text-transform:uppercase;'
+            f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+            for c in _df_cov.columns
+        )
+        _rows_cov = ""
+        for _, row in _df_cov.iterrows():
+            _cells_cov = ""
+            for col in _df_cov.columns:
+                _v = row[col]
+                _align = "right" if col == "pontos históricos" else "left"
+                if col == "pontos históricos":
+                    try:
+                        _pts = int(_v)
+                        _pc = "#2ecc71" if _pts >= 10 else ("#f39c12" if _pts >= 5 else "#e74c3c")
+                        _cell = f'<span style="font-family:{_mn_cov};font-size:0.8rem;color:{_pc};font-weight:600;">{_pts}</span>'
+                    except (TypeError, ValueError):
+                        _cell = f'<span style="font-size:0.8rem;">{_v}</span>'
+                else:
+                    _cell = f'<span style="font-family:{_mn_cov};font-size:0.78rem;">{_v if _v is not None else "—"}</span>'
+                _cells_cov += f'<td style="padding:7px 10px;text-align:{_align};">{_cell}</td>'
+            _rows_cov += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
+                          f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
+                          f'onmouseout="this.style.background=\'transparent\'">{_cells_cov}</tr>')
+        st.markdown(
+            f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+            f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+            f'<thead><tr>{_hdrs_cov}</tr></thead><tbody>{_rows_cov}</tbody></table></div>',
+            unsafe_allow_html=True,
         )
     else:
         st.info("nenhum dado histórico ainda. execute o backfill abaixo.")
