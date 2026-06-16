@@ -585,17 +585,27 @@ def _get_dfp_series(
     if not dados_por_data:
         return []
 
-    # Preços mensais via yfinance para cálculo de PE/PB
+    # Preços mensais via yfinance para cálculo de PE/PB.
+    # Prefere marketCap/preço_atual para derivar "total shares effective" — yfinance
+    # agrega marketCap em todas as classes (ON+PN), enquanto sharesOutstanding traz
+    # só as ações da classe do ticker (ex.: PETR4 = 5,4B PN, mas PL no CVM é da
+    # Petrobras consolidada). Usar shares de uma classe contra PL total distorce
+    # P/L, P/VP, EV/EBITDA — ex.: PETR4 P/VP histórico ~0,1× em vez de ~1,1×.
     shares   = 0
     hist_px  = pd.Series(dtype=float)
     try:
         tk      = yf.Ticker(ticker_yf)
         info    = tk.info or {}
-        shares  = (
-            info.get("sharesOutstanding") or
-            info.get("impliedSharesOutstanding") or
-            info.get("floatShares") or 0
-        )
+        _mktcap_now = info.get("marketCap") or 0
+        _price_now  = info.get("regularMarketPrice") or info.get("currentPrice") or 0
+        if _mktcap_now and _price_now:
+            shares = _mktcap_now / _price_now   # equivalente a impliedSharesOutstanding agregado
+        else:
+            shares = (
+                info.get("sharesOutstanding") or
+                info.get("impliedSharesOutstanding") or
+                info.get("floatShares") or 0
+            )
         hist_px = tk.history(period=f"{anos + 2}y", interval="1mo")["Close"].dropna()
         if getattr(hist_px.index, "tz", None) is not None:
             hist_px.index = hist_px.index.tz_localize(None)
@@ -798,17 +808,24 @@ def _get_itr_series(
     if not dados_por_data:
         return []
 
-    # Preços e shares via yfinance
+    # Preços e shares via yfinance.
+    # Veja get_historico_cvm() — prefere marketCap/preço para derivar shares totais
+    # agregadas (necessário em tickers com classes múltiplas como PETR3/PETR4).
     shares  = 0
     hist_px = pd.Series(dtype=float)
     try:
         tk     = yf.Ticker(ticker_yf)
         info   = tk.info or {}
-        shares = (
-            info.get("sharesOutstanding") or
-            info.get("impliedSharesOutstanding") or
-            info.get("floatShares") or 0
-        )
+        _mktcap_now = info.get("marketCap") or 0
+        _price_now  = info.get("regularMarketPrice") or info.get("currentPrice") or 0
+        if _mktcap_now and _price_now:
+            shares = _mktcap_now / _price_now
+        else:
+            shares = (
+                info.get("sharesOutstanding") or
+                info.get("impliedSharesOutstanding") or
+                info.get("floatShares") or 0
+            )
         hist_px = tk.history(period=f"{anos + 2}y", interval="1mo")["Close"].dropna()
         if getattr(hist_px.index, "tz", None) is not None:
             hist_px.index = hist_px.index.tz_localize(None)
