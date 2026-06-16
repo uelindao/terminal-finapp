@@ -170,8 +170,8 @@ SCREENER_US = [
 
     # ── INDÚSTRIA ────────────────────────────────────────────────────────
     "BA", "CAT", "CSX", "DE", "EMR", "ETN", "FDX", "GD", "GE",
-    "HON", "ITW", "LMT", "MMM", "NOC", "NSC", "PH", "RTX", "TT",
-    "UNP", "UPS", "WM",
+    "HON", "ITW", "LMT", "MMM", "NOC", "NSC", "PH", "RTX", "SPCX",
+    "TT", "UNP", "UPS", "WM",
 
     # ── MATERIAIS ────────────────────────────────────────────────────────
     "ALB", "APD", "CF", "DD", "ECL", "FCX", "FMC", "IP", "LIN",
