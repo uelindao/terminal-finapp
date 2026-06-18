@@ -231,8 +231,15 @@ def puxar_historico_mestre():
 
             df_global = pd.DataFrame(dfs_global_dict)
             if 'CPIAUCSL' in df_global.columns:
-                df_global['CPI_MoM'] = df_global['CPIAUCSL'].pct_change() * 100
-                df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
+                # Mesma lógica do recálculo abaixo: dropna ANTES do pct_change
+                # porque o merge cria índice diário e CPIAUCSL é mensal/esparsa.
+                _cpi_m = df_global['CPIAUCSL'].dropna()
+                if len(_cpi_m) >= 2:
+                    _mom = _cpi_m.pct_change(fill_method=None) * 100
+                    df_global['CPI_MoM'] = _mom.reindex(df_global.index)
+                if len(_cpi_m) >= 13:
+                    _yoy = _cpi_m.pct_change(12, fill_method=None) * 100
+                    df_global['CPI_YOY'] = _yoy.reindex(df_global.index)
 
             if not df_global.empty:
                 salvar_snapshot("fred_global", df_global)
@@ -1677,19 +1684,25 @@ with tab_global:
             with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
 
             # CPI YoY — SEMPRE recalcula de CPIAUCSL se a série base existir.
-            # Não confia em snapshot porque pode ter sido salvo com CPI_YOY=NaN antes
-            # do fix do sync_macro. Alinhamento por índice (sem dropna intermediário).
+            # CRÍTICO: dropna() ANTES de pct_change(12) — df_global tem índice diário
+            # (DGS10/DGS2 são diárias), mas CPIAUCSL é mensal. Sem dropna, pct_change(12)
+            # desloca 12 LINHAS (não 12 meses), e como a coluna CPIAUCSL é esparsa
+            # (NaN em quase todas as linhas), o resultado fica quase todo NaN. Depois
+            # reindex traz de volta ao índice diário com NaN entre os pontos mensais.
             if 'CPIAUCSL' in df_global.columns:
                 try:
-                    _cpi_serie = df_global['CPIAUCSL'].dropna()
-                    if len(_cpi_serie) >= 13:
-                        df_global['CPI_YOY'] = df_global['CPIAUCSL'].pct_change(12) * 100
+                    _cpi_monthly = df_global['CPIAUCSL'].dropna()
+                    if len(_cpi_monthly) >= 13:
+                        _yoy_monthly = _cpi_monthly.pct_change(12, fill_method=None) * 100
+                        df_global['CPI_YOY'] = _yoy_monthly.reindex(df_global.index)
+                        _last_yoy = df_global['CPI_YOY'].dropna()
                         logger.info(
-                            f"[macro] CPI_YOY recalculado: {len(_cpi_serie)} pontos CPIAUCSL, "
-                            f"último valor CPI_YOY = {df_global['CPI_YOY'].dropna().iloc[-1] if not df_global['CPI_YOY'].dropna().empty else 'NaN'}"
+                            f"[macro] CPI_YOY recalculado: {len(_cpi_monthly)} pontos CPIAUCSL, "
+                            f"último valor CPI_YOY = {_last_yoy.iloc[-1]:.2f}% on {_last_yoy.index[-1].date()}"
+                            if not _last_yoy.empty else "[macro] CPI_YOY: serie vazia após reindex"
                         )
                     else:
-                        logger.warning(f"[macro] CPI_YOY: CPIAUCSL tem só {len(_cpi_serie)} pontos (precisa >=13).")
+                        logger.warning(f"[macro] CPI_YOY: CPIAUCSL tem só {len(_cpi_monthly)} pontos (precisa >=13).")
                 except Exception as e:
                     logger.error(f"[macro] CPI_YOY calc via CPIAUCSL falhou: {e}")
             else:

@@ -234,10 +234,15 @@ def fetch_fred():
 
         if dfs_fred:
             df_global_hist = pd.DataFrame(dfs_fred)
-            # Calcula CPI YoY
+            # Calcula CPI YoY — dropna ANTES de pct_change porque o merge cria
+            # índice diário (DGS10/DGS2 são diários) e CPIAUCSL é mensal/esparsa.
+            # Sem dropna, pct_change(12) desloca 12 LINHAS e dá NaN quase sempre.
             if "CPIAUCSL" in df_global_hist.columns:
                 try:
-                    df_global_hist["CPI_YOY"] = df_global_hist["CPIAUCSL"].pct_change(12) * 100
+                    _cpi_m = df_global_hist["CPIAUCSL"].dropna()
+                    if len(_cpi_m) >= 13:
+                        _yoy = _cpi_m.pct_change(12, fill_method=None) * 100
+                        df_global_hist["CPI_YOY"] = _yoy.reindex(df_global_hist.index)
                 except Exception as e:
                     logger.debug(f"falha ao calcular CPI_YOY: {e}")
             _salvar_snapshot_historico("fred_global", df_global_hist)
