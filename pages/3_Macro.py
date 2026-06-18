@@ -178,12 +178,27 @@ def puxar_historico_mestre():
 
     # ── 2. Global — FRED ─────────────────────────────────────────────────────
     df_global = pd.DataFrame()
-    # Cache-first: tenta carregar do Supabase
+    # Cache-first: tenta carregar do Supabase. Valida que colunas críticas
+    # estão presentes — snapshots antigos podem ter sido salvos sem CPIAUCSL
+    # quando a série ainda não estava no series_fred, e o cache de 6h
+    # mantinha o snapshot incompleto servindo até expirar.
     _cache_global = carregar_snapshot("fred_global", max_age_days=MAX_CACHE_HORAS / 24)
-    if _cache_global is not None and not _cache_global.empty:
+    _cache_ok = (
+        _cache_global is not None
+        and not _cache_global.empty
+        and "CPIAUCSL" in _cache_global.columns
+        and not _cache_global["CPIAUCSL"].dropna().empty
+    )
+    if _cache_ok:
         df_global = _cache_global
         logger.info("[macro] FRED: servindo do cache Supabase (cache-first).")
-    elif "FRED_API_KEY" in st.secrets:
+    elif _cache_global is not None and not _cache_global.empty:
+        logger.warning(
+            "[macro] FRED: snapshot Supabase incompleto (sem CPIAUCSL) — "
+            "forçando refetch ao vivo."
+        )
+
+    if df_global.empty and "FRED_API_KEY" in st.secrets:
         try:
             fred = Fred(api_key=st.secrets["FRED_API_KEY"])
             try:
