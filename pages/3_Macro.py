@@ -1889,16 +1889,19 @@ with tab_global:
                 except Exception:
                     pass
 
-            # P/L real do S&P 500 via yfinance
+            # P/L real do S&P 500 via yfinance.
+            # ^GSPC é índice — yfinance NÃO retorna trailingPE pra índices (None).
+            # Usar ETFs que replicam o S&P 500 (SPY/IVV/VOO) como fonte primária.
+            # Try independente por ticker — uma exceção em um não impede o próximo.
             _pl_real_spx = None
-            try:
-                _spx_info = yf.Ticker("^GSPC").info or {}
-                _pl_real_spx = _spx_info.get("trailingPE")
-                if _pl_real_spx is None:
-                    _spy_info = yf.Ticker("SPY").info or {}
-                    _pl_real_spx = _spy_info.get("trailingPE")
-            except Exception:
-                pass
+            for _proxy_spx in ("SPY", "IVV", "VOO"):
+                try:
+                    _pe_val = (yf.Ticker(_proxy_spx).info or {}).get("trailingPE")
+                    if _pe_val is not None and _pe_val > 0:
+                        _pl_real_spx = float(_pe_val)
+                        break
+                except Exception:
+                    continue
 
             _pj1, _pj2, _pj3, _pj4 = st.columns(4)
             with _pj1:
