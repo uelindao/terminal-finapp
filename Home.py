@@ -715,7 +715,7 @@ if _tickers_wl_home:
 
         def _render_breakdown_item(_opp):
             _items = [
-                ("qualidade (hs)",  _opp['score_hs'],         55,  f"{_opp['score_hs']:.0f}/100"),
+                ("qualidade (hs)",  _opp['score_hs'],         100, f"{_opp['score_hs']:.0f}/100"),
                 ("valuation hist.", _opp['score_val'],        20,  f"{_opp['score_val']:.0f}/20"),
                 ("timing entrada",  _opp['score_timing'],     25,  f"{_opp['score_timing']:.0f}/25"),
             ]
