@@ -12,7 +12,7 @@ from utils.formatters import traduzir_setor
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # importações do ecossistema finapp
-from utils.auth import require_auth, render_user_badge
+from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from database.db import (
     listar_watchlist, get_health_scores, adicionar_ativo,
@@ -24,7 +24,7 @@ from utils.tickers import (
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url
+from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url, topbar
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout, chart_type_toggle, barras_verticais, _cores as _chart_cores
 from utils.macro_regime import classificar_regime
@@ -48,6 +48,12 @@ except Exception:
 init_db()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
+_user_top_disc = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", "/"), ("discovery", None)],
+    user_name=_user_top_disc.get('username', '') or _user_top_disc.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+)
 page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
 
 _n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
