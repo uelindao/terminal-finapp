@@ -12,13 +12,13 @@ import time
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # importações do ecossistema finapp
-from utils.auth import require_auth, render_user_badge
+from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url, topbar
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -43,6 +43,12 @@ try:
 except Exception:
     pass
 
+_user_top_pf = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", "/"), ("portfolio", None)],
+    user_name=_user_top_pf.get('username', '') or _user_top_pf.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+)
 page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
 
 @st.cache_data(ttl=3600, show_spinner=False)
