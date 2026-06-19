@@ -18,7 +18,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator, tooltip, label_com_tooltip
+from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator, tooltip, label_com_tooltip, topbar
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -47,6 +47,12 @@ except Exception:
     pass
 garantir_macro_context()
 
+_user_top_macro = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", "/"), ("macro", None)],
+    user_name=_user_top_macro.get('username', '') or _user_top_macro.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+)
 page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
 
 if "FRED_API_KEY" not in st.secrets:
@@ -85,8 +91,8 @@ try:
         f'</div>'
         f'<div style="margin-top:6px; color:var(--text-muted, #888); '
         f'font-size:0.85rem;">{_regime.leitura}</div>'
-        f'<div style="margin-top:8px; font-family:Courier New,monospace; '
-        f'font-size:0.7rem; color:#888;">{_sinais_str}</div>'
+        f'<div style="margin-top:8px; font-family:var(--font-data); '
+        f'font-size:0.7rem; color:var(--text-muted);">{_sinais_str}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
