@@ -3,7 +3,7 @@ import streamlit as st
 from utils.auth   import require_auth, get_current_user, render_user_badge, logout
 from utils.style  import aplicar_tema
 from utils.components import (
-    page_header, section_title, metric_card, status_card, empty_state
+    page_header, section_title, metric_card, status_card, empty_state, topbar
 )
 from utils.ai_client import PROVIDERS
 from database.db import (
@@ -34,6 +34,12 @@ user          = get_current_user()
 user_id_atual = get_user_id()
 is_admin      = st.session_state.get('is_admin', False)
 
+_user_top_cfg = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", "/"), ("configurações", None)],
+    user_name=_user_top_cfg.get('username', '') or _user_top_cfg.get('nome', '') or 'usuário',
+    sync_label="ao vivo",
+)
 page_header("⚙️ configurações", "conta · watchlists · portfólios · ia · administração")
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -17,7 +17,7 @@ import datetime
 
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
-from utils.components import page_header, section_title, inject_ui_enhancements, show_toast
+from utils.components import page_header, section_title, inject_ui_enhancements, show_toast, topbar
 from utils.logger import get_logger
 from utils.tickers import SCREENER_US, SCREENER_B3
 
@@ -41,6 +41,12 @@ st.set_page_config(
     page_icon="🕐",
 )
 
+_user_top_bf = get_current_user() or {}
+topbar(
+    breadcrumb_itens=[("⚡ finterminal", "/"), ("backfill", None)],
+    user_name=_user_top_bf.get('username', '') or _user_top_bf.get('nome', '') or 'usuário',
+    sync_label="manual",
+)
 page_header("🕐 backfill histórico", "popula 10 anos de health scores via FMP · CVM · yfinance.")
 inject_ui_enhancements()
 try:
@@ -1068,9 +1074,9 @@ else:
 lote = pendentes[:batch_size]
 
 st.markdown(
-    f'<div style="font-family:Courier New; font-size:0.78rem; color:#555; margin:8px 0;">'
-    f'pendentes: <span style="color:#FF9900;">{len(pendentes)}</span> tickers | '
-    f'este lote: <span style="color:#00C853;">{len(lote)}</span> tickers'
+    f'<div style="font-family:var(--font-data); font-size:0.78rem; color:var(--text-muted); margin:8px 0;">'
+    f'pendentes: <span style="color:var(--amber);">{len(pendentes)}</span> tickers | '
+    f'este lote: <span style="color:var(--bull);">{len(lote)}</span> tickers'
     f'</div>',
     unsafe_allow_html=True,
 )
