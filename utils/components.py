@@ -2114,9 +2114,11 @@ def topbar(
     if show_search:
         center_html = (
             '<div class="ft-topbar-search-btn" '
+            'style="display:inline-flex;align-items:center;gap:6px;" '
             'onclick="window.parent.postMessage({type:\'finterm-open-palette\'},\'*\');" '
             'title="abrir command palette (Ctrl+K)">'
-            '<span>🔍 buscar</span><kbd>Ctrl+K</kbd></div>'
+            '<span>🔍 buscar</span>'
+            '<kbd style="margin-left:4px;">Ctrl+K</kbd></div>'
         )
 
     # ── Slot direita: sync + user ────────────────────────────────────────────
@@ -2124,24 +2126,28 @@ def topbar(
     if show_sync:
         _sl = sync_label or "ativo"
         right_parts.append(
-            f'<span class="ft-topbar-pill" title="status de sincronização">'
+            f'<span class="ft-topbar-pill" '
+            f'style="display:inline-flex;align-items:center;gap:6px;" '
+            f'title="status de sincronização">'
             f'<span class="dot"></span>{_sl}</span>'
         )
     if show_user:
         nm = user_name or "usuário"
         ini = (nm.strip()[:1] or "U").upper()
         right_parts.append(
-            f'<span class="ft-topbar-user" title="conectado como {nm}">'
+            f'<span class="ft-topbar-user" '
+            f'style="display:inline-flex;align-items:center;gap:6px;" '
+            f'title="conectado como {nm}">'
             f'<span>{nm[:14]}</span><span class="avatar">{ini}</span></span>'
         )
 
     right_html = "".join(right_parts)
 
     st.markdown(
-        f'<div class="ft-topbar">'
-        f'<div class="ft-topbar-left">{left_html}</div>'
+        f'<div class="ft-topbar" style="display:flex;align-items:center;gap:var(--space-4);">'
+        f'<div class="ft-topbar-left" style="flex:1;display:flex;align-items:center;gap:var(--space-2);">{left_html}</div>'
         f'<div class="ft-topbar-center">{center_html}</div>'
-        f'<div class="ft-topbar-right">{right_html}</div>'
+        f'<div class="ft-topbar-right" style="flex:1;display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);">{right_html}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
