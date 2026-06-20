@@ -26,7 +26,7 @@ from utils.components import (
     topbar, section_title, info_box, portfolio_kpis, highlights_strip,
     tabs_pill, pill_select, chip, chip_status, html_table,
     inline_sparkline, info_box as _info_box, inject_keyboard_shortcuts,
-    chip_filter_row,
+    chip_filter_row, url_state_chip_filter_row,
 )
 from database.db import (
     listar_watchlist, listar_watchlists, listar_tags_watchlist,
@@ -302,11 +302,11 @@ st.markdown(
     '<div style="font-family:var(--font-ui);font-size:.58rem;'
     'color:var(--text-muted);text-transform:uppercase;'
     'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
-    'font-weight:600;opacity:.7;">mercado</div>',
+    'font-weight:600;opacity:.7;">mercado · <span style="opacity:.5;">link copiável</span></div>',
     unsafe_allow_html=True,
 )
-mkt_sel = chip_filter_row(
-    mkt_opcoes, key="wlpro_mkt", default="Todos", max_chip_cols=10,
+mkt_sel = url_state_chip_filter_row(
+    mkt_opcoes, qp_key="mkt", default="Todos", max_chip_cols=10,
 )
 
 # Tag filter (todas as tags únicas entre as watchlists selecionadas)

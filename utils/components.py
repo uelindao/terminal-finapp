@@ -735,26 +735,32 @@ def inject_ui_enhancements():
             color:var(--text-muted);font-family:var(--font-ui);}}
         #finterm-toasts{{position:fixed;top:20px;right:20px;z-index:99999;
             display:flex;flex-direction:column;gap:var(--space-2);pointer-events:none;}}
-        .ft-toast{{background:var(--bg-surface);border:1px solid var(--border-normal);border-radius:var(--radius-md);
-            padding:12px 16px;min-width:240px;max-width:340px;
-            box-shadow:var(--shadow-lg);display:flex;
-            align-items:flex-start;gap:10px;animation:ft-tin .22s ease;
+        .ft-toast{{background:var(--surface-glass);backdrop-filter:var(--glass-blur);
+            -webkit-backdrop-filter:var(--glass-blur);
+            border:1px solid var(--border-subtle);border-radius:var(--radius-lg);
+            padding:12px 16px;min-width:260px;max-width:360px;
+            box-shadow:var(--shadow-xl);display:flex;
+            align-items:flex-start;gap:10px;animation:ft-tin .25s var(--ease-out);
             pointer-events:all;overflow:hidden;position:relative;
             font-family:var(--font-ui);}}
+        .ft-toast::before{{content:"";position:absolute;left:0;top:0;bottom:0;
+            width:3px;background:var(--toast-tone);
+            box-shadow:0 0 10px var(--toast-tone);}}
         .ft-toast.out{{animation:ft-tout .18s ease forwards;}}
-        .ft-toast-icon{{font-size:.95rem;flex-shrink:0;margin-top:1px;}}
-        .ft-toast-msg{{font-size:var(--text-sm);color:var(--text-primary);line-height:1.4;}}
+        .ft-toast-icon{{font-size:1.05rem;flex-shrink:0;margin-top:1px;
+            color:var(--toast-tone);}}
+        .ft-toast-msg{{font-size:var(--text-sm);color:var(--text-primary);
+            line-height:1.4;font-weight:500;flex:1;}}
         .ft-bar-wrap{{position:absolute;bottom:0;left:0;right:0;height:2px;
-            background:rgba(255,255,255,.08);}}
-        .ft-bar{{height:100%;transition:width linear;width:100%;}}
-        .ft-toast.success{{border-left:3px solid var(--bull);}}
-        .ft-toast.success .ft-bar{{background:var(--bull);}}
-        .ft-toast.error{{border-left:3px solid var(--bear);}}
-        .ft-toast.error .ft-bar{{background:var(--bear);}}
-        .ft-toast.warning{{border-left:3px solid var(--amber);}}
-        .ft-toast.warning .ft-bar{{background:var(--amber);}}
-        .ft-toast.info{{border-left:3px solid var(--info);}}
-        .ft-toast.info .ft-bar{{background:var(--info);}}
+            background:rgba(255,255,255,.06);}}
+        .ft-bar{{height:100%;transition:width linear;width:100%;
+            background:var(--toast-tone);
+            box-shadow:0 0 6px var(--toast-tone);}}
+        .ft-toast.success,.ft-toast.bull{{--toast-tone:var(--bull);}}
+        .ft-toast.error,.ft-toast.bear{{--toast-tone:var(--bear);}}
+        .ft-toast.warning,.ft-toast.amber{{--toast-tone:var(--amber);}}
+        .ft-toast.info{{--toast-tone:var(--info);}}
+        .ft-toast.accent{{--toast-tone:var(--accent);}}
         .ft-hint-badge{{position:fixed;bottom:76px;right:20px;z-index:9998;
             background:var(--bg-surface);border:1px solid var(--border-normal);border-radius:var(--radius-sm);
             padding:var(--space-2) var(--space-3);font-size:.65rem;color:var(--text-secondary);
@@ -1056,18 +1062,38 @@ def inject_keyboard_shortcuts():
 
 def show_toast(message: str, type: str = "success", duration: int = 3000) -> None:
     """
-    Exibe uma notificação toast animada no canto superior direito.
+    Exibe uma notificação toast (canto sup direito) integrada ao design system v5.
 
-    Parâmetros
-    ----------
-    message  : texto da notificação (HTML básico permitido).
-    type     : 'success' | 'error' | 'warning' | 'info'
-    duration : tempo em ms antes de auto-fechar (padrão 3 000 ms).
+    Args:
+        message: texto da notificação (HTML básico permitido)
+        type:    aceita aliases do design system:
+                   'success'/'bull'  → verde (sucesso)
+                   'error'/'bear'    → vermelho (erro/destrutivo)
+                   'warning'/'amber' → âmbar (atenção)
+                   'info'            → azul (informação)
+                   'accent'          → cor do tema ativo (destaque neutro)
+        duration: ms antes de auto-fechar (default 3000)
 
-    Requer que inject_ui_enhancements() (ou inject_keyboard_shortcuts())
-    tenha sido chamado na mesma página antes de show_toast().
+    Visual v5:
+      - glass background com backdrop-filter
+      - border-left luminoso com glow no tone
+      - barra de progresso animada para o user "ver" o tempo restante
+      - shadow-xl para flutuar acima do conteúdo
+
+    Requer inject_keyboard_shortcuts() / inject_ui_enhancements() na página.
     """
     import streamlit.components.v1 as _comp
+
+    # Mapeia aliases v5 → classes CSS suportadas pelo JS
+    _alias = {
+        "bull":   "success",
+        "bear":   "error",
+        "amber":  "warning",
+        "accent": "accent",
+        "info":   "info",
+    }
+    _type = _alias.get(type, type)
+
     msg_safe = (
         message
         .replace("\\", "\\\\")
@@ -1078,7 +1104,7 @@ def show_toast(message: str, type: str = "success", duration: int = 3000) -> Non
     _comp.html(
         f"<script>(function(){{"
         f"  if (window.parent._fintermToast)"
-        f"    window.parent._fintermToast('{msg_safe}','{type}',{duration});"
+        f"    window.parent._fintermToast('{msg_safe}','{_type}',{duration});"
         f"}})();</script>",
         height=0,
         scrolling=False,
@@ -3878,3 +3904,324 @@ def skeleton_hero() -> None:
         '</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMPTY STATE v5 — glass + CTA gradient + ícone com glow
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def empty_state_v5(
+    *,
+    titulo:      str,
+    descricao:   str = "",
+    icone:       str = "📭",
+    tone:        str = "info",   # info | bull | amber | bear | accent
+    cta_label:   str = "",
+    cta_key:     str = "ev5_cta",
+    cta_icone:   str = "",
+    secondary_label: str = "",   # botão secundário ghost (opcional)
+    secondary_key:   str = "ev5_sec",
+) -> dict:
+    """
+    Empty state premium — glass card com ícone gigante glow + título + descrição +
+    CTA gradient + botão secundário opcional.
+
+    Retorna dict:
+        {"cta": bool, "secondary": bool}
+
+    Tones: info (azul) · bull (verde) · amber · bear · accent (laranja)
+    """
+    t = _tone(tone)
+    tone_c = t.get("fg", "var(--info)")
+
+    _inject_once(
+        "_empty_v5_css_v1",
+        '.ft-ev5{position:relative;text-align:center;'
+        '  padding:var(--space-8) var(--space-6);'
+        '  border-radius:var(--radius-xl);'
+        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px dashed var(--border-normal);'
+        '  margin:var(--space-4) auto;max-width:560px;'
+        '  animation:ft-fadein .4s var(--ease-out);}'
+        '@keyframes ft-fadein{from{opacity:0;transform:translateY(8px);}'
+        '  to{opacity:1;transform:translateY(0);}}'
+        '.ft-ev5::before{content:"";position:absolute;inset:0;'
+        '  background:radial-gradient(circle at 50% 0%,'
+        '    var(--ev5-rgba) 0%,transparent 70%);'
+        '  pointer-events:none;border-radius:var(--radius-xl);}'
+        '.ft-ev5-icon{font-size:3.4rem;line-height:1;'
+        '  margin-bottom:var(--space-3);opacity:.85;'
+        '  filter:drop-shadow(0 0 18px var(--ev5-tone));'
+        '  position:relative;display:inline-block;}'
+        '.ft-ev5-titulo{font-family:var(--font-title);'
+        '  font-size:var(--text-lg);font-weight:700;'
+        '  color:var(--text-primary);'
+        '  letter-spacing:var(--ls-tight);'
+        '  margin-bottom:var(--space-1);position:relative;}'
+        '.ft-ev5-desc{font-family:var(--font-ui);'
+        '  font-size:var(--text-sm);color:var(--text-secondary);'
+        '  line-height:1.6;max-width:42ch;margin:0 auto;'
+        '  position:relative;}'
+    )
+
+    rgba = "rgba(110,128,255,0.10)"
+    if tone == "bull":   rgba = "rgba(74,222,128,0.10)"
+    elif tone == "bear": rgba = "rgba(248,113,113,0.10)"
+    elif tone == "amber":rgba = "rgba(251,191,36,0.10)"
+    elif tone == "accent": rgba = "rgba(255,140,0,0.10)"
+
+    st.markdown(
+        f'<div class="ft-ev5" '
+        f'style="--ev5-tone:{tone_c};--ev5-rgba:{rgba};">'
+        f'<div class="ft-ev5-icon">{icone}</div>'
+        f'<div class="ft-ev5-titulo">{titulo}</div>'
+        f'<div class="ft-ev5-desc">{descricao}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    res = {"cta": False, "secondary": False}
+    if cta_label or secondary_label:
+        col_l, col_m, col_r = st.columns([2, 2, 2])
+        idx = 0
+        cols_used = []
+        if cta_label:
+            cols_used.append(col_m if not secondary_label else col_l)
+        if secondary_label:
+            cols_used.append(col_m if cta_label else col_l)
+            if cta_label:
+                cols_used[-1] = col_r
+
+        if cta_label:
+            target_col = col_m if not secondary_label else col_l
+            with target_col:
+                lbl = f"{cta_icone} {cta_label}" if cta_icone else cta_label
+                if gradient_cta_button(lbl, key=cta_key, largura_full=True):
+                    res["cta"] = True
+
+        if secondary_label:
+            target_col = col_m if not cta_label else col_r
+            with target_col:
+                if st.button(secondary_label, key=secondary_key,
+                             use_container_width=True):
+                    res["secondary"] = True
+
+    return res
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# URL STATE — filtros persistem no link (deeplink)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def url_state_chip_filter_row(
+    labels:  list[str],
+    qp_key:  str,
+    *,
+    default: str | None = None,
+    max_chip_cols: int = 8,
+) -> str:
+    """
+    Variação do chip_filter_row que persiste o estado no URL via st.query_params.
+
+    - O parâmetro selecionado vira `?qp_key=<label_slug>` na URL
+    - Compartilhar o link compartilha o filtro aplicado
+    - Recarregar a página preserva o filtro
+
+    Slug: removemos espaços e baixamos pra um identificador URL-safe.
+    """
+    if not labels:
+        return ""
+
+    # Mapa slug → label original
+    def _slug(s: str) -> str:
+        import unicodedata
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return "".join(c if c.isalnum() else "_" for c in s.lower()).strip("_")[:32]
+
+    slug_to_label = {_slug(lab): lab for lab in labels}
+    label_to_slug = {lab: slug for slug, lab in slug_to_label.items()}
+
+    # Lê estado atual do URL
+    qp = st.query_params
+    current_slug = qp.get(qp_key, [])
+    if isinstance(current_slug, list):
+        current_slug = current_slug[0] if current_slug else ""
+    current = slug_to_label.get(current_slug, default or labels[0])
+    if current not in labels:
+        current = labels[0]
+
+    _inject_once(
+        "_chipfilter_css_v1",
+        # Mesmo estilo do chip_filter_row — sincronizado
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button{'
+        '  background:transparent !important;'
+        '  border:1px solid var(--border-subtle) !important;'
+        '  border-radius:999px !important;'
+        '  color:var(--text-secondary) !important;'
+        '  padding:3px 12px !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-xs) !important;'
+        '  font-weight:500 !important;'
+        '  width:100% !important;'
+        '  min-height:28px !important;'
+        '  box-shadow:none !important;'
+        '  white-space:nowrap !important;'
+        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button:hover{'
+        '  background:var(--bg-overlay) !important;'
+        '  border-color:var(--border-normal) !important;'
+        '  color:var(--text-primary) !important;}'
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
+        '  background:var(--accent-gradient) !important;'
+        '  color:#fff !important;font-weight:600 !important;'
+        '  border-color:transparent !important;'
+        '  box-shadow:var(--shadow-sm) !important;}'
+    )
+
+    st.markdown('<div data-fchip="1"></div>', unsafe_allow_html=True)
+
+    n_slots = max(max_chip_cols, len(labels))
+    cols = st.columns(n_slots, gap="small")
+    for i, lab in enumerate(labels):
+        with cols[i]:
+            if st.button(
+                lab,
+                key=f"{qp_key}__url__{i}",
+                type="primary" if lab == current else "secondary",
+                use_container_width=True,
+            ):
+                # Persiste no URL
+                st.query_params[qp_key] = label_to_slug[lab]
+                st.rerun()
+    return current
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LAZY CHART — render só quando o user expandir/clicar (perf)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def lazy_chart(
+    titulo:      str,
+    render_fn,
+    *,
+    key:         str,
+    descricao:   str = "",
+    icone:       str = "📈",
+    auto_load:   bool = False,
+) -> None:
+    """
+    Wrapper para gráficos pesados (Plotly + cálculo) que só são computados
+    quando o usuário clica para expandir. Reduz tempo de render inicial.
+
+    Args:
+        titulo:    nome do gráfico (mostrado no header sempre)
+        render_fn: callable() → None que faz o cálculo + st.plotly_chart
+        key:       chave única do session_state (estado expand)
+        descricao: subtítulo opcional
+        icone:     emoji do header
+        auto_load: se True, carrega na primeira render automaticamente
+
+    Visual:
+      - Card glass com header + botão "carregar gráfico"
+      - Quando expandido: render_fn() é executado
+      - Estado persiste no session_state (não recolhe ao mudar filtros)
+
+    Por que importa:
+      Plotly + cálculo pesado (e.g. correlação de 30 ativos) pode levar
+      2-5 segundos. Em uma página com 5 desses gráficos, são 10-25s.
+      Lazy: usuário carrega só o que quer ver.
+    """
+    _inject_once(
+        "_lazy_chart_css_v1",
+        '.ft-lazy{position:relative;padding:14px 18px;'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);'
+        '  margin-bottom:var(--space-3);}'
+        '.ft-lazy-head{display:flex;align-items:center;'
+        '  justify-content:space-between;gap:12px;}'
+        '.ft-lazy-titulo{font-family:var(--font-ui);font-size:var(--text-sm);'
+        '  font-weight:600;color:var(--text-primary);'
+        '  display:inline-flex;align-items:center;gap:6px;}'
+        '.ft-lazy-titulo .ic{font-size:1rem;opacity:.85;}'
+        '.ft-lazy-desc{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-muted);margin-top:4px;}'
+        '.ft-lazy-status{font-family:var(--font-ui);font-size:.62rem;'
+        '  color:var(--text-muted);text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);'
+        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
+        '  border-radius:999px;padding:2px 10px;}'
+    )
+
+    state_key = f"__lazy_{key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = bool(auto_load)
+
+    expanded = st.session_state[state_key]
+
+    if not expanded:
+        _desc_html = (
+            f'<div class="ft-lazy-desc">{descricao}</div>' if descricao else ""
+        )
+        st.markdown(
+            f'<div class="ft-lazy">'
+            f'<div class="ft-lazy-head">'
+            f'<div>'
+            f'<div class="ft-lazy-titulo">'
+            f'<span class="ic">{icone}</span>{titulo}</div>'
+            f'{_desc_html}'
+            f'</div>'
+            f'<span class="ft-lazy-status">não carregado</span>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        c1, c2, c3 = st.columns([2, 1, 2])
+        with c2:
+            if st.button(
+                "▶ carregar gráfico",
+                key=f"__lazy_btn_{key}",
+                use_container_width=True,
+            ):
+                st.session_state[state_key] = True
+                st.rerun()
+        return
+
+    # Expandido — render real
+    _desc_html2 = (
+        f'<div class="ft-lazy-desc">{descricao}</div>' if descricao else ""
+    )
+    st.markdown(
+        f'<div class="ft-lazy" style="border-color:var(--accent-border);">'
+        f'<div class="ft-lazy-head">'
+        f'<div>'
+        f'<div class="ft-lazy-titulo">'
+        f'<span class="ic">{icone}</span>{titulo}</div>'
+        f'{_desc_html2}'
+        f'</div>'
+        f'<span class="ft-lazy-status" '
+        f'style="color:var(--bull);border-color:var(--bull);">'
+        f'● carregado</span>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    try:
+        render_fn()
+    except Exception as e:
+        st.error(f"Falha ao renderizar gráfico: {e}")
+
+    # Botão recolher (canto direito)
+    c1, c2 = st.columns([5, 1])
+    with c2:
+        if st.button("× recolher", key=f"__lazy_btn_close_{key}",
+                     use_container_width=True):
+            st.session_state[state_key] = False
+            st.rerun()
