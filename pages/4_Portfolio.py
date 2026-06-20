@@ -1508,9 +1508,11 @@ with tab_posicoes:
         ]
 
         if not _pos_dict_perf:
-            st.info(
-                "adicione posições com quantidade e preço médio "
-                "para calcular a performance."
+            info_box(
+                tipo   = "info",
+                titulo = "sem posições com quantidade/preço",
+                texto  = "adicione posições com quantidade e preço médio para calcular a performance.",
+                icone  = "📭",
             )
         else:
             with st.spinner("calculando performance vs benchmarks..."):
@@ -1523,9 +1525,11 @@ with tab_posicoes:
                 )
 
             if not _perf or not _perf.get('series'):
-                st.warning(
-                    "não foi possível calcular a performance. "
-                    "verifique se os tickers estão corretos."
+                info_box(
+                    tipo   = "amber",
+                    titulo = "performance indisponível",
+                    texto  = "não foi possível calcular. verifique se os tickers estão corretos.",
+                    icone  = "⚠",
                 )
             else:
                 _met = _perf.get('metricas', {})
@@ -1646,29 +1650,29 @@ with tab_posicoes:
                 _alpha_cdi  = _ret_cart - _ret_cdi
                 _alpha_ibov = _ret_cart - _ret_ibov
 
-                _ac1, _ac2, _ac3 = st.columns(3)
-                with _ac1:
-                    metric_card(
-                        "retorno da carteira",
-                        f"{_ret_cart:+.2f}%",
-                        f"no período de {_periodo_perf}",
-                        "bull" if _ret_cart > 0 else "bear",
-                        destaque=True,
-                    )
-                with _ac2:
-                    metric_card(
-                        "alpha vs cdi",
-                        f"{_alpha_cdi:+.2f}pp",
-                        "acima ou abaixo do cdi",
-                        "bull" if _alpha_cdi > 0 else "bear",
-                    )
-                with _ac3:
-                    metric_card(
-                        "alpha vs ibovespa",
-                        f"{_alpha_ibov:+.2f}pp",
-                        "acima ou abaixo do ibov",
-                        "bull" if _alpha_ibov > 0 else "bear",
-                    )
+                portfolio_kpis([
+                    {
+                        "nome":     "retorno carteira",
+                        "valor":    f"{_ret_cart:+.2f}%",
+                        "sublabel": f"no período de {_periodo_perf}",
+                        "tone":     "bull" if _ret_cart > 0 else "bear",
+                        "icone":    "📈" if _ret_cart > 0 else "📉",
+                    },
+                    {
+                        "nome":     "alpha vs cdi",
+                        "valor":    f"{_alpha_cdi:+.2f}pp",
+                        "sublabel": "acima ou abaixo do cdi",
+                        "tone":     "bull" if _alpha_cdi > 0 else "bear",
+                        "icone":    "🎯",
+                    },
+                    {
+                        "nome":     "alpha vs ibovespa",
+                        "valor":    f"{_alpha_ibov:+.2f}pp",
+                        "sublabel": "acima ou abaixo do ibov",
+                        "tone":     "bull" if _alpha_ibov > 0 else "bear",
+                        "icone":    "🇧🇷",
+                    },
+                ])
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2023,38 +2027,36 @@ with tab_posicoes:
             pl_usd_em_brl_simples = pl_usd * cambio_atual
             contrib_cambio        = pl_brl_posicoes_usd - pl_usd_em_brl_simples
 
-            cg1, cg2, cg3, cg4 = st.columns(4)
-            with cg1:
-                metric_card(
-                    "patrimônio total (brl)",
-                    f"R$ {total_brl_carteira:,.2f}",
-                    f"custo: R$ {total_custo_brl:,.2f}",
-                    cor_delta="info",
-                )
-            with cg2:
-                cor_total = "bull" if pl_total_brl >= 0 else "bear"
-                metric_card(
-                    "p&l total em brl",
-                    f"R$ {pl_total_brl:+,.2f}",
-                    f"{pl_total_pct:+.2f}% sobre custo",
-                    cor_delta=cor_total,
-                )
-            with cg3:
-                cor_usd = "bull" if pl_usd >= 0 else "bear"
-                metric_card(
-                    "p&l ativos eua (usd)",
-                    f"$ {pl_usd:+,.2f}",
-                    f"{pl_usd_pct:+.2f}% | câmbio R$ {cambio_atual:.2f}",
-                    cor_delta=cor_usd,
-                )
-            with cg4:
-                cor_camb = "bull" if contrib_cambio >= 0 else "bear"
-                metric_card(
-                    "contribuição cambial",
-                    f"R$ {contrib_cambio:+,.2f}",
-                    "efeito usd/brl no resultado",
-                    cor_delta=cor_camb,
-                )
+            portfolio_kpis([
+                {
+                    "nome":     "patrimônio total (brl)",
+                    "valor":    f"R$ {total_brl_carteira:,.2f}",
+                    "sublabel": f"custo R$ {total_custo_brl:,.2f}",
+                    "tone":     "info",
+                    "icone":    "💎",
+                },
+                {
+                    "nome":     "p&l total brl",
+                    "valor":    f"R$ {pl_total_brl:+,.2f}",
+                    "sublabel": f"{pl_total_pct:+.2f}% sobre custo",
+                    "tone":     "bull" if pl_total_brl >= 0 else "bear",
+                    "icone":    "📈" if pl_total_brl >= 0 else "📉",
+                },
+                {
+                    "nome":     "p&l eua (usd)",
+                    "valor":    f"$ {pl_usd:+,.2f}",
+                    "sublabel": f"{pl_usd_pct:+.2f}% · câmbio R$ {cambio_atual:.2f}",
+                    "tone":     "bull" if pl_usd >= 0 else "bear",
+                    "icone":    "🇺🇸",
+                },
+                {
+                    "nome":     "contribuição cambial",
+                    "valor":    f"R$ {contrib_cambio:+,.2f}",
+                    "sublabel": "efeito usd/brl no resultado",
+                    "tone":     "bull" if contrib_cambio >= 0 else "bear",
+                    "icone":    "💱",
+                },
+            ])
 
             st.markdown("---")
             col_br, col_us = st.columns(2)
@@ -2286,14 +2288,29 @@ with tab_posicoes:
                         aporte_liq    = max(0.0, total_compras - total_vendas)
 
                         st.markdown("---")
-                        rc1, rc2, rc3 = st.columns(3)
-                        with rc1:
-                            metric_card("total a comprar",   f"R$ {total_compras:,.2f}", "", "bull")
-                        with rc2:
-                            metric_card("total a vender",    f"R$ {total_vendas:,.2f}",  "", "bear")
-                        with rc3:
-                            metric_card("aporte necessário", f"R$ {aporte_liq:,.2f}",
-                                        "além do que já tem em carteira", "amber")
+                        portfolio_kpis([
+                            {
+                                "nome":     "total a comprar",
+                                "valor":    f"R$ {total_compras:,.2f}",
+                                "sublabel": "ordens de compra agregadas",
+                                "tone":     "bull",
+                                "icone":    "🟢",
+                            },
+                            {
+                                "nome":     "total a vender",
+                                "valor":    f"R$ {total_vendas:,.2f}",
+                                "sublabel": "ordens de venda agregadas",
+                                "tone":     "bear",
+                                "icone":    "🔴",
+                            },
+                            {
+                                "nome":     "aporte necessário",
+                                "valor":    f"R$ {aporte_liq:,.2f}",
+                                "sublabel": "além do que já tem em carteira",
+                                "tone":     "amber",
+                                "icone":    "💰",
+                            },
+                        ])
 
 # ==========================================
 # tab 2: concentração de risco
@@ -2448,47 +2465,50 @@ with tab_concentracao:
                 tipo="bull",
             )
 
-        # ── CARDS DE RESUMO ──────────────────────────────────────────────
+        # ── CARDS DE RESUMO (design system v5) ───────────────────────────
         st.markdown("---")
-        cc1, cc2, cc3, cc4 = st.columns(4)
 
         _maior = max(dados_conc, key=lambda x: x['peso'])
         _cor_ma = ("bear" if _maior['peso'] > 25 else
                    "amber" if _maior['peso'] > 15 else "bull")
-        with cc1:
-            metric_card(
-                "maior posição",
-                _maior['ticker'],
-                f"{_maior['peso']:.1f}% da carteira",
-                cor_delta=_cor_ma,
-            )
-        with cc2:
-            metric_card(
-                "nº de ativos",
-                str(len(dados_conc)),
-                "diversificação por ativo",
-                cor_delta="info",
-            )
-        with cc3:
-            _pct_brl = paises_peso.get('Brasil', 0.0)
-            _pct_usd = paises_peso.get('EUA', 0.0)
-            metric_card(
-                "exposição brl / usd",
-                f"{_pct_brl:.0f}% / {_pct_usd:.0f}%",
-                "brasil vs eua",
-                cor_delta="info",
-            )
-        with cc4:
-            _hhi      = sum(_dc['peso'] ** 2 for _dc in dados_conc) / 10000
-            _diversif = max(0.0, 100.0 - _hhi * 100)
-            _cor_hhi  = ("bull" if _diversif > 70 else
-                         "amber" if _diversif > 50 else "bear")
-            metric_card(
-                "índice de diversificação",
-                f"{_diversif:.0f}/100",
-                "baseado no HHI (100 = máx diversif.)",
-                cor_delta=_cor_hhi,
-            )
+        _pct_brl = paises_peso.get('Brasil', 0.0)
+        _pct_usd = paises_peso.get('EUA', 0.0)
+        _hhi      = sum(_dc['peso'] ** 2 for _dc in dados_conc) / 10000
+        _diversif = max(0.0, 100.0 - _hhi * 100)
+        _cor_hhi  = ("bull" if _diversif > 70 else
+                     "amber" if _diversif > 50 else "bear")
+
+        portfolio_kpis([
+            {
+                "nome":        "maior posição",
+                "ticker_chip": _maior['ticker'].replace('.SA', ''),
+                "valor":       f"{_maior['peso']:.1f}%",
+                "sublabel":    "da carteira total",
+                "tone":        _cor_ma,
+                "icone":       "🥇" if _cor_ma == "bull" else ("⚠" if _cor_ma == "amber" else "🚨"),
+            },
+            {
+                "nome":     "nº de ativos",
+                "valor":    str(len(dados_conc)),
+                "sublabel": "diversificação por ativo",
+                "tone":     "info",
+                "icone":    "📊",
+            },
+            {
+                "nome":     "exposição br / us",
+                "valor":    f"{_pct_brl:.0f}% / {_pct_usd:.0f}%",
+                "sublabel": "alocação por país",
+                "tone":     "info",
+                "icone":    "🌎",
+            },
+            {
+                "nome":     "índice diversificação",
+                "valor":    f"{_diversif:.0f}/100",
+                "sublabel": "HHI (100 = máx)",
+                "tone":     _cor_hhi,
+                "icone":    "💎" if _cor_hhi == "bull" else "⚠",
+            },
+        ])
 
         # ── GRÁFICOS DE PIZZA ────────────────────────────────────────────
         st.markdown("---")
@@ -2581,40 +2601,40 @@ with tab_concentracao:
 
             if _corr_df is not None and not _corr_df.empty:
 
-                # Cards de resumo
-                _cc1, _cc2, _cc3 = st.columns(3)
-                with _cc1:
-                    _cor_div = (
-                        "#00C853" if _score_div >= 60
-                        else "#FF9900" if _score_div >= 35
-                        else "#FF1744"
-                    )
-                    _label_div = (
-                        "boa diversificação" if _score_div >= 60
-                        else "diversificação moderada" if _score_div >= 35
-                        else "alta concentração"
-                    )
-                    metric_card(
-                        "score de diversificação",
-                        f"{_score_div}/100",
-                        _label_div,
-                        "bull" if _score_div >= 60 else ("amber" if _score_div >= 35 else "bear"),
-                    )
-                    tooltip("correlacao")
-                with _cc2:
-                    metric_card(
-                        "pares de alta correlação",
-                        str(sum(1 for a in _alertas_corr if "alta" in a)),
-                        "> 0.70 — risco de concentração oculta",
-                        "bear" if any("alta" in a for a in _alertas_corr) else "bull",
-                    )
-                with _cc3:
-                    metric_card(
-                        "hedges naturais",
-                        str(sum(1 for a in _alertas_corr if "hedge" in a)),
-                        "correlação < -0.30",
-                        "bull" if any("hedge" in a for a in _alertas_corr) else "muted",
-                    )
+                # Cards de resumo (design system v5)
+                _label_div = (
+                    "boa diversificação" if _score_div >= 60
+                    else "diversificação moderada" if _score_div >= 35
+                    else "alta concentração"
+                )
+                _tone_div = "bull" if _score_div >= 60 else ("amber" if _score_div >= 35 else "bear")
+                _n_alta = sum(1 for a in _alertas_corr if "alta" in a)
+                _n_hedge = sum(1 for a in _alertas_corr if "hedge" in a)
+
+                portfolio_kpis([
+                    {
+                        "nome":     "score diversificação",
+                        "valor":    f"{_score_div}/100",
+                        "sublabel": _label_div,
+                        "tone":     _tone_div,
+                        "icone":    "💎" if _tone_div == "bull" else "⚠",
+                    },
+                    {
+                        "nome":     "pares alta correlação",
+                        "valor":    str(_n_alta),
+                        "sublabel": "> 0.70 — concentração oculta",
+                        "tone":     "bear" if _n_alta > 0 else "bull",
+                        "icone":    "🚨" if _n_alta > 0 else "✓",
+                    },
+                    {
+                        "nome":     "hedges naturais",
+                        "valor":    str(_n_hedge),
+                        "sublabel": "correlação < -0.30",
+                        "tone":     "bull" if _n_hedge > 0 else "muted",
+                        "icone":    "🛡" if _n_hedge > 0 else "—",
+                    },
+                ])
+                tooltip("correlacao")
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
