@@ -242,8 +242,8 @@ def status_card(
 
 def watchlist_header_row():
     """Header da lista densa — labels das colunas."""
-    cols = st.columns([1.2, 3.2, 1.5, 0.9, 0.9, 1.5, 0.6])
-    labels = ["ativo", "nome / sinal", "preço", "1d", "1m", "health", ""]
+    cols = st.columns([1.2, 3.0, 1.5, 0.9, 0.9, 1.1, 1.4, 0.6])
+    labels = ["ativo", "nome / sinal", "preço", "1d", "1m", "30d", "health", ""]
     for col, label in zip(cols, labels):
         with col:
             st.markdown(
@@ -270,6 +270,7 @@ def watchlist_row(
     alertas:       list  = None,
     earnings_info: dict  = None,
     data_source:   str   = "",
+    serie_30d:     list  = None,  # série pra sparkline 30d
     on_delete:     str   = None,   # aceito mas ignorado — chave = ticker
     on_memorial:   str   = None,   # aceito mas ignorado — chave = ticker
 ):
@@ -341,9 +342,17 @@ def watchlist_row(
             f'res·{dias_e}d</span>'
         )
 
-    # ── Layout 7 colunas ─────────────────────────────────────
-    col_tk, col_nm, col_pr, col_1d, col_1m, col_hs, col_ac = st.columns(
-        [1.2, 3.2, 1.5, 0.9, 0.9, 1.5, 0.6]
+    # ── Sparkline 30d ────────────────────────────────────────
+    spark_html = ""
+    if serie_30d and len(serie_30d) >= 2:
+        _spark_tone = "bull" if serie_30d[-1] >= serie_30d[0] else "bear"
+        spark_html = inline_sparkline(
+            serie_30d, tone=_spark_tone, largura=72, altura=22,
+        )
+
+    # ── Layout 8 colunas (adicionou sparkline 30d) ───────────
+    col_tk, col_nm, col_pr, col_1d, col_1m, col_sp, col_hs, col_ac = st.columns(
+        [1.2, 3.0, 1.5, 0.9, 0.9, 1.1, 1.4, 0.6]
     )
 
     with col_tk:
@@ -395,6 +404,19 @@ def watchlist_row(
             f'{seta_1m} {abs(var_1m):.2f}%</div>',
             unsafe_allow_html=True,
         )
+
+    with col_sp:
+        if spark_html:
+            st.markdown(
+                f'<div style="padding:11px 0 3px;">{spark_html}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="padding:13px 0 3px; color:var(--text-muted); '
+                'opacity:.35; font-size:0.7rem;">—</div>',
+                unsafe_allow_html=True,
+            )
 
     with col_hs:
         if hs_html:
@@ -2650,5 +2672,169 @@ def kpi_index_row(
 
     st.markdown(
         f'<div class="ft-kpi-row">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WATCHLIST COMPONENTS (Zona 2 — destaques e headers de grupo)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def highlights_strip(
+    secoes: list[dict],
+) -> None:
+    """
+    Strip horizontal de cards-destaque (Earnings hoje · Movers · Alertas).
+
+    Cada seção: {"titulo", "icone", "tone" (bull/amber/bear/info/accent),
+                 "items" (list de dicts {"label", "valor", "tone"} ou str)}
+
+    Substitui o side_panel vertical na Home (que causa nesting de st.columns
+    quando colocado ao lado da watchlist). Aqui usa grid responsivo flat.
+    """
+    if not secoes:
+        return
+
+    _inject_once(
+        "_highlights_strip_css_v1",
+        '.ft-hs-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));'
+        '  gap:var(--space-3);margin-bottom:var(--space-4);}'
+        '.ft-hs-card{position:relative;padding:var(--space-3) var(--space-4);'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);overflow:hidden;'
+        '  transition:border-color var(--motion-fast) var(--ease-out);}'
+        '.ft-hs-card:hover{border-color:var(--border-normal);}'
+        '.ft-hs-card::before{content:"";position:absolute;left:0;top:0;'
+        '  bottom:0;width:3px;background:var(--hs-tone);'
+        '  box-shadow:0 0 8px var(--hs-tone);}'
+        '.ft-hs-head{display:flex;align-items:center;'
+        '  justify-content:space-between;margin-bottom:8px;}'
+        '.ft-hs-head .ic{display:inline-flex;align-items:center;gap:6px;'
+        '  font-family:var(--font-ui);font-size:.66rem;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  color:var(--hs-tone);font-weight:600;}'
+        '.ft-hs-head .qt{font-family:var(--font-data);font-size:.7rem;'
+        '  color:var(--text-muted);background:var(--bg-elevated);'
+        '  border-radius:999px;padding:2px 8px;}'
+        '.ft-hs-list{display:flex;flex-direction:column;gap:4px;}'
+        '.ft-hs-item{display:grid;'
+        '  grid-template-columns:minmax(0,1fr) auto;'
+        '  align-items:center;gap:10px;padding:5px 0;'
+        '  border-bottom:1px solid var(--border-subtle);font-size:var(--text-xs);}'
+        '.ft-hs-item:last-child{border-bottom:0;}'
+        '.ft-hs-item .lb{font-family:var(--font-ui);'
+        '  color:var(--text-secondary);'
+        '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+        '.ft-hs-item .vl{font-family:var(--font-data);font-weight:600;'
+        '  font-size:var(--text-xs);}'
+        '.ft-hs-empty{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-muted);text-align:center;padding:14px 8px;'
+        '  font-style:italic;opacity:.7;}'
+        '@media (max-width:900px){.ft-hs-row{grid-template-columns:1fr;}}'
+    )
+
+    cards = []
+    for sec in secoes:
+        titulo = sec.get("titulo", "")
+        icone  = sec.get("icone", "")
+        tone   = sec.get("tone", "muted")
+        items  = sec.get("items", [])
+
+        t = _tone(tone)
+        tone_c = t.get("fg", "var(--text-muted)")
+
+        items_html = ""
+        if not items:
+            items_html = '<div class="ft-hs-empty">— nada agora —</div>'
+        else:
+            for it in items[:5]:
+                if isinstance(it, str):
+                    items_html += (
+                        f'<div class="ft-hs-item">'
+                        f'<span class="lb">{it}</span></div>'
+                    )
+                else:
+                    lb = it.get("label", "")
+                    vl = it.get("valor", "")
+                    it_tone = it.get("tone", "muted")
+                    it_t = _tone(it_tone)
+                    it_c = it_t.get("fg", "var(--text-primary)")
+                    vl_html = (
+                        f'<span class="vl" style="color:{it_c};">{vl}</span>'
+                        if vl else ''
+                    )
+                    items_html += (
+                        f'<div class="ft-hs-item">'
+                        f'<span class="lb">{lb}</span>{vl_html}</div>'
+                    )
+
+        cards.append(
+            f'<div class="ft-hs-card" style="--hs-tone:{tone_c};">'
+            f'<div class="ft-hs-head">'
+            f'<span class="ic">{icone} {titulo}</span>'
+            f'<span class="qt">{len(items)}</span>'
+            f'</div>'
+            f'<div class="ft-hs-list">{items_html}</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div class="ft-hs-row">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def mercado_group_header(
+    nome: str,
+    qtd: int,
+    *,
+    tone: str = "info",
+    icone: str = "▸",
+) -> None:
+    """
+    Header bonito para grupo de mercado dentro da watchlist (BR / EUA / FIIs).
+    Substitui o '▸ brasil' minúsculo por uma faixa com chip e contagem.
+    """
+    _inject_once(
+        "_mercado_group_css_v1",
+        '.ft-mkt-group{display:flex;align-items:center;gap:10px;'
+        '  padding:14px 0 8px;margin-top:var(--space-3);}'
+        '.ft-mkt-group .ic{font-family:var(--font-ui);'
+        '  font-size:.72rem;font-weight:700;color:var(--mkt-tone);'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
+        '  display:inline-flex;align-items:center;gap:6px;}'
+        '.ft-mkt-group .dot{width:6px;height:6px;border-radius:50%;'
+        '  background:var(--mkt-tone);box-shadow:0 0 6px var(--mkt-tone);}'
+        '.ft-mkt-group .ct{font-family:var(--font-data);font-size:.68rem;'
+        '  color:var(--text-muted);background:var(--bg-elevated);'
+        '  border:1px solid var(--border-subtle);'
+        '  border-radius:999px;padding:1px 8px;}'
+        '.ft-mkt-group .ln{flex:1;height:1px;background:linear-gradient('
+        '  90deg,var(--mkt-tone-rgba) 0%,transparent 100%);opacity:.6;}'
+    )
+
+    t = _tone(tone)
+    c = t.get("fg", "var(--accent)")
+    # rgba derivado simples
+    rgba = "rgba(110,128,255,0.3)"
+    if tone == "bull":
+        rgba = "rgba(74,222,128,0.3)"
+    elif tone == "bear":
+        rgba = "rgba(248,113,113,0.3)"
+    elif tone == "amber":
+        rgba = "rgba(251,191,36,0.3)"
+    elif tone == "accent":
+        rgba = "rgba(255,140,0,0.3)"
+
+    st.markdown(
+        f'<div class="ft-mkt-group" '
+        f'style="--mkt-tone:{c};--mkt-tone-rgba:{rgba};">'
+        f'<span class="ic"><span class="dot"></span>{icone} {nome}</span>'
+        f'<span class="ct">{qtd}</span>'
+        f'<span class="ln"></span>'
+        f'</div>',
         unsafe_allow_html=True,
     )

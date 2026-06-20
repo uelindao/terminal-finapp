@@ -42,6 +42,8 @@ from utils.components import (
     topbar, side_panel,
     # Zona 1 — hero visual
     hero_macro, kpi_index_row,
+    # Zona 2 — watchlist polida
+    tabs_pill, highlights_strip, mercado_group_header,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -1712,7 +1714,12 @@ else:
                                     p_atual = float(s.iloc[-1])
                                     p_ontem = float(s.iloc[-2])
                                     p_1m = float(s.iloc[0])
-                                    live_data[t] = {'preco': p_atual, 'var_1d': ((p_atual/p_ontem)-1)*100, 'var_1m': ((p_atual/p_1m)-1)*100}
+                                    live_data[t] = {
+                                        'preco':  p_atual,
+                                        'var_1d': ((p_atual/p_ontem)-1)*100,
+                                        'var_1m': ((p_atual/p_1m)-1)*100,
+                                        'serie_30d': [float(x) for x in s.tail(30).tolist()],
+                                    }
                                     fonte_wl[t] = "api"
                         except Exception:
                             pass
@@ -1791,37 +1798,62 @@ else:
                 'data': '—',
             }
 
-    # ── FILTRO POR TAG / TESE ────────────────────────────────────────────────
-    tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
-    opcoes_filtro    = ['todas'] + tags_disponiveis
+    # ── FILTRO POR MERCADO (tabs_pill) ───────────────────────────────────────
+    mercados_disponiveis = sorted(set(
+        (i.get('mercado') or 'outros').lower() for i in watchlist
+    ))
+    _mkt_label_map = {
+        "brasil":       "🇧🇷 BR",
+        "eua":          "🇺🇸 EUA",
+        "criptomoedas": "₿ Cripto",
+        "outros":       "🌐 Outros",
+    }
+    mkt_opcoes = ["Todos"] + [
+        _mkt_label_map.get(m, f"📁 {m}") for m in mercados_disponiveis
+    ]
+    mkt_sel = tabs_pill(mkt_opcoes, key="wl_mkt_filtro", default="Todos")
 
-    col_tag1, col_tag2, col_tag3 = st.columns([3, 1, 1])
-    with col_tag1:
-        tag_filtro = st.radio(
-            "filtrar por tese:",
-            options=opcoes_filtro,
-            format_func=lambda x: "🌐 todas" if x == 'todas' else f"📁 {x}",
-            horizontal=True,
-            key="wl_tag_filtro",
-            label_visibility="collapsed",
+    # ── FILTRO POR TAG / TESE (tabs_pill) ────────────────────────────────────
+    tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
+    if tags_disponiveis:
+        tag_opcoes = ["🌐 todas"] + [f"📁 {t}" for t in tags_disponiveis]
+        tag_sel_raw = tabs_pill(tag_opcoes, key="wl_tag_filtro", default="🌐 todas")
+        tag_filtro = (
+            'todas' if tag_sel_raw == "🌐 todas"
+            else tag_sel_raw.replace("📁 ", "", 1)
         )
-    with col_tag2:
+    else:
+        tag_filtro = 'todas'
+
+    # ── Controles auxiliares (editar tags + contador) ────────────────────────
+    col_aux1, col_aux2, col_aux3 = st.columns([2, 3, 3])
+    with col_aux1:
         if st.button("🏷️ editar tags", key="btn_editar_tags", use_container_width=True):
             st.session_state['modo_editar_tags'] = not st.session_state.get('modo_editar_tags', False)
-    with col_tag3:
+    with col_aux3:
         _n_grupos = len(tags_disponiveis) if tags_disponiveis else 1
         st.markdown(
             f'<div style="font-family:var(--font-data); font-size:0.75rem; color:var(--text-muted); '
             f'padding-top:8px; text-align:right;">'
-            f'{len(watchlist)} ativos | {_n_grupos} grupo{"s" if _n_grupos != 1 else ""}</div>',
+            f'{len(watchlist)} ativos · {_n_grupos} grupo{"s" if _n_grupos != 1 else ""}</div>',
             unsafe_allow_html=True,
         )
 
-    # Filtra watchlist pela tag selecionada
+    # Filtra watchlist por mercado primeiro, depois por tag
+    watchlist_filtrada = list(watchlist)
+    if mkt_sel != "Todos":
+        # mapeamento reverso: label → chave mercado
+        _label_para_mkt = {v: k for k, v in _mkt_label_map.items()}
+        _mkt_chave = _label_para_mkt.get(mkt_sel, mkt_sel.replace("📁 ", "", 1).lower())
+        watchlist_filtrada = [
+            i for i in watchlist_filtrada
+            if (i.get('mercado') or 'outros').lower() == _mkt_chave
+        ]
     if tag_filtro != 'todas':
-        watchlist_filtrada = [i for i in watchlist if (i.get('tag') or 'geral') == tag_filtro]
-    else:
-        watchlist_filtrada = watchlist
+        watchlist_filtrada = [
+            i for i in watchlist_filtrada
+            if (i.get('tag') or 'geral') == tag_filtro
+        ]
 
     # Modo de edição de tags
     if st.session_state.get('modo_editar_tags'):
@@ -1931,6 +1963,84 @@ else:
 
     watchlist_filtrada = sorted(watchlist_filtrada, key=_sort_key, reverse=_ordem_reversa)
 
+    # ── HIGHLIGHTS STRIP (Zona 2: Earnings · Movers · Alertas) ───────────────
+    # Earnings nos próximos 14d
+    _earn_items = []
+    for _tb, _info in sorted(
+        _earnings_info_map.items(),
+        key=lambda kv: kv[1].get('dias', 99),
+    ):
+        _dias_e = _info.get('dias', 99)
+        if 0 <= _dias_e <= 14:
+            _tone_e = "bear" if _dias_e <= 2 else ("amber" if _dias_e <= 7 else "info")
+            _earn_items.append({
+                "label": _tb.replace('.SA', ''),
+                "valor": f"em {_dias_e}d" if _dias_e > 0 else "hoje",
+                "tone":  _tone_e,
+            })
+
+    # Top movers do dia
+    _movers = []
+    for _item in watchlist_filtrada:
+        _t = _item['ticker']
+        _d = live_data.get(_t, {})
+        _v = float(_d.get('var_1d', 0) or 0)
+        if abs(_v) > 0.01:
+            _movers.append((_t, _v))
+    _movers.sort(key=lambda x: abs(x[1]), reverse=True)
+    _movers_items = [
+        {
+            "label": _t.replace('.SA', ''),
+            "valor": f"{'+' if _v >= 0 else ''}{_v:.2f}%",
+            "tone":  "bull" if _v >= 0 else "bear",
+        }
+        for _t, _v in _movers[:5]
+    ]
+
+    # Alertas ativos
+    _alertas_items = []
+    for _item in watchlist_filtrada:
+        _t = _item['ticker']
+        _tb = mapear_ticker_base(_t)
+        _h = health_data.get(_t, health_data.get(_tb, {}))
+        try:
+            _parsed = json.loads(_h.get('alertas_venda') or '{}')
+            if isinstance(_parsed, str):
+                _parsed = json.loads(_parsed)
+            _lst = (
+                _parsed.get('alertas', [])
+                if isinstance(_parsed, dict) else _parsed
+            )
+        except Exception:
+            _lst = []
+        if _lst:
+            _alertas_items.append({
+                "label": f"{_t.replace('.SA', '')} · {_lst[0][:42]}",
+                "valor": "",
+                "tone":  "amber",
+            })
+
+    highlights_strip([
+        {
+            "titulo": "earnings",
+            "icone":  "📅",
+            "tone":   "info",
+            "items":  _earn_items,
+        },
+        {
+            "titulo": "top movers",
+            "icone":  "📊",
+            "tone":   "accent",
+            "items":  _movers_items,
+        },
+        {
+            "titulo": "alertas",
+            "icone":  "⚠",
+            "tone":   "amber",
+            "items":  _alertas_items[:5],
+        },
+    ])
+
     # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
     mercados_dict = {}
     for item in watchlist_filtrada:
@@ -1946,15 +2056,18 @@ else:
     _remover_pendente  = None   # (ticker, watchlist_id) para o dialog de remoção
 
     for mercado, ativos in mercados_dict.items():
-        # Header do grupo de mercado
-        st.markdown(
-            f'<div style="font-family:var(--font-data);'
-            f' font-size:0.60rem; font-weight:bold;'
-            f' color:var(--text-muted); text-transform:uppercase;'
-            f' letter-spacing:0.14em; padding:8px 0 4px;">'
-            f'▸ {mercado}</div>',
-            unsafe_allow_html=True,
-        )
+        # Header bonito do grupo de mercado (Zona 2)
+        _mkt_label = {
+            "brasil":       "🇧🇷 brasil",
+            "eua":          "🇺🇸 estados unidos",
+            "criptomoedas": "₿ criptomoedas",
+        }.get(mercado, mercado)
+        _mkt_tone = {
+            "brasil":       "bull",
+            "eua":          "info",
+            "criptomoedas": "accent",
+        }.get(mercado, "muted")
+        mercado_group_header(_mkt_label, len(ativos), tone=_mkt_tone)
 
         # Header das colunas (uma vez por grupo)
         watchlist_header_row()
@@ -2004,6 +2117,7 @@ else:
                     alertas       = lista_alertas,
                     earnings_info = _earnings_info_map.get(t_base),
                     data_source   = fonte_wl.get(t, ''),
+                    serie_30d     = d.get('serie_30d'),
                 )
 
             # Coleta remoção pendente (dialog chamado fora do loop)
