@@ -1,5 +1,5 @@
 import streamlit as st
-import uuid
+import secrets as _pysecrets
 from utils.style import aplicar_tema
 from utils.components import page_header, empty_state
 from database.db import (
@@ -8,7 +8,9 @@ from database.db import (
 )
 
 _SESSION_PARAM = "s"   # query param que carrega o token de sessão
-_SESSION_DAYS  = 7
+# Reduzido de 7 dias para 24h — token vaza em URL/screenshots/Referer,
+# janela curta + sliding window (estende a cada uso) limita exposição.
+_SESSION_HOURS = 24
 
 
 def _login_por_sessao(token: str) -> bool:
@@ -138,8 +140,9 @@ def _render_tela_login():
                         usuario = autenticar_usuario(usuario_input, senha_input)
 
                         if usuario:
-                            token = str(uuid.uuid4())
-                            criar_sessao(usuario['id'], token, dias=_SESSION_DAYS)
+                            # 256-bit URL-safe token (vs 128-bit do uuid4 anterior)
+                            token = _pysecrets.token_urlsafe(32)
+                            criar_sessao(usuario['id'], token, horas=_SESSION_HOURS)
 
                             st.session_state['autenticado']       = True
                             st.session_state['user_id']           = usuario['id']

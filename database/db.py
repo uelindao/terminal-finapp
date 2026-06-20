@@ -46,11 +46,50 @@ def get_user_id() -> int:
 # AUTENTICAÇÃO E GESTÃO DE UTILIZADORES
 # ==========================================
 
-def _hash_senha(senha: str, salt: str = "finterminal_2025") -> str:
-    # NOTA DE SEGURANÇA: salt fixo é uma limitação conhecida — migração para argon2/bcrypt
-    # exigiria adicionar coluna 'salt' na tabela users e re-hash de todos os usuários.
-    # Para terminal pessoal (1-2 usuários) o risco é baixo, mas não usar em produção multi-tenant.
-    return hashlib.sha256(f"{salt}{senha}".encode()).hexdigest()
+_LEGACY_SALT = "finterminal_2025"
+
+
+def _hash_senha_sha256_legado(senha: str) -> str:
+    """SHA-256 com salt fixo — mantido APENAS para validar hashes legados.
+    NUNCA usar para gerar novos hashes (chame _hash_senha_novo)."""
+    return hashlib.sha256(f"{_LEGACY_SALT}{senha}".encode()).hexdigest()
+
+
+def _hash_senha_novo(senha: str) -> str:
+    """Gera hash bcrypt (salt aleatório embutido). Hash resultante começa com $2b$."""
+    import bcrypt
+    return bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
+
+
+def _verificar_senha(senha_plain: str, hash_stored: str) -> tuple[bool, bool]:
+    """
+    Verifica senha contra hash armazenado. Detecta formato automaticamente.
+    Retorna (ok, is_legacy):
+      - ok: True se a senha bateu com o hash
+      - is_legacy: True se o hash era SHA-256 antigo (chamada deve re-hashear bcrypt)
+    """
+    if not hash_stored:
+        return False, False
+    # bcrypt hashes começam com $2 (ex.: $2b$12$...). SHA-256 hex é só 0-9a-f.
+    if hash_stored.startswith("$2"):
+        try:
+            import bcrypt
+            ok = bcrypt.checkpw(senha_plain.encode("utf-8"), hash_stored.encode("ascii"))
+            return bool(ok), False
+        except Exception as e:
+            logger.error(f"[db] falha ao verificar hash bcrypt: {e}")
+            return False, False
+    # Legado SHA-256 — comparação constant-time
+    import hmac as _hmac
+    expected = _hash_senha_sha256_legado(senha_plain)
+    return _hmac.compare_digest(expected, hash_stored), True
+
+
+# Compat retroativa: _hash_senha ainda existe mas agora gera bcrypt
+# (callers internos: criar_usuario, alterar_senha, _criar_admin_padrao).
+def _hash_senha(senha: str, salt: str = _LEGACY_SALT) -> str:
+    """DEPRECATED. Mantida pra compat; gera bcrypt independente do `salt`."""
+    return _hash_senha_novo(senha)
 
 
 def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is_admin: bool = False) -> bool:
@@ -58,7 +97,7 @@ def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is
     try:
         sb.table('users').insert({
             'username': username.lower().strip(),
-            'senha_hash': _hash_senha(senha),
+            'senha_hash': _hash_senha_novo(senha),
             'nome': nome,
             'email': email,
             'is_admin': is_admin,
@@ -70,26 +109,48 @@ def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is
 
 
 def autenticar_usuario(username: str, senha: str) -> dict | None:
+    """
+    Autentica e auto-migra hash SHA-256 legado para bcrypt no primeiro login
+    bem-sucedido após o deploy. Próximos logins do mesmo usuário usam bcrypt
+    direto (mais lento ~100ms — esperado).
+    """
     sb = get_supabase()
     try:
         rows = (
             sb.table('users')
-            .select('id, username, nome, email, is_admin')
+            .select('id, username, nome, email, is_admin, senha_hash')
             .eq('username', username.lower().strip())
-            .eq('senha_hash', _hash_senha(senha))
+            .limit(1)
             .execute()
             .data
         )
-        if rows:
-            user = rows[0]
+        if not rows:
+            return None
+        row = rows[0]
+        ok, is_legacy = _verificar_senha(senha, row.get('senha_hash') or '')
+        if not ok:
+            return None
+
+        # Re-hash transparente: migra SHA-256 → bcrypt no primeiro login bem-sucedido.
+        if is_legacy:
             try:
                 sb.table('users').update(
-                    {'ultimo_login': datetime.utcnow().isoformat()}
-                ).eq('id', user['id']).execute()
+                    {'senha_hash': _hash_senha_novo(senha)}
+                ).eq('id', row['id']).execute()
+                logger.info(f"[db] hash de senha do user {row['id']} migrado SHA-256 → bcrypt.")
             except Exception as e:
-                logger.warning(f"[db] falha ao atualizar ultimo_login do user {user['id']}: {e}")
-            return user
-        return None
+                logger.warning(f"[db] migração bcrypt falhou para user {row['id']}: {e}")
+
+        # Atualiza ultimo_login
+        try:
+            sb.table('users').update(
+                {'ultimo_login': datetime.utcnow().isoformat()}
+            ).eq('id', row['id']).execute()
+        except Exception as e:
+            logger.warning(f"[db] falha ao atualizar ultimo_login do user {row['id']}: {e}")
+
+        # Não retorna senha_hash pro chamador
+        return {k: v for k, v in row.items() if k != 'senha_hash'}
     except Exception as e:
         logger.error(f"[db] falha na autenticação do usuário '{username}': {e}")
         return None
@@ -99,12 +160,15 @@ def autenticar_usuario(username: str, senha: str) -> dict | None:
 # SESSÕES PERSISTENTES (cross-tab login)
 # ==========================================
 
-def criar_sessao(user_id: int, token: str, dias: int = 7) -> bool:
-    """Persiste um token de sessão no banco com expiração."""
+def criar_sessao(user_id: int, token: str, horas: int = 24) -> bool:
+    """Persiste um token de sessão no banco com expiração.
+    TTL padrão reduzido para 24h (era 7 dias) para limitar janela de exposição
+    do token na URL (?s=TOKEN). Sessão é estendida automaticamente em cada
+    uso via validar_sessao (sliding window)."""
     from datetime import timezone, timedelta
     sb = get_supabase()
     try:
-        expires = (datetime.now(timezone.utc) + timedelta(days=dias)).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=horas)).isoformat()
         sb.table('user_sessions').upsert(
             {'token': token, 'user_id': user_id, 'expires_at': expires},
             on_conflict='token',
@@ -115,12 +179,16 @@ def criar_sessao(user_id: int, token: str, dias: int = 7) -> bool:
         return False
 
 
-def validar_sessao(token: str) -> dict | None:
-    """Verifica se token existe, não expirou e retorna dados do usuário."""
-    from datetime import timezone
+def validar_sessao(token: str, sliding_horas: int = 24) -> dict | None:
+    """Verifica se token existe, não expirou e retorna dados do usuário.
+    Estende automaticamente expires_at por mais `sliding_horas` em cada
+    chamada bem-sucedida (sliding window) — sessão inativa expira no TTL,
+    sessão em uso continua válida."""
+    from datetime import timezone, timedelta
     sb = get_supabase()
     try:
-        agora = datetime.now(timezone.utc).isoformat()
+        agora_dt = datetime.now(timezone.utc)
+        agora    = agora_dt.isoformat()
         rows = (
             sb.table('user_sessions')
             .select('user_id, expires_at')
@@ -132,6 +200,15 @@ def validar_sessao(token: str) -> dict | None:
         )
         if not rows:
             return None
+        # Sliding window: empurra expires_at para frente. Best-effort — se falhar
+        # apenas mantém o TTL original.
+        try:
+            novo_expires = (agora_dt + timedelta(hours=sliding_horas)).isoformat()
+            sb.table('user_sessions').update(
+                {'expires_at': novo_expires}
+            ).eq('token', token).execute()
+        except Exception as e:
+            logger.debug(f"[db] sliding session falhou (não-crítico): {e}")
         user_id = rows[0]['user_id']
         user_rows = (
             sb.table('users')
