@@ -50,6 +50,8 @@ from utils.components import (
     # Polimentos
     events_strip, pill_select, watchlist_selector_header,
     opportunity_card, chip_filter_row,
+    # UX percebida — skeleton loaders
+    skeleton_hero, skeleton_kpi_row,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -692,8 +694,10 @@ if _tickers_wl_home:
         st.markdown("<br>", unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def buscar_indices_completo():
+    """Usa helper centralizada bulk_close_history (cache 5min compartilhado)."""
+    from utils.market_data import bulk_close_history
+
     tickers = {
         "ibovespa":     "^BVSP",
         "s&p 500":      "^GSPC",
@@ -708,37 +712,36 @@ def buscar_indices_completo():
     }
     resultados = {}
     try:
-        hist = yf.download(list(tickers.values()), period="5d", auto_adjust=True, progress=False)['Close']
-        raw: dict[str, pd.Series] = {}
+        series_map = bulk_close_history(tuple(tickers.values()), period="5d")
+        raw: dict[str, list[float]] = {}
         for nome, tk in tickers.items():
-            try:
-                s = hist[tk].dropna() if isinstance(hist, pd.DataFrame) and tk in hist.columns else pd.Series()
-                if len(s) >= 2:
-                    raw[nome] = s
-            except Exception:
-                pass
+            s = series_map.get(tk, [])
+            if len(s) >= 2:
+                raw[nome] = s
 
         for nome, s in raw.items():
             if nome.startswith("_"):
                 continue
-            preco = float(s.iloc[-1])
-            var   = ((preco / float(s.iloc[-2])) - 1) * 100
+            preco = s[-1]
+            try:
+                var = ((preco / s[-2]) - 1) * 100 if s[-2] > 0 else 0.0
+            except Exception:
+                var = 0.0
             resultados[nome] = {
-                "preco": preco,
-                "var":   var,
+                "preco":  preco,
+                "var":    var,
                 "ticker": tickers[nome],
-                "serie": [float(x) for x in s.tail(20).tolist()],
+                "serie":  s[-20:],
             }
 
         # Spread curva de juros: 10Y − 3M (em pp)
         if "treasury 10y" in raw and "_irx" in raw:
             s10 = raw["treasury 10y"]
             s3m = raw["_irx"]
-            spread = float(s10.iloc[-1]) - float(s3m.iloc[-1])
-            # usa spread atual como "var" → positivo = curva normal (verde), negativo = invertida (vermelho)
+            spread = s10[-1] - s3m[-1]
             resultados["curva 10y-3m"] = {
-                "preco": spread,
-                "var":   spread,
+                "preco":  spread,
+                "var":    spread,
                 "ticker": "T10Y3M",
             }
     except Exception:
@@ -1164,33 +1167,33 @@ if ativos_alocados:
     # Header da seção é embutido no portfolio_hero abaixo (não usa section_title).
     tickers_com_peso = list(ativos_alocados.keys())
 
-    # ── Série histórica 5d do valor da carteira (pra sparkline do hero) ──────
+    # ── Série histórica 5d do valor da carteira (sparkline do hero) ──────────
     @st.cache_data(ttl=300, show_spinner=False)
     def _serie_carteira_5d(tickers_tuple: tuple, qtds_tuple: tuple) -> list:
+        """
+        Reusa utils.market_data.bulk_close_history — mesmo cache 5min
+        compartilhado com Dashboard/Watchlists.
+        """
+        from utils.market_data import bulk_close_history
         try:
-            tk_base = list(set([mapear_ticker_base(t) for t in tickers_tuple]))
-            _hist = yf.download(tk_base, period="5d", auto_adjust=True, progress=False)
-            if _hist.empty:
+            tk_base = tuple(sorted({mapear_ticker_base(t) for t in tickers_tuple}))
+            series_map = bulk_close_history(tk_base, period="5d")
+            if not series_map:
                 return []
-            if isinstance(_hist.columns, pd.MultiIndex):
-                try:
-                    _hp = _hist.xs('Close', axis=1, level=0)
-                except KeyError:
-                    _hp = _hist.xs('Close', axis=1, level=1)
-            else:
-                _hp = _hist.get('Close', _hist)
-            if isinstance(_hp, pd.Series):
-                _hp = _hp.to_frame(name=tk_base[0])
-            _hp = _hp.ffill()
+            # Alinhamento: assume todas as séries com mesmo tamanho (ffill já feito)
+            n_dias = max((len(s) for s in series_map.values() if s), default=0)
+            if n_dias < 2:
+                return []
             qtds = dict(zip(tickers_tuple, qtds_tuple))
             serie = []
-            for i in range(len(_hp)):
+            for i in range(n_dias):
                 v = 0.0
                 for t, q in qtds.items():
                     tb = mapear_ticker_base(t)
-                    if tb in _hp.columns:
+                    s = series_map.get(tb, [])
+                    if i < len(s):
                         try:
-                            v += float(q) * float(_hp[tb].iloc[i])
+                            v += float(q) * float(s[i])
                         except Exception:
                             pass
                 if v > 0:

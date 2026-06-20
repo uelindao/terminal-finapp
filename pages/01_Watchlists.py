@@ -161,45 +161,43 @@ if not ativos_uniao:
 health_data = {h['ticker']: h for h in (get_health_scores() or [])}
 cache_precos = get_all_price_cache() or {}
 
-# Sincronizar preços (cache + yfinance fallback)
-@st.cache_data(ttl=300, show_spinner=False)
+# Sincronizar preços + série 30d via helper centralizada (cache compartilhado)
 def _precos_e_serie(tickers_tuple: tuple) -> dict:
-    out: dict = {}
-    if not tickers_tuple:
-        return out
-    try:
-        tb_set = list(set(mapear_ticker_base(t) for t in tickers_tuple))
-        _raw = yf.download(tb_set, period="1mo", auto_adjust=True, progress=False)
-        if isinstance(_raw.columns, pd.MultiIndex):
-            try:
-                hist = _raw.xs('Close', axis=1, level=0)
-            except KeyError:
-                hist = _raw.xs('Close', axis=1, level=1)
-        else:
-            hist = _raw.get('Close', _raw)
-        if isinstance(hist, pd.Series):
-            hist = hist.to_frame(name=tb_set[0])
-        hist = hist.ffill()
+    """
+    Wrapper sobre utils.market_data.bulk_close_history.
 
-        for t in tickers_tuple:
-            tb = mapear_ticker_base(t)
+    O cache da bulk_close_history é COMPARTILHADO entre páginas (Dashboard,
+    Home, Watchlists) — abrir uma página depois da outra, com tickers
+    parecidos, devolve dados instantaneamente.
+    """
+    from utils.market_data import bulk_close_history
+    if not tickers_tuple:
+        return {}
+
+    # Os tickers da watchlist podem ter sufixos (.SA). bulk_close_history
+    # aceita exatamente esses sufixos, então passamos diretos.
+    tb_set = tuple(sorted({mapear_ticker_base(t) for t in tickers_tuple}))
+    series_map = bulk_close_history(tb_set, period="1mo")
+
+    out: dict = {}
+    for t in tickers_tuple:
+        tb = mapear_ticker_base(t)
+        s = series_map.get(tb, [])
+        if len(s) >= 2:
+            p_atual = s[-1]
+            p_ontem = s[-2]
+            p_1m    = s[0]
             try:
-                if tb in hist.columns:
-                    s = hist[tb].dropna()
-                    if len(s) >= 2:
-                        p_atual = float(s.iloc[-1])
-                        p_ontem = float(s.iloc[-2])
-                        p_1m    = float(s.iloc[0])
-                        out[t] = {
-                            "preco":   p_atual,
-                            "var_1d":  ((p_atual / p_ontem) - 1) * 100,
-                            "var_1m":  ((p_atual / p_1m)    - 1) * 100,
-                            "serie":   [float(x) for x in s.tail(30).tolist()],
-                        }
+                v_1d = ((p_atual / p_ontem) - 1) * 100 if p_ontem > 0 else 0.0
+                v_1m = ((p_atual / p_1m)    - 1) * 100 if p_1m    > 0 else 0.0
             except Exception:
-                pass
-    except Exception:
-        pass
+                v_1d, v_1m = 0.0, 0.0
+            out[t] = {
+                "preco":  p_atual,
+                "var_1d": v_1d,
+                "var_1m": v_1m,
+                "serie":  s[-30:],
+            }
     return out
 
 with st.spinner("sincronizando preços e série 30d..."):
