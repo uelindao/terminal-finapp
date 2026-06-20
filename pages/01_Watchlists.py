@@ -26,6 +26,7 @@ from utils.components import (
     topbar, section_title, info_box, portfolio_kpis, highlights_strip,
     tabs_pill, pill_select, chip, chip_status, html_table,
     inline_sparkline, info_box as _info_box, inject_keyboard_shortcuts,
+    chip_filter_row,
 )
 from database.db import (
     listar_watchlist, listar_watchlists, listar_tags_watchlist,
@@ -299,7 +300,16 @@ _mkt_label_map = {
     "outros":       "🌐 Outros",
 }
 mkt_opcoes = ["Todos"] + [_mkt_label_map[m] for m in mercados_disp]
-mkt_sel = tabs_pill(mkt_opcoes, key="wlpro_mkt", default="Todos")
+st.markdown(
+    '<div style="font-family:var(--font-ui);font-size:.58rem;'
+    'color:var(--text-muted);text-transform:uppercase;'
+    'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+    'font-weight:600;opacity:.7;">mercado</div>',
+    unsafe_allow_html=True,
+)
+mkt_sel = chip_filter_row(
+    mkt_opcoes, key="wlpro_mkt", default="Todos", max_chip_cols=10,
+)
 
 # Tag filter (todas as tags únicas entre as watchlists selecionadas)
 tags_union: set = set()
@@ -313,7 +323,16 @@ tags_disp = sorted(tags_union)
 
 if tags_disp:
     tag_opcoes = ["🌐 todas"] + [f"📁 {t}" for t in tags_disp]
-    tag_sel_raw = tabs_pill(tag_opcoes, key="wlpro_tag", default="🌐 todas")
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">tese / tag</div>',
+        unsafe_allow_html=True,
+    )
+    tag_sel_raw = chip_filter_row(
+        tag_opcoes, key="wlpro_tag", default="🌐 todas", max_chip_cols=10,
+    )
     tag_sel = (
         'todas' if tag_sel_raw == "🌐 todas"
         else tag_sel_raw.replace("📁 ", "", 1)
@@ -321,41 +340,44 @@ if tags_disp:
 else:
     tag_sel = 'todas'
 
-# Busca + ordem
-_col_b, _col_o, _col_d = st.columns([4, 3, 2])
-with _col_b:
-    busca = st.text_input(
-        "buscar ticker:",
-        placeholder="ex: petr, wege, aapl...",
-        label_visibility="collapsed",
-        key="wlpro_busca",
-    )
-with _col_o:
-    st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.62rem;'
-        'color:var(--text-muted);text-transform:uppercase;'
-        'letter-spacing:var(--ls-wider);margin-bottom:4px;'
-        'font-weight:600;">ordenar por</div>',
-        unsafe_allow_html=True,
-    )
-    ord_campo = pill_select(
-        ["health", "var 1d", "var 1m", "ticker"],
-        key="wlpro_ord_campo",
-        default="health",
-    )
-with _col_d:
-    st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.62rem;'
-        'color:var(--text-muted);text-transform:uppercase;'
-        'letter-spacing:var(--ls-wider);margin-bottom:4px;'
-        'font-weight:600;">direção</div>',
-        unsafe_allow_html=True,
-    )
-    ord_dir = pill_select(
-        ["↓ desc", "↑ asc"],
-        key="wlpro_ord_dir",
-        default="↓ desc",
-    )
+# Busca textual (linha separada compacta)
+st.markdown(
+    '<div style="font-family:var(--font-ui);font-size:.58rem;'
+    'color:var(--text-muted);text-transform:uppercase;'
+    'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+    'font-weight:600;opacity:.7;">buscar ticker</div>',
+    unsafe_allow_html=True,
+)
+busca = st.text_input(
+    "buscar ticker:",
+    placeholder="ex: petr, wege, aapl...",
+    label_visibility="collapsed",
+    key="wlpro_busca",
+)
+
+# Ordenação compacta
+st.markdown(
+    '<div style="display:flex;align-items:center;gap:10px;'
+    'margin-top:14px;margin-bottom:4px;">'
+    '<span style="font-family:var(--font-ui);font-size:.6rem;'
+    'color:var(--text-muted);text-transform:uppercase;'
+    'letter-spacing:var(--ls-wider);font-weight:700;">↕ ordenar por</span>'
+    '<span style="flex:1;height:1px;background:var(--border-subtle);'
+    'opacity:.5;"></span></div>',
+    unsafe_allow_html=True,
+)
+ord_campo = chip_filter_row(
+    ["health", "var 1d", "var 1m", "ticker"],
+    key="wlpro_ord_campo",
+    default="health",
+    max_chip_cols=10,
+)
+ord_dir = chip_filter_row(
+    ["↓ desc", "↑ asc"],
+    key="wlpro_ord_dir",
+    default="↓ desc",
+    max_chip_cols=10,
+)
 
 # Aplicar filtros
 ativos_filtrados: list[dict] = []

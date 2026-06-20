@@ -49,7 +49,7 @@ from utils.components import (
     portfolio_hero, portfolio_kpis,
     # Polimentos
     events_strip, pill_select, watchlist_selector_header,
-    opportunity_card,
+    opportunity_card, chip_filter_row,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -1808,19 +1808,19 @@ else:
                 'data': '—',
             }
 
-    # ── FILTROS (mercado + tese) ─────────────────────────────────────────────
+    # ── FILTROS compactos (mercado + tese inline) ────────────────────────────
     st.markdown(
         '<div style="display:flex;align-items:center;gap:10px;'
-        'margin-top:14px;margin-bottom:6px;">'
-        '<span style="font-family:var(--font-ui);font-size:.62rem;'
+        'margin-top:14px;margin-bottom:4px;">'
+        '<span style="font-family:var(--font-ui);font-size:.6rem;'
         'color:var(--text-muted);text-transform:uppercase;'
-        'letter-spacing:var(--ls-wider);font-weight:600;">🔍 filtros</span>'
+        'letter-spacing:var(--ls-wider);font-weight:700;">🔍 filtros</span>'
         '<span style="flex:1;height:1px;background:var(--border-subtle);'
-        'opacity:.6;"></span></div>',
+        'opacity:.5;"></span></div>',
         unsafe_allow_html=True,
     )
 
-    # Mercado filter (normalizado para evitar duplicidades)
+    # Mercado filter (normalizado pra evitar duplicidades)
     mercados_disponiveis = sorted(set(
         normalizar_mercado(i.get('mercado')) for i in watchlist
     ))
@@ -1833,26 +1833,30 @@ else:
     mkt_opcoes = ["Todos"] + [_mkt_label_map[m] for m in mercados_disponiveis]
 
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.6rem;'
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
         'color:var(--text-muted);text-transform:uppercase;'
-        'letter-spacing:var(--ls-wide);margin-top:4px;margin-bottom:3px;'
-        'font-weight:600;opacity:.75;">mercado</div>',
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">mercado</div>',
         unsafe_allow_html=True,
     )
-    mkt_sel = tabs_pill(mkt_opcoes, key="wl_mkt_filtro", default="Todos")
+    mkt_sel = chip_filter_row(
+        mkt_opcoes, key="wl_mkt_filtro", default="Todos", max_chip_cols=10,
+    )
 
     # Tese filter
     tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
     if tags_disponiveis:
         st.markdown(
-            '<div style="font-family:var(--font-ui);font-size:.6rem;'
+            '<div style="font-family:var(--font-ui);font-size:.58rem;'
             'color:var(--text-muted);text-transform:uppercase;'
-            'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:3px;'
-            'font-weight:600;opacity:.75;">tese / tag</div>',
+            'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+            'font-weight:600;opacity:.7;">tese / tag</div>',
             unsafe_allow_html=True,
         )
         tag_opcoes = ["🌐 todas"] + [f"📁 {t}" for t in tags_disponiveis]
-        tag_sel_raw = tabs_pill(tag_opcoes, key="wl_tag_filtro", default="🌐 todas")
+        tag_sel_raw = chip_filter_row(
+            tag_opcoes, key="wl_tag_filtro", default="🌐 todas", max_chip_cols=10,
+        )
         tag_filtro = (
             'todas' if tag_sel_raw == "🌐 todas"
             else tag_sel_raw.replace("📁 ", "", 1)
@@ -1943,27 +1947,29 @@ else:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── ORDENAÇÃO DA WATCHLIST (pill_select compacto) ────────────────────────
+    # ── ORDENAÇÃO DA WATCHLIST (chip_filter_row compacto) ────────────────────
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.62rem;'
+        '<div style="display:flex;align-items:center;gap:10px;'
+        'margin-top:14px;margin-bottom:4px;">'
+        '<span style="font-family:var(--font-ui);font-size:.6rem;'
         'color:var(--text-muted);text-transform:uppercase;'
-        'letter-spacing:var(--ls-wider);margin-top:8px;margin-bottom:6px;'
-        'font-weight:600;">↕ ordenar por</div>',
+        'letter-spacing:var(--ls-wider);font-weight:700;">↕ ordenar por</span>'
+        '<span style="flex:1;height:1px;background:var(--border-subtle);'
+        'opacity:.5;"></span></div>',
         unsafe_allow_html=True,
     )
-    _col_ord1, _col_ord2 = st.columns([5, 2])
-    with _col_ord1:
-        _ordem_campo = pill_select(
-            ["health", "ticker", "1d", "1m", "preço", "status"],
-            key="wl_ordem_campo_v2",
-            default="health",
-        )
-    with _col_ord2:
-        _ordem_dir = pill_select(
-            ["↓ desc", "↑ asc"],
-            key="wl_ordem_dir_v2",
-            default="↓ desc",
-        )
+    _ordem_campo = chip_filter_row(
+        ["health", "ticker", "1d", "1m", "preço", "status"],
+        key="wl_ordem_campo_v2",
+        default="health",
+        max_chip_cols=10,
+    )
+    _ordem_dir = chip_filter_row(
+        ["↓ desc", "↑ asc"],
+        key="wl_ordem_dir_v2",
+        default="↓ desc",
+        max_chip_cols=10,
+    )
 
     # Compatibilidade: mapear labels novos para o sistema antigo
     _ordem_campo_map = {

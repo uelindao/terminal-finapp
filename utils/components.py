@@ -3509,3 +3509,85 @@ def opportunity_card(
         f'</div>'
         f'</div>'
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHIP FILTER ROW — filtros compactos (substitui tabs_pill em filtros)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def chip_filter_row(
+    labels: list[str],
+    key:    str,
+    default: str | None = None,
+    *,
+    max_chip_cols: int = 8,
+) -> str:
+    """
+    Linha de chips compactos para filtros — alternativa ao tabs_pill quando
+    os botões estavam ocupando largura cheia.
+
+    Comportamento:
+      - Usa st.columns(max_chip_cols) — fixa o nº de slots = max_chip_cols
+      - Distribui labels nos primeiros slots; resto fica vazio (espaço em branco)
+      - Botões ficam compactos (largura ~ tamanho do label)
+      - Para 3 labels com max=8 cols: cada chip ocupa 1/8 da linha, sobra 5/8
+
+    Use quando:
+      - Você tem poucos itens (2-5) e o tabs_pill ficaria com botões largos
+      - Quer um look mais natural de "chips"
+
+    tabs_pill continua melhor para tabs reais com 4-6 opções que devem
+    preencher uma barra horizontal cheia.
+    """
+    if not labels:
+        return ""
+    current = st.session_state.get(key) or default or labels[0]
+    if current not in labels:
+        current = labels[0]
+
+    _inject_once(
+        "_chipfilter_css_v1",
+        # Mesmo estilo do pill_select, mas mais compacto
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button{'
+        '  background:transparent !important;'
+        '  border:1px solid var(--border-subtle) !important;'
+        '  border-radius:999px !important;'
+        '  color:var(--text-secondary) !important;'
+        '  padding:3px 12px !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-xs) !important;'
+        '  font-weight:500 !important;'
+        '  width:100% !important;'
+        '  min-height:28px !important;'
+        '  box-shadow:none !important;'
+        '  white-space:nowrap !important;'
+        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button:hover{'
+        '  background:var(--bg-overlay) !important;'
+        '  border-color:var(--border-normal) !important;'
+        '  color:var(--text-primary) !important;}'
+        'div[data-fchip="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
+        '  background:var(--accent-gradient) !important;'
+        '  color:#fff !important;font-weight:600 !important;'
+        '  border-color:transparent !important;'
+        '  box-shadow:var(--shadow-sm) !important;}'
+    )
+
+    st.markdown('<div data-fchip="1"></div>', unsafe_allow_html=True)
+
+    # Slots fixos — labels nos primeiros, vazios no fim
+    n_labels = len(labels)
+    n_slots = max(max_chip_cols, n_labels)
+    cols = st.columns(n_slots, gap="small")
+    for i, lab in enumerate(labels):
+        with cols[i]:
+            if st.button(
+                lab,
+                key=f"{key}__{i}",
+                type="primary" if lab == current else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state[key] = lab
+                st.rerun()
+    return current
