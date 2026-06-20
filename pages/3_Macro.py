@@ -1247,12 +1247,56 @@ with tab_global:
                 df_br['IPCA_12M'] = _ipca_roll
                 _ipca_12m = valor_atual_seguro(df_br, 'IPCA_12M')
 
-            with c1: metric_card("selic atual", fmt_pct(v_selic, sinal=False))
+            # KPIs Brasil (design system v5)
+            from utils.components import portfolio_kpis as _pf_kpis_br
+            _ipca_val = _ipca_12m or v_ipca_m
+            _selic_tone = (
+                "bear" if (v_selic and v_selic > 13)
+                else "amber" if (v_selic and v_selic > 10)
+                else "bull"
+            )
+            _ipca_tone = (
+                "bear" if (_ipca_val and _ipca_val > 6)
+                else "amber" if (_ipca_val and _ipca_val > 4.5)
+                else "bull"
+            )
+            _desemp_tone = (
+                "bear" if (v_desemp and v_desemp > 10)
+                else "amber" if (v_desemp and v_desemp > 7)
+                else "bull"
+            )
+            _pf_kpis_br([
+                {
+                    "nome":     "selic atual",
+                    "valor":    fmt_pct(v_selic, sinal=False),
+                    "sublabel": "taxa básica de juros",
+                    "tone":     _selic_tone,
+                    "icone":    "🏛",
+                },
+                {
+                    "nome":     "ipca 12m",
+                    "valor":    fmt_pct(_ipca_val, sinal=False),
+                    "sublabel": "inflação acumulada",
+                    "tone":     _ipca_tone,
+                    "icone":    "📊",
+                },
+                {
+                    "nome":     "dólar (ptax)",
+                    "valor":    fmt_preco(v_dolar, "r$"),
+                    "sublabel": "câmbio comercial",
+                    "tone":     "info",
+                    "icone":    "💵",
+                },
+                {
+                    "nome":     "desemprego",
+                    "valor":    fmt_pct(v_desemp, sinal=False),
+                    "sublabel": "taxa pnad contínua",
+                    "tone":     _desemp_tone,
+                    "icone":    "👥",
+                },
+            ])
             tooltip("selic")
-            with c2: metric_card("ipca 12m", fmt_pct(_ipca_12m or v_ipca_m, sinal=False))
             tooltip("ipca")
-            with c3: metric_card("dólar (ptax)", fmt_preco(v_dolar, "r$"))
-            with c4: metric_card("desemprego", fmt_pct(v_desemp, sinal=False))
             
             st.markdown(tooltip_info("Selic — taxa básica de juros definida pelo Copom. Impacta diretamente renda fixa, crédito e atividade econômica."), unsafe_allow_html=True)
             # ── SELIC REAL (ex-post) ──────────────────────────────────────────
@@ -1625,34 +1669,43 @@ with tab_global:
             # independente do filtro de horizonte selecionado pelo usuário)
             fiscal = calcular_semaforo_fiscal(df_br_master)
 
-            f1, f2, f3 = st.columns(3)
-            with f1:
-                divida_val = fiscal['divida_pib']
-                tend_val   = fiscal['tendencia_divida']
-                if divida_val is not None:
-                    if tend_val is not None:
-                        sinal_tend  = "▲" if tend_val > 0 else "▼"
-                        delta_divida = f"{sinal_tend} {abs(tend_val):.1f}pp em 6m"
-                        cor_tend     = "bear" if tend_val > 1 else ("bull" if tend_val < -1 else "muted")
-                    else:
-                        delta_divida, cor_tend = "", "muted"
-                    metric_card("dívida bruta/pib", f"{divida_val:.1f}%", delta_divida, cor_tend)
-                else:
-                    metric_card("dívida bruta/pib", "n/d", "sem dados bcb")
-            with f2:
-                prim_val = fiscal['result_primario']
-                if prim_val is not None:
-                    metric_card(
-                        "resultado primário",
-                        f"{prim_val:+.2f}% pib",
-                        "superávit" if prim_val >= 0 else "déficit",
-                        "bull" if prim_val >= 0 else "bear",
-                    )
-                else:
-                    metric_card("resultado primário", "n/d", "sem dados bcb")
-            with f3:
-                cores_map = {"bear": "bear", "amber": "amber", "bull": "bull"}
-                metric_card("status fiscal", fiscal['label'], "", cores_map.get(fiscal['cor'], "muted"))
+            # KPIs Fiscal Brasil (design system v5)
+            from utils.components import portfolio_kpis as _pf_kpis_fbr
+            divida_val = fiscal['divida_pib']
+            tend_val   = fiscal['tendencia_divida']
+            prim_val   = fiscal['result_primario']
+            cores_map  = {"bear": "bear", "amber": "amber", "bull": "bull"}
+
+            if divida_val is not None and tend_val is not None:
+                sinal_tend  = "▲" if tend_val > 0 else "▼"
+                divida_sub  = f"{sinal_tend} {abs(tend_val):.1f}pp em 6m"
+                cor_tend    = "bear" if tend_val > 1 else ("bull" if tend_val < -1 else "muted")
+            else:
+                divida_sub, cor_tend = "sem dados BCB", "muted"
+
+            _pf_kpis_fbr([
+                {
+                    "nome":     "dívida bruta/pib",
+                    "valor":    f"{divida_val:.1f}%" if divida_val is not None else "n/d",
+                    "sublabel": divida_sub,
+                    "tone":     cor_tend,
+                    "icone":    "🏛",
+                },
+                {
+                    "nome":     "resultado primário",
+                    "valor":    f"{prim_val:+.2f}% pib" if prim_val is not None else "n/d",
+                    "sublabel": ("superávit" if (prim_val or 0) >= 0 else "déficit") if prim_val is not None else "sem dados BCB",
+                    "tone":     "bull" if (prim_val or -1) >= 0 else "bear",
+                    "icone":    "💰",
+                },
+                {
+                    "nome":     "status fiscal",
+                    "valor":    fiscal['label'],
+                    "sublabel": "leitura agregada do quadro",
+                    "tone":     cores_map.get(fiscal['cor'], "muted"),
+                    "icone":    "🚦",
+                },
+            ])
 
             gf1, gf2 = st.columns(2)
             with gf1:
@@ -1696,14 +1749,9 @@ with tab_global:
 
         elif aba_sel == "🇺🇸 estados unidos":
             _macro_us_tipo = chart_type_toggle(key="macro_us", default="linha")
-            c1, c2, c3, c4 = st.columns(4)
             v_fed    = valor_atual_seguro(df_global, 'FEDFUNDS')
             v_dgs10  = valor_atual_seguro(df_global, 'DGS10')
             v_unrate = valor_atual_seguro(df_global, 'UNRATE')
-            with c1: metric_card("fed funds rate", fmt_pct(v_fed, sinal=False))
-            with c3: metric_card("treasury 10y", fmt_pct(v_dgs10, sinal=False))
-            tooltip("treasury_10y")
-            with c4: metric_card("desemprego (us)", fmt_pct(v_unrate, sinal=False))
 
             # CPI YoY — SEMPRE recalcula de CPIAUCSL se a série base existir.
             # CRÍTICO: dropna() ANTES de pct_change(12) — df_global tem índice diário
@@ -1733,20 +1781,44 @@ with tab_global:
             _cpi_yoy_val = valor_atual_seguro(df_global, 'CPI_YOY')
             _df_cpi_yoy  = df_global['CPI_YOY'].dropna() if 'CPI_YOY' in df_global.columns else pd.Series(dtype=float)
 
-            with c2:
-                metric_card(
-                    "cpi yoy (eua)",
-                    f"{_cpi_yoy_val:.2f}%" if _cpi_yoy_val else "N/D",
-                    "variação anual do índice de preços ao consumidor",
-                    (
-                        "bear" if (_cpi_yoy_val or 0) > 3.5
-                        else "bull" if (_cpi_yoy_val or 0) < 2.5
-                        else "amber"
-                    ),
-                )
+            # KPIs EUA (design system v5)
+            from utils.components import portfolio_kpis as _pf_kpis_us
+            _fed_tone = "bear" if (v_fed and v_fed > 5) else ("amber" if (v_fed and v_fed > 3.5) else "bull")
+            _cpi_tone = "bear" if (_cpi_yoy_val and _cpi_yoy_val > 3.5) else ("bull" if (_cpi_yoy_val and _cpi_yoy_val < 2.5) else "amber")
+            _t10_tone = "bear" if (v_dgs10 and v_dgs10 > 4.5) else ("amber" if (v_dgs10 and v_dgs10 > 3.5) else "bull")
+            _unrate_tone = "bear" if (v_unrate and v_unrate > 5.5) else ("amber" if (v_unrate and v_unrate > 4.5) else "bull")
 
-            st.markdown(tooltip_info("Fed Funds Rate — taxa de juros básica americana definida pelo FOMC. Referência global para custo do dinheiro."), unsafe_allow_html=True)
-            st.markdown(tooltip_info("CPI YoY — variação anual do índice de preços ao consumidor americano. Principal referência de inflação nos EUA, acompanhada de perto pelo Fed."), unsafe_allow_html=True)
+            _pf_kpis_us([
+                {
+                    "nome":     "fed funds rate",
+                    "valor":    fmt_pct(v_fed, sinal=False),
+                    "sublabel": "taxa fomc",
+                    "tone":     _fed_tone,
+                    "icone":    "🏛",
+                },
+                {
+                    "nome":     "cpi yoy",
+                    "valor":    f"{_cpi_yoy_val:.2f}%" if _cpi_yoy_val else "n/d",
+                    "sublabel": "inflação acumulada",
+                    "tone":     _cpi_tone,
+                    "icone":    "📊",
+                },
+                {
+                    "nome":     "treasury 10y",
+                    "valor":    fmt_pct(v_dgs10, sinal=False),
+                    "sublabel": "yield benchmark",
+                    "tone":     _t10_tone,
+                    "icone":    "📈",
+                },
+                {
+                    "nome":     "desemprego (us)",
+                    "valor":    fmt_pct(v_unrate, sinal=False),
+                    "sublabel": "taxa BLS",
+                    "tone":     _unrate_tone,
+                    "icone":    "👥",
+                },
+            ])
+            tooltip("treasury_10y")
             g1, g2 = st.columns(2)
             with g1:
                 st.plotly_chart(criar_grafico_macro(df_global, 'FEDFUNDS', "fed funds rate (%)", _chart_cores()["bull"], _macro_us_tipo), use_container_width=True, config={'responsive': True})
