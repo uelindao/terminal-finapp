@@ -2838,3 +2838,253 @@ def mercado_group_header(
         f'</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PORTFOLIO COMPONENTS (Zona 3 — header do portfólio + KPI grid premium)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def portfolio_hero(
+    *,
+    titulo:        str = "PORTFÓLIO",
+    valor_atual:   float = 0.0,
+    custo_total:   float = 0.0,
+    pnl_valor:     float = 0.0,
+    pnl_pct:       float = 0.0,
+    moeda:         str = "R$",
+    serie_valor:   list | None = None,
+    data_source:   str = "",
+) -> None:
+    """
+    Hero card grande do portfólio. Substitui o caption "patrimônio atual"
+    + 4 metric_card cinzas por um banner único com PL gigante e sparkline.
+
+    Layout: glass card, esquerda = eyebrow + titulo + valor 3xl + delta;
+    direita = sparkline grande do valor da carteira.
+    """
+    is_up   = pnl_valor >= 0
+    tone    = "bull" if is_up else "bear"
+    tone_c  = "var(--bull)" if is_up else "var(--bear)"
+    arrow   = "▲" if is_up else "▼"
+
+    _inject_once(
+        "_portfolio_hero_css_v1",
+        '.ft-pf-hero{position:relative;display:grid;'
+        '  grid-template-columns:1.4fr 1fr;gap:var(--space-5);'
+        '  padding:var(--space-5) var(--space-5);'
+        '  border-radius:var(--radius-xl);'
+        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);'
+        '  box-shadow:var(--shadow-lg);overflow:hidden;'
+        '  margin-bottom:var(--space-3);}'
+        '.ft-pf-hero::before{content:"";position:absolute;inset:0;'
+        '  background:linear-gradient(135deg,var(--pfh-rgba) 0%,transparent 60%);'
+        '  pointer-events:none;}'
+        '.ft-pf-hero::after{content:"";position:absolute;left:0;top:0;'
+        '  bottom:0;width:3px;background:var(--pfh-tone);'
+        '  box-shadow:0 0 16px var(--pfh-tone);}'
+        '.ft-pf-left{position:relative;display:flex;flex-direction:column;'
+        '  justify-content:center;gap:6px;}'
+        '.ft-pf-eyebrow{font-family:var(--font-ui);font-size:.66rem;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
+        '  color:var(--text-muted);font-weight:600;'
+        '  display:inline-flex;align-items:center;gap:6px;}'
+        '.ft-pf-eyebrow .ic{font-size:.85rem;}'
+        '.ft-pf-sublabel{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-muted);margin-top:2px;}'
+        '.ft-pf-value{font-family:var(--font-data);font-size:var(--text-3xl);'
+        '  font-weight:800;color:var(--text-primary);'
+        '  letter-spacing:var(--ls-tight);line-height:1.1;'
+        '  margin-top:var(--space-1);}'
+        '.ft-pf-value .cur{font-size:var(--text-md);'
+        '  color:var(--text-muted);font-weight:600;margin-right:6px;}'
+        '.ft-pf-delta{display:inline-flex;align-items:baseline;gap:8px;'
+        '  margin-top:var(--space-2);font-family:var(--font-data);}'
+        '.ft-pf-delta .pct{font-size:var(--text-md);font-weight:700;'
+        '  display:inline-flex;align-items:center;gap:3px;}'
+        '.ft-pf-delta .abs{font-size:var(--text-xs);'
+        '  color:var(--text-muted);}'
+        '.ft-pf-right{position:relative;display:flex;align-items:center;'
+        '  justify-content:flex-end;}'
+        '.ft-pf-spark-wrap{width:100%;max-width:340px;}'
+        '.ft-pf-spark-wrap svg{width:100%;height:80px;}'
+        '@media (max-width:900px){.ft-pf-hero{grid-template-columns:1fr;}'
+        '  .ft-pf-right{justify-content:flex-start;}}'
+    )
+
+    # rgba derivado pro gradient bg
+    rgba = "rgba(74,222,128,0.10)" if is_up else "rgba(248,113,113,0.10)"
+
+    # Formatar valores
+    def _fmt_money(v: float) -> str:
+        try:
+            return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return f"{v}"
+
+    valor_html = _fmt_money(valor_atual)
+    pnl_abs_html = _fmt_money(abs(pnl_valor))
+    sub_html = f"vs custo {moeda} {_fmt_money(custo_total)}" if custo_total else ""
+
+    # Sparkline grande (80px alto)
+    spark = ""
+    if serie_valor and len(serie_valor) >= 2:
+        spark = inline_sparkline(serie_valor, tone=tone, largura=320, altura=80)
+
+    src_html = ""
+    if data_source:
+        ic = "📦" if data_source == "cache" else "📡"
+        src_html = (
+            f' <span style="font-size:.6rem;color:var(--text-muted);'
+            f'opacity:.6;margin-left:8px;">{ic} {data_source}</span>'
+        )
+
+    st.markdown(
+        f'<div class="ft-pf-hero" '
+        f'style="--pfh-tone:{tone_c};--pfh-rgba:{rgba};">'
+        f'<div class="ft-pf-left">'
+        f'<span class="ft-pf-eyebrow"><span class="ic">💼</span>{titulo}'
+        f'{src_html}</span>'
+        f'<div class="ft-pf-value"><span class="cur">{moeda}</span>{valor_html}</div>'
+        f'<div class="ft-pf-sublabel">{sub_html}</div>'
+        f'<div class="ft-pf-delta">'
+        f'<span class="pct" style="color:{tone_c};">{arrow} {abs(pnl_pct):.2f}%</span>'
+        f'<span class="abs">({"+" if is_up else "-"}{moeda} {pnl_abs_html})</span>'
+        f'</div>'
+        f'</div>'
+        f'<div class="ft-pf-right"><div class="ft-pf-spark-wrap">{spark}</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def portfolio_kpis(items: list[dict]) -> None:
+    """
+    Grid de KPI cards para o portfólio — mais rico que kpi_index_row.
+
+    Cada item:
+      {nome, valor (str/num), sublabel (opc), var_pct (opc),
+       serie (opc), tone (opc — auto pelo var_pct), icone (opc),
+       ticker_chip (opc — destaca ticker como label primário) }
+    """
+    if not items:
+        return
+
+    _inject_once(
+        "_portfolio_kpis_css_v1",
+        '.ft-pfk-row{display:grid;'
+        '  grid-template-columns:repeat(4,minmax(0,1fr));'
+        '  gap:var(--space-3);margin-bottom:var(--space-4);}'
+        '.ft-pfk-card{position:relative;padding:14px 16px;'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);overflow:hidden;'
+        '  transition:transform var(--motion-fast) var(--ease-out),'
+        '             border-color var(--motion-fast) var(--ease-out);}'
+        '.ft-pfk-card:hover{transform:translateY(-2px);'
+        '  border-color:var(--border-normal);}'
+        '.ft-pfk-card::after{content:"";position:absolute;left:0;top:0;'
+        '  width:100%;height:2px;background:var(--pfk-tone);'
+        '  box-shadow:0 0 10px var(--pfk-tone);opacity:.85;}'
+        '.ft-pfk-head{display:flex;justify-content:space-between;'
+        '  align-items:center;margin-bottom:6px;}'
+        '.ft-pfk-name{font-family:var(--font-ui);font-size:.66rem;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  color:var(--text-muted);font-weight:600;}'
+        '.ft-pfk-icon{font-size:.95rem;opacity:.75;}'
+        '.ft-pfk-ticker{display:inline-block;font-family:var(--font-data);'
+        '  font-size:.62rem;font-weight:700;color:var(--pfk-tone);'
+        '  background:var(--bg-elevated);border:1px solid var(--pfk-tone);'
+        '  border-radius:var(--radius-sm);padding:1px 6px;'
+        '  letter-spacing:var(--ls-wide);margin-bottom:4px;}'
+        '.ft-pfk-value{font-family:var(--font-data);font-size:var(--text-xl);'
+        '  font-weight:700;color:var(--text-primary);line-height:1.15;'
+        '  letter-spacing:var(--ls-tight);}'
+        '.ft-pfk-sub{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-muted);margin-top:3px;}'
+        '.ft-pfk-foot{display:flex;justify-content:space-between;'
+        '  align-items:center;margin-top:10px;gap:8px;min-height:22px;}'
+        '.ft-pfk-delta{font-family:var(--font-data);font-size:var(--text-sm);'
+        '  font-weight:600;display:inline-flex;align-items:center;gap:3px;}'
+        '@media (max-width:900px){.ft-pfk-row{grid-template-columns:repeat(2,1fr);}}'
+        '@media (max-width:500px){.ft-pfk-row{grid-template-columns:1fr;}}'
+    )
+
+    cards = []
+    for it in items:
+        nome    = it.get("nome", "")
+        valor   = it.get("valor", "")
+        sub     = it.get("sublabel", "")
+        var_pct = it.get("var_pct")
+        serie   = it.get("serie") or []
+        icone   = it.get("icone", "")
+        ticker  = it.get("ticker_chip", "")
+        tone_in = it.get("tone")
+
+        # Determina tom
+        if tone_in in ("bull", "bear", "amber", "info", "accent"):
+            tone = tone_in
+        elif var_pct is not None:
+            tone = "bull" if float(var_pct) >= 0 else "bear"
+        else:
+            tone = "info"
+
+        tone_c = {
+            "bull":   "var(--bull)",
+            "bear":   "var(--bear)",
+            "amber":  "var(--amber)",
+            "info":   "var(--info)",
+            "accent": "var(--accent)",
+        }.get(tone, "var(--info)")
+
+        # Delta
+        delta_html = ""
+        if var_pct is not None:
+            arrow = "▲" if float(var_pct) >= 0 else "▼"
+            delta_html = (
+                f'<span class="ft-pfk-delta" style="color:{tone_c};">'
+                f'{arrow} {abs(float(var_pct)):.2f}%</span>'
+            )
+
+        # Sparkline mini
+        spark = ""
+        if len(serie) >= 2:
+            spark = inline_sparkline(serie, tone=tone, largura=78, altura=20)
+
+        # Valor (aceita string ou número)
+        if isinstance(valor, (int, float)):
+            v = float(valor)
+            if abs(v) >= 1000:
+                valor_fmt = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            else:
+                valor_fmt = f"{v:.2f}".replace(".", ",")
+        else:
+            valor_fmt = str(valor)
+
+        ticker_html = (
+            f'<span class="ft-pfk-ticker">{ticker}</span>' if ticker else ""
+        )
+        icone_html = (
+            f'<span class="ft-pfk-icon">{icone}</span>' if icone else ""
+        )
+        sub_html = f'<div class="ft-pfk-sub">{sub}</div>' if sub else ""
+
+        cards.append(
+            f'<div class="ft-pfk-card" style="--pfk-tone:{tone_c};">'
+            f'<div class="ft-pfk-head">'
+            f'<span class="ft-pfk-name">{nome}</span>{icone_html}'
+            f'</div>'
+            f'{ticker_html}'
+            f'<div class="ft-pfk-value">{valor_fmt}</div>'
+            f'{sub_html}'
+            f'<div class="ft-pfk-foot">{delta_html}{spark}</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div class="ft-pfk-row">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )

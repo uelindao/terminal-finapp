@@ -38,12 +38,15 @@ from utils.components import (
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
     tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url,
+    info_box,
     # Fase 6 — shell visual da Home
     topbar, side_panel,
     # Zona 1 — hero visual
     hero_macro, kpi_index_row,
     # Zona 2 — watchlist polida
     tabs_pill, highlights_strip, mercado_group_header,
+    # Zona 3 — portfólio premium
+    portfolio_hero, portfolio_kpis,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -1250,9 +1253,44 @@ pesos_atuais = get_pesos()
 ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
 
 if ativos_alocados:
-    section_title("💼 portfólio & watchlist highlights")
-
+    # Header da seção é embutido no portfolio_hero abaixo (não usa section_title).
     tickers_com_peso = list(ativos_alocados.keys())
+
+    # ── Série histórica 5d do valor da carteira (pra sparkline do hero) ──────
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _serie_carteira_5d(tickers_tuple: tuple, qtds_tuple: tuple) -> list:
+        try:
+            tk_base = list(set([mapear_ticker_base(t) for t in tickers_tuple]))
+            _hist = yf.download(tk_base, period="5d", auto_adjust=True, progress=False)
+            if _hist.empty:
+                return []
+            if isinstance(_hist.columns, pd.MultiIndex):
+                try:
+                    _hp = _hist.xs('Close', axis=1, level=0)
+                except KeyError:
+                    _hp = _hist.xs('Close', axis=1, level=1)
+            else:
+                _hp = _hist.get('Close', _hist)
+            if isinstance(_hp, pd.Series):
+                _hp = _hp.to_frame(name=tk_base[0])
+            _hp = _hp.ffill()
+            qtds = dict(zip(tickers_tuple, qtds_tuple))
+            serie = []
+            for i in range(len(_hp)):
+                v = 0.0
+                for t, q in qtds.items():
+                    tb = mapear_ticker_base(t)
+                    if tb in _hp.columns:
+                        try:
+                            v += float(q) * float(_hp[tb].iloc[i])
+                        except Exception:
+                            pass
+                if v > 0:
+                    serie.append(v)
+            return serie
+        except Exception:
+            return []
+
     with st.spinner("sincronizando..."):
         live_data_port = {}
         var_dia_port = {}
@@ -1299,18 +1337,83 @@ if ativos_alocados:
     pnl_valor = valor_atual - custo_total
     pnl_pct = (pnl_valor / custo_total * 100) if custo_total > 0 else 0
 
-    pf1, pf2, pf3, pf4 = st.columns(4)
-    with pf1: metric_card("patrimônio atual", fmt_preco(valor_atual, "$"), fmt_pct(pnl_pct), "bull" if pnl_pct >= 0 else "bear", destaque=True, data_source=fonte_port)
-    with pf2: metric_card("p&l total", fmt_preco(pnl_valor, "$"), "", "bull" if pnl_valor >= 0 else "bear", data_source=fonte_port)
+    # Série pra sparkline grande do hero
+    _qtds_port = tuple(
+        float(ativos_alocados[t].get('quantidade', 0))
+        for t in tickers_com_peso
+    )
+    _serie_pf = _serie_carteira_5d(tuple(tickers_com_peso), _qtds_port)
+
+    # ── Zona 3: Hero do portfólio ────────────────────────────────────────────
+    portfolio_hero(
+        titulo      = "PORTFÓLIO",
+        valor_atual = valor_atual,
+        custo_total = custo_total,
+        pnl_valor   = pnl_valor,
+        pnl_pct     = pnl_pct,
+        moeda       = "R$",
+        serie_valor = _serie_pf,
+        data_source = fonte_port,
+    )
+
+    # ── Zona 3: Grid 4-KPI premium ───────────────────────────────────────────
+    _kpis_items = [
+        {
+            "nome":     "patrimônio",
+            "valor":    valor_atual,
+            "sublabel": "marcação a mercado",
+            "var_pct":  pnl_pct,
+            "icone":    "💎",
+            "serie":    _serie_pf,
+        },
+        {
+            "nome":     "p&l acumulado",
+            "valor":    pnl_valor,
+            "sublabel": f"R$ {abs(custo_total):,.0f}".replace(",", ".") + " investido",
+            "tone":     "bull" if pnl_valor >= 0 else "bear",
+            "icone":    "📈" if pnl_valor >= 0 else "📉",
+        },
+    ]
 
     if var_dia_port:
         melhor_t = max(var_dia_port, key=var_dia_port.get)
-        pior_t = min(var_dia_port, key=var_dia_port.get)
-        with pf3: metric_card("melhor hoje", melhor_t, fmt_pct(var_dia_port[melhor_t]), "bull", data_source=fonte_port)
-        with pf4: metric_card("pior hoje", pior_t, fmt_pct(var_dia_port[pior_t]), "bear", data_source=fonte_port)
+        pior_t   = min(var_dia_port, key=var_dia_port.get)
+        _kpis_items.append({
+            "nome":        "melhor do dia",
+            "ticker_chip": melhor_t.replace('.SA', ''),
+            "valor":       f"+{var_dia_port[melhor_t]:.2f}%",
+            "sublabel":    "maior alta hoje",
+            "tone":        "bull",
+            "icone":       "🚀",
+        })
+        _kpis_items.append({
+            "nome":        "pior do dia",
+            "ticker_chip": pior_t.replace('.SA', ''),
+            "valor":       f"{var_dia_port[pior_t]:.2f}%",
+            "sublabel":    "maior queda hoje",
+            "tone":        "bear",
+            "icone":       "⚠",
+        })
+    else:
+        # Sem var_dia: completa com 2 KPIs neutros
+        _kpis_items.append({
+            "nome":     "ativos",
+            "valor":    f"{len(tickers_com_peso)}",
+            "sublabel": "posições no portfólio",
+            "tone":     "info",
+            "icone":    "📊",
+        })
+        _kpis_items.append({
+            "nome":     "diversificação",
+            "valor":    f"{len(set([mapear_ticker_base(t)[-3:] for t in tickers_com_peso]))}",
+            "sublabel": "mercados distintos",
+            "tone":     "info",
+            "icone":    "🌐",
+        })
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    portfolio_kpis(_kpis_items)
 
+    # ── Health alerts (info_box mais elegante que st.warning) ────────────────
     health_data_home = {h['ticker']: h for h in get_health_scores()}
     ativos_alerta = []
     for t in tickers_com_peso:
@@ -1321,8 +1424,16 @@ if ativos_alocados:
             ativos_alerta.append((t, score))
 
     if ativos_alerta:
-        alertas_txt = " | ".join([f"{t} ({s:.0f})" for t, s in sorted(ativos_alerta, key=lambda x: x[1])[:3]])
-        st.warning(f"🚨 atenção no portfólio — health score crítico: {alertas_txt}")
+        alertas_txt = " · ".join(
+            [f"{t.replace('.SA','')} ({s:.0f})"
+             for t, s in sorted(ativos_alerta, key=lambda x: x[1])[:3]]
+        )
+        info_box(
+            tipo   = "bear",
+            titulo = "atenção no portfólio",
+            texto  = f"health score crítico (<40) em: {alertas_txt}",
+            icone  = "🚨",
+        )
 
     st.caption("🔍 para análise completa acesse meu portfólio.")
     st.markdown("---")
