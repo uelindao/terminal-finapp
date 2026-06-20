@@ -18,7 +18,11 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, auto_refresh_indicator, tooltip, label_com_tooltip, topbar
+from utils.components import (
+    page_header, section_title, metric_card, status_card, empty_state,
+    inject_keyboard_shortcuts, auto_refresh_indicator, tooltip,
+    label_com_tooltip, topbar, hero_macro, kpi_index_row, info_box,
+)
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -56,7 +60,12 @@ topbar(
 page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
 
 if "FRED_API_KEY" not in st.secrets:
-    st.warning("⚠️ **aviso de arquitetura:** a chave da api do fred não foi encontrada no arquivo `secrets.toml`.\n\nsem ela, os dados dos eua e risco global ficarão indisponíveis.")
+    info_box(
+        tipo   = "amber",
+        titulo = "aviso de arquitetura",
+        texto  = "chave da api do FRED não foi encontrada em secrets.toml. sem ela, dados dos EUA e risco global ficarão indisponíveis.",
+        icone  = "⚠",
+    )
 
 # ── Regime Macro — classificador automático ──────────────────────────────────
 section_title("regime macro — classificador automático")
@@ -72,32 +81,39 @@ def _regime_macro_cached():
 
 try:
     _regime = _regime_macro_cached()
-    _cor_regime = {
-        "expansao": "var(--bull)",
-        "pico": "var(--amber)",
-        "contracao": "var(--accent)",
-        "vale": "var(--bear)",
-    }[_regime.fase]
-    _sinais_str = " · ".join(
-        f"{k}: {'✓' if v else ('—' if v is None else '✗')}"
-        for k, v in _regime.sinais.items()
-    )
-    st.markdown(
-        f'<div style="border-left:3px solid {_cor_regime}; padding:12px 16px; '
-        f'background:var(--bg-elevated); border-radius:6px; margin-bottom:16px;">'
-        f'<div style="font-family:Courier New,monospace; font-size:1.1rem; '
-        f'font-weight:700; color:{_cor_regime}; text-transform:uppercase;">'
-        f'{_regime.fase} · prob {int(_regime.probabilidade*100)}%'
-        f'</div>'
-        f'<div style="margin-top:6px; color:var(--text-muted, #888); '
-        f'font-size:0.85rem;">{_regime.leitura}</div>'
-        f'<div style="margin-top:8px; font-family:var(--font-data); '
-        f'font-size:0.7rem; color:var(--text-muted);">{_sinais_str}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
+    # Mapeia fase do regime → tom do hero_macro
+    _tom_regime = {
+        "expansao":  "bull",
+        "pico":      "amber",
+        "contracao": "accent",
+        "vale":      "bear",
+    }.get(_regime.fase, "amber")
+
+    # Converte sinais (dict) em lista de tuplas (nome, status, tipo, valor)
+    _sinais_lst = []
+    for k, v in _regime.sinais.items():
+        if v is True:
+            _status, _tipo, _val = "ativo", "bull", "✓"
+        elif v is False:
+            _status, _tipo, _val = "ausente", "bear", "✗"
+        else:
+            _status, _tipo, _val = "indef.", "amber", "—"
+        _sinais_lst.append((k, _status, _tipo, _val))
+
+    hero_macro(
+        score      = int(_regime.probabilidade * 100),
+        label      = _regime.fase.upper(),
+        descricao  = _regime.leitura,
+        tom        = _tom_regime,
+        sinais     = _sinais_lst,
     )
 except Exception as e:
-    st.warning(f"Classificador de regime indisponível: {e}")
+    info_box(
+        tipo   = "amber",
+        titulo = "classificador de regime indisponível",
+        texto  = str(e),
+        icone  = "⚠",
+    )
 
 # ==========================================
 # funções globais de cache e apoio
@@ -2524,9 +2540,19 @@ with tab_global:
             
             if v_t10y2y is not None:
                 if v_t10y2y < 0:
-                    st.warning("⚠️ curva invertida: historicamente precede recessão em 12-18 meses. posicionamento defensivo recomendado.")
+                    info_box(
+                        tipo   = "bear",
+                        titulo = "curva invertida",
+                        texto  = "historicamente precede recessão em 12-18 meses. posicionamento defensivo recomendado.",
+                        icone  = "⚠",
+                    )
                 elif 0 <= v_t10y2y <= 0.5:
-                    st.info("📊 spread estreito: ciclo de crédito em atenção.")
+                    info_box(
+                        tipo   = "amber",
+                        titulo = "spread estreito",
+                        texto  = "ciclo de crédito em atenção.",
+                        icone  = "📊",
+                    )
             
             _cc_t10 = _chart_cores()
             fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", _cc_t10["info"])

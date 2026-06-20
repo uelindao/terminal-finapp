@@ -331,7 +331,13 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
     page_header("⚖️ comparativo de mercado", "análise relativa de múltiplos e performance em base 100.")
     
     if not ativos_comp:
-        st.info("selecione ativos na barra lateral para iniciar a comparação.")
+        from utils.components import info_box as _info_box_r
+        _info_box_r(
+            tipo   = "info",
+            titulo = "selecione ativos para começar",
+            texto  = "use a barra lateral para escolher 2 ou mais ativos e iniciar a comparação.",
+            icone  = "👈",
+        )
     else:
         with st.spinner("sincronizando matriz de múltiplos..."):
             dados_comp = []
@@ -771,34 +777,43 @@ if is_fii:
         else "var(--bear)"
     )
 
-    st.markdown(
-        f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
-        f'border-radius:6px; padding:10px 16px; margin-top:8px; '
-        f'display:flex; gap:32px; align-items:center; flex-wrap:wrap;">'
-
-        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
-        f'text-transform:uppercase;">segmento</span><br>'
-        f'<span style="font-family:var(--font-data,monospace);color:var(--accent);'
-        f'font-size:0.85rem;">{_segmento_fii}</span></div>'
-
-        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
-        f'text-transform:uppercase;">yield real</span><br>'
-        f'<span style="font-family:var(--font-data,monospace);color:var(--text-primary);'
-        f'font-size:0.85rem;">{_dy_real:.1f}%</span></div>'
-
-        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
-        f'text-transform:uppercase;">ntn-b benchmark</span><br>'
-        f'<span style="font-family:var(--font-data,monospace);color:var(--text-primary);'
-        f'font-size:0.85rem;">{_ntnb_yield:.2f}% (ipca+)</span></div>'
-
-        f'<div><span style="font-size:0.65rem;color:var(--text-muted);'
-        f'text-transform:uppercase;">spread vs ntn-b</span><br>'
-        f'<span style="font-family:var(--font-data,monospace);color:{_cor_spread};'
-        f'font-weight:600;font-size:0.85rem;">{_spread:+.2f}pp</span></div>'
-
-        f'</div>',
-        unsafe_allow_html=True,
+    # ── Bloco de spread NTN-B (premium via portfolio_kpis) ─────────────
+    from utils.components import portfolio_kpis as _pf_kpis_fii
+    _spread_tone = (
+        "bull"  if _spread >= 2.5
+        else "amber" if _spread >= 0
+        else "bear"
     )
+    _pf_kpis_fii([
+        {
+            "nome":     "segmento",
+            "valor":    _segmento_fii,
+            "sublabel": "categoria do FII",
+            "tone":     "accent",
+            "icone":    "🏢",
+        },
+        {
+            "nome":     "yield real",
+            "valor":    f"{_dy_real:.2f}%",
+            "sublabel": "dy − inflação",
+            "tone":     "info",
+            "icone":    "📊",
+        },
+        {
+            "nome":     "ntn-b benchmark",
+            "valor":    f"{_ntnb_yield:.2f}%",
+            "sublabel": "IPCA + (taxa real)",
+            "tone":     "info",
+            "icone":    "🏛",
+        },
+        {
+            "nome":        "spread vs ntn-b",
+            "valor":       f"{_spread:+.2f}pp",
+            "sublabel":    "prêmio sobre tesouro",
+            "tone":        _spread_tone,
+            "icone":       "✨" if _spread >= 2.5 else ("⚠" if _spread < 0 else "📈"),
+        },
+    ])
     tooltip("ntnb_spread")
 
 else:

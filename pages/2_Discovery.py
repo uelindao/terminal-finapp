@@ -681,28 +681,28 @@ with tab_screen:
     except Exception:
         pass
 
-    # ── seleção de universo ──────────────────────────────────────────────────
-    col_univ, col_info_scr = st.columns([2, 3])
-    with col_univ:
-        universo_sel = st.radio(
-            "universo de ativos:",
-            options=['b3', 'fii', 'us'],
-            format_func=lambda x: {
-                'b3':  f'🇧🇷 Ações B3 ({len(SCREENER_B3)} ativos)',
-                'fii': f'🏢 FIIs ({len(FII_TODOS)} fundos)',
-                'us':  f'🇺🇸 Ações EUA ({len(SCREENER_US)} ativos)',
-            }[x],
-            horizontal=True,
-            key="screener_univ",
-        )
-    with col_info_scr:
-        status_card(
-            "como funciona",
-            "os dados são do cache de fundamentos atualizado pelos botões de sync no topo da página. "
-            "health score integra fatores técnicos, fundamentalistas e macro. "
-            "use o botão 🔄 sync antes de rodar o screener pela primeira vez.",
-            tipo="info",
-        )
+    # ── seleção de universo (tabs_pill) ─────────────────────────────────────
+    from utils.components import tabs_pill as _tabs_pill_disc, info_box as _info_box_disc
+    _univ_labels = [
+        f"🇧🇷 B3 ({len(SCREENER_B3)})",
+        f"🏢 FIIs ({len(FII_TODOS)})",
+        f"🇺🇸 EUA ({len(SCREENER_US)})",
+    ]
+    _univ_pick = _tabs_pill_disc(_univ_labels, key="screener_univ_pill", default=_univ_labels[0])
+    universo_sel = (
+        'b3'  if _univ_pick.startswith("🇧🇷")
+        else 'fii' if _univ_pick.startswith("🏢")
+        else 'us'
+    )
+    _info_box_disc(
+        tipo   = "info",
+        titulo = "como funciona",
+        texto  = (
+            "dados do cache de fundamentos (atualizado pelos botões 🔄 sync no topo). "
+            "health score integra técnico, fundamentos e macro."
+        ),
+        icone  = "ⓘ",
+    )
 
     st.markdown("---")
 

@@ -18,7 +18,12 @@ from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_se
 from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
-from utils.components import page_header, section_title, metric_card, status_card, empty_state, inject_keyboard_shortcuts, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url, topbar
+from utils.components import (
+    page_header, section_title, metric_card, status_card, empty_state,
+    inject_keyboard_shortcuts, tooltip, label_com_tooltip,
+    handle_ticker_nav, ticker_nav_url, topbar,
+    portfolio_hero, portfolio_kpis, info_box,
+)
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
@@ -1792,12 +1797,49 @@ with tab_posicoes:
             'num_posicoes':  len(df_portfolio),
         }
 
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1: metric_card("custo total alocado", fmt_preco(custo_total_carteira, "$"), destaque=True)
-        with col_m2: metric_card("património atual (m2m)", fmt_preco(valor_atual_carteira, "$"), fmt_pct(pnl_global_pct), "bull" if pnl_global_pct >= 0 else "bear", destaque=True)
-        with col_m3: metric_card("p&l global", fmt_preco(pnl_global_valor, "$"), "", "bull" if pnl_global_valor >= 0 else "bear")
+        # ── Banner do portfólio (design system v5) ───────────────────────
+        portfolio_hero(
+            titulo      = "GESTÃO DE PORTFÓLIO",
+            valor_atual = valor_atual_carteira,
+            custo_total = custo_total_carteira,
+            pnl_valor   = pnl_global_valor,
+            pnl_pct     = pnl_global_pct,
+            moeda       = "R$",
+            data_source = "",
+        )
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        # ── KPIs auxiliares ──────────────────────────────────────────────
+        _pf_kpis = [
+            {
+                "nome":     "custo alocado",
+                "valor":    custo_total_carteira,
+                "sublabel": "total investido (preço médio × qtd)",
+                "tone":     "info",
+                "icone":    "💰",
+            },
+            {
+                "nome":     "p&l global",
+                "valor":    pnl_global_valor,
+                "sublabel": f"{pnl_global_pct:+.2f}% sobre custo",
+                "tone":     "bull" if pnl_global_valor >= 0 else "bear",
+                "icone":    "📈" if pnl_global_valor >= 0 else "📉",
+            },
+            {
+                "nome":     "posições",
+                "valor":    f"{len(df_portfolio)}",
+                "sublabel": "ativos no portfólio",
+                "tone":     "accent",
+                "icone":    "📊",
+            },
+            {
+                "nome":     "valor médio/posição",
+                "valor":    (valor_atual_carteira / max(len(df_portfolio), 1)),
+                "sublabel": "ticket médio atual",
+                "tone":     "info",
+                "icone":    "🎯",
+            },
+        ]
+        portfolio_kpis(_pf_kpis)
 
         # Tabela de posições HTML — P&L colorido, health bar, link para Research
         def _pf_table_html(df: pd.DataFrame) -> str:
