@@ -27,6 +27,7 @@ from utils.fmp_client import get_multiplos_medios, get_peers, get_multiplos_hist
 # componentes do design system
 from utils.components import (
     page_header, section_title, metric_card, status_card,
+    ticker_hero, portfolio_kpis as _portfolio_kpis_v5, info_box as _info_box_v5,
     empty_state, inject_keyboard_shortcuts,
     tooltip, label_com_tooltip, TOOLTIPS,
     data_quality_badge,
@@ -741,9 +742,63 @@ topbar(
     sync_label="ao vivo",
 )
 
-page_header(f"🔬 {ticker.lower()}", f"{nome_exibicao.lower()} | {setor.lower()}")
+# ── TICKER HERO (banner premium do ativo) ──────────────────────────────────
+_preco_atual_th = 0.0
+_var_1d_th = 0.0
+_var_1m_th = 0.0
+_var_ytd_th = 0.0
+_serie_30d_th: list = []
+_health_th = None
+try:
+    _close = df_hist['Close'].dropna()
+    if len(_close) >= 2:
+        _preco_atual_th = float(_close.iloc[-1])
+        _var_1d_th = ((_preco_atual_th / float(_close.iloc[-2])) - 1) * 100
+        # 1m: ~21 dias úteis
+        if len(_close) >= 22:
+            _var_1m_th = ((_preco_atual_th / float(_close.iloc[-22])) - 1) * 100
+        # YTD: primeiro dia útil deste ano
+        import datetime as _dt_th
+        _ano_inicio = pd.Timestamp(_dt_th.date(_dt_th.date.today().year, 1, 1))
+        _close_ytd = _close[_close.index >= _ano_inicio]
+        if len(_close_ytd) >= 2:
+            _var_ytd_th = ((_preco_atual_th / float(_close_ytd.iloc[0])) - 1) * 100
+        _serie_30d_th = [float(x) for x in _close.tail(30).tolist()]
+except Exception:
+    pass
 
-c1, c2, c3, c4 = st.columns(4)
+# Health score se houver
+try:
+    from database.db import get_health_scores as _ghs_th
+    _h_map_th = {h['ticker']: h for h in (_ghs_th() or [])}
+    _health_th = _h_map_th.get(t_base, {}).get('score')
+    if _health_th is not None:
+        _health_th = float(_health_th)
+except Exception:
+    _health_th = None
+
+# Mercado label
+_mkt_th = (
+    "FII" if is_fii
+    else "BR" if ticker.endswith(".SA")
+    else "EUA"
+)
+
+ticker_hero(
+    ticker      = ticker,
+    nome        = nome_exibicao,
+    setor       = setor,
+    mercado     = _mkt_th,
+    preco_atual = _preco_atual_th,
+    moeda       = moeda.upper(),
+    var_1d      = _var_1d_th,
+    var_1m      = _var_1m_th,
+    var_ytd     = _var_ytd_th,
+    health      = _health_th,
+    serie_30d   = _serie_30d_th,
+)
+
+# ── KPIs PRINCIPAIS (premium via portfolio_kpis) ───────────────────────────
 if is_fii:
     pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
     _dy_raw_fii = safe_float(info_dict.get('dividendYield', 0))
@@ -752,14 +807,40 @@ if is_fii:
     dy = safe_float(cache_d.get('dy%')) or _dy_info_fii
     mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
     assets = safe_float(info_dict.get('totalAssets'))
-    with c1:
-        metric_card("preço / vp", f"{pvp:.2f}" if pvp is not None else "n/d", "desconto" if pvp and pvp < 1 else ("ágio" if pvp else ""), "bull" if pvp and pvp < 1 else "bear", destaque=True)
-        tooltip("pvp")
-    with c2:
-        metric_card("dividend yield", fmt_pct(dy), "12m", "bull" if dy and dy > 8 else "muted", icone="💵")
-        tooltip("dy")
-    with c3: metric_card("mkt cap", fmt_numero(mcap, moeda))
-    with c4: metric_card("patrimônio líq.", fmt_numero(assets, moeda))
+
+    _pvp_tone = "bull" if (pvp and pvp < 1) else ("bear" if (pvp and pvp > 1.1) else "amber")
+    _dy_tone  = "bull" if (dy and dy > 8) else "muted"
+
+    _portfolio_kpis_v5([
+        {
+            "nome":     "preço / vp",
+            "valor":    f"{pvp:.2f}" if pvp is not None else "n/d",
+            "sublabel": "desconto" if pvp and pvp < 1 else ("ágio" if pvp else "—"),
+            "tone":     _pvp_tone,
+            "icone":    "🏷",
+        },
+        {
+            "nome":     "dividend yield",
+            "valor":    fmt_pct(dy),
+            "sublabel": "últimos 12 meses",
+            "tone":     _dy_tone,
+            "icone":    "💵",
+        },
+        {
+            "nome":     "mkt cap",
+            "valor":    fmt_numero(mcap, moeda),
+            "sublabel": "capitalização",
+            "tone":     "info",
+            "icone":    "📊",
+        },
+        {
+            "nome":     "patrimônio líq.",
+            "valor":    fmt_numero(assets, moeda),
+            "sublabel": "ativos totais",
+            "tone":     "info",
+            "icone":    "🏛",
+        },
+    ])
 
     # Segmento e spread NTN-B para FIIs
     from utils.health_engine import _detectar_segmento_fii, _buscar_yield_ntnb
@@ -824,18 +905,42 @@ else:
     # yfinance retorna decimal. Sempre ×100.
     _dy_info_us = (_dy_raw_us * 100 if _dy_raw_us and _dy_raw_us <= 0.50 else 0)
     dy = safe_float(cache_d.get('dy%')) or _dy_info_us
-    with c1:
-        metric_card("preço / lucro", f"{pl:.1f}" if pl is not None else "n/d", "valuation", icone="🏷️")
-        tooltip("pl")
-    with c2:
-        metric_card("r.o.e", fmt_pct(roe), "rentabilidade", "bull" if roe and roe > 15 else "muted", icone="📈")
-        tooltip("roe")
-    with c3:
-        metric_card("margem líq.", fmt_pct(mrg), "eficiência", "bull" if mrg and mrg > 10 else "bear", icone="💰")
-        tooltip("margem_liquida")
-    with c4:
-        metric_card("div yield", fmt_pct(dy), "12m", icone="💵")
-        tooltip("dy")
+
+    _pl_tone  = "bull" if (pl and 5 < pl < 18) else ("bear" if (pl and pl > 30) else "amber")
+    _roe_tone = "bull" if (roe and roe > 15) else ("amber" if (roe and roe > 8) else "muted")
+    _mrg_tone = "bull" if (mrg and mrg > 10) else ("amber" if (mrg and mrg > 5) else "bear")
+    _dy_tone  = "bull" if (dy and dy > 4) else "muted"
+
+    _portfolio_kpis_v5([
+        {
+            "nome":     "preço / lucro",
+            "valor":    f"{pl:.1f}x" if pl is not None else "n/d",
+            "sublabel": "valuation",
+            "tone":     _pl_tone,
+            "icone":    "🏷",
+        },
+        {
+            "nome":     "r.o.e",
+            "valor":    fmt_pct(roe),
+            "sublabel": "retorno sobre PL",
+            "tone":     _roe_tone,
+            "icone":    "📈",
+        },
+        {
+            "nome":     "margem líq.",
+            "valor":    fmt_pct(mrg),
+            "sublabel": "eficiência operacional",
+            "tone":     _mrg_tone,
+            "icone":    "💰",
+        },
+        {
+            "nome":     "div yield",
+            "valor":    fmt_pct(dy),
+            "sublabel": "últimos 12 meses",
+            "tone":     _dy_tone,
+            "icone":    "💵",
+        },
+    ])
 
 st.markdown("<br>", unsafe_allow_html=True)
 

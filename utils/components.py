@@ -3591,3 +3591,161 @@ def chip_filter_row(
                 st.session_state[key] = lab
                 st.rerun()
     return current
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TICKER HERO — banner premium para a página Research
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def ticker_hero(
+    *,
+    ticker:      str,
+    nome:        str,
+    setor:       str = "",
+    mercado:     str = "",      # "BR" | "EUA" | "FII" | "Cripto"
+    preco_atual: float = 0.0,
+    moeda:       str = "R$",
+    var_1d:      float = 0.0,
+    var_1m:      float = 0.0,
+    var_ytd:     float = 0.0,
+    health:      float | None = None,
+    serie_30d:   list | None = None,
+) -> None:
+    """
+    Banner premium do ticker no Research. Substitui o page_header + grid
+    de 4 metric_card por um único hero com:
+
+    Esquerda:
+      - chip mercado (BR/EUA/FII/Cripto)
+      - ticker em 3xl + nome em ui-sm + setor em muted
+      - preço atual em mono 3xl
+      - 3 deltas (1d · 1m · YTD) coloridos
+    Direita:
+      - chip_status do health score
+      - sparkline grande 30d (320x90)
+    """
+    is_up   = var_1d >= 0
+    tone    = "bull" if is_up else "bear"
+    tone_c  = "var(--bull)" if is_up else "var(--bear)"
+    rgba    = "rgba(74,222,128,0.10)" if is_up else "rgba(248,113,113,0.10)"
+
+    _inject_once(
+        "_ticker_hero_css_v1",
+        '.ft-tk-hero{position:relative;display:grid;'
+        '  grid-template-columns:1.7fr 1fr;gap:var(--space-5);'
+        '  padding:var(--space-5);border-radius:var(--radius-xl);'
+        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);'
+        '  box-shadow:var(--shadow-lg);overflow:hidden;'
+        '  margin-bottom:var(--space-3);}'
+        '.ft-tk-hero::before{content:"";position:absolute;inset:0;'
+        '  background:linear-gradient(135deg,var(--tk-rgba) 0%,transparent 60%);'
+        '  pointer-events:none;}'
+        '.ft-tk-hero::after{content:"";position:absolute;left:0;top:0;'
+        '  bottom:0;width:3px;background:var(--tk-tone);'
+        '  box-shadow:0 0 16px var(--tk-tone);}'
+        '.ft-tk-left{position:relative;display:flex;flex-direction:column;'
+        '  justify-content:center;gap:var(--space-1);min-width:0;}'
+        '.ft-tk-meta{display:flex;align-items:center;gap:8px;'
+        '  margin-bottom:var(--space-1);}'
+        '.ft-tk-mkt{display:inline-flex;align-items:center;gap:4px;'
+        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
+        '  border-radius:var(--radius-sm);padding:2px 8px;'
+        '  font-family:var(--font-ui);font-size:.62rem;font-weight:700;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  color:var(--text-secondary);}'
+        '.ft-tk-name{font-family:var(--font-title);font-size:var(--text-3xl);'
+        '  font-weight:800;color:var(--text-primary);'
+        '  letter-spacing:var(--ls-tight);line-height:1;margin:0;}'
+        '.ft-tk-sub{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-muted);margin-top:2px;'
+        '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+        '  max-width:90%;}'
+        '.ft-tk-price{font-family:var(--font-data);font-size:var(--text-3xl);'
+        '  font-weight:700;color:var(--text-primary);line-height:1.1;'
+        '  letter-spacing:var(--ls-tight);margin-top:var(--space-2);}'
+        '.ft-tk-price .cur{font-size:var(--text-md);'
+        '  color:var(--text-muted);font-weight:600;margin-right:6px;}'
+        '.ft-tk-deltas{display:flex;flex-wrap:wrap;gap:12px 18px;'
+        '  margin-top:var(--space-2);}'
+        '.ft-tk-delta{display:inline-flex;flex-direction:column;'
+        '  font-family:var(--font-data);}'
+        '.ft-tk-delta .l{font-size:.6rem;color:var(--text-muted);'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  font-family:var(--font-ui);margin-bottom:2px;}'
+        '.ft-tk-delta .v{font-size:var(--text-sm);font-weight:700;}'
+        '.ft-tk-right{position:relative;display:flex;flex-direction:column;'
+        '  align-items:flex-end;justify-content:space-between;gap:10px;}'
+        '.ft-tk-spark-wrap{width:100%;max-width:340px;}'
+        '.ft-tk-spark-wrap svg{width:100%;height:90px;}'
+        '@media (max-width:900px){.ft-tk-hero{grid-template-columns:1fr;}'
+        '  .ft-tk-right{align-items:flex-start;}}'
+    )
+
+    def _fmt(v: float) -> str:
+        try:
+            if abs(v) >= 1000:
+                return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"{v:.2f}".replace(".", ",")
+        except Exception:
+            return str(v)
+
+    def _delta_html(label: str, val: float) -> str:
+        c = "var(--bull)" if val >= 0 else "var(--bear)"
+        arrow = "▲" if val >= 0 else "▼"
+        return (
+            f'<div class="ft-tk-delta">'
+            f'<span class="l">{label}</span>'
+            f'<span class="v" style="color:{c};">{arrow} {abs(val):.2f}%</span>'
+            f'</div>'
+        )
+
+    deltas_html = (
+        _delta_html("variação dia", var_1d) +
+        _delta_html("1 mês",        var_1m) +
+        _delta_html("no ano",       var_ytd)
+    )
+
+    health_html = ""
+    if health is not None:
+        try:
+            h = float(health)
+            if h >= 65:
+                h_tone = "bull"
+            elif h >= 40:
+                h_tone = "amber"
+            else:
+                h_tone = "bear"
+            health_html = chip_status(f"health {int(h)}", tone=h_tone)
+        except Exception:
+            pass
+
+    spark_html = ""
+    if serie_30d and len(serie_30d) >= 2:
+        spark_html = inline_sparkline(
+            serie_30d, tone=tone, largura=320, altura=90,
+        )
+
+    mkt_html = (
+        f'<span class="ft-tk-mkt">{mercado}</span>' if mercado else ""
+    )
+
+    st.markdown(
+        f'<div class="ft-tk-hero" '
+        f'style="--tk-tone:{tone_c};--tk-rgba:{rgba};">'
+        f'<div class="ft-tk-left">'
+        f'<div class="ft-tk-meta">{mkt_html}</div>'
+        f'<h1 class="ft-tk-name">{ticker.replace(".SA","")}</h1>'
+        f'<div class="ft-tk-sub">{nome.lower()[:80]} · {setor.lower()[:40]}</div>'
+        f'<div class="ft-tk-price"><span class="cur">{moeda}</span>{_fmt(preco_atual)}</div>'
+        f'<div class="ft-tk-deltas">{deltas_html}</div>'
+        f'</div>'
+        f'<div class="ft-tk-right">'
+        f'<div>{health_html}</div>'
+        f'<div class="ft-tk-spark-wrap">{spark_html}</div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
