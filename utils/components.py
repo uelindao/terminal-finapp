@@ -2398,3 +2398,257 @@ def html_table(
         f'</table></div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HERO COMPONENTS (Zona 1 — visual de impacto na Home)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def hero_macro(
+    score: int,
+    label: str,
+    descricao: str,
+    tom: str = "amber",
+    sinais: list[tuple] | None = None,
+    fontes_badges: list[tuple[str, str]] | None = None,
+) -> None:
+    """
+    Hero card grande do regime macro. Substitui o gauge + sinais individuais.
+
+    Layout: card com border-glow no tom, esquerda = regime em tipografia 3xl +
+    score grande + descrição; direita = grid 2 colunas de sinais como mini-pills.
+
+    Args:
+      score: 0–100 (mostrado em destaque grande)
+      label: "RISK ON" | "NEUTRO" | "CAUTELOSO" | "RISK OFF"
+      descricao: texto curto descritivo do regime
+      tom: "bull" | "amber" | "bear" — define cor do gradient e accent
+      sinais: lista de (nome, status, tipo_s [bull/amber/bear], valor)
+      fontes_badges: lista de (chave, "cache"|"api") para badges discretos no rodapé
+    """
+    t = _tone(tom)
+    sinais = sinais or []
+    fontes_badges = fontes_badges or []
+
+    _inject_once(
+        "_hero_macro_css_v1",
+        '.ft-hero-macro{position:relative;display:grid;'
+        '  grid-template-columns:minmax(280px, 1fr) 1.6fr;gap:var(--space-5);'
+        '  padding:var(--space-5) var(--space-5);'
+        '  border-radius:var(--radius-xl);'
+        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);'
+        '  box-shadow:var(--shadow-lg);overflow:hidden;'
+        '  margin-bottom:var(--space-4);}'
+        '.ft-hero-macro::before{content:"";position:absolute;inset:0;'
+        '  background:linear-gradient(135deg,var(--hero-tone-rgba) 0%,transparent 55%);'
+        '  pointer-events:none;}'
+        '.ft-hero-macro::after{content:"";position:absolute;left:0;top:0;bottom:0;'
+        '  width:3px;background:var(--hero-tone);box-shadow:0 0 18px var(--hero-tone);}'
+        '.ft-hero-left{position:relative;display:flex;flex-direction:column;'
+        '  justify-content:center;gap:var(--space-2);}'
+        '.ft-hero-eyebrow{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
+        '  color:var(--text-muted);}'
+        '.ft-hero-label{font-family:var(--font-title);font-size:var(--text-3xl);'
+        '  font-weight:800;color:var(--hero-tone);letter-spacing:var(--ls-tight);'
+        '  line-height:1;margin:0;'
+        '  text-shadow:0 0 24px var(--hero-tone-rgba-strong);}'
+        '.ft-hero-score{display:inline-flex;align-items:baseline;gap:6px;'
+        '  font-family:var(--font-data);margin-top:var(--space-1);}'
+        '.ft-hero-score .num{font-size:var(--text-2xl);font-weight:700;'
+        '  color:var(--text-primary);}'
+        '.ft-hero-score .max{font-size:var(--text-sm);color:var(--text-muted);}'
+        '.ft-hero-desc{font-family:var(--font-ui);font-size:var(--text-sm);'
+        '  color:var(--text-secondary);line-height:1.55;max-width:42ch;'
+        '  margin-top:var(--space-2);}'
+        '.ft-hero-bar{position:relative;height:6px;border-radius:999px;'
+        '  background:var(--bg-elevated);overflow:hidden;'
+        '  margin-top:var(--space-3);max-width:340px;}'
+        '.ft-hero-bar-fill{position:absolute;left:0;top:0;bottom:0;'
+        '  background:linear-gradient(90deg,var(--hero-tone) 0%,var(--hero-tone-soft) 100%);'
+        '  box-shadow:0 0 12px var(--hero-tone);'
+        '  transition:width var(--motion-base) var(--ease-out);}'
+        '.ft-hero-right{position:relative;display:grid;'
+        '  grid-template-columns:1fr 1fr;gap:8px;align-content:center;}'
+        '.ft-hero-sinal{display:grid;'
+        '  grid-template-columns:14px minmax(0,1fr) auto;align-items:center;'
+        '  gap:8px;padding:8px 12px;border-radius:var(--radius-md);'
+        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
+        '  font-size:var(--text-xs);'
+        '  transition:border-color var(--motion-fast) var(--ease-out);}'
+        '.ft-hero-sinal:hover{border-color:var(--border-normal);}'
+        '.ft-hero-sinal .dot{width:8px;height:8px;border-radius:50%;'
+        '  box-shadow:0 0 6px currentColor;}'
+        '.ft-hero-sinal .name{font-family:var(--font-ui);'
+        '  color:var(--text-secondary);text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);font-size:.66rem;'
+        '  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+        '.ft-hero-sinal .val{font-family:var(--font-data);'
+        '  color:var(--text-primary);font-weight:600;'
+        '  font-size:var(--text-xs);}'
+        '.ft-hero-fontes{grid-column:1 / -1;display:flex;flex-wrap:wrap;'
+        '  gap:6px 12px;padding-top:8px;border-top:1px solid var(--border-subtle);'
+        '  margin-top:4px;}'
+        '.ft-hero-fontes span{font-family:var(--font-ui);font-size:.6rem;'
+        '  color:var(--text-muted);}'
+        '@media (max-width:900px){.ft-hero-macro{grid-template-columns:1fr;}'
+        '  .ft-hero-right{grid-template-columns:1fr;}}'
+    )
+
+    # Map tom → cores reais (via _TONES já existente)
+    tone_color = t.get("fg", "var(--amber)")
+    # rgba derivado pra glow / gradient bg
+    rgba_soft = "rgba(255,170,0,0.10)"
+    rgba_strong = "rgba(255,170,0,0.45)"
+    soft_color = "var(--amber-soft, var(--amber))"
+    if tom == "bull":
+        rgba_soft = "rgba(74,222,128,0.10)"
+        rgba_strong = "rgba(74,222,128,0.45)"
+        soft_color = "var(--bull-soft, var(--bull))"
+    elif tom == "bear":
+        rgba_soft = "rgba(248,113,113,0.10)"
+        rgba_strong = "rgba(248,113,113,0.45)"
+        soft_color = "var(--bear-soft, var(--bear))"
+
+    # Sinais → cards mini
+    sinais_html = ""
+    for nome, status, tipo_s, valor in sinais:
+        st_t = _tone(tipo_s if tipo_s in ("bull", "bear", "amber") else "muted")
+        dot_c = st_t.get("fg", "var(--text-muted)")
+        sinais_html += (
+            f'<div class="ft-hero-sinal" title="{nome}: {status}">'
+            f'<span class="dot" style="background:{dot_c};color:{dot_c};"></span>'
+            f'<span class="name">{nome} · {status}</span>'
+            f'<span class="val">{valor}</span>'
+            f'</div>'
+        )
+
+    fontes_html = ""
+    if fontes_badges:
+        parts = []
+        for k, src in fontes_badges:
+            ic = "📦" if src == "cache" else "📡"
+            parts.append(f'<span>{ic} {k}</span>')
+        fontes_html = f'<div class="ft-hero-fontes">{"".join(parts)}</div>'
+
+    pct_fill = max(0, min(100, int(score)))
+
+    st.markdown(
+        f'<div class="ft-hero-macro" '
+        f'style="--hero-tone:{tone_color};'
+        f'--hero-tone-soft:{soft_color};'
+        f'--hero-tone-rgba:{rgba_soft};'
+        f'--hero-tone-rgba-strong:{rgba_strong};">'
+        f'<div class="ft-hero-left">'
+        f'<span class="ft-hero-eyebrow">ambiente macro · score</span>'
+        f'<h2 class="ft-hero-label">{label}</h2>'
+        f'<div class="ft-hero-score"><span class="num">{score}</span>'
+        f'<span class="max">/ 100</span></div>'
+        f'<div class="ft-hero-bar"><div class="ft-hero-bar-fill" '
+        f'style="width:{pct_fill}%;"></div></div>'
+        f'<p class="ft-hero-desc">{descricao}</p>'
+        f'</div>'
+        f'<div class="ft-hero-right">{sinais_html}{fontes_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_index_row(
+    items: list[dict],
+) -> None:
+    """
+    Linha de KPIs grandes para índices/preços. Cada item:
+      {nome, valor, var_pct, serie? (lista p/ sparkline), ticker?, sufixo?}
+
+    Renderiza grid responsivo (4-col em desktop, 2-col em mobile) com card
+    glassmorphism, sparkline inline, delta colorido e leve glow no tom da var.
+    """
+    _inject_once(
+        "_kpi_index_row_css_v1",
+        '.ft-kpi-row{display:grid;grid-template-columns:repeat(4, minmax(0,1fr));'
+        '  gap:var(--space-3);margin-bottom:var(--space-4);}'
+        '.ft-kpi-card{position:relative;padding:14px 16px;'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);overflow:hidden;'
+        '  transition:transform var(--motion-fast) var(--ease-out),'
+        '             border-color var(--motion-fast) var(--ease-out);}'
+        '.ft-kpi-card:hover{transform:translateY(-2px);'
+        '  border-color:var(--border-normal);}'
+        '.ft-kpi-card::after{content:"";position:absolute;left:0;top:0;'
+        '  width:100%;height:2px;background:var(--kpi-tone);'
+        '  box-shadow:0 0 10px var(--kpi-tone);opacity:.85;}'
+        '.ft-kpi-name{font-family:var(--font-ui);font-size:.66rem;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
+        '  color:var(--text-muted);margin-bottom:6px;'
+        '  display:flex;justify-content:space-between;align-items:center;}'
+        '.ft-kpi-name .tk{font-size:.58rem;color:var(--text-muted);opacity:.7;}'
+        '.ft-kpi-value{font-family:var(--font-data);font-size:var(--text-2xl);'
+        '  font-weight:700;color:var(--text-primary);'
+        '  line-height:1.1;letter-spacing:var(--ls-tight);}'
+        '.ft-kpi-foot{display:flex;justify-content:space-between;'
+        '  align-items:center;margin-top:8px;gap:8px;}'
+        '.ft-kpi-delta{font-family:var(--font-data);font-size:var(--text-sm);'
+        '  font-weight:600;display:inline-flex;align-items:center;gap:3px;}'
+        '@media (max-width:900px){.ft-kpi-row{grid-template-columns:repeat(2,1fr);}}'
+        '@media (max-width:500px){.ft-kpi-row{grid-template-columns:1fr;}}'
+    )
+
+    if not items:
+        return
+
+    cards = []
+    for it in items:
+        nome   = it.get("nome", "")
+        valor  = it.get("valor", "")
+        var    = float(it.get("var_pct", 0) or 0)
+        serie  = it.get("serie") or []
+        ticker = it.get("ticker", "")
+        sufixo = it.get("sufixo", "")
+
+        is_up   = var >= 0
+        tone    = "bull" if is_up else "bear"
+        tone_c  = "var(--bull)" if is_up else "var(--bear)"
+        arrow   = "▲" if is_up else "▼"
+
+        # Sparkline (compacto)
+        spark = ""
+        if len(serie) >= 2:
+            spark = inline_sparkline(serie, tone=tone, largura=78, altura=20)
+
+        # Formatação do valor (aceita string já formatada ou número)
+        if isinstance(valor, (int, float)):
+            v = float(valor)
+            if abs(v) >= 1000:
+                valor_fmt = f"{v:,.0f}".replace(",", ".")
+            else:
+                valor_fmt = f"{v:.2f}".replace(".", ",")
+            if sufixo:
+                valor_fmt = f"{valor_fmt} {sufixo}"
+        else:
+            valor_fmt = str(valor)
+
+        cards.append(
+            f'<div class="ft-kpi-card" style="--kpi-tone:{tone_c};">'
+            f'<div class="ft-kpi-name">'
+            f'<span>{nome}</span>'
+            f'<span class="tk">{ticker}</span>'
+            f'</div>'
+            f'<div class="ft-kpi-value">{valor_fmt}</div>'
+            f'<div class="ft-kpi-foot">'
+            f'<span class="ft-kpi-delta" style="color:{tone_c};">'
+            f'{arrow} {abs(var):.2f}%</span>'
+            f'{spark}'
+            f'</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div class="ft-kpi-row">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )

@@ -40,6 +40,8 @@ from utils.components import (
     handle_ticker_nav, ticker_nav_url,
     # Fase 6 — shell visual da Home
     topbar, side_panel,
+    # Zona 1 — hero visual
+    hero_macro, kpi_index_row,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -806,7 +808,12 @@ def buscar_indices_completo():
                 continue
             preco = float(s.iloc[-1])
             var   = ((preco / float(s.iloc[-2])) - 1) * 100
-            resultados[nome] = {"preco": preco, "var": var, "ticker": tickers[nome]}
+            resultados[nome] = {
+                "preco": preco,
+                "var":   var,
+                "ticker": tickers[nome],
+                "serie": [float(x) for x in s.tail(20).tolist()],
+            }
 
         # Spread curva de juros: 10Y − 3M (em pp)
         if "treasury 10y" in raw and "_irx" in raw:
@@ -825,16 +832,53 @@ def buscar_indices_completo():
 
 indices = buscar_indices_completo()
 if indices:
-    try:
-        from utils.components import market_pulse_bar as _mpb
-        _pulse_data = {
-            nome: (d["preco"], d["var"])
-            for nome, d in indices.items()
-        }
+    # ─── Zona 1 destaque: 4 KPI grandes com sparkline (hero row) ──────────
+    _kpi_principais = []
+    _labels = {
+        "ibovespa":    ("IBOVESPA",   "^BVSP"),
+        "s&p 500":     ("S&P 500",    "^GSPC"),
+        "dólar (brl)": ("USD / BRL",  "BRL=X"),
+        "bitcoin":     ("BITCOIN",    "BTC-USD"),
+    }
+    for _k_raw, (_nm, _tk) in _labels.items():
+        _d = indices.get(_k_raw)
+        if not _d:
+            continue
+        _kpi_principais.append({
+            "nome":    _nm,
+            "ticker":  _tk,
+            "valor":   _d["preco"],
+            "var_pct": _d["var"],
+            "serie":   _d.get("serie", []),
+        })
+
+    if _kpi_principais:
         with _pulse_bar_ph.container():
-            _mpb(_pulse_data)
-    except Exception:
-        pass
+            kpi_index_row(_kpi_principais)
+            # mantém o pulse bar abaixo com os demais índices (curva, vix, etc.)
+            try:
+                from utils.components import market_pulse_bar as _mpb
+                _outros = {
+                    nome: (d["preco"], d["var"])
+                    for nome, d in indices.items()
+                    if nome not in _labels
+                }
+                if _outros:
+                    _mpb(_outros)
+            except Exception:
+                pass
+    else:
+        # fallback: sem KPI principais, mostra o pulse bar completo
+        try:
+            from utils.components import market_pulse_bar as _mpb
+            _pulse_data = {
+                nome: (d["preco"], d["var"])
+                for nome, d in indices.items()
+            }
+            with _pulse_bar_ph.container():
+                _mpb(_pulse_data)
+        except Exception:
+            pass
 
 # ==========================================
 # FAIXA 2 — SEMÁFORO MACRO
@@ -1124,97 +1168,23 @@ st.session_state['macro_context'] = {
     'ipca':  dados_sem.get('ipca_12m') or dados_sem.get('ipca') or 4.5,
 }
 
-# ── renderização: gauge + sinais individuais ─────────────────────────────────
-col_gauge_mac, col_sinais_mac = st.columns([1, 2])
+# ── renderização: HERO MACRO (Zona 1) ────────────────────────────────────────
+# Substitui o antigo gauge plotly + grid de sinais individuais por um card
+# único com regime em destaque, score, descrição e sinais como mini-pills.
+_fontes_badges = [
+    (k, fontes_sem.get(k))
+    for k in ("selic", "ipca", "t10y2y", "vix", "hy_spread", "divida_pib")
+    if fontes_sem.get(k)
+]
 
-with col_gauge_mac:
-    fig_mac = go.Figure(go.Indicator(
-        mode  = "gauge+number",
-        value = ambiente['score'],
-        title = {
-            'text': "ambiente macro",
-            'font': {'color': '#555', 'family': 'Courier New', 'size': 12},
-        },
-        gauge = {
-            'axis': {
-                'range': [0, 100],
-                'tickcolor': '#333',
-                'tickfont': {'color': '#444', 'size': 9},
-            },
-            'bar': {'color': ambiente['cor'], 'thickness': 0.25},
-            'bgcolor': '#13141E',
-            'bordercolor': '#2A2C3E',
-            'steps': [
-                {'range': [0,  35],  'color': '#2a0a12'},
-                {'range': [35, 50],  'color': '#2a1a00'},
-                {'range': [50, 70],  'color': '#1C1D2B'},
-                {'range': [70, 100], 'color': '#0a2218'},
-            ],
-            'threshold': {
-                'line': {'color': ambiente['cor'], 'width': 3},
-                'thickness': 0.8,
-                'value': ambiente['score'],
-            },
-        },
-        number = {
-            'font': {'color': ambiente['cor'], 'family': 'Courier New', 'size': 42},
-        },
-    ))
-
-    layout_mac = base_layout(height=230)
-    _cc_home = _chart_cores()
-    layout_mac.update({
-        'margin':       {'l': 10, 'r': 10, 't': 50, 'b': 10},
-        'paper_bgcolor': _cc_home["surface"],
-    })
-    fig_mac.update_layout(**layout_mac)
-    st.plotly_chart(fig_mac, use_container_width=True, config={'responsive': True})
-
-    st.markdown(
-        f'<div style="text-align:center; font-family:var(--font-data); font-size:1.1rem; '
-        f'color:{ambiente["cor"]}; font-weight:bold; margin-top:-16px; '
-        f'letter-spacing:0.1em;">{ambiente["label"]}</div>',
-        unsafe_allow_html=True,
-    )
-
-with col_sinais_mac:
-    section_title("sinais individuais")
-
-    for nome, status, tipo_s, valor in ambiente['sinais']:
-        cor_s  = ("var(--bull)" if tipo_s == "bull" else
-                  "var(--bear)" if tipo_s == "bear" else "var(--amber)")
-        icone  = ("✅" if tipo_s == "bull" else
-                  "🚨" if tipo_s == "bear" else "⚠️")
-        st.markdown(
-            f'<div style="display:flex; justify-content:space-between; align-items:center; '
-            f'padding:6px 0; border-bottom:1px solid var(--border-subtle);">'
-            f'<span style="font-family:var(--font-ui); font-size:0.75rem; color:var(--text-muted); '
-            f'text-transform:uppercase; letter-spacing:0.06em;">{nome}</span>'
-            f'<span style="font-family:var(--font-ui); font-size:0.78rem; '
-            f'color:{cor_s};">{icone} {status}</span>'
-            f'<span style="font-family:var(--font-data); font-size:0.75rem; '
-            f'color:var(--text-muted);">{valor}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    status_card("leitura macro", ambiente['descr'], tipo=ambiente['tipo'])
-
-    # Badge de fonte dos indicadores macro
-    _badges = []
-    for _k in ["selic", "ipca", "t10y2y", "vix", "hy_spread", "divida_pib"]:
-        _f = fontes_sem.get(_k)
-        if _f:
-            _ic = "📦" if _f == "cache" else "📡"
-            _badges.append(f'<span style="font-size:0.6rem; color:var(--text-muted); margin-right:8px;">{_ic} {_k}</span>')
-    if _badges:
-        st.markdown(
-            f'<div style="text-align:center; padding:2px 0 6px;">{"".join(_badges)}</div>',
-            unsafe_allow_html=True,
-        )
-
-st.markdown("<br>", unsafe_allow_html=True)
+hero_macro(
+    score      = ambiente['score'],
+    label      = ambiente['label'],
+    descricao  = ambiente['descr'],
+    tom        = ambiente['tipo'],
+    sinais     = ambiente['sinais'],
+    fontes_badges = _fontes_badges,
+)
 
 # ==========================================
 # FAIXA 3 — PRÓXIMOS EVENTOS CRÍTICOS
