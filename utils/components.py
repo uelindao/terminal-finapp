@@ -3013,7 +3013,7 @@ def portfolio_kpis(items: list[dict]) -> None:
         '@media (max-width:500px){.ft-pfk-row{grid-template-columns:1fr;}}'
     )
 
-    cards = []
+    cards: list[str] = []
     for it in items:
         nome    = it.get("nome", "")
         valor   = it.get("valor", "")
@@ -3088,3 +3088,267 @@ def portfolio_kpis(items: list[dict]) -> None:
         f'<div class="ft-pfk-row">{"".join(cards)}</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVENTS / TIMELINE COMPONENTS (polimento Home)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def events_strip(eventos: list[dict]) -> None:
+    """
+    Strip de próximos eventos econômicos — countdown elegante.
+
+    Cada evento: {
+      "data": str (DD/MM/YYYY),
+      "dias": int (até o evento),
+      "titulo": str (ex: "COPOM — juros"),
+      "categoria": "brasil"|"eua"|"global",
+      "impacto": "alto"|"medio"|"baixo",
+    }
+    """
+    if not eventos:
+        return
+
+    _inject_once(
+        "_events_strip_css_v1",
+        '.ft-evt-row{display:grid;'
+        '  grid-template-columns:repeat(auto-fit, minmax(180px,1fr));'
+        '  gap:var(--space-3);margin-bottom:var(--space-4);}'
+        '.ft-evt-card{position:relative;display:flex;flex-direction:column;'
+        '  padding:14px 16px;border-radius:var(--radius-lg);'
+        '  background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);overflow:hidden;'
+        '  transition:transform var(--motion-fast) var(--ease-out),'
+        '             border-color var(--motion-fast) var(--ease-out);}'
+        '.ft-evt-card:hover{transform:translateY(-2px);'
+        '  border-color:var(--border-normal);}'
+        '.ft-evt-card::before{content:"";position:absolute;left:0;top:0;'
+        '  bottom:0;width:3px;background:var(--evt-tone);'
+        '  box-shadow:0 0 10px var(--evt-tone);}'
+        '.ft-evt-head{display:flex;justify-content:space-between;'
+        '  align-items:center;margin-bottom:8px;}'
+        '.ft-evt-cat{font-family:var(--font-ui);font-size:.6rem;'
+        '  font-weight:700;text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wider);color:var(--evt-tone);'
+        '  display:inline-flex;align-items:center;gap:5px;}'
+        '.ft-evt-imp{font-family:var(--font-ui);font-size:.58rem;'
+        '  font-weight:700;color:var(--evt-imp-c);'
+        '  background:var(--bg-elevated);'
+        '  border:1px solid var(--evt-imp-c);border-radius:var(--radius-sm);'
+        '  padding:1px 6px;text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);}'
+        '.ft-evt-titulo{font-family:var(--font-ui);font-size:var(--text-sm);'
+        '  color:var(--text-primary);font-weight:600;'
+        '  line-height:1.3;margin-bottom:10px;flex:1;}'
+        '.ft-evt-foot{display:flex;align-items:baseline;'
+        '  justify-content:space-between;margin-top:auto;'
+        '  padding-top:8px;border-top:1px solid var(--border-subtle);}'
+        '.ft-evt-data{font-family:var(--font-data);font-size:.72rem;'
+        '  color:var(--text-secondary);font-weight:600;}'
+        '.ft-evt-count{font-family:var(--font-data);font-size:.7rem;'
+        '  color:var(--evt-cd-c);font-weight:700;'
+        '  display:inline-flex;align-items:baseline;gap:3px;}'
+        '.ft-evt-count .n{font-size:1.15rem;}'
+    )
+
+    _cat_map = {
+        "brasil": ("🇧🇷 brasil", "var(--bull)"),
+        "eua":    ("🇺🇸 eua",    "var(--info)"),
+        "global": ("🌐 global",   "var(--accent)"),
+    }
+
+    cards: list[str] = []
+    for ev in eventos:
+        dias     = int(ev.get("dias", 99))
+        categ    = ev.get("categoria", "global")
+        impacto  = ev.get("impacto", "medio")
+        titulo   = ev.get("titulo", "")
+        data     = ev.get("data", "")
+
+        cat_lbl, tone_c = _cat_map.get(categ, _cat_map["global"])
+
+        # Cor do impacto
+        imp_c = {
+            "alto":  "var(--bear)",
+            "medio": "var(--amber)",
+            "baixo": "var(--text-muted)",
+        }.get(impacto, "var(--text-muted)")
+
+        # Cor do countdown (urgência)
+        cd_c = (
+            "var(--bear)"  if dias <= 2 else
+            "var(--amber)" if dias <= 7 else
+            "var(--text-secondary)"
+        )
+
+        # Sufixo do countdown
+        if dias <= 0:
+            cd_label = "hoje"
+            cd_n = ""
+        elif dias == 1:
+            cd_label = "amanhã"
+            cd_n = ""
+        else:
+            cd_label = f"{dias}d"
+            cd_n = ""
+
+        cards.append(
+            f'<div class="ft-evt-card" '
+            f'style="--evt-tone:{tone_c};--evt-imp-c:{imp_c};--evt-cd-c:{cd_c};">'
+            f'<div class="ft-evt-head">'
+            f'<span class="ft-evt-cat">{cat_lbl}</span>'
+            f'<span class="ft-evt-imp">{impacto}</span>'
+            f'</div>'
+            f'<div class="ft-evt-titulo">{titulo}</div>'
+            f'<div class="ft-evt-foot">'
+            f'<span class="ft-evt-data">{data}</span>'
+            f'<span class="ft-evt-count">em <span class="n">{cd_label}</span></span>'
+            f'</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div class="ft-evt-row">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def pill_select(
+    labels: list[str],
+    key:    str,
+    default: str | None = None,
+) -> str:
+    """
+    Seletor estilo pill mais compacto que tabs_pill (para usar em ordenacao).
+    Retorna o label selecionado. Persiste em session_state[key].
+
+    Diferenca pra tabs_pill: visual menor, sem fundo gradient (so border ativo).
+    """
+    if not labels:
+        return ""
+    current = st.session_state.get(key) or default or labels[0]
+    if current not in labels:
+        current = labels[0]
+
+    _inject_once(
+        "_pillselect_css_v1",
+        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button{'
+        '  background:transparent !important;'
+        '  border:1px solid var(--border-subtle) !important;'
+        '  border-radius:var(--radius-sm) !important;'
+        '  color:var(--text-secondary) !important;'
+        '  padding:4px 10px !important;'
+        '  font-family:var(--font-ui) !important;'
+        '  font-size:var(--text-xs) !important;'
+        '  font-weight:500 !important;'
+        '  width:100% !important;'
+        '  box-shadow:none !important;'
+        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
+        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button:hover{'
+        '  border-color:var(--border-normal) !important;'
+        '  color:var(--text-primary) !important;}'
+        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
+        '  background:var(--bg-elevated) !important;'
+        '  color:var(--accent) !important;'
+        '  border-color:var(--accent) !important;'
+        '  font-weight:600 !important;}'
+    )
+
+    st.markdown('<div data-fpsel="1"></div>', unsafe_allow_html=True)
+    cols = st.columns(len(labels), gap="small")
+    for i, lab in enumerate(labels):
+        with cols[i]:
+            if st.button(
+                lab,
+                key=f"{key}__{i}",
+                type="primary" if lab == current else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state[key] = lab
+                st.rerun()
+    return current
+
+
+def watchlist_selector_header(
+    watchlists: list[dict],
+    ativa_id: int | None,
+    *,
+    key_prefix: str = "wl_sel",
+) -> tuple[int | None, str | None]:
+    """
+    Header bonito do seletor de watchlist — substitui o columns([5,2,1]).
+
+    Retorna (watchlist_id_selecionada, acao_clicada) onde acao ∈ {None, "criar", "config"}.
+
+    Renderiza:
+      - linha superior: titulo "minhas watchlists" + counts
+      - tabs_pill com cada watchlist (icone + nome)
+      - botões finos à direita: ➕ nova · ⚙ config
+    """
+    if not watchlists:
+        # Sem watchlists: estado vazio + botão criar
+        st.markdown(
+            '<div style="text-align:center;padding:24px;'
+            'border:1px dashed var(--border-subtle);border-radius:var(--radius-md);'
+            'color:var(--text-muted);font-family:var(--font-ui);">'
+            '<div style="font-size:1.5rem;margin-bottom:8px;opacity:.6;">📋</div>'
+            'sem watchlists. crie a primeira pra começar.</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("➕ criar primeira watchlist", type="primary",
+                     use_container_width=True, key=f"{key_prefix}_primeira"):
+            return (None, "criar")
+        return (None, None)
+
+    _inject_once(
+        "_wl_selector_css_v1",
+        '.ft-wl-header{display:flex;align-items:center;'
+        '  justify-content:space-between;'
+        '  margin-bottom:8px;padding-bottom:8px;'
+        '  border-bottom:1px solid var(--border-subtle);}'
+        '.ft-wl-title{font-family:var(--font-ui);font-size:.7rem;'
+        '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
+        '  color:var(--text-muted);font-weight:600;'
+        '  display:inline-flex;align-items:center;gap:6px;}'
+        '.ft-wl-counts{font-family:var(--font-data);font-size:.7rem;'
+        '  color:var(--text-secondary);}'
+    )
+
+    # Header textual
+    st.markdown(
+        f'<div class="ft-wl-header">'
+        f'<span class="ft-wl-title">📋 minhas watchlists</span>'
+        f'<span class="ft-wl-counts">{len(watchlists)} listas</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Linha principal: tabs_pill com nomes + botões à direita
+    nomes = [f"{wl.get('icone', '⭐')} {wl.get('nome', '?')}" for wl in watchlists]
+    id_por_nome = {f"{wl.get('icone', '⭐')} {wl.get('nome', '?')}": wl['id']
+                   for wl in watchlists}
+    nome_por_id = {wl['id']: f"{wl.get('icone', '⭐')} {wl.get('nome', '?')}"
+                   for wl in watchlists}
+
+    default_lbl = nome_por_id.get(ativa_id, nomes[0]) if ativa_id else nomes[0]
+
+    col_tabs, col_btns = st.columns([7, 3])
+    with col_tabs:
+        escolhida = tabs_pill(nomes, key=f"{key_prefix}_pick", default=default_lbl)
+    with col_btns:
+        sub1, sub2 = st.columns(2)
+        acao = None
+        with sub1:
+            if st.button("➕ nova", key=f"{key_prefix}_btn_nova",
+                         use_container_width=True):
+                acao = "criar"
+        with sub2:
+            if st.button("⚙ config", key=f"{key_prefix}_btn_cfg",
+                         use_container_width=True):
+                acao = "config"
+
+    wl_id = id_por_nome.get(escolhida)
+    return (wl_id, acao)

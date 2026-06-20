@@ -47,6 +47,8 @@ from utils.components import (
     tabs_pill, highlights_strip, mercado_group_header,
     # Zona 3 — portfólio premium
     portfolio_hero, portfolio_kpis,
+    # Polimentos
+    events_strip, pill_select, watchlist_selector_header,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -1229,20 +1231,18 @@ def get_proximos_eventos_home():
 
 proximos_eventos = get_proximos_eventos_home()
 if proximos_eventos:
-    ev_cols = st.columns(len(proximos_eventos))
     hoje_home = dt_module.date.today()
-    for i, ev in enumerate(proximos_eventos):
+    _evt_items = []
+    for ev in proximos_eventos:
         dias = (ev['data'] - hoje_home).days
-        cor_cat = {"brasil": "#22C55E", "eua": "#60A5FA"}.get(ev['categoria'], "var(--text-muted)")
-        cor_dias = "var(--bear)" if dias <= 3 else ("var(--amber)" if dias <= 7 else "var(--text-muted)")
-        icone_imp = "🔴" if ev['impacto'] == 'alto' else "🟡"
-        with ev_cols[i]:
-            st.markdown(f'''<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-top:2px solid {cor_cat}; border-radius:var(--radius-md); padding:12px; text-align:center;">
-            <div style="font-family:var(--font-ui); font-size:0.68rem; color:{cor_cat}; text-transform:uppercase; font-weight:bold;">{ev['categoria']}</div>
-            <div style="font-family:var(--font-ui); font-size:0.85rem; color:var(--text-primary); margin:6px 0;">{icone_imp} {ev['evento']}</div>
-            <div style="font-family:var(--font-data); font-size:0.75rem; color:{cor_dias};">{ev['data'].strftime('%d/%m/%Y')}</div>
-            <div style="font-family:var(--font-ui); font-size:0.68rem; color:var(--text-muted); margin-top:2px;">em {dias} dias</div>
-            </div>''', unsafe_allow_html=True)
+        _evt_items.append({
+            "data":      ev['data'].strftime('%d/%m'),
+            "dias":      dias,
+            "titulo":    ev['evento'],
+            "categoria": ev['categoria'],
+            "impacto":   ev['impacto'],
+        })
+    events_strip(_evt_items)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1622,7 +1622,7 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
 # Interações dentro deste fragment NÃO recarregam o restante da página
 @st.fragment
 def _watchlist_section():
-    # ── Selector e gerenciamento de watchlists ───────────────────────────
+    # ── Selector e gerenciamento de watchlists (design system v5) ─────────
     watchlists_disponiveis = listar_watchlists()
     if not watchlists_disponiveis:
         get_watchlist_padrao()
@@ -1631,28 +1631,19 @@ def _watchlist_section():
     if 'watchlist_ativa_id' not in st.session_state:
         st.session_state['watchlist_ativa_id'] = watchlists_disponiveis[0]['id']
 
-    opcoes_wl = {f"{wl['icone']} {wl['nome']} ({wl['total_ativos']} ativos)": wl['id'] for wl in watchlists_disponiveis}
+    # Header bonito (substitui o columns([5,2,1]) com selectbox)
+    _wl_id, _acao = watchlist_selector_header(
+        watchlists_disponiveis,
+        st.session_state.get('watchlist_ativa_id'),
+        key_prefix="wl_sel_v2",
+    )
+    if _wl_id is not None:
+        st.session_state['watchlist_ativa_id'] = _wl_id
 
-    idx_ativo = 0
-    for i, wl in enumerate(watchlists_disponiveis):
-        if wl['id'] == st.session_state['watchlist_ativa_id']:
-            idx_ativo = i
-            break
-
-    col_sel_wl, col_btn_nova, col_btn_cfg = st.columns([5, 2, 1])
-
-    with col_sel_wl:
-        sel_wl_label = st.selectbox("watchlist ativa:", list(opcoes_wl.keys()), index=idx_ativo, key="sel_watchlist_ativa_ui", label_visibility="collapsed")
-        st.session_state['watchlist_ativa_id'] = opcoes_wl[sel_wl_label]
-        watchlist_id_ativo = st.session_state['watchlist_ativa_id']
-
-    with col_btn_nova:
-        if st.button("➕ nova watchlist", use_container_width=True):
-            st.session_state['criar_wl_modal'] = True
-
-    with col_btn_cfg:
-        if st.button("⚙️", use_container_width=True, help="configurar watchlist"):
-            st.session_state['cfg_wl_modal'] = True
+    if _acao == "criar":
+        st.session_state['criar_wl_modal'] = True
+    elif _acao == "config":
+        st.session_state['cfg_wl_modal'] = True
 
     if st.session_state.get('criar_wl_modal'):
         st.session_state.pop('criar_wl_modal')
@@ -2019,30 +2010,39 @@ else:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── ORDENAÇÃO DA WATCHLIST ───────────────────────────────────────────────
-    _col_ord1, _col_ord2, _col_ord3 = st.columns([3, 2, 1])
+    # ── ORDENAÇÃO DA WATCHLIST (pill_select compacto) ────────────────────────
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.62rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wider);margin-top:8px;margin-bottom:6px;'
+        'font-weight:600;">↕ ordenar por</div>',
+        unsafe_allow_html=True,
+    )
+    _col_ord1, _col_ord2 = st.columns([5, 2])
     with _col_ord1:
-        _ordem_campo = st.selectbox(
-            "ordenar por:",
-            ["health score", "ticker", "variação 1d", "variação 1m", "preço", "status"],
-            key="wl_ordem_campo",
-            label_visibility="collapsed",
+        _ordem_campo = pill_select(
+            ["health", "ticker", "1d", "1m", "preço", "status"],
+            key="wl_ordem_campo_v2",
+            default="health",
         )
     with _col_ord2:
-        _ordem_dir = st.radio(
-            "direção:",
-            ["↓ maior primeiro", "↑ menor primeiro"],
-            horizontal=True,
-            key="wl_ordem_dir",
-            label_visibility="collapsed",
+        _ordem_dir = pill_select(
+            ["↓ desc", "↑ asc"],
+            key="wl_ordem_dir_v2",
+            default="↓ desc",
         )
-    with _col_ord3:
-        if st.button("↺", key="btn_reset_ordem", help="resetar ordenação"):
-            st.session_state.pop('wl_ordem_campo', None)
-            st.session_state.pop('wl_ordem_dir', None)
-            st.rerun(scope="fragment")
 
-    _ordem_reversa = "maior" in _ordem_dir
+    # Compatibilidade: mapear labels novos para o sistema antigo
+    _ordem_campo_map = {
+        "health": "health score",
+        "ticker": "ticker",
+        "1d":     "variação 1d",
+        "1m":     "variação 1m",
+        "preço":  "preço",
+        "status": "status",
+    }
+    _ordem_campo = _ordem_campo_map.get(_ordem_campo, "health score")
+    _ordem_reversa = "↓" in _ordem_dir
 
     def _sort_key(item):
         _t     = item.get('ticker', '')
@@ -2247,7 +2247,7 @@ else:
     if _memorial_pendente:
         exibir_memorial(*_memorial_pendente)
 
-    # ── Barra de deleção múltipla ──────────────────────────────────────────
+    # ── Barra de deleção múltipla (design system) ──────────────────────────
     _del_selecionados = st.session_state.get('del_selecionados', [])
     if _del_selecionados:
         _n_del = len(_del_selecionados)
@@ -2257,11 +2257,11 @@ else:
 
         _cb1, _cb2 = st.columns([3, 1])
         with _cb1:
-            st.markdown(
-                f'<div style="background:#1a0505; border:1px solid #FF1744; border-radius:6px;'
-                f' padding:10px 16px; font-family:var(--font-data); font-size:0.8rem; color:var(--bear);">'
-                f'🗑 selecionados: <strong>{_labels}</strong></div>',
-                unsafe_allow_html=True,
+            info_box(
+                tipo   = "bear",
+                titulo = f"{_n_del} ativo{'s' if _n_del != 1 else ''} selecionado{'s' if _n_del != 1 else ''}",
+                texto  = _labels,
+                icone  = "🗑",
             )
         with _cb2:
             _cols_del = st.columns(2)
@@ -2294,11 +2294,26 @@ with col_rel1:
         dt_ultimo = datetime.fromisoformat(ultimo_envio['enviado_em'])
         dias_desde = (datetime.now() - dt_ultimo).days
         if dias_desde >= 7:
-            st.info(f"📬 último relatório enviado há {dias_desde} dias ({dt_ultimo.strftime('%d/%m/%Y')}). hora de enviar o novo!")
+            info_box(
+                tipo   = "amber",
+                titulo = f"hora de enviar — {dias_desde} dias desde o último",
+                texto  = f"último envio em {dt_ultimo.strftime('%d/%m/%Y')}.",
+                icone  = "📬",
+            )
         else:
-            st.success(f"✅ relatório enviado em {dt_ultimo.strftime('%d/%m/%Y %H:%M')} — {dias_desde} dia(s) atrás.")
+            info_box(
+                tipo   = "bull",
+                titulo = f"relatório enviado há {dias_desde} dia{'s' if dias_desde != 1 else ''}",
+                texto  = f"enviado em {dt_ultimo.strftime('%d/%m/%Y às %H:%M')}.",
+                icone  = "✅",
+            )
     else:
-        st.info("📭 nenhum relatório enviado ainda. clique para gerar o primeiro.")
+        info_box(
+            tipo   = "info",
+            titulo = "nenhum relatório ainda",
+            texto  = "clique no botão para gerar o primeiro relatório semanal.",
+            icone  = "📭",
+        )
 
 with col_rel2:
     btn_relatorio = st.button(
