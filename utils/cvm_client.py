@@ -609,8 +609,9 @@ def _get_dfp_series(
         hist_px = tk.history(period=f"{anos + 2}y", interval="1mo")["Close"].dropna()
         if getattr(hist_px.index, "tz", None) is not None:
             hist_px.index = hist_px.index.tz_localize(None)
-    except Exception:
-        pass
+    except Exception as _e_yf:
+        # mktcap/shares ficam 0; P/L, P/VP, EV/EBITDA viram None — degradação aceitável
+        logger.debug(f"[cvm] yfinance falhou para {ticker_yf} em DFP: {_e_yf}")
 
     # Monta lista ordenada por data (mais recente primeiro)
     datas_ord = sorted(dados_por_data.keys(), reverse=True)[:anos]
@@ -829,8 +830,8 @@ def _get_itr_series(
         hist_px = tk.history(period=f"{anos + 2}y", interval="1mo")["Close"].dropna()
         if getattr(hist_px.index, "tz", None) is not None:
             hist_px.index = hist_px.index.tz_localize(None)
-    except Exception:
-        pass
+    except Exception as _e_yf:
+        logger.debug(f"[cvm] yfinance falhou para {ticker_yf} em ITR: {_e_yf}")
 
     datas_ord  = sorted(dados_por_data.keys(), reverse=True)
     resultados: list[tuple[str, dict, dict]] = []

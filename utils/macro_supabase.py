@@ -68,8 +68,9 @@ def _json_to_df(payload: str) -> pd.DataFrame:
     try:
         df.index = pd.to_datetime(df.index)
         df.index.name = None
-    except Exception:
-        pass
+    except Exception as _e_dt:
+        # snapshot legado com índice não-datetime; preserva como está
+        logger.debug(f"[macro_supabase] não foi possível converter índice para datetime: {_e_dt}")
     return df
 
 

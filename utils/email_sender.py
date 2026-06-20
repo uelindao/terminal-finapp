@@ -28,8 +28,9 @@ def _ler_credenciais_email() -> tuple[str, str, str]:
         rem = rem or sec.get("remetente") or ""
         pwd = pwd or sec.get("app_password") or ""
         dst = dst or sec.get("destinatario") or ""
-    except Exception:
-        pass
+    except Exception as _e_sec:
+        # Contexto não-streamlit (ETL/CI) ou secrets ausentes — usa só env vars
+        logger.debug(f"[email] st.secrets indisponível, usando apenas env vars: {_e_sec}")
     return rem, pwd, dst
 
 

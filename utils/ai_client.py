@@ -296,8 +296,8 @@ def chamar_ia(
                     st.session_state['ai_modo_atual'] = _ai_modo
                     if _ai_modo == 'pro' and not (user_settings and user_settings.get('ai_api_key', '').strip()):
                         user_settings = _loaded
-        except Exception:
-            pass
+        except Exception as _e_ai_mode:
+            logger.debug(f"[ai_client] falha ao determinar ai_modo via session/db: {_e_ai_mode}")
     if _ai_modo is None:
         _ai_modo = 'free'
 
@@ -312,8 +312,8 @@ def chamar_ia(
                     _uid = _u.get('user_id') or st.session_state.get('user_id')
                     if _uid:
                         user_settings = get_user_settings(_uid)
-            except Exception:
-                pass
+            except Exception as _e_load:
+                logger.debug(f"[ai_client] falha ao carregar user_settings para modo pro: {_e_load}")
             if not (user_settings and user_settings.get('ai_api_key', '').strip()):
                 st.warning("modo pro ativo, mas nenhuma chave api encontrada. configure em configurações › minha ia.")
                 user_settings = None
