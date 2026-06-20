@@ -125,50 +125,35 @@ except Exception as e:
 section_title("🌐 índices globais")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _indices_dashboard():
+    """Usa helper centralizada bulk_close_history (cache 5min compartilhado)."""
+    from utils.market_data import bulk_close_history
+
     tickers = {
         "IBOVESPA":  "^BVSP",
         "S&P 500":   "^GSPC",
         "USD / BRL": "BRL=X",
         "BITCOIN":   "BTC-USD",
     }
-    out = []
-    try:
-        _raw = yf.download(
-            list(tickers.values()),
-            period       = "5d",
-            auto_adjust  = True,
-            progress     = False,
-        )
-        if isinstance(_raw.columns, pd.MultiIndex):
-            try:
-                hist = _raw.xs('Close', axis=1, level=0)
-            except KeyError:
-                hist = _raw.xs('Close', axis=1, level=1)
-        else:
-            hist = _raw.get('Close', _raw)
-        if isinstance(hist, pd.Series):
-            hist = hist.to_frame(name=list(tickers.values())[0])
+    series_map = bulk_close_history(tuple(tickers.values()), period="5d")
 
-        for nm, tk in tickers.items():
-            try:
-                s = hist[tk].dropna() if tk in hist.columns else pd.Series()
-                if len(s) < 2:
-                    continue
-                p_atual = float(s.iloc[-1])
-                var = ((p_atual / float(s.iloc[-2])) - 1) * 100
-                out.append({
-                    "nome":    nm,
-                    "ticker":  tk,
-                    "valor":   p_atual,
-                    "var_pct": var,
-                    "serie":   [float(x) for x in s.tail(20).tolist()],
-                })
-            except Exception:
-                pass
-    except Exception:
-        pass
+    out = []
+    for nm, tk in tickers.items():
+        s = series_map.get(tk, [])
+        if len(s) < 2:
+            continue
+        p_atual = s[-1]
+        try:
+            var = ((p_atual / s[-2]) - 1) * 100 if s[-2] > 0 else 0.0
+        except Exception:
+            var = 0.0
+        out.append({
+            "nome":    nm,
+            "ticker":  tk,
+            "valor":   p_atual,
+            "var_pct": var,
+            "serie":   s[-20:],
+        })
     return out
 
 

@@ -662,12 +662,15 @@ def inject_ui_enhancements():
     tickers_json = json.dumps(tickers_b3 + tickers_fii + tickers_us)
 
     pages_json = json.dumps([
-        {"label": "Portfolio",     "icon": "📊", "nav": "Portfolio",     "key": "1"},
-        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "2"},
-        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "3"},
-        {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "4"},
-        {"label": "Configurações", "icon": "⚙️", "nav": "Configuracoes", "key": "5"},
-        {"label": "Backfill",      "icon": "🗄️", "nav": "Backfill",      "key": "6"},
+        {"label": "Home",          "icon": "⚡", "nav": "Home",          "key": "0"},
+        {"label": "Dashboard",     "icon": "📈", "nav": "Dashboard",     "key": "1"},
+        {"label": "Watchlists",    "icon": "👁",  "nav": "Watchlists",    "key": "2"},
+        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "3"},
+        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "4"},
+        {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "5"},
+        {"label": "Portfolio",     "icon": "💼", "nav": "Portfolio",     "key": "6"},
+        {"label": "Configurações", "icon": "⚙",  "nav": "Configuracoes", "key": "7"},
+        {"label": "Backfill",      "icon": "🗄",  "nav": "Backfill",      "key": "8"},
     ])
 
     # IMPORTANTE: st.markdown() NÃO executa <script> no Streamlit moderno (React
@@ -3747,5 +3750,131 @@ def ticker_hero(
         f'<div class="ft-tk-spark-wrap">{spark_html}</div>'
         f'</div>'
         f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SKELETON LOADERS — UX percebida (estruturas fantasma durante loading)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _skeleton_css() -> None:
+    """Injeta CSS dos skeletons + animação shimmer."""
+    _inject_once(
+        "_skeleton_css_v1",
+        '@keyframes ft-shimmer{'
+        '  0%{background-position:-1000px 0;}'
+        '  100%{background-position:1000px 0;}}'
+        '.ft-skel{'
+        '  background:linear-gradient(90deg,'
+        '    var(--bg-elevated) 0%,'
+        '    var(--bg-overlay) 50%,'
+        '    var(--bg-elevated) 100%);'
+        '  background-size:1000px 100%;'
+        '  animation:ft-shimmer 1.6s linear infinite;'
+        '  border-radius:var(--radius-sm);'
+        '  display:block;}'
+        '.ft-skel-text{height:.85em;margin:6px 0;}'
+        '.ft-skel-line{height:.65em;margin:5px 0;border-radius:3px;}'
+        '.ft-skel-block{height:80px;margin:8px 0;'
+        '  border-radius:var(--radius-md);}'
+        '.ft-skel-card{position:relative;padding:14px 16px;'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  border:1px solid var(--border-subtle);}'
+        '.ft-skel-card .ft-skel-text{height:.65em;width:35%;'
+        '  margin-bottom:10px;}'
+        '.ft-skel-card .ft-skel-block{height:32px;margin:4px 0;width:60%;}'
+        '.ft-skel-card-row{display:grid;'
+        '  grid-template-columns:repeat(4,minmax(0,1fr));'
+        '  gap:var(--space-3);margin-bottom:var(--space-4);}'
+        '@media (max-width:900px){.ft-skel-card-row{'
+        '  grid-template-columns:repeat(2,1fr);}}'
+        '.ft-skel-table{width:100%;border-collapse:collapse;'
+        '  background:var(--bg-surface);'
+        '  border-radius:var(--radius-md);overflow:hidden;}'
+        '.ft-skel-table th,.ft-skel-table td{padding:9px 12px;'
+        '  border-bottom:1px solid var(--border-subtle);}'
+        '.ft-skel-table .ft-skel{height:.7em;}'
+    )
+
+
+def skeleton_kpi_row(n: int = 4) -> None:
+    """
+    Skeleton fantasma para uma linha de KPIs (4 cards por default).
+    Use enquanto carrega dados que vão preencher um portfolio_kpis ou kpi_index_row.
+    """
+    _skeleton_css()
+    cards = "".join(
+        '<div class="ft-skel-card">'
+        '<span class="ft-skel ft-skel-text"></span>'
+        '<span class="ft-skel ft-skel-block"></span>'
+        '<span class="ft-skel ft-skel-line" style="width:50%;"></span>'
+        '</div>'
+        for _ in range(max(1, n))
+    )
+    st.markdown(
+        f'<div class="ft-skel-card-row" '
+        f'style="grid-template-columns:repeat({n},minmax(0,1fr));">{cards}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def skeleton_table(
+    n_rows: int = 5,
+    n_cols: int = 4,
+    *,
+    show_header: bool = True,
+) -> None:
+    """
+    Skeleton fantasma para uma tabela (default 5 linhas × 4 colunas).
+    """
+    _skeleton_css()
+    th = ""
+    if show_header:
+        th = (
+            '<thead><tr>' +
+            "".join(
+                f'<th><span class="ft-skel ft-skel-text" '
+                f'style="width:{60 + (i*5) % 30}%;"></span></th>'
+                for i in range(n_cols)
+            ) +
+            '</tr></thead>'
+        )
+    tr = "".join(
+        '<tr>' +
+        "".join(
+            f'<td><span class="ft-skel ft-skel-line" '
+            f'style="width:{45 + (i*13 + r*7) % 45}%;"></span></td>'
+            for i in range(n_cols)
+        ) +
+        '</tr>'
+        for r in range(max(1, n_rows))
+    )
+    st.markdown(
+        f'<table class="ft-skel-table">{th}<tbody>{tr}</tbody></table>',
+        unsafe_allow_html=True,
+    )
+
+
+def skeleton_hero() -> None:
+    """
+    Skeleton fantasma para um hero (portfolio_hero / ticker_hero / hero_macro).
+    """
+    _skeleton_css()
+    st.markdown(
+        '<div class="ft-skel-card" style="display:grid;'
+        'grid-template-columns:1.5fr 1fr;gap:24px;padding:24px;'
+        'border-radius:var(--radius-xl);margin-bottom:var(--space-3);">'
+        '<div>'
+        '<span class="ft-skel ft-skel-line" style="width:25%;height:.5em;"></span>'
+        '<span class="ft-skel ft-skel-block" style="width:50%;height:36px;margin:8px 0;"></span>'
+        '<span class="ft-skel ft-skel-block" style="width:45%;height:28px;margin:6px 0;"></span>'
+        '<span class="ft-skel ft-skel-line" style="width:60%;"></span>'
+        '</div>'
+        '<div style="display:flex;align-items:center;justify-content:flex-end;">'
+        '<span class="ft-skel ft-skel-block" style="width:100%;height:80px;"></span>'
+        '</div>'
+        '</div>',
         unsafe_allow_html=True,
     )

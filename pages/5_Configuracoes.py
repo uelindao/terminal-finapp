@@ -4,7 +4,7 @@ from utils.auth   import require_auth, get_current_user, render_user_badge, logo
 from utils.style  import aplicar_tema
 from utils.components import (
     page_header, section_title, metric_card, status_card, empty_state, topbar,
-    portfolio_kpis, info_box
+    portfolio_kpis, info_box, inject_keyboard_shortcuts,
 )
 from utils.ai_client import PROVIDERS
 from database.db import (
@@ -25,6 +25,7 @@ if not require_auth():
 
 aplicar_tema()
 render_user_badge()
+inject_keyboard_shortcuts()
 try:
     from utils.themes import render_theme_switcher_sidebar
     render_theme_switcher_sidebar()
