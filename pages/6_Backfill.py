@@ -17,7 +17,10 @@ import datetime
 
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
-from utils.components import page_header, section_title, inject_ui_enhancements, show_toast, topbar
+from utils.components import (
+    page_header, section_title, inject_ui_enhancements, show_toast, topbar,
+    portfolio_kpis, info_box, chip_filter_row,
+)
 from utils.logger import get_logger
 from utils.tickers import SCREENER_US, SCREENER_B3
 
@@ -744,30 +747,56 @@ _has_sem_dados = "sem_dados" in cob.columns
 cob_eua_ok = cob_eua[~cob_eua["sem_dados"]] if _has_sem_dados else cob_eua
 cob_br_ok  = cob_br[~cob_br["sem_dados"]]   if _has_sem_dados else cob_br
 
-m1, m2, m3, m4 = st.columns(4)
-with m1:
-    n_eua = len(cob_eua_ok)
-    n_eua_nd = len(cob_eua) - n_eua
-    delta_eua = f"{n_eua/total_eua*100:.0f}%" + (f" | {n_eua_nd} sem dados" if n_eua_nd else "")
-    st.metric("tickers EUA cobertos", f"{n_eua} / {total_eua}",
-              delta_eua if total_eua else "—")
-with m2:
-    n_br = len(cob_br_ok)
-    n_br_nd = len(cob_br) - n_br
-    delta_br = f"{n_br/total_br*100:.0f}%" + (f" | {n_br_nd} sem dados" if n_br_nd else "")
-    st.metric("tickers BR cobertos", f"{n_br} / {total_br}",
-              delta_br if total_br else "—")
-with m3:
-    # Exclui pontos sentinel (score=0, 2000-01-01) da contagem total
-    cob_com_dados = cob[~cob["sem_dados"]] if _has_sem_dados else cob
-    total_pts = int(cob_com_dados["pontos"].sum()) if not cob_com_dados.empty else 0
-    st.metric("total de pontos no banco", f"{total_pts:,}")
-with m4:
-    # Mediana só dos tickers com backfill real (≥ 5 pontos)
-    cob_real = cob[cob["pontos"] >= 5]
-    med_pts  = int(cob_real["pontos"].median()) if not cob_real.empty else 0
-    st.metric("mediana pontos/ticker (≥5)", med_pts,
-              help="meta: ~10 pontos = 10 anos anuais | ~40 = 10 anos trimestrais")
+n_eua = len(cob_eua_ok)
+n_eua_nd = len(cob_eua) - n_eua
+n_br = len(cob_br_ok)
+n_br_nd = len(cob_br) - n_br
+
+# Exclui pontos sentinel (score=0, 2000-01-01) da contagem total
+cob_com_dados = cob[~cob["sem_dados"]] if _has_sem_dados else cob
+total_pts = int(cob_com_dados["pontos"].sum()) if not cob_com_dados.empty else 0
+
+# Mediana só dos tickers com backfill real (≥ 5 pontos)
+cob_real = cob[cob["pontos"] >= 5]
+med_pts  = int(cob_real["pontos"].median()) if not cob_real.empty else 0
+
+# Tones de cobertura: bull se >70%, amber 40-70%, bear <40%
+_eua_pct = (n_eua / total_eua * 100) if total_eua else 0
+_br_pct  = (n_br / total_br * 100)  if total_br else 0
+_eua_tone = "bull" if _eua_pct >= 70 else ("amber" if _eua_pct >= 40 else "bear")
+_br_tone  = "bull" if _br_pct >= 70 else ("amber" if _br_pct >= 40 else "bear")
+_med_tone = "bull" if med_pts >= 8 else ("amber" if med_pts >= 4 else "bear")
+
+portfolio_kpis([
+    {
+        "nome":     "tickers EUA cobertos",
+        "valor":    f"{n_eua} / {total_eua}",
+        "sublabel": f"{_eua_pct:.0f}%" + (f" · {n_eua_nd} sem dados" if n_eua_nd else " ok"),
+        "tone":     _eua_tone,
+        "icone":    "🇺🇸",
+    },
+    {
+        "nome":     "tickers BR cobertos",
+        "valor":    f"{n_br} / {total_br}",
+        "sublabel": f"{_br_pct:.0f}%" + (f" · {n_br_nd} sem dados" if n_br_nd else " ok"),
+        "tone":     _br_tone,
+        "icone":    "🇧🇷",
+    },
+    {
+        "nome":     "pontos no banco",
+        "valor":    f"{total_pts:,}".replace(",", "."),
+        "sublabel": "registros históricos totais",
+        "tone":     "info",
+        "icone":    "💾",
+    },
+    {
+        "nome":     "mediana pontos/ticker",
+        "valor":    str(med_pts),
+        "sublabel": "≥5 pts · meta ~10 anuais / ~40 trim.",
+        "tone":     _med_tone,
+        "icone":    "📊",
+    },
+])
 
 # Barra de progresso global
 cobertos      = n_eua + n_br
@@ -834,7 +863,12 @@ with st.expander("🔍 detalhe por ticker", expanded=False):
             unsafe_allow_html=True,
         )
     else:
-        st.info("nenhum dado histórico ainda. execute o backfill abaixo.")
+        info_box(
+            tipo   = "info",
+            titulo = "nenhum dado histórico ainda",
+            texto  = "execute o backfill abaixo para começar a popular o banco com séries de fundamentos.",
+            icone  = "📭",
+        )
 
 st.markdown("---")
 
@@ -843,12 +877,16 @@ st.markdown("---")
 # ──────────────────────────────────────────────────────────────────────────────
 
 with st.expander("🔄 sincronização de fundamentos — screener / research", expanded=False):
-    st.info(
-        "Sincroniza dados atuais (P/L, ROE, DY, setor…) usados pelo Discovery e Screener.\n\n"
-        "**B3:** Fundamentus scraper + yfinance como fallback.  \n"
-        "**EUA:** FMP (ratios-ttm + profile) + yfinance como fallback.  \n"
-        "Não consome quota FMP além do necessário.",
-        icon="ℹ️",
+    info_box(
+        tipo   = "info",
+        titulo = "sincroniza dados atuais (P/L, ROE, DY, setor…)",
+        texto  = (
+            "usados pelo Discovery e Screener. "
+            "BR: Fundamentus + yfinance fallback. "
+            "EUA: FMP (ratios-ttm + profile) + yfinance. "
+            "não consome quota FMP além do necessário."
+        ),
+        icone  = "ℹ",
     )
     _sc1, _sc2 = st.columns(2)
     with _sc1:
@@ -1022,14 +1060,30 @@ st.markdown("---")
 # ──────────────────────────────────────────────────────────────────────────────
 section_title("🚀 executar backfill")
 
+# Mercado em chip_filter_row + slider/select abaixo
+st.markdown(
+    '<div style="font-family:var(--font-ui);font-size:.58rem;'
+    'color:var(--text-muted);text-transform:uppercase;'
+    'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+    'font-weight:600;opacity:.7;">mercado</div>',
+    unsafe_allow_html=True,
+)
+_merc_raw = chip_filter_row(
+    ["🇺🇸 EUA", "🇧🇷 Brasil (B3)", "🌍 Todos"],
+    key="bf_mercado_v2",
+    default="🇺🇸 EUA",
+    max_chip_cols=10,
+)
+mercado_sel = (
+    "EUA"          if _merc_raw.startswith("🇺🇸")
+    else "Brasil (B3)" if _merc_raw.startswith("🇧🇷")
+    else "Todos"
+)
+
 col_a, col_b, col_c = st.columns([2, 2, 2])
 
 with col_a:
-    mercado_sel = st.selectbox(
-        "mercado:",
-        ["EUA", "Brasil (B3)", "Todos"],
-        help="FMP tem boa cobertura de EUA e das maiores ações BR.",
-    )
+    pass  # mercado_sel já definido acima via chip_filter_row
 with col_b:
     batch_size = st.slider(
         "tickers por sessão:",

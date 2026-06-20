@@ -3,7 +3,8 @@ import streamlit as st
 from utils.auth   import require_auth, get_current_user, render_user_badge, logout
 from utils.style  import aplicar_tema
 from utils.components import (
-    page_header, section_title, metric_card, status_card, empty_state, topbar
+    page_header, section_title, metric_card, status_card, empty_state, topbar,
+    portfolio_kpis, info_box
 )
 from utils.ai_client import PROVIDERS
 from database.db import (
@@ -63,18 +64,30 @@ with tab_conta:
     section_title("informações da conta")
 
     if user:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            metric_card("usuário", user['username'], "", "muted")
-        with c2:
-            metric_card("nome", user['nome'] or "—", "", "muted")
-        with c3:
-            metric_card(
-                "perfil",
-                "administrador" if user['is_admin'] else "usuário",
-                "",
-                "amber" if user['is_admin'] else "muted",
-            )
+        _is_admin = bool(user.get('is_admin'))
+        portfolio_kpis([
+            {
+                "nome":     "usuário",
+                "valor":    user['username'],
+                "sublabel": "login do sistema",
+                "tone":     "info",
+                "icone":    "👤",
+            },
+            {
+                "nome":     "nome",
+                "valor":    user['nome'] or "—",
+                "sublabel": "nome completo cadastrado",
+                "tone":     "info",
+                "icone":    "📝",
+            },
+            {
+                "nome":     "perfil",
+                "valor":    "administrador" if _is_admin else "usuário",
+                "sublabel": "acesso ao painel admin" if _is_admin else "acesso padrão",
+                "tone":     "accent" if _is_admin else "muted",
+                "icone":    "🛡" if _is_admin else "👁",
+            },
+        ])
 
     section_title("alterar senha")
 
@@ -109,19 +122,36 @@ with tab_conta:
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("sessão")
 
-    ms1, ms2, ms3 = st.columns(3)
-    with ms1:
-        metric_card("user id", f"#{user_id_atual}")
-    with ms2:
-        wl_padrao_id   = get_watchlist_padrao()
-        wls_all        = listar_watchlists()
-        nome_wl_padrao = next((w['nome'] for w in wls_all if w['id'] == wl_padrao_id), "—")
-        metric_card("watchlist padrão", nome_wl_padrao)
-    with ms3:
-        pf_padrao_id   = get_portfolio_padrao()
-        pfs_all        = listar_portfolios()
-        nome_pf_padrao = next((p['nome'] for p in pfs_all if p['id'] == pf_padrao_id), "—")
-        metric_card("portfólio padrão", nome_pf_padrao)
+    wl_padrao_id   = get_watchlist_padrao()
+    wls_all        = listar_watchlists()
+    nome_wl_padrao = next((w['nome'] for w in wls_all if w['id'] == wl_padrao_id), "—")
+    pf_padrao_id   = get_portfolio_padrao()
+    pfs_all        = listar_portfolios()
+    nome_pf_padrao = next((p['nome'] for p in pfs_all if p['id'] == pf_padrao_id), "—")
+
+    portfolio_kpis([
+        {
+            "nome":     "user id",
+            "valor":    f"#{user_id_atual}",
+            "sublabel": "identificador único",
+            "tone":     "muted",
+            "icone":    "🆔",
+        },
+        {
+            "nome":     "watchlist padrão",
+            "valor":    nome_wl_padrao,
+            "sublabel": "abre por padrão na home",
+            "tone":     "info",
+            "icone":    "⭐",
+        },
+        {
+            "nome":     "portfólio padrão",
+            "valor":    nome_pf_padrao,
+            "sublabel": "carteira ativa nos cálculos",
+            "tone":     "info",
+            "icone":    "💼",
+        },
+    ])
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 encerrar sessão", type="secondary"):
