@@ -212,27 +212,41 @@ def deletar_usuario(user_id: int) -> None:
 
 
 def _criar_admin_padrao():
+    """
+    Cria usuário admin inicial APENAS se [admin].password estiver definido
+    em secrets.toml. Não cai mais em senha default ('admin123') — qualquer
+    deploy sem o secret termina sem admin, e o operador precisa configurar
+    explicitamente antes de poder logar.
+    """
     sb = get_supabase()
     try:
         rows = sb.table('users').select('id').eq('is_admin', True).execute().data
-        if len(rows) == 0:
-            try:
-                import streamlit as st
-                try:
-                    senha_padrao = st.secrets["admin"]["password"]
-                except (KeyError, AttributeError):
-                    senha_padrao = 'admin123'
-            except Exception as e:
-                logger.warning(f"[db] falha ao ler senha admin dos secrets, usando padrão: {e}")
-                senha_padrao = 'admin123'
+        if len(rows) > 0:
+            return  # já existe admin, nada a fazer
 
-            sb.table('users').insert({
-                'username': 'admin',
-                'senha_hash': _hash_senha(senha_padrao),
-                'nome': 'administrador',
-                'is_admin': True,
-            }).execute()
-            logger.info("[db] usuário admin padrão criado.")
+        senha_admin = None
+        try:
+            import streamlit as st
+            senha_admin = st.secrets.get("admin", {}).get("password")
+        except Exception as e:
+            logger.warning(f"[db] não foi possível ler st.secrets para admin: {e}")
+
+        if not senha_admin:
+            logger.error(
+                "[db] NENHUM admin encontrado e [admin].password não está "
+                "configurado em secrets.toml — admin NÃO foi criado. "
+                "Adicione [admin] / password = \"<senha forte>\" em "
+                ".streamlit/secrets.toml para habilitar o login."
+            )
+            return
+
+        sb.table('users').insert({
+            'username': 'admin',
+            'senha_hash': _hash_senha(senha_admin),
+            'nome': 'administrador',
+            'is_admin': True,
+        }).execute()
+        logger.info("[db] usuário admin padrão criado (senha vinda de secrets).")
     except Exception as e:
         logger.error(f"[db] falha ao criar admin padrão: {e}")
 

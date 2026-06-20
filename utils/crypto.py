@@ -63,14 +63,34 @@ def encrypt_key(api_key: str) -> str:
 def decrypt_key(encrypted: str) -> str:
     """
     Descriptografa uma API key do banco.
-    Retorna string vazia se a entrada for vazia ou a descriptografia falhar
+    Retorna string vazia se a entrada for vazia OU a descriptografia falhar
     (chave inválida, APP_SECRET diferente do original, etc.).
+    Para distinguir os dois cenários use `decrypt_key_safe()`.
+    """
+    val, _ok = decrypt_key_safe(encrypted)
+    return val
+
+
+def decrypt_key_safe(encrypted: str) -> tuple[str, bool]:
+    """
+    Versão de decrypt_key que sinaliza o sucesso da descriptografia.
+    Retorna (valor, ok):
+      - ("", True)  → entrada vazia (nenhuma chave configurada)
+      - ("plain", True)  → descriptografado com sucesso
+      - ("", False) → entrada existe mas falhou (APP_SECRET trocou ou dado corrompido)
+    Permite distinguir "sem chave" de "chave existe mas ilegível" — situação
+    que sinaliza incidente (rotação de APP_SECRET sem migração ou DB tampered).
     """
     if not encrypted or not encrypted.strip():
-        return ""
+        return "", True
     try:
         f = _get_fernet()
-        return f.decrypt(encrypted.strip().encode()).decode()
+        return f.decrypt(encrypted.strip().encode()).decode(), True
     except Exception as e:
-        logger.warning(f"[crypto] falha ao descriptografar chave: {e}")
-        return ""
+        # Loga como ERROR (não warning) — falha de decrypt em dado não-vazio
+        # é sempre sintoma de problema operacional (rotação de secret, drift).
+        logger.error(
+            f"[crypto] falha ao descriptografar chave (APP_SECRET mudou? "
+            f"dado corrompido?): {e}"
+        )
+        return "", False
