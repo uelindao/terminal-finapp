@@ -24,7 +24,12 @@ from utils.tickers import (
     BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, mapear_ticker_base
 )
 from utils.health_engine import calcular_health_score
-from utils.components import page_header, section_title, status_card, empty_state, inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip, handle_ticker_nav, ticker_nav_url, topbar
+from utils.components import (
+    page_header, section_title, status_card, empty_state,
+    inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip,
+    handle_ticker_nav, ticker_nav_url, topbar,
+    portfolio_kpis, info_box, chip_filter_row, tabs_pill,
+)
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout, chart_type_toggle, barras_verticais, _cores as _chart_cores
 from utils.macro_regime import classificar_regime
@@ -454,7 +459,12 @@ with tab_mom:
         if "🏢 b3 — fiis" in mom_universos: mom_lista += FII_TODOS
 
         if not mom_lista:
-            st.warning("selecione pelo menos um universo.")
+            info_box(
+                tipo   = "amber",
+                titulo = "selecione um universo",
+                texto  = "marque ao menos um universo (B3 / FIIs / EUA) para rodar o screener.",
+                icone  = "☝",
+            )
         else:
             with st.spinner(f"calculando momentum de {len(mom_lista)} ativos..."):
                 resultados_mom = calcular_momentum(tuple(mom_lista))
@@ -469,14 +479,32 @@ with tab_mom:
 
         section_title(f"top {len(df_m)} ativos por momentum")
 
-        mm1, mm2, mm3 = st.columns(3)
-        with mm1:
-            metric_card("melhor momentum", df_m.iloc[0]['ticker'], f"score {df_m.iloc[0]['score momentum']}/100", "bull")
-        with mm2:
-            metric_card("retorno médio 1y", f"{df_m['ret 1y (%)'].mean():.1f}%", "", "bull" if df_m['ret 1y (%)'].mean() > 0 else "bear")
-        with mm3:
-            acima_200 = (df_m['acima mm200'] == '✅').sum()
-            metric_card("acima da mm200", f"{acima_200}/{len(df_m)}", "tendência de alta", "bull" if acima_200 > len(df_m)//2 else "amber")
+        _ret_med = df_m['ret 1y (%)'].mean()
+        acima_200 = (df_m['acima mm200'] == '✅').sum()
+        portfolio_kpis([
+            {
+                "nome":        "melhor momentum",
+                "ticker_chip": str(df_m.iloc[0]['ticker']).replace('.SA', ''),
+                "valor":       f"{df_m.iloc[0]['score momentum']}/100",
+                "sublabel":    "score do líder do ranking",
+                "tone":        "bull",
+                "icone":       "🚀",
+            },
+            {
+                "nome":     "retorno médio 1y",
+                "valor":    f"{_ret_med:+.1f}%",
+                "sublabel": "performance agregada do top",
+                "tone":     "bull" if _ret_med > 0 else "bear",
+                "icone":    "📈" if _ret_med > 0 else "📉",
+            },
+            {
+                "nome":     "acima da mm200",
+                "valor":    f"{acima_200}/{len(df_m)}",
+                "sublabel": "tendência de alta de longo prazo",
+                "tone":     "bull" if acima_200 > len(df_m) // 2 else "amber",
+                "icone":    "📊",
+            },
+        ])
 
         cols_mostrar = ['ticker', 'nome', 'setor', 'ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)', 'acima mm50', 'acima mm200', 'score momentum']
 
@@ -1018,31 +1046,44 @@ with tab_ia:
         unsafe_allow_html=True,
     )
 
-    _col_ia_u, _col_ia_m = st.columns(2)
-    with _col_ia_u:
-        _univ_ia = st.radio(
-            "universo:",
-            ["BR", "US", "AMBOS"],
-            format_func=lambda x: {
-                "BR":    "🇧🇷 brasil (b3 + fiis)",
-                "US":    "🇺🇸 eua (s&p500)",
-                "AMBOS": "🌍 todos",
-            }[x],
-            horizontal=True,
-            key="radio_univ_ia_disc",
-        )
-    with _col_ia_m:
-        _modo_ia = st.radio(
-            "foco:",
-            ["entrada", "dividendo", "realizacao"],
-            format_func=lambda x: {
-                "entrada":    "🎯 melhor entrada",
-                "dividendo":  "💰 renda / dividendos",
-                "realizacao": "📤 possível realização",
-            }[x],
-            horizontal=True,
-            key="radio_modo_ia_disc",
-        )
+    # Universo + modo (chip_filter_row compacto, design system v5)
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">universo</div>',
+        unsafe_allow_html=True,
+    )
+    _univ_ia_raw = chip_filter_row(
+        ["🇧🇷 brasil (b3 + fiis)", "🇺🇸 eua (s&p500)", "🌍 todos"],
+        key="radio_univ_ia_disc_v2",
+        default="🇧🇷 brasil (b3 + fiis)",
+        max_chip_cols=10,
+    )
+    _univ_ia = (
+        "BR" if _univ_ia_raw.startswith("🇧🇷")
+        else "US" if _univ_ia_raw.startswith("🇺🇸")
+        else "AMBOS"
+    )
+
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">foco</div>',
+        unsafe_allow_html=True,
+    )
+    _modo_ia_raw = chip_filter_row(
+        ["🎯 melhor entrada", "💰 renda / dividendos", "📤 possível realização"],
+        key="radio_modo_ia_disc_v2",
+        default="🎯 melhor entrada",
+        max_chip_cols=10,
+    )
+    _modo_ia = (
+        "entrada"    if _modo_ia_raw.startswith("🎯")
+        else "dividendo" if _modo_ia_raw.startswith("💰")
+        else "realizacao"
+    )
 
     _btn_rodar_ia = st.button(
         "🧠 analisar oportunidades agora",
@@ -1376,16 +1417,13 @@ with tab_setorial:
 
     _col_univ, _col_refresh = st.columns([3, 1])
     with _col_univ:
-        _univ_set = st.radio(
-            "universo:",
-            ["BR", "US"],
-            format_func=lambda x: {
-                "BR": "🇧🇷 Brasil (B3 + FIIs)",
-                "US": "🇺🇸 EUA (S&P500)",
-            }[x],
-            horizontal=True,
-            key="radio_univ_setorial",
+        _univ_set_raw = chip_filter_row(
+            ["🇧🇷 Brasil (B3 + FIIs)", "🇺🇸 EUA (S&P500)"],
+            key="radio_univ_setorial_v2",
+            default="🇧🇷 Brasil (B3 + FIIs)",
+            max_chip_cols=10,
         )
+        _univ_set = "BR" if _univ_set_raw.startswith("🇧🇷") else "US"
     with _col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 recalcular", key="btn_refresh_setorial",
@@ -1397,26 +1435,47 @@ with tab_setorial:
         _dados_set = calcular_heatmap_setorial(_univ_set)
 
     if not _dados_set:
-        st.info(
-            "nenhum dado setorial disponível. "
-            "rode o sync de fundamentos no topo da página primeiro."
+        info_box(
+            tipo   = "info",
+            titulo = "nenhum dado setorial disponível",
+            texto  = "rode o sync de fundamentos no topo da página primeiro.",
+            icone  = "📭",
         )
     else:
         _n_acum_total  = sum(1 for s in _dados_set if s['sinal'] == 'acumulação')
         _n_neutro_total = sum(1 for s in _dados_set if s['sinal'] == 'neutro')
         _n_caut_total  = sum(1 for s in _dados_set if s['sinal'] == 'cautela')
 
-        _rs1, _rs2, _rs3, _rs4 = st.columns(4)
-        with _rs1:
-            metric_card("setores analisados", str(len(_dados_set)), "com dados suficientes")
-        with _rs2:
-            metric_card("em acumulação", str(_n_acum_total),
-                        "score médio ≥ 65", "bull" if _n_acum_total > 0 else "muted")
-        with _rs3:
-            metric_card("neutros", str(_n_neutro_total), "score 45–64", "amber")
-        with _rs4:
-            metric_card("em cautela", str(_n_caut_total),
-                        "score médio < 45", "bear" if _n_caut_total > 0 else "muted")
+        portfolio_kpis([
+            {
+                "nome":     "setores analisados",
+                "valor":    str(len(_dados_set)),
+                "sublabel": "com dados suficientes",
+                "tone":     "info",
+                "icone":    "📊",
+            },
+            {
+                "nome":     "em acumulação",
+                "valor":    str(_n_acum_total),
+                "sublabel": "score médio ≥ 65",
+                "tone":     "bull" if _n_acum_total > 0 else "muted",
+                "icone":    "✨" if _n_acum_total > 0 else "—",
+            },
+            {
+                "nome":     "neutros",
+                "valor":    str(_n_neutro_total),
+                "sublabel": "score 45–64",
+                "tone":     "amber",
+                "icone":    "⚖",
+            },
+            {
+                "nome":     "em cautela",
+                "valor":    str(_n_caut_total),
+                "sublabel": "score médio < 45",
+                "tone":     "bear" if _n_caut_total > 0 else "muted",
+                "icone":    "⚠" if _n_caut_total > 0 else "—",
+            },
+        ])
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1765,38 +1824,46 @@ with tab_radar:
         unsafe_allow_html=True,
     )
 
-    _rc1, _rc2, _rc3 = st.columns([2, 2, 1])
-    with _rc1:
-        _univ_radar = st.radio(
-            "universo:",
-            ["BR", "US"],
-            format_func=lambda x: {
-                "BR": "🇧🇷 Brasil (B3 + FIIs)",
-                "US": "🇺🇸 EUA (S&P500)",
-            }[x],
-            horizontal=True,
-            key="radio_univ_radar",
-        )
-    with _rc2:
-        _modo_radar_disc = st.radio(
-            "modo:",
-            ["entrada", "realizacao", "dividendo"],
-            format_func=lambda x: {
-                "entrada":    "🎯 entrada",
-                "realizacao": "📤 realização",
-                "dividendo":  "💰 dividendos",
-            }[x],
-            horizontal=True,
-            key="radio_modo_radar_disc",
-        )
-    with _rc3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        _btn_radar = st.button(
-            "▶ rodar scan",
-            type="primary",
-            use_container_width=True,
-            key="btn_rodar_radar",
-        )
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">universo</div>',
+        unsafe_allow_html=True,
+    )
+    _univ_radar_raw = chip_filter_row(
+        ["🇧🇷 Brasil (B3 + FIIs)", "🇺🇸 EUA (S&P500)"],
+        key="radio_univ_radar_v2",
+        default="🇧🇷 Brasil (B3 + FIIs)",
+        max_chip_cols=10,
+    )
+    _univ_radar = "BR" if _univ_radar_raw.startswith("🇧🇷") else "US"
+
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
+        'font-weight:600;opacity:.7;">modo</div>',
+        unsafe_allow_html=True,
+    )
+    _modo_radar_raw = chip_filter_row(
+        ["🎯 entrada", "📤 realização", "💰 dividendos"],
+        key="radio_modo_radar_disc_v2",
+        default="🎯 entrada",
+        max_chip_cols=10,
+    )
+    _modo_radar_disc = (
+        "entrada"    if _modo_radar_raw.startswith("🎯")
+        else "realizacao" if _modo_radar_raw.startswith("📤")
+        else "dividendo"
+    )
+
+    _btn_radar = st.button(
+        "▶ rodar scan",
+        type="primary",
+        use_container_width=False,
+        key="btn_rodar_radar",
+    )
 
     if _btn_radar or st.session_state.get('radar_resultado'):
 
