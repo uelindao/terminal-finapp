@@ -1,5 +1,5 @@
 """
-Watchlist Pro — ferramenta full-screen de gestão avançada de watchlists.
+Watchlists — ferramenta full-screen de gestão consolidada das watchlists.
 
 Diferenças vs widget da Home:
   - Seletor MULTI-watchlist (visualiza união de várias listas)
@@ -23,7 +23,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from utils.components import (
-    topbar, section_title, info_box, kpi_index_row, highlights_strip,
+    topbar, section_title, info_box, portfolio_kpis, highlights_strip,
     tabs_pill, pill_select, chip, chip_status, html_table,
     inline_sparkline, info_box as _info_box, inject_keyboard_shortcuts,
 )
@@ -31,7 +31,7 @@ from database.db import (
     listar_watchlist, listar_watchlists, listar_tags_watchlist,
     get_health_scores, get_all_price_cache,
 )
-from utils.tickers import mapear_ticker_base
+from utils.tickers import mapear_ticker_base, normalizar_mercado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ except Exception:
 
 _user = get_current_user() or {}
 topbar(
-    breadcrumb_itens = [("⚡ finterminal", "/"), ("watchlist pro", None)],
+    breadcrumb_itens = [("⚡ finterminal", "/"), ("watchlists", None)],
     user_name        = _user.get('username', '') or _user.get('nome', '') or 'usuário',
     sync_label       = "ao vivo",
 )
@@ -63,10 +63,10 @@ st.markdown(
     '<div style="font-family:var(--font-ui);font-size:.7rem;'
     'color:var(--text-muted);text-transform:uppercase;'
     'letter-spacing:var(--ls-wider);margin-bottom:6px;font-weight:600;">'
-    '⚡ watchlist · modo pro</div>'
+    '👁 watchlists · visão consolidada</div>'
     '<h1 style="font-family:var(--font-title);font-size:var(--text-3xl);'
     'font-weight:800;color:var(--text-primary);margin:0 0 var(--space-2);'
-    'letter-spacing:var(--ls-tight);">visão consolidada das suas listas</h1>'
+    'letter-spacing:var(--ls-tight);">todas as suas listas em uma tela</h1>'
     '<div style="font-family:var(--font-ui);font-size:var(--text-sm);'
     'color:var(--text-secondary);margin-bottom:var(--space-4);'
     'max-width:60ch;">filtre por mercado, tese ou health · veja '
@@ -248,35 +248,38 @@ for t in ativos_uniao:
         n_var += 1
 media_var = (soma_var / n_var) if n_var else 0
 
-# KPI row (4 cards usando kpi_index_row pra reaproveitar visual)
-kpi_index_row([
+# KPI row (4 cards via portfolio_kpis — sublabel + delta opcional)
+_health_tone = "bull" if health_medio >= 60 else ("amber" if health_medio >= 45 else "bear")
+_mov_tone    = "bull" if n_bull >= n_bear else "bear"
+
+portfolio_kpis([
     {
-        "nome":    "TOTAL ATIVOS",
-        "ticker":  f"{len(watchlists_selecionadas)} listas",
-        "valor":   f"{n_total}",
-        "var_pct": media_var,
-        "serie":   [],
+        "nome":     "total ativos",
+        "valor":    f"{n_total}",
+        "sublabel": f"em {len(watchlists_selecionadas)} list{'a' if len(watchlists_selecionadas) == 1 else 'as'}",
+        "tone":     "info",
+        "icone":    "📊",
     },
     {
-        "nome":    "HEALTH MÉDIO",
-        "ticker":  f"{n_alert} críticos",
-        "valor":   f"{health_medio:.1f}",
-        "var_pct": (health_medio - 50),  # > 50 verde, < 50 vermelho
-        "serie":   [],
+        "nome":     "health médio",
+        "valor":    f"{health_medio:.1f}",
+        "sublabel": f"{n_alert} crítico{'s' if n_alert != 1 else ''} (<40)",
+        "tone":     _health_tone,
+        "icone":    "💎" if _health_tone == "bull" else ("⚠" if _health_tone == "amber" else "🚨"),
     },
     {
-        "nome":    "MOVIMENTO HOJE",
-        "ticker":  f"↑{n_bull} ↓{n_bear}",
-        "valor":   f"{(n_bull/max(n_total,1))*100:.0f}%",
-        "var_pct": (n_bull - n_bear),
-        "serie":   [],
+        "nome":     "movimento hoje",
+        "valor":    f"{(n_bull/max(n_total,1))*100:.0f}%",
+        "sublabel": f"↑{n_bull} subiram · ↓{n_bear} caíram",
+        "var_pct":  media_var,
+        "tone":     _mov_tone,
     },
     {
-        "nome":    "OVERLAP",
-        "ticker":  "em ≥2 listas",
-        "valor":   f"{n_overlap}",
-        "var_pct": n_overlap,  # informativo (cor sempre verde se >0)
-        "serie":   [],
+        "nome":     "overlap",
+        "valor":    f"{n_overlap}",
+        "sublabel": "ativos em ≥2 listas",
+        "tone":     "accent" if n_overlap > 0 else "muted",
+        "icone":    "🔗",
     },
 ])
 
@@ -285,9 +288,9 @@ kpi_index_row([
 # ═════════════════════════════════════════════════════════════════════════════
 section_title("🔍 filtros")
 
-# Mercado filter
+# Mercado filter (normalizado)
 mercados_disp = sorted(set(
-    (it.get('mercado') or 'outros').lower() for it in ativos_uniao.values()
+    normalizar_mercado(it.get('mercado')) for it in ativos_uniao.values()
 ))
 _mkt_label_map = {
     "brasil":       "🇧🇷 BR",
@@ -295,7 +298,7 @@ _mkt_label_map = {
     "criptomoedas": "₿ Cripto",
     "outros":       "🌐 Outros",
 }
-mkt_opcoes = ["Todos"] + [_mkt_label_map.get(m, f"📁 {m}") for m in mercados_disp]
+mkt_opcoes = ["Todos"] + [_mkt_label_map[m] for m in mercados_disp]
 mkt_sel = tabs_pill(mkt_opcoes, key="wlpro_mkt", default="Todos")
 
 # Tag filter (todas as tags únicas entre as watchlists selecionadas)
@@ -359,12 +362,12 @@ ativos_filtrados: list[dict] = []
 _label_mkt_inverso = {v: k for k, v in _mkt_label_map.items()}
 mkt_chave = (
     None if mkt_sel == "Todos"
-    else _label_mkt_inverso.get(mkt_sel, mkt_sel.replace("📁 ", "", 1).lower())
+    else _label_mkt_inverso.get(mkt_sel, "outros")
 )
 
 for tk, it in ativos_uniao.items():
-    # Mercado
-    if mkt_chave and (it.get('mercado') or 'outros').lower() != mkt_chave:
+    # Mercado (normalizado)
+    if mkt_chave and normalizar_mercado(it.get('mercado')) != mkt_chave:
         continue
     # Tag
     if tag_sel != 'todas' and (it.get('tag') or 'geral') != tag_sel:
@@ -429,10 +432,10 @@ else:
 
         moeda = "R$" if tb.endswith(".SA") else "$"
 
-        # Chip mercado
-        mk = (it.get('mercado') or 'outros').lower()
+        # Chip mercado (normalizado)
+        mk = normalizar_mercado(it.get('mercado'))
         _mk_tone = {"brasil": "bull", "eua": "info", "criptomoedas": "accent"}.get(mk, "muted")
-        _mk_lbl = {"brasil": "BR", "eua": "EUA", "criptomoedas": "Cripto"}.get(mk, mk[:3].upper())
+        _mk_lbl = {"brasil": "BR", "eua": "EUA", "criptomoedas": "Cripto"}.get(mk, "Outros")
 
         # Chip tese
         tag_lbl = it.get('tag') or 'geral'
@@ -565,7 +568,7 @@ highlights_strip([
 # ═════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
 st.caption(
-    f"📋 watchlist pro · {len(watchlists_selecionadas)} listas selecionadas · "
+    f"📋 watchlists · {len(watchlists_selecionadas)} listas selecionadas · "
     f"{n_total} ativos na união · "
     f"cache de 5min para preços/séries 30d"
 )

@@ -29,7 +29,7 @@ from database.db import (
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score, _is_fii
 from utils.earnings_scraper import buscar_resultados
-from utils.tickers import mapear_ticker_base
+from utils.tickers import mapear_ticker_base, normalizar_mercado
 
 from utils.components import (
     page_header, section_title, metric_card,
@@ -49,6 +49,7 @@ from utils.components import (
     portfolio_hero, portfolio_kpis,
     # Polimentos
     events_strip, pill_select, watchlist_selector_header,
+    opportunity_card,
 )
 from utils.formatters import fmt_preco, fmt_pct
 import plotly.graph_objects as go
@@ -645,74 +646,23 @@ if _tickers_wl_home:
         )
 
         def _render_opp_card(_opp, _rank):
-            _badges = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            _badge  = _badges[_rank] if _rank < 5 else ""
-
             st.markdown(
-                f'<div style="background:var(--bg-surface); '
-                f'border:1px solid var(--border-subtle); '
-                f'border-top:2px solid var(--accent); '
-                f'border-radius:var(--radius-md); padding:16px; '
-                f'height:100%;">'
-
-                f'<div style="display:flex; justify-content:space-between; '
-                f'align-items:center; margin-bottom:6px;">'
-                f'<span style="font-family:var(--font-data); font-size:1rem; '
-                f'font-weight:700; color:var(--accent);">'
-                f'{_opp["ticker"].replace(".SA","")}</span>'
-                f'<span style="font-size:1.1rem;">{_badge}</span>'
-                f'</div>'
-
-                f'<div style="font-family:var(--font-ui); font-size:0.68rem; '
-                f'color:var(--text-muted); margin-bottom:12px; line-height:1.4;">'
-                f'{_opp["nome"].lower()}<br>'
-                f'{_opp["setor"][:30] if _opp["setor"] != "—" else ""}'
-                f'</div>'
-
-                # Breakdown do score
-                + ''.join(
-                    _render_breakdown_item(_opp)
-                ) +
-
-                # Métricas de timing
-                f'<div style="display:flex;gap:12px;margin-top:6px;'
-                f'flex-wrap:wrap;">'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:var(--text-muted);">RSI</div>'
-                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
-                f'color:{"var(--bull)" if 35 <= _opp["rsi"] <= 55 else "var(--amber)"};">'
-                f'{_opp["rsi"]:.0f}</div>'
-                f'</div>'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:var(--text-muted);">5d</div>'
-                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
-                f'color:{"var(--bull)" if _opp["ret_5d"] >= 0 else "var(--bear)"};">'
-                f'{_opp["ret_5d"]:+.1f}%</div>'
-                f'</div>'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:var(--text-muted);">3m</div>'
-                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
-                f'color:{"var(--bull)" if _opp["ret_3m"] >= 0 else "var(--bear)"};">'
-                f'{_opp["ret_3m"]:+.1f}%</div>'
-                f'</div>'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.58rem;color:var(--text-muted);">topo</div>'
-                f'<div style="font-family:var(--font-data);font-size:0.75rem;'
-                f'color:var(--text-secondary);">'
-                f'{_opp["dist_top"]:.0f}%</div>'
-                f'</div>'
-
-                f'</div>'
-
-                f'</div>',
+                opportunity_card(
+                    ticker       = _opp['ticker'],
+                    nome         = _opp['nome'],
+                    setor        = _opp.get('setor', ''),
+                    rank         = _rank,
+                    score_hs     = _opp['score_hs'],
+                    score_val    = _opp['score_val'],
+                    score_timing = _opp['score_timing'],
+                    rsi          = _opp['rsi'],
+                    ret_5d       = _opp['ret_5d'],
+                    ret_3m       = _opp['ret_3m'],
+                    dist_top     = _opp['dist_top'],
+                ),
                 unsafe_allow_html=True,
             )
 
-            st.markdown("<br style='margin:4px'>", unsafe_allow_html=True)
             _btn_key = f"btn_opp_research_{_opp['ticker']}_{_rank}"
             if st.button(
                 f"🔬 analisar {_opp['ticker'].replace('.SA','')}",
@@ -722,60 +672,18 @@ if _tickers_wl_home:
                 st.session_state['research_ticker_externo'] = _opp['ticker']
                 st.switch_page("pages/1_Research.py")
 
-        def _render_breakdown_item(_opp):
-            _items = [
-                ("qualidade (hs)",  _opp['score_hs'],         100, f"{_opp['score_hs']:.0f}/100"),
-                ("valuation hist.", _opp['score_val'],        20,  f"{_opp['score_val']:.0f}/20"),
-                ("timing entrada",  _opp['score_timing'],     25,  f"{_opp['score_timing']:.0f}/25"),
-            ]
-            _html = ""
-            for _bl, _bv, _bmax, _bstr in _items:
-                _bpct = min(100, int(_bv / _bmax * 100)) if _bmax > 0 else 0
-                _bcor = (
-                    "var(--bull)" if _bpct >= 70
-                    else "var(--amber)" if _bpct >= 40
-                    else "var(--text-muted)"
-                )
-                _html += (
-                    f'<div style="display:flex;justify-content:space-between;'
-                    f'margin-bottom:3px;">'
-                    f'<span style="font-size:0.62rem;color:var(--text-muted);'
-                    f'font-family:var(--font-ui);">{_bl}</span>'
-                    f'<span style="font-size:0.68rem;color:{_bcor};'
-                    f'font-family:var(--font-data);font-weight:600;">{_bstr}</span>'
-                    f'</div>'
-                    f'<div style="background:var(--bg-overlay);border-radius:2px;'
-                    f'height:2px;margin-bottom:5px;">'
-                    f'<div style="background:{_bcor};border-radius:2px;'
-                    f'height:2px;width:{_bpct}%;"></div>'
-                    f'</div>'
-                )
-            return _html
-
         _opps_br  = [o for o in _opps if o.get('mercado') == 'BR']
         _opps_eua = [o for o in _opps if o.get('mercado') == 'EUA']
 
         if _opps_br:
-            st.markdown(
-                '<div style="font-family:var(--font-ui); font-size:0.72rem; '
-                'color:var(--text-muted); margin:8px 0 4px 0;'
-                'text-transform:uppercase; letter-spacing:var(--ls-wide);">'
-                '🇧🇷 brasil</div>',
-                unsafe_allow_html=True,
-            )
+            mercado_group_header("🇧🇷 brasil", len(_opps_br), tone="bull")
             _cols_br = st.columns(min(len(_opps_br), 3))
             for _ci, (_col_opp, _opp) in enumerate(zip(_cols_br, _opps_br)):
                 with _col_opp:
                     _render_opp_card(_opp, _ci)
 
         if _opps_eua:
-            st.markdown(
-                '<div style="font-family:var(--font-ui); font-size:0.72rem; '
-                'color:var(--text-muted); margin:12px 0 4px 0;'
-                'text-transform:uppercase; letter-spacing:var(--ls-wide);">'
-                '🇺🇸 eua</div>',
-                unsafe_allow_html=True,
-            )
+            mercado_group_header("🇺🇸 estados unidos", len(_opps_eua), tone="info")
             _cols_eua = st.columns(min(len(_opps_eua), 3))
             for _ci, (_col_opp, _opp) in enumerate(zip(_cols_eua, _opps_eua)):
                 with _col_opp:
@@ -1900,9 +1808,21 @@ else:
                 'data': '—',
             }
 
-    # ── FILTRO POR MERCADO (tabs_pill) ───────────────────────────────────────
+    # ── FILTROS (mercado + tese) ─────────────────────────────────────────────
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:10px;'
+        'margin-top:14px;margin-bottom:6px;">'
+        '<span style="font-family:var(--font-ui);font-size:.62rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wider);font-weight:600;">🔍 filtros</span>'
+        '<span style="flex:1;height:1px;background:var(--border-subtle);'
+        'opacity:.6;"></span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Mercado filter (normalizado para evitar duplicidades)
     mercados_disponiveis = sorted(set(
-        (i.get('mercado') or 'outros').lower() for i in watchlist
+        normalizar_mercado(i.get('mercado')) for i in watchlist
     ))
     _mkt_label_map = {
         "brasil":       "🇧🇷 BR",
@@ -1910,14 +1830,27 @@ else:
         "criptomoedas": "₿ Cripto",
         "outros":       "🌐 Outros",
     }
-    mkt_opcoes = ["Todos"] + [
-        _mkt_label_map.get(m, f"📁 {m}") for m in mercados_disponiveis
-    ]
+    mkt_opcoes = ["Todos"] + [_mkt_label_map[m] for m in mercados_disponiveis]
+
+    st.markdown(
+        '<div style="font-family:var(--font-ui);font-size:.6rem;'
+        'color:var(--text-muted);text-transform:uppercase;'
+        'letter-spacing:var(--ls-wide);margin-top:4px;margin-bottom:3px;'
+        'font-weight:600;opacity:.75;">mercado</div>',
+        unsafe_allow_html=True,
+    )
     mkt_sel = tabs_pill(mkt_opcoes, key="wl_mkt_filtro", default="Todos")
 
-    # ── FILTRO POR TAG / TESE (tabs_pill) ────────────────────────────────────
+    # Tese filter
     tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
     if tags_disponiveis:
+        st.markdown(
+            '<div style="font-family:var(--font-ui);font-size:.6rem;'
+            'color:var(--text-muted);text-transform:uppercase;'
+            'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:3px;'
+            'font-weight:600;opacity:.75;">tese / tag</div>',
+            unsafe_allow_html=True,
+        )
         tag_opcoes = ["🌐 todas"] + [f"📁 {t}" for t in tags_disponiveis]
         tag_sel_raw = tabs_pill(tag_opcoes, key="wl_tag_filtro", default="🌐 todas")
         tag_filtro = (
@@ -1944,12 +1877,12 @@ else:
     # Filtra watchlist por mercado primeiro, depois por tag
     watchlist_filtrada = list(watchlist)
     if mkt_sel != "Todos":
-        # mapeamento reverso: label → chave mercado
+        # mapeamento reverso: label → chave mercado canônica
         _label_para_mkt = {v: k for k, v in _mkt_label_map.items()}
-        _mkt_chave = _label_para_mkt.get(mkt_sel, mkt_sel.replace("📁 ", "", 1).lower())
+        _mkt_chave = _label_para_mkt.get(mkt_sel, "outros")
         watchlist_filtrada = [
             i for i in watchlist_filtrada
-            if (i.get('mercado') or 'outros').lower() == _mkt_chave
+            if normalizar_mercado(i.get('mercado')) == _mkt_chave
         ]
     if tag_filtro != 'todas':
         watchlist_filtrada = [
@@ -2155,7 +2088,7 @@ else:
     # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
     mercados_dict = {}
     for item in watchlist_filtrada:
-        m = item.get('mercado', 'outros').lower()
+        m = normalizar_mercado(item.get('mercado'))
         mercados_dict.setdefault(m, []).append(item)
 
     if not mercados_dict:

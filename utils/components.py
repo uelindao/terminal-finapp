@@ -1692,10 +1692,20 @@ def inline_sparkline(
 # ── 4. Gradient CTA button ────────────────────────────────────────────────────
 
 def _inject_once(key: str, css: str) -> None:
-    """Helper: injeta um bloco de CSS uma vez por sessão."""
-    if key not in st.session_state:
-        st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
-        st.session_state[key] = True
+    """
+    Helper: injeta um bloco de CSS — sempre escreve no markdown.
+
+    Por que sempre injetar (não cachear via session_state)?
+    Streamlit re-executa o script inteiro a cada rerun, mas o DOM é
+    reconstruído. Se cachearmos em session_state e pularmos `st.markdown`,
+    o <style> some do DOM ao mesmo tempo que a flag persiste — resultado:
+    componentes renderizam sem CSS (texto cru).
+
+    A duplicação não é problema: o React do Streamlit faz dedup por chave
+    estável e múltiplos <style> idênticos só somam uma regra ao CSSOM.
+    O parâmetro `key` é mantido por compatibilidade (não usado mais).
+    """
+    st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
 
 
 def gradient_cta_button(
@@ -3352,3 +3362,150 @@ def watchlist_selector_header(
 
     wl_id = id_por_nome.get(escolhida)
     return (wl_id, acao)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OPPORTUNITY CARD (design system v5 — substitui o card antigo da Home)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def opportunity_card(
+    *,
+    ticker:    str,
+    nome:      str,
+    setor:     str = "",
+    rank:      int = 0,
+    score_hs:  float = 0,
+    score_val: float = 0,
+    score_timing: float = 0,
+    rsi:       float = 0,
+    ret_5d:    float = 0,
+    ret_3m:    float = 0,
+    dist_top:  float = 0,
+) -> str:
+    """
+    Retorna HTML de card de oportunidade — glassmorphism + breakdown + stats.
+
+    Use dentro de uma st.column do Streamlit:
+        with col:
+            st.markdown(opportunity_card(...), unsafe_allow_html=True)
+            if st.button(f"analisar {ticker}", key=...): ...
+
+    Renderiza:
+      - ticker grande em accent + medal badge à direita
+      - nome em ui-secondary + setor em muted
+      - 3 barras de breakdown: qualidade, valuation, timing
+      - 4 micro-stats em grid: RSI · 5d · 3m · topo
+    """
+    _inject_once(
+        "_opportunity_card_v1",
+        '.ft-opp-card{position:relative;padding:14px 16px;'
+        '  border-radius:var(--radius-lg);background:var(--surface-glass);'
+        '  backdrop-filter:var(--glass-blur);'
+        '  -webkit-backdrop-filter:var(--glass-blur);'
+        '  border:1px solid var(--border-subtle);overflow:hidden;'
+        '  transition:transform var(--motion-fast) var(--ease-out),'
+        '             border-color var(--motion-fast) var(--ease-out);'
+        '  margin-bottom:8px;}'
+        '.ft-opp-card:hover{transform:translateY(-2px);'
+        '  border-color:var(--border-normal);}'
+        '.ft-opp-card::after{content:"";position:absolute;left:0;top:0;'
+        '  width:100%;height:2px;background:var(--accent);'
+        '  box-shadow:0 0 10px var(--accent);opacity:.85;}'
+        '.ft-opp-head{display:flex;justify-content:space-between;'
+        '  align-items:flex-start;margin-bottom:8px;}'
+        '.ft-opp-tk{font-family:var(--font-data);font-size:var(--text-md);'
+        '  font-weight:800;color:var(--accent);letter-spacing:var(--ls-tight);}'
+        '.ft-opp-medal{font-size:1.1rem;line-height:1;}'
+        '.ft-opp-name{font-family:var(--font-ui);font-size:var(--text-xs);'
+        '  color:var(--text-secondary);line-height:1.35;'
+        '  overflow:hidden;text-overflow:ellipsis;'
+        '  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}'
+        '.ft-opp-setor{font-family:var(--font-ui);font-size:.6rem;'
+        '  color:var(--text-muted);text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);margin-top:2px;'
+        '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+        '.ft-opp-bds{margin-top:10px;}'
+        '.ft-opp-bd-row{display:flex;justify-content:space-between;'
+        '  align-items:center;margin-bottom:3px;}'
+        '.ft-opp-bd-row .lb{font-family:var(--font-ui);'
+        '  font-size:.6rem;color:var(--text-muted);}'
+        '.ft-opp-bd-row .vl{font-family:var(--font-data);font-size:.66rem;'
+        '  font-weight:600;color:var(--bd-tone);}'
+        '.ft-opp-bd-bar{background:var(--bg-overlay);border-radius:2px;'
+        '  height:3px;margin-bottom:8px;overflow:hidden;}'
+        '.ft-opp-bd-bar-fill{background:var(--bd-tone);border-radius:2px;'
+        '  height:100%;box-shadow:0 0 4px var(--bd-tone);'
+        '  transition:width var(--motion-base) var(--ease-out);}'
+        '.ft-opp-stats{display:grid;grid-template-columns:repeat(4,1fr);'
+        '  gap:6px;margin-top:8px;padding-top:8px;'
+        '  border-top:1px solid var(--border-subtle);}'
+        '.ft-opp-stat{text-align:center;}'
+        '.ft-opp-stat .l{font-family:var(--font-ui);font-size:.55rem;'
+        '  color:var(--text-muted);text-transform:uppercase;'
+        '  letter-spacing:var(--ls-wide);}'
+        '.ft-opp-stat .v{font-family:var(--font-data);font-size:.7rem;'
+        '  font-weight:600;margin-top:1px;}'
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    medal = medals[rank] if 0 <= rank < len(medals) else ""
+
+    # Breakdown bars
+    bd_items = [
+        ("qualidade (hs)",  score_hs,     100, f"{score_hs:.0f}/100"),
+        ("valuation hist.", score_val,    20,  f"{score_val:.0f}/20"),
+        ("timing entrada",  score_timing, 25,  f"{score_timing:.0f}/25"),
+    ]
+    bds_html = ""
+    for lbl, val, vmax, vstr in bd_items:
+        pct = min(100, int(val / vmax * 100)) if vmax > 0 else 0
+        tone_c = (
+            "var(--bull)"  if pct >= 70 else
+            "var(--amber)" if pct >= 40 else
+            "var(--text-muted)"
+        )
+        bds_html += (
+            f'<div class="ft-opp-bd-row" style="--bd-tone:{tone_c};">'
+            f'<span class="lb">{lbl}</span><span class="vl">{vstr}</span>'
+            f'</div>'
+            f'<div class="ft-opp-bd-bar" style="--bd-tone:{tone_c};">'
+            f'<div class="ft-opp-bd-bar-fill" style="width:{pct}%;"></div>'
+            f'</div>'
+        )
+
+    # Micro-stats
+    rsi_c = "var(--bull)" if 35 <= rsi <= 55 else "var(--amber)"
+    r5_c  = "var(--bull)" if ret_5d >= 0 else "var(--bear)"
+    r3_c  = "var(--bull)" if ret_3m >= 0 else "var(--bear)"
+
+    setor_html = (
+        f'<div class="ft-opp-setor">{setor[:30]}</div>'
+        if setor and setor != "—" else ""
+    )
+
+    return (
+        f'<div class="ft-opp-card">'
+        f'<div class="ft-opp-head">'
+        f'<span class="ft-opp-tk">{ticker.replace(".SA","")}</span>'
+        f'<span class="ft-opp-medal">{medal}</span>'
+        f'</div>'
+        f'<div class="ft-opp-name">{nome.lower()[:60]}</div>'
+        f'{setor_html}'
+        f'<div class="ft-opp-bds">{bds_html}</div>'
+        f'<div class="ft-opp-stats">'
+        f'<div class="ft-opp-stat">'
+        f'<div class="l">RSI</div>'
+        f'<div class="v" style="color:{rsi_c};">{rsi:.0f}</div></div>'
+        f'<div class="ft-opp-stat">'
+        f'<div class="l">5d</div>'
+        f'<div class="v" style="color:{r5_c};">{ret_5d:+.1f}%</div></div>'
+        f'<div class="ft-opp-stat">'
+        f'<div class="l">3m</div>'
+        f'<div class="v" style="color:{r3_c};">{ret_3m:+.1f}%</div></div>'
+        f'<div class="ft-opp-stat">'
+        f'<div class="l">topo</div>'
+        f'<div class="v" style="color:var(--text-secondary);">{dist_top:.0f}%</div></div>'
+        f'</div>'
+        f'</div>'
+    )

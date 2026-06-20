@@ -251,5 +251,35 @@ def mapear_ticker_base(ticker: str) -> str:
         return t[:-1]
     elif t.startswith("b") and len(t) > 1 and t[1].isupper():
         return t[1:]
-        
+
     return t
+
+
+def normalizar_mercado(mercado: str | None) -> str:
+    """
+    Normaliza o campo `mercado` da watchlist para chaves canônicas.
+
+    A DB tem registros antigos com variações ("brasil (b3)", "us EUA",
+    "São Paulo", "Crypto", etc.). Esta função reduz tudo para 4 chaves:
+      "brasil" | "eua" | "criptomoedas" | "outros"
+
+    Use ao renderizar filtros de mercado para evitar opções duplicadas.
+    """
+    if not mercado:
+        return "outros"
+    m = str(mercado).strip().lower()
+    if not m:
+        return "outros"
+    # Brasil
+    if any(k in m for k in ("brasil", "b3", "bovespa", "são paulo", "sao paulo", "br")):
+        if m == "br" or "brasil" in m or "b3" in m or "bovespa" in m or "paulo" in m:
+            return "brasil"
+    # EUA
+    if any(k in m for k in ("eua", "usa", "us ", "nyse", "nasdaq", "amex", "estados unidos")):
+        return "eua"
+    if m in ("us", "u.s.", "u.s"):
+        return "eua"
+    # Cripto
+    if any(k in m for k in ("cripto", "crypto", "btc", "moeda digital", "currency")):
+        return "criptomoedas"
+    return "outros"
