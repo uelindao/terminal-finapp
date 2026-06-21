@@ -1152,22 +1152,39 @@ with tab_global:
             if isinstance(df_comm.columns, pd.MultiIndex): df_comm.columns = df_comm.columns.get_level_values(1)
         else: df_comm = df_comm_master
 
-        # Atualiza macro_context global para uso nas outras páginas
-        _selic_ss  = valor_atual_seguro(df_br, 'Selic')
-        _ipca_ss   = valor_atual_seguro(df_br, 'IPCA')
-        _vix_ss    = valor_atual_seguro(df_global, 'VIXCLS')
+        # Atualiza macro_context global para uso nas outras páginas.
+        # CONTRATO (ver utils/macro_context.py): 'ipca'/'ipca_12m' = acumulado
+        # 12m (% a.a.) — chave canônica; 'ipca_mensal' = print do mês (série 433).
+        _selic_ss    = valor_atual_seguro(df_br, 'Selic')
+        _ipca12_ss   = valor_atual_seguro(df_br, 'IPCA_12M')
+        _ipca_mes_ss = valor_atual_seguro(df_br, 'IPCA')
+        _vix_ss      = valor_atual_seguro(df_global, 'VIXCLS')
+        _t10y_ss     = valor_atual_seguro(df_global, 'DGS10')
 
         if _selic_ss is not None or _vix_ss is not None:
-            _selic_val = float(_selic_ss) if _selic_ss is not None else st.session_state.get("macro_context", {}).get("selic", 10.75)
+            _ctx_prev  = st.session_state.get("macro_context", {})
+            _selic_val = float(_selic_ss) if _selic_ss is not None else _ctx_prev.get("selic", 10.75)
             # Sanidade: série 432/439 = % anual. Se < 1, veio como decimal
             if 0 < _selic_val < 1:
                 _selic_val = _selic_val * 100
             elif _selic_val > 50:
                 _selic_val = 10.75
-            _ipca_val  = float(_ipca_ss)  if _ipca_ss  is not None else st.session_state.get("macro_context", {}).get("ipca", 4.5)
-            if abs(_ipca_val) > 5:
-                _ipca_val = 0.45
-            _vix_val   = float(_vix_ss)   if _vix_ss   is not None else st.session_state.get("macro_context", {}).get("vix", 15.0)
+            # IPCA acumulado 12m (anual) — chave canônica para Fisher / yield real
+            _ipca12_val = (
+                float(_ipca12_ss) if _ipca12_ss is not None
+                else (_ctx_prev.get("ipca_12m") or _ctx_prev.get("ipca", 4.5))
+            )
+            if not (0 < _ipca12_val < 50):       # sanidade: 0–50% a.a.
+                _ipca12_val = 4.5
+            # IPCA mensal (print do mês) — exibição / cálculos mensais
+            _ipca_mes_val = (
+                float(_ipca_mes_ss) if _ipca_mes_ss is not None
+                else _ctx_prev.get("ipca_mensal", 0.45)
+            )
+            if abs(_ipca_mes_val) > 5:           # >5% no mês = erro
+                _ipca_mes_val = 0.45
+            _vix_val  = float(_vix_ss)  if _vix_ss  is not None else _ctx_prev.get("vix", 15.0)
+            _t10y_val = float(_t10y_ss) if _t10y_ss is not None else _ctx_prev.get("treasury_10y", 4.5)
 
             _juros_altos = _selic_val > 10.0
             _risco_alto  = _vix_val   > 20.0
@@ -1182,10 +1199,13 @@ with tab_global:
                 _regime_label = "juros baixos / risco controlado"
 
             st.session_state["macro_context"] = {
-                "selic": round(_selic_val, 2),
-                "ipca":  round(_ipca_val, 2),
-                "vix":   round(_vix_val, 1),
-                "label": _regime_label,
+                "selic":        round(_selic_val, 2),
+                "ipca":         round(_ipca12_val, 2),     # canônico: 12m (% a.a.)
+                "ipca_12m":     round(_ipca12_val, 2),     # alias explícito
+                "ipca_mensal":  round(_ipca_mes_val, 2),   # print do mês
+                "vix":          round(_vix_val, 1),
+                "treasury_10y": round(_t10y_val, 2),
+                "label":        _regime_label,
             }
 
         section_title("leitura macroeconômica (ai synthesis)")
