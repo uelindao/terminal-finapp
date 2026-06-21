@@ -385,3 +385,87 @@ def tilt_setor(setor: str, macro_context: dict | None = None,
         impacto, pontos = "neutro", 0
 
     return {"impacto": impacto, "pontos": pontos, "motivos": motivos, "setor_canon": canon}
+
+
+# ── Cockpit macro (faixa persistente — fonte única no topo das páginas) ──────
+
+def render_cockpit_macro(market: str = "BR") -> None:
+    """
+    Renderiza uma faixa macro compacta — a "fonte única de verdade" para o topo
+    de qualquer página. LEVE: lê do macro_context + snapshot de inflação, sem as
+    chamadas yfinance pesadas de get_macro_state(). Silenciosa em falha.
+    """
+    if not _ST:
+        return
+    try:
+        from utils.macro_context import garantir_macro_context
+        mc = garantir_macro_context()
+    except Exception:
+        mc = st.session_state.get("macro_context", {}) or {}
+
+    try:
+        selic = float(mc.get("selic", SELIC_FALLBACK) or SELIC_FALLBACK)
+        ipca  = float(mc.get("ipca_12m") or mc.get("ipca", IPCA_12M_FALLBACK))
+        vix   = float(mc.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
+        sreal = selic_real_fisher(selic, ipca)
+
+        # regime label (puro, sem rede)
+        regime_label = "n/d"
+        try:
+            from utils.macro_regime import classificar_regime
+            regime_label = classificar_regime(
+                selic=selic, vix=vix, ipca=ipca,
+                treasury_10y=mc.get("treasury_10y", TREASURY_10Y_FALLBACK),
+            ).get("label", "n/d")
+        except Exception:
+            pass
+
+        # inflação setorial (núcleo/serviços) do snapshot — degrada para None
+        nucleo = servicos = None
+        try:
+            from utils.inflation_sectoral import get_inflacao_atual
+            _infl = get_inflacao_atual(market)
+            servicos = _infl.get("servicos") if market == "BR" else _infl.get("servicos_core")
+            # núcleo: média dos cortes nucleo_* disponíveis
+            _nucs = [v for k, v in _infl.items() if k.startswith("nucleo")]
+            if _nucs:
+                nucleo = round(sum(_nucs) / len(_nucs), 2)
+            elif market != "BR":
+                nucleo = _infl.get("core")
+        except Exception:
+            pass
+
+        _cor_juro = "var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)")
+        _cor_vix  = "var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)")
+
+        def _kpi(lbl, val, cor="var(--text-secondary)"):
+            return (
+                f'<div style="display:flex;flex-direction:column;gap:1px;">'
+                f'<span style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">{lbl}</span>'
+                f'<span style="font-size:0.86rem;font-weight:600;color:{cor};font-family:var(--font-data,monospace);">{val}</span>'
+                f'</div>'
+            )
+
+        partes = [
+            _kpi("regime", regime_label, "var(--accent)"),
+            _kpi("selic", f"{selic:.2f}%", _cor_juro),
+            _kpi("juro real (fisher)", f"{sreal:+.1f}%", _cor_juro),
+            _kpi("ipca 12m", f"{ipca:.1f}%"),
+        ]
+        if nucleo is not None:
+            partes.append(_kpi("núcleo 12m", f"{nucleo:.1f}%"))
+        if servicos is not None:
+            partes.append(_kpi("serviços 12m", f"{servicos:.1f}%"))
+        partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
+
+        st.markdown(
+            '<div style="display:flex;gap:26px;flex-wrap:wrap;align-items:center;'
+            'background:var(--bg-surface);border:1px solid var(--border-subtle);'
+            'border-left:3px solid var(--accent);border-radius:6px;'
+            'padding:8px 18px;margin-bottom:14px;font-family:var(--font-ui,sans-serif);">'
+            + "".join(partes) +
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    except Exception as e:
+        logger.debug(f"[macro_state] render_cockpit_macro falhou: {e}")

@@ -59,6 +59,13 @@ topbar(
 )
 page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
 
+# Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
+try:
+    from utils.macro_state import render_cockpit_macro
+    render_cockpit_macro("BR")
+except Exception:
+    pass
+
 if "FRED_API_KEY" not in st.secrets:
     info_box(
         tipo   = "amber",

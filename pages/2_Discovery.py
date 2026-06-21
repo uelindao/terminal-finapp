@@ -1431,6 +1431,59 @@ with tab_setorial:
             st.cache_data.clear()
             st.rerun()
 
+    # ── SCORECARD DE ROTAÇÃO (fundamento × técnico × macro) ───────────────────
+    section_title("🎯 scorecard de rotação — fundamento × técnico × macro")
+    st.markdown(
+        '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
+        'color:var(--text-muted); margin:-4px 0 12px 0; line-height:1.55;">'
+        'nota composta que cruza qualidade (health médio), força relativa '
+        '(momentum 12m vs universo) e vento macro (regime + inflação setorial). '
+        'overweight ≥ 62 · neutro 48–61 · underweight &lt; 48.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    try:
+        from utils.sector_scorecard import calcular_scorecard_setorial
+        _scorecard = calcular_scorecard_setorial(_univ_set)
+    except Exception:
+        _scorecard = []
+
+    if _scorecard:
+        import pandas as _pd_sc
+        _df_sc = _pd_sc.DataFrame([{
+            "setor":      r["label"],
+            "composto":   r["composto"],
+            "fundamento": r["fundamento"],
+            "técnico":    r["tecnico"],
+            "macro":      r["macro"],
+            "veredicto":  r["veredicto"],
+            "ativos":     r["n_ativos"],
+        } for r in _scorecard])
+        _colcfg = {
+            "composto":   st.column_config.ProgressColumn("composto", min_value=0, max_value=100, format="%.0f"),
+            "fundamento": st.column_config.ProgressColumn("fundamento", min_value=0, max_value=100, format="%.0f"),
+            "técnico":    st.column_config.ProgressColumn("técnico (RS 12m)", min_value=0, max_value=100, format="%.0f"),
+            "macro":      st.column_config.ProgressColumn("macro (regime+infl.)", min_value=0, max_value=100, format="%.0f"),
+        }
+        try:
+            st.dataframe(_df_sc, use_container_width=True, hide_index=True, column_config=_colcfg)
+        except Exception:
+            st.dataframe(_df_sc, use_container_width=True, hide_index=True)
+
+        _ow = [r["label"] for r in _scorecard if r["veredicto"] == "overweight"]
+        _uw = [r["label"] for r in _scorecard if r["veredicto"] == "underweight"]
+        st.markdown(
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;'
+            f'color:var(--text-muted);margin-top:6px;line-height:1.6;">'
+            f'<span style="color:var(--bull);font-weight:600;">▲ overweight:</span> '
+            f'{", ".join(_ow[:4]) or "—"} &nbsp;·&nbsp; '
+            f'<span style="color:var(--bear);font-weight:600;">▼ underweight:</span> '
+            f'{", ".join(_uw[-4:]) or "—"}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+
     with st.spinner("agrupando setores..."):
         _dados_set = calcular_heatmap_setorial(_univ_set)
 
