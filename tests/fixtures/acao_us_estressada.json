@@ -9,7 +9,8 @@
       "roe%": 5.0,
       "margem%": 2.0,
       "ev/ebitda": 10.0,
-      "dy%": 3.5
+      "dy%": 3.5,
+      "setor": "Consumer Cyclical"
     },
     "yf_info": {
       "trailingPE": 18.0,
@@ -36,28 +37,70 @@
       "ipca": 4.5
     },
     "yf_financials": {
-      "Total Revenue": [105000000000, 114000000000],
-      "Gross Profit": [26000000000, 29000000000],
-      "Net Income": [2100000000, 3400000000],
-      "EBIT": [4200000000, 6000000000],
-      "Interest Expense": [800000000, 700000000],
-      "Operating Cash Flow": [5500000000, 7000000000]
+      "Total Revenue": [
+        105000000000,
+        114000000000
+      ],
+      "Gross Profit": [
+        26000000000,
+        29000000000
+      ],
+      "Net Income": [
+        2100000000,
+        3400000000
+      ],
+      "EBIT": [
+        4200000000,
+        6000000000
+      ],
+      "Interest Expense": [
+        800000000,
+        700000000
+      ],
+      "Operating Cash Flow": [
+        5500000000,
+        7000000000
+      ]
     },
     "yf_balance_sheet": {
-      "Total Assets": [55000000000, 52000000000],
-      "Long Term Debt": [20000000000, 18000000000],
-      "Current Assets": [20000000000, 19000000000],
-      "Current Liabilities": [15000000000, 14000000000],
-      "Share Issued": [460000000, 460000000],
-      "Cash And Cash Equivalents": [5000000000, 4500000000]
+      "Total Assets": [
+        55000000000,
+        52000000000
+      ],
+      "Long Term Debt": [
+        20000000000,
+        18000000000
+      ],
+      "Current Assets": [
+        20000000000,
+        19000000000
+      ],
+      "Current Liabilities": [
+        15000000000,
+        14000000000
+      ],
+      "Share Issued": [
+        460000000,
+        460000000
+      ],
+      "Cash And Cash Equivalents": [
+        5000000000,
+        4500000000
+      ]
     },
     "yf_cashflow": {
-      "Operating Cash Flow": [5500000000, 7000000000],
-      "Capital Expenditure": [3000000000, 2500000000]
+      "Operating Cash Flow": [
+        5500000000,
+        7000000000
+      ],
+      "Capital Expenditure": [
+        3000000000,
+        2500000000
+      ]
     }
   },
   "expected": {
-    "score": 27,
+    "score": 24,
     "tolerancia": 2
   }
 }

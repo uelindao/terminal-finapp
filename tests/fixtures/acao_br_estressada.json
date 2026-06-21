@@ -9,19 +9,20 @@
       "roe%": -10.0,
       "margem%": -12.0,
       "ev/ebitda": 6.0,
-      "dy%": 0.0
+      "dy%": 0.0,
+      "setor": "Industrials"
     },
     "yf_info": {
       "trailingPE": null,
       "priceToBook": 1.2,
-      "returnOnEquity": -0.10,
+      "returnOnEquity": -0.1,
       "profitMargins": -0.12,
       "enterpriseToEbitda": 6.0,
       "debtToEquity": 400.0,
       "beta": 1.8,
       "sector": "Industrials",
-      "revenueGrowth": -0.20,
-      "earningsGrowth": -0.30,
+      "revenueGrowth": -0.2,
+      "earningsGrowth": -0.3,
       "dividendYield": 0.0
     },
     "tecnico": {
@@ -36,28 +37,70 @@
       "ipca": 4.5
     },
     "yf_financials": {
-      "Total Revenue": [8000000000, 10000000000],
-      "Gross Profit": [1500000000, 2500000000],
-      "Net Income": [-1200000000, -800000000],
-      "EBIT": [-500000000, 200000000],
-      "Interest Expense": [1500000000, 1200000000],
-      "Operating Cash Flow": [800000000, 1200000000]
+      "Total Revenue": [
+        8000000000,
+        10000000000
+      ],
+      "Gross Profit": [
+        1500000000,
+        2500000000
+      ],
+      "Net Income": [
+        -1200000000,
+        -800000000
+      ],
+      "EBIT": [
+        -500000000,
+        200000000
+      ],
+      "Interest Expense": [
+        1500000000,
+        1200000000
+      ],
+      "Operating Cash Flow": [
+        800000000,
+        1200000000
+      ]
     },
     "yf_balance_sheet": {
-      "Total Assets": [35000000000, 33000000000],
-      "Long Term Debt": [25000000000, 22000000000],
-      "Current Assets": [5000000000, 5500000000],
-      "Current Liabilities": [8000000000, 7000000000],
-      "Share Issued": [3500000000, 3200000000],
-      "Cash And Cash Equivalents": [1500000000, 2000000000]
+      "Total Assets": [
+        35000000000,
+        33000000000
+      ],
+      "Long Term Debt": [
+        25000000000,
+        22000000000
+      ],
+      "Current Assets": [
+        5000000000,
+        5500000000
+      ],
+      "Current Liabilities": [
+        8000000000,
+        7000000000
+      ],
+      "Share Issued": [
+        3500000000,
+        3200000000
+      ],
+      "Cash And Cash Equivalents": [
+        1500000000,
+        2000000000
+      ]
     },
     "yf_cashflow": {
-      "Operating Cash Flow": [800000000, 1200000000],
-      "Capital Expenditure": [2000000000, 1800000000]
+      "Operating Cash Flow": [
+        800000000,
+        1200000000
+      ],
+      "Capital Expenditure": [
+        2000000000,
+        1800000000
+      ]
     }
   },
   "expected": {
-    "score": 7,
+    "score": 5,
     "tolerancia": 2
   }
 }

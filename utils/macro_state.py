@@ -318,14 +318,19 @@ def get_macro_state(macro_context: dict | None = None) -> MacroState:
 
 # ── tilt setorial PURO (sem yfinance/streamlit) — usado no health_engine ─────
 
-def tilt_setor(setor: str, macro_context: dict | None = None) -> dict:
+def tilt_setor(setor: str, macro_context: dict | None = None,
+               market: str = "BR") -> dict:
     """
     Avalia se o setor está favorecido/neutro/desfavorecido no regime atual,
-    usando APENAS o macro_context (selic/vix/ipca) — sem chamadas de rede.
+    usando APENAS o macro_context (selic/treasury/vix) — sem chamadas de rede.
 
-    Retorna {'impacto', 'pontos', 'motivos'} onde 'pontos' é a contribuição
-    base de regime para o pilar macro-setorial do score (±4). O componente de
-    inflação setorial é somado em utils/inflation_sectoral.py.
+    O eixo de JURO é consciente de mercado: ações BR sofrem com a Selic
+    (taxa nominal alta em termos absolutos), ações US com o Treasury 10y
+    (níveis "altos" muito menores). O eixo de STRESS (VIX) é global.
+
+    Retorna {'impacto', 'pontos', 'motivos', 'setor_canon'} onde 'pontos' é a
+    contribuição base de regime para o pilar macro-setorial do score (±4). O
+    componente de inflação setorial é somado em utils/inflation_sectoral.py.
 
     Pura e barata: chamável por ticker no ETL.
     """
@@ -336,22 +341,30 @@ def tilt_setor(setor: str, macro_context: dict | None = None) -> dict:
     canon = normalizar_setor(setor)
 
     try:
+        _vix = float(macro_context.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
+        _t10 = float(macro_context.get("treasury_10y", TREASURY_10Y_FALLBACK) or TREASURY_10Y_FALLBACK)
         _selic = float(macro_context.get("selic", SELIC_FALLBACK) or SELIC_FALLBACK)
-        _vix   = float(macro_context.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
-        _ipca  = float(macro_context.get("ipca_12m") or macro_context.get("ipca", IPCA_12M_FALLBACK))
 
-        # Peso do eixo juro: cresce com o nível da Selic (proibitivo > 13%).
-        if _selic >= 13.0:
-            juro_w, juro_tag = 1.0, "juro muito alto"
-        elif _selic > 10.0:
-            juro_w, juro_tag = 0.7, "juro alto"
+        # Eixo juro consciente de mercado.
+        if str(market).upper() == "US":
+            if _t10 >= 5.5:
+                juro_w, juro_tag = 1.0, f"juro US alto ({_t10:.1f}% 10y)"
+            elif _t10 >= 4.0:
+                juro_w, juro_tag = 0.6, f"juro US elevado ({_t10:.1f}% 10y)"
+            else:
+                juro_w, juro_tag = 0.0, ""
         else:
-            juro_w, juro_tag = 0.0, ""
+            if _selic >= 13.0:
+                juro_w, juro_tag = 1.0, f"juro muito alto (selic {_selic:.1f}%)"
+            elif _selic > 10.0:
+                juro_w, juro_tag = 0.7, f"juro alto (selic {_selic:.1f}%)"
+            else:
+                juro_w, juro_tag = 0.0, ""
 
         raw = juro_w * _TILT_JURO_ALTO.get(canon, 0)
         if juro_w and _TILT_JURO_ALTO.get(canon):
             _dir = "favorece" if _TILT_JURO_ALTO[canon] > 0 else "pressiona"
-            motivos.append(f"{juro_tag} (selic {_selic:.1f}%) {_dir} {canon or 'setor'}")
+            motivos.append(f"{juro_tag} {_dir} {canon or 'setor'}")
 
         if _vix > 20.0:
             _s = _TILT_STRESS.get(canon, 0)
