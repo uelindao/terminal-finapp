@@ -2773,6 +2773,116 @@ with tab_risco:
             # Normaliza pesos
             _pesos_carteira = {t: v / _valor_total for t, v in _pesos_carteira.items()}
 
+            # ── EXPOSIÇÃO MACRO DO BOOK + SIZING SUGERIDO (Fronteira 2) ──────
+            try:
+                from utils.macro_context import garantir_macro_context
+                _macro_ctx_pf = garantir_macro_context()
+            except Exception:
+                _macro_ctx_pf = st.session_state.get("macro_context", {}) or {}
+            _cache_fund_pf = get_todos_fundamentos_cache() or {}
+            _setor_map_pf = {
+                t: (_cache_fund_pf.get(t, {}) or {}).get("setor", "")
+                for t in _pesos_carteira
+            }
+            _health_map_pf = {
+                h["ticker"]: h.get("score") for h in (get_health_scores() or [])
+            }
+
+            with st.expander("🌡️ exposição macro do book (regime + inflação setorial)",
+                             expanded=True):
+                try:
+                    from utils.portfolio_sizing import exposicao_macro_book
+                    _exp_macro = exposicao_macro_book(
+                        _pesos_carteira, _setor_map_pf, _macro_ctx_pf
+                    )
+                except Exception as _e_exp:
+                    _exp_macro = {}
+                    logger.warning(f"[portfolio] exposição macro falhou: {_e_exp}")
+
+                if _exp_macro:
+                    _tone_book = (
+                        "bull" if _exp_macro["tilt_medio"] >= 2
+                        else "bear" if _exp_macro["tilt_medio"] <= -2
+                        else "amber"
+                    )
+                    status_card(
+                        "leitura macro do book",
+                        _exp_macro["leitura"],
+                        tipo="bear" if _tone_book == "bear" else (
+                            "bull" if _tone_book == "bull" else "info"),
+                    )
+                    portfolio_kpis([
+                        {"nome": "tilt macro médio", "valor": f"{_exp_macro['tilt_medio']:+.1f}",
+                         "sublabel": "−8 contra · +8 a favor", "tone": _tone_book, "icone": "🧭"},
+                        {"nome": "favorável", "valor": f"{_exp_macro['pct_favoravel']:.0f}%",
+                         "sublabel": "peso com vento a favor", "tone": "bull", "icone": "🌤"},
+                        {"nome": "exposto a duration", "valor": f"{_exp_macro['duration_exposta_pct']:.0f}%",
+                         "sublabel": "setores sob juro alto", "tone": "amber", "icone": "📉"},
+                        {"nome": "proteção inflação", "valor": f"{_exp_macro['inflacao_protegida_pct']:.0f}%",
+                         "sublabel": "receita indexada", "tone": "info", "icone": "🛡"},
+                    ])
+                    _piores_book = [a for a in _exp_macro["por_ativo"] if a["tilt"] < 0][:6]
+                    if _piores_book:
+                        st.markdown("##### posições brigando com o macro")
+                        st.dataframe(
+                            pd.DataFrame([{
+                                "ticker": a["ticker"].replace(".SA", ""),
+                                "peso %": a["peso"], "setor": a["setor"],
+                                "tilt macro": a["tilt"], "impacto": a["impacto"],
+                            } for a in _piores_book]),
+                            use_container_width=True, hide_index=True,
+                        )
+                else:
+                    st.caption("exposição macro indisponível (sem setor/cache).")
+
+            with st.expander("🎯 sizing sugerido — risk parity tiltado por edge e macro",
+                             expanded=False):
+                st.markdown(
+                    "*peso-alvo = paridade de risco (1/volatilidade) × edge (health score) "
+                    "× vento macro-setorial. compare com seu peso atual para rebalancear.*"
+                )
+                try:
+                    from utils.portfolio_sizing import sugerir_sizing
+                    from utils.price_history import obter_close_carteira as _occ_sz
+                    _precos_sz = _occ_sz(tuple(_pesos_carteira.keys()), periodo="1y")
+                    _sizing = sugerir_sizing(
+                        _pesos_carteira, _precos_sz, _health_map_pf,
+                        _setor_map_pf, _macro_ctx_pf,
+                    )
+                except Exception as _e_sz:
+                    _sizing = []
+                    logger.warning(f"[portfolio] sizing falhou: {_e_sz}")
+
+                if _sizing:
+                    _df_sizing = pd.DataFrame([{
+                        "ticker":     s["ticker"].replace(".SA", ""),
+                        "peso atual": s["peso_atual"],
+                        "peso-alvo":  s["peso_alvo"],
+                        "Δ pp":       s["delta_pp"],
+                        "ação":       s["acao"],
+                        "vol %":      s["vol"],
+                        "health":     s["health"],
+                        "macro":      s["macro_pts"],
+                    } for s in _sizing])
+                    _cfg_sz = {
+                        "peso atual": st.column_config.ProgressColumn("peso atual %", min_value=0, max_value=float(max(20, _df_sizing["peso atual"].max())), format="%.1f"),
+                        "peso-alvo":  st.column_config.ProgressColumn("peso-alvo %", min_value=0, max_value=float(max(20, _df_sizing["peso-alvo"].max())), format="%.1f"),
+                    }
+                    try:
+                        st.dataframe(_df_sizing, use_container_width=True, hide_index=True, column_config=_cfg_sz)
+                    except Exception:
+                        st.dataframe(_df_sizing, use_container_width=True, hide_index=True)
+                    info_box(
+                        tipo="info",
+                        titulo="como ler",
+                        texto="‘aumentar/reduzir’ é o movimento para alinhar risco e edge. "
+                              "vol alta derruba o peso-alvo (paridade de risco); health alto e "
+                              "vento macro a favor elevam. teto de 20% por posição quando viável.",
+                        icone="🎯",
+                    )
+                else:
+                    st.caption("dados insuficientes para sizing (precisa de histórico de preços).")
+
             # ── Seção VaR ───────────────────────────────────────────────
             with st.expander("📉 value-at-risk (VaR e CVaR)", expanded=True):
                 st.markdown(
