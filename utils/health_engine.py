@@ -1631,10 +1631,28 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 penalidade_dados -= 8
                 alertas.append(f"⚠️ poucos múltiplos disponíveis ({_multiplos_presentes}/4). score pode estar subestimado.")
 
+            # --- Macro-Setorial: vento de regime + inflação setorial (±8) ---
+            # Faz o ativo HERDAR o cenário macro: o mesmo papel num setor
+            # favorecido pelo regime/inflação pontua diferente de um pressionado.
+            # Tilt de regime é puro; a inflação degrada para 0 sem snapshot.
+            score_macro_setorial = 0
+            ms_breakdown: dict = {}
+            try:
+                from utils.inflation_sectoral import pilar_macro_setorial
+                _mercado_ms = 'US' if is_us else 'BR'
+                _setor_ms = setor_yf or dados_base.get('setor', '')
+                _pilar_ms = pilar_macro_setorial(_setor_ms, _mercado_ms, macro_context)
+                score_macro_setorial = int(_pilar_ms.get('pontos', 0))
+                ms_breakdown = _pilar_ms.get('breakdown', {}) or {}
+                alertas.extend(_pilar_ms.get('alertas', []))
+            except Exception as e:
+                logger.debug(f"[health_engine] pilar macro-setorial falhou: {e}")
+
             score = (
                 score_q + score_v + score_r_final + score_y
                 + score_piotroski + score_crescimento + score_roic
                 + score_momentum + score_icr + score_nd
+                + score_macro_setorial
                 + penalidade_tec + penalidade_vix + penalidade_dados
             )
 
@@ -1650,10 +1668,13 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 "Momentum (12-1m)": score_momentum,
                 "Cobertura de Juros (ICR)": score_icr,
                 "Net Debt / EBITDA": score_nd,
+                "Macro-Setorial (regime+inflação)": score_macro_setorial,
                 "Penalidade Técnica (MM200)": penalidade_tec,
                 "Risco Volatilidade (VIX)": penalidade_vix,
                 "Penalidade Dados (Qualidade)": penalidade_dados,
             }
+            for _k_ms, _v_ms in ms_breakdown.items():
+                breakdown[f"  ↳ {_k_ms}"] = _v_ms
 
             if roic_valor is not None:
                 breakdown["  ↳ ROIC"] = f"{roic_valor:.1f}%"

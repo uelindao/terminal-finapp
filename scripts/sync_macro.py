@@ -314,6 +314,162 @@ def fetch_yfinance_macro():
         print(f"  [yfinance] ERRO: {e}")
 
 
+# ── Inflação SETORIAL (decomposição IPCA/CPI) ────────────────────────────────
+# Códigos SGS verificados ao vivo contra a API do BCB + catálogo oficial.
+#
+# IPCA por GRUPO (variação mensal %):
+_IPCA_GRUPOS_BR = {
+    "alimentacao":         1635,   # Alimentação e bebidas
+    "habitacao":           1636,   # Habitação
+    "artigos_residencia":  1637,   # Artigos de residência
+    "vestuario":           1638,   # Vestuário
+    "transportes":         1639,   # Transportes
+    "comunicacao":         1640,   # Comunicação
+    "saude":               1641,   # Saúde e cuidados pessoais
+    "despesas_pessoais":   1642,   # Despesas pessoais
+    "educacao":            1643,   # Educação
+}
+# IPCA por CATEGORIA ESPECIAL (variação mensal %) — cortes que o BC acompanha:
+_IPCA_CATEGORIAS_BR = {
+    "comercializaveis":     4447,
+    "nao_comercializaveis": 4448,
+    "administrados":        4449,   # monitorados (energia elétrica, combustível, tarifas)
+    "servicos":            10844,   # núcleo de rigidez — função de reação do Copom
+    "livres":              11428,
+}
+# Núcleos do IPCA (variação mensal %) — medem inflação subjacente:
+_IPCA_NUCLEOS_BR = {
+    "nucleo_ma_suav":      4466,    # médias aparadas com suavização
+    "nucleo_ma_sem_suav": 16121,    # médias aparadas sem suavização
+    "nucleo_dupla_pond":  16122,    # dupla ponderação
+    "nucleo_ex2":         27838,    # exclusão EX2
+    "nucleo_ex3":         27839,    # exclusão EX3
+}
+# CPI EUA por componente (índice — YoY calculado abaixo) via FRED:
+_CPI_COMPONENTES_US = {
+    "core":           "CPILFESL",        # all items less food & energy
+    "energia":        "CPIENGSL",        # energy
+    "alimentos":      "CPIUFDSL",        # food
+    "shelter":        "CUSR0000SAH1",    # shelter (40% do core — sticky)
+    "servicos_core":  "CUSR0000SASLE",   # services less energy services
+    "bens_core":      "CUSR0000SACL1E",  # commodities less food & energy
+}
+
+
+def _acumular_12m(serie: pd.Series) -> pd.Series:
+    """Acumula uma série de variação mensal (%) em janela de 12 meses (composto)."""
+    s = serie.dropna()
+    return ((1 + s / 100).rolling(12).apply(lambda x: x.prod(), raw=True) - 1) * 100
+
+
+def fetch_inflacao_setorial():
+    """
+    Decomposição setorial da inflação — alimenta a camada de transmissão
+    macro→setor→ativo (utils/inflation_sectoral.py).
+
+    BR (BCB SGS): grupos + categorias (serviços/administrados/livres) + núcleos.
+                  Persiste snapshot 'inflacao_br' com colunas mensais e *_12m.
+    EUA (FRED):   componentes do CPI (core/shelter/serviços/bens/energia/alimentos),
+                  com YoY. Persiste snapshot 'inflacao_us'.
+    Também salva valores pontuais (12m/YoY) em macro_cache para o cockpit.
+    """
+    # ── Brasil ────────────────────────────────────────────────────────────────
+    try:
+        from bcb import sgs
+        inicio_10a = (dt.date.today() - dt.timedelta(days=365 * 10)).isoformat()
+        todos = {**_IPCA_GRUPOS_BR, **_IPCA_CATEGORIAS_BR, **_IPCA_NUCLEOS_BR}
+
+        cols = {}
+        for nome, codigo in todos.items():
+            try:
+                _df = sgs.get({nome: codigo}, start=inicio_10a)
+                if _df is not None and not _df.empty:
+                    cols[nome] = _df[nome]
+                    print(f"  [infl BR] {nome} ({codigo}): {len(_df)} pts")
+            except Exception as _e:
+                print(f"  [infl BR] {nome} ({codigo}): {_e}")
+
+        if cols:
+            df_infl_br = pd.DataFrame(cols)
+            # acumulado 12m por coluna (cost-push / pricing-power setorial)
+            for nome in list(df_infl_br.columns):
+                try:
+                    df_infl_br[f"{nome}_12m"] = _acumular_12m(df_infl_br[nome]).reindex(df_infl_br.index)
+                except Exception as e:
+                    logger.debug(f"falha 12m {nome}: {e}")
+            _salvar_snapshot_historico("inflacao_br", df_infl_br)
+
+            # valores pontuais p/ cockpit (último 12m disponível)
+            def _last12(nome):
+                c = f"{nome}_12m"
+                if c in df_infl_br.columns and not df_infl_br[c].dropna().empty:
+                    return round(float(df_infl_br[c].dropna().iloc[-1]), 2)
+                return None
+
+            _nuc = [_last12(n) for n in _IPCA_NUCLEOS_BR if _last12(n) is not None]
+            if _nuc:
+                upsert_macro("ipca_nucleo_12m", round(sum(_nuc) / len(_nuc), 2),
+                             label="IPCA Núcleo (média 12m)", unit="%", source="bcb")
+            for _k, _lbl in [("servicos", "IPCA Serviços 12m"),
+                             ("administrados", "IPCA Administrados 12m"),
+                             ("livres", "IPCA Livres 12m")]:
+                _v = _last12(_k)
+                if _v is not None:
+                    upsert_macro(f"ipca_{_k}_12m", _v, label=_lbl, unit="%", source="bcb")
+                    print(f"  [infl BR] ipca_{_k}_12m = {_v}")
+    except Exception as e:
+        print(f"  [infl BR] ERRO: {e}")
+
+    # ── EUA ───────────────────────────────────────────────────────────────────
+    if not FRED_API_KEY:
+        print("  [infl US] FRED_API_KEY ausente, pulando")
+    else:
+        try:
+            from fredapi import Fred
+            fred = Fred(api_key=FRED_API_KEY)
+            inicio_10a = dt.date.today() - dt.timedelta(days=365 * 10)
+
+            cols_us = {}
+            for nome, serie_id in _CPI_COMPONENTES_US.items():
+                try:
+                    _s = fred.get_series(serie_id, observation_start=inicio_10a)
+                    if _s is not None and not _s.empty:
+                        cols_us[nome] = _s
+                        print(f"  [infl US] {nome} ({serie_id}): {len(_s)} pts")
+                except Exception as _e:
+                    print(f"  [infl US] {nome} ({serie_id}): {_e}")
+
+            if cols_us:
+                df_infl_us = pd.DataFrame(cols_us)
+                for nome in list(df_infl_us.columns):
+                    try:
+                        _m = df_infl_us[nome].dropna()
+                        if len(_m) >= 13:
+                            df_infl_us[f"{nome}_yoy"] = (
+                                _m.pct_change(12, fill_method=None) * 100
+                            ).reindex(df_infl_us.index)
+                    except Exception as e:
+                        logger.debug(f"falha yoy {nome}: {e}")
+                _salvar_snapshot_historico("inflacao_us", df_infl_us)
+
+                def _last_yoy(nome):
+                    c = f"{nome}_yoy"
+                    if c in df_infl_us.columns and not df_infl_us[c].dropna().empty:
+                        return round(float(df_infl_us[c].dropna().iloc[-1]), 2)
+                    return None
+
+                for _k, _lbl in [("core", "US Core CPI YoY"),
+                                 ("shelter", "US Shelter CPI YoY"),
+                                 ("servicos_core", "US Core Services CPI YoY"),
+                                 ("bens_core", "US Core Goods CPI YoY")]:
+                    _v = _last_yoy(_k)
+                    if _v is not None:
+                        upsert_macro(f"us_cpi_{_k}_yoy", _v, label=_lbl, unit="%", source="fred")
+                        print(f"  [infl US] us_cpi_{_k}_yoy = {_v}")
+        except Exception as e:
+            print(f"  [infl US] ERRO: {e}")
+
+
 def main():
     print("[sync_macro] inicio")
     log_id = log_etl_start("sync_macro")
@@ -323,6 +479,9 @@ def main():
 
     print("[sync_macro] FRED...")
     fetch_fred()
+
+    print("[sync_macro] inflação setorial (IPCA/CPI)...")
+    fetch_inflacao_setorial()
 
     print("[sync_macro] yfinance...")
     fetch_yfinance_macro()

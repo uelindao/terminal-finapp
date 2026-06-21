@@ -244,8 +244,9 @@ def calcular_indicadores_ciclo_br() -> dict:
     try:
         macro = st.session_state.get('macro_context', {})
         selic = float(macro.get('selic', 10.75))
-        ipca_mensal = float(macro.get('ipca', 0.45))
-        ipca_12m = ipca_mensal * 12  # aproximação se não tiver acumulado
+        # 'ipca'/'ipca_12m' já são o acumulado 12m (% a.a.) — ver contrato em
+        # utils/macro_context.py. 'ipca_mensal' é o print do mês (não usar aqui).
+        ipca_12m = float(macro.get('ipca_12m') or macro.get('ipca', 4.5))
 
         # ── 1. Selic real (Selic - IPCA esperado) ────────────────────────
         # Selic real alta → aperto monetário → contração/pico

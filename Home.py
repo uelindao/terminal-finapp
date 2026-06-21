@@ -1080,10 +1080,13 @@ ambiente = calcular_ambiente_macro(
 st.session_state['macro_score']   = ambiente['score']
 st.session_state['macro_label']   = ambiente['label']
 st.session_state['selic']         = dados_sem.get('selic') or 10.75
+# 'ipca'/'ipca_12m' = acumulado 12m (% a.a.) — ver contrato em utils/macro_context.py
+_ipca12_home = dados_sem.get('ipca_12m') or dados_sem.get('ipca') or 4.5
 st.session_state['macro_context'] = {
-    'selic': dados_sem.get('selic') or 10.75,
-    'vix':   dados_sem.get('vix')   or 15.0,
-    'ipca':  dados_sem.get('ipca_12m') or dados_sem.get('ipca') or 4.5,
+    'selic':    dados_sem.get('selic') or 10.75,
+    'vix':      dados_sem.get('vix')   or 15.0,
+    'ipca':     _ipca12_home,
+    'ipca_12m': _ipca12_home,
 }
 
 # ── renderização: HERO MACRO (Zona 1) ────────────────────────────────────────
