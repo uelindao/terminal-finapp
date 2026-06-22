@@ -559,6 +559,7 @@ def build_portfolio_context_v2(
     fx_exposicao: dict = None,
     dy_carteira: float = None,
     health_medio: float = None,
+    exposicao_macro: dict = None,
 ) -> str:
     """
     Contexto rico para chat de portfolio.
@@ -613,5 +614,20 @@ def build_portfolio_context_v2(
 
     if macro:
         linhas.append(bloco_macro(macro))
+
+    if exposicao_macro:
+        linhas.append(
+            "\nexposição macro do book (tilt regime + inflação setorial, "
+            "ponderado por peso):\n"
+            f"- tilt macro médio: {exposicao_macro.get('tilt_medio', 0):+.1f} "
+            f"(escala −8 contra … +8 a favor)\n"
+            f"- {exposicao_macro.get('leitura', '')}\n"
+            f"- peso em setores favoráveis: {exposicao_macro.get('pct_favoravel', 0):.0f}% | "
+            f"desfavoráveis: {exposicao_macro.get('pct_desfavoravel', 0):.0f}%\n"
+            f"- exposto a duration (setores sob juro alto): "
+            f"{exposicao_macro.get('duration_exposta_pct', 0):.0f}% | "
+            f"com proteção inflacionária (receita indexada): "
+            f"{exposicao_macro.get('inflacao_protegida_pct', 0):.0f}%"
+        )
 
     return "\n".join(linhas)

@@ -5200,12 +5200,41 @@ with tab_chat:
 
         macro = st.session_state.get("macro_context", {})
         if macro:
+            try:
+                from utils.macro_state import selic_real_fisher
+                _sel = float(macro.get('selic', 10.75))
+                _ip = float(macro.get('ipca_12m') or macro.get('ipca', 4.5))
+                _jr = f" | juro real (fisher): {selic_real_fisher(_sel, _ip):+.1f}%"
+            except Exception:
+                _ip, _jr = float(macro.get('ipca_12m') or macro.get('ipca', 4.5)), ""
             linhas.append(
                 f"\nambiente macro atual:\n"
-                f"- selic: {macro.get('selic', 10.75):.2f}%\n"
+                f"- selic: {macro.get('selic', 10.75):.2f}% | ipca 12m: {_ip:.1f}%{_jr}\n"
                 f"- vix: {macro.get('vix', 15.0):.1f}\n"
                 f"- ambiente: {macro.get('label', 'neutro')}"
             )
+
+        # exposição macro do book (regime + inflação setorial)
+        if _enriched and _total_valor > 0:
+            try:
+                from utils.portfolio_sizing import exposicao_macro_book
+                _cf_chat = get_todos_fundamentos_cache() or {}
+                _pesos_b, _setor_b = {}, {}
+                for _e in _enriched:
+                    _tbb = mapear_ticker_base(_e['ticker'])
+                    _pesos_b[_tbb] = _pesos_b.get(_tbb, 0.0) + _e['valor']
+                    _setor_b[_tbb] = (_cf_chat.get(_tbb, {}) or _cf_chat.get(_e['ticker'], {}) or {}).get('setor', '')
+                _exp_b = exposicao_macro_book(_pesos_b, _setor_b, macro or {})
+                if _exp_b:
+                    linhas.append(
+                        f"\nexposição macro do book (tilt regime+inflação setorial):\n"
+                        f"- tilt macro médio: {_exp_b['tilt_medio']:+.1f} (−8 contra … +8 a favor)\n"
+                        f"- {_exp_b['leitura']}\n"
+                        f"- favorável: {_exp_b['pct_favoravel']:.0f}% | desfavorável: {_exp_b['pct_desfavoravel']:.0f}% | "
+                        f"duration: {_exp_b['duration_exposta_pct']:.0f}% | proteção inflação: {_exp_b['inflacao_protegida_pct']:.0f}%"
+                    )
+            except Exception as _e_eb:
+                logger.debug(f"[chat] exposição macro (fallback) falhou: {_e_eb}")
 
         return "\n".join(linhas)
 
@@ -5281,6 +5310,22 @@ with tab_chat:
             else:
                 _hs_medio = None
 
+            # Exposição macro do book (tilt regime + inflação setorial) → IA
+            _exp_macro_chat = None
+            try:
+                from utils.portfolio_sizing import exposicao_macro_book
+                _pesos_macro_chat, _setor_macro_chat = {}, {}
+                for e in _enriched_v2:
+                    _tbm = mapear_ticker_base(e['ticker'])
+                    _pesos_macro_chat[_tbm] = _pesos_macro_chat.get(_tbm, 0.0) + e['valor']
+                    _setor_macro_chat[_tbm] = e.get('setor', '')
+                _exp_macro_chat = exposicao_macro_book(
+                    _pesos_macro_chat, _setor_macro_chat,
+                    st.session_state.get("macro_context", {}),
+                )
+            except Exception as _e_exp_ai:
+                logger.debug(f"[chat] exposição macro p/ IA falhou: {_e_exp_ai}")
+
             st.session_state[_ctx_key] = build_portfolio_context_v2(
                 posicoes_enriched   = _enriched_v2,
                 metricas            = metricas_chat,
@@ -5289,6 +5334,7 @@ with tab_chat:
                 fx_exposicao        = _fx,
                 dy_carteira         = None,
                 health_medio        = _hs_medio,
+                exposicao_macro     = _exp_macro_chat,
             )
         except Exception:
             st.session_state[_ctx_key] = montar_contexto_carteira(
