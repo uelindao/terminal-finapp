@@ -76,3 +76,27 @@ def test_book_alinhado_macro():
     exp = exposicao_macro_book(pesos, setor, macro)
     assert exp["tilt_medio"] > 0
     assert "ALINHADO" in exp["leitura"]
+
+
+def test_exposicao_macro_entra_no_prompt_da_ia():
+    """A exposição macro do book deve aparecer no contexto enviado à IA."""
+    from utils.ai_prompts import build_portfolio_context_v2
+
+    exp = {
+        "tilt_medio": -3.2, "pct_favoravel": 10.0, "pct_desfavoravel": 70.0,
+        "duration_exposta_pct": 65.0, "inflacao_protegida_pct": 8.0,
+        "leitura": "⚠️ o book está BRIGANDO com o macro",
+    }
+    ctx = build_portfolio_context_v2(
+        posicoes_enriched=[{"ticker": "MGLU3.SA", "peso_pct": 50, "health_score": 30, "setor": "varejo"}],
+        metricas={}, macro={"selic": 14.75, "ipca": 5.0, "vix": 16.5},
+        exposicao_macro=exp,
+    )
+    assert "exposição macro do book" in ctx
+    assert "BRIGANDO" in ctx
+    assert "duration" in ctx
+    # sem exposição → bloco ausente (não quebra)
+    ctx2 = build_portfolio_context_v2(
+        posicoes_enriched=[], metricas={}, macro={"selic": 14.75, "ipca": 5.0, "vix": 16.5},
+    )
+    assert "exposição macro do book" not in ctx2
