@@ -56,53 +56,9 @@ _FASE_RISK_ON  = {"expansao", "vale"}    # janelas pró-risco/cíclico
 _FASE_RISK_OFF = {"pico", "contracao"}   # janelas defensivas
 
 
-# ── Taxonomia setorial canônica ──────────────────────────────────────────────
-# O terminal recebe setores em inglês (yfinance/FMP: "Financial Services") E em
-# português (cache/CVM/traduzir_setor: "🏦 financeiro"). Sem normalizar, o
-# cruzamento setor↔regime/inflação falha silenciosamente. Esta é a chave única.
-_SETOR_CANON = {
-    # English (yfinance / FMP)
-    "financial services":     "financeiro",
-    "technology":             "tecnologia",
-    "communication services": "comunicacao",
-    "healthcare":             "saude",
-    "consumer cyclical":      "consumo_ciclico",
-    "consumer defensive":     "consumo_defensivo",
-    "industrials":            "industria",
-    "basic materials":        "materiais",
-    "energy":                 "energia",
-    "utilities":              "utilities",
-    "real estate":            "imobiliario",
-    # Portuguese (cache / CVM / traduzir_setor — podem vir com emoji prefixo)
-    "financeiro":             "financeiro",
-    "tecnologia":             "tecnologia",
-    "telecom":                "comunicacao",
-    "comunicação":            "comunicacao",
-    "saúde":                  "saude",
-    "consumo cíclico":        "consumo_ciclico",
-    "consumo def.":           "consumo_defensivo",
-    "consumo defensivo":      "consumo_defensivo",
-    "consumo básico":         "consumo_defensivo",
-    "indústria":              "industria",
-    "materiais":              "materiais",
-    "energia":                "energia",
-    "imobiliário":            "imobiliario",
-}
-
-def normalizar_setor(setor: str | None) -> str:
-    """
-    Reduz um rótulo de setor (EN ou PT, com ou sem emoji) à chave canônica.
-    Ex.: 'Financial Services' → 'financeiro'; '🏦 financeiro' → 'financeiro'.
-    Devolve o texto em minúsculas se não reconhecer.
-    """
-    if not setor:
-        return ""
-    s = str(setor).strip().lower()
-    # match por substring (cobre prefixos de emoji e sufixos tipo " br")
-    for label, canon in _SETOR_CANON.items():
-        if label in s:
-            return canon
-    return s
+# Taxonomia setorial canônica consolidada em utils/setores (era definida aqui).
+# Reexportado para compat: `from utils.macro_state import normalizar_setor`.
+from utils.setores import normalizar_setor, _SETOR_CANON  # noqa: F401
 
 
 # ── Tilt setorial por primeiros princípios (consistente entre regimes) ───────

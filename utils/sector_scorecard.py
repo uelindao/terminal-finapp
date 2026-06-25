@@ -17,24 +17,9 @@ from __future__ import annotations
 from utils.st_fallback import st, ST_AVAILABLE as _ST
 
 from utils.logger import get_logger
-from utils.macro_state import normalizar_setor
+from utils.setores import normalizar_setor, LABEL_SETOR as _LABEL_SETOR
 
 logger = get_logger(__name__)
-
-# Rótulo de exibição por setor canônico.
-_LABEL_SETOR = {
-    "financeiro":        "🏦 financeiro",
-    "tecnologia":        "💻 tecnologia",
-    "energia":           "⛽ energia",
-    "materiais":         "⛏️ materiais",
-    "industria":         "🏭 indústria",
-    "consumo_ciclico":   "🛒 consumo cíclico",
-    "consumo_defensivo": "🧺 consumo defensivo",
-    "saude":             "🏥 saúde",
-    "utilities":         "⚡ utilities",
-    "imobiliario":       "🏢 imobiliário",
-    "comunicacao":       "📡 comunicação",
-}
 
 # Pesos da nota composta.
 _W_FUND, _W_TEC, _W_MAC = 0.45, 0.25, 0.30
