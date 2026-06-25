@@ -1,19 +1,4 @@
-try:
-    import streamlit as st
-    _ST_AVAILABLE = True
-except ImportError:
-    # ETL context (GitHub Actions) — sem Streamlit instalado
-    class _NoOpCache:
-        def __call__(self, *a, **kw):
-            return lambda f: f
-    class _FakeSt:
-        cache_data = _NoOpCache()
-        class session_state:
-            @staticmethod
-            def get(*a, **kw):
-                return kw.get('default', a[1] if len(a) > 1 else {})
-    st = _FakeSt()
-    _ST_AVAILABLE = False
+from utils.st_fallback import st, ST_AVAILABLE as _ST_AVAILABLE
 
 import yfinance as yf
 import pandas as pd
@@ -47,14 +32,8 @@ MULTIPLOS_SETOR: dict[str, tuple] = {
 }
 
 
-def safe_float(val, default=None) -> float | None:
-    """Converte valor para float de forma segura, tratando string/None."""
-    if val is None:
-        return default
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return default
+# safe_float consolidado em utils/formatters (era duplicado em 3 lugares).
+from utils.formatters import safe_float
 
 
 def safe_int(val, default=0) -> int:
@@ -1102,11 +1081,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         if preco_cached and preco_cached.get('rsi_14') is not None:
             rsi = float(preco_cached['rsi_14'])
         if rsi is None and len(close) >= 15:
-            delta = close.diff()
-            ganho = delta.clip(lower=0).rolling(14).mean()
-            perda = (-delta.clip(upper=0)).rolling(14).mean()
-            rs = ganho / perda.replace(0, float('nan'))
-            rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(perda) >= 14 else 50
+            from utils.indicators import rsi_last as _rsi_last
+            rsi = _rsi_last(close, 14, default=50)
         if rsi is None:
             rsi = 50
         
@@ -1144,9 +1120,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             [_ret_ativo, _ret_bench], axis=1
                         ).dropna()
                         if len(_df_beta) >= 30:
-                            _cov = _df_beta.cov().iloc[0, 1]
-                            _var = _df_beta.iloc[:, 1].var()
-                            beta_val = _cov / _var if _var > 0 else 1.0
+                            from utils.indicators import beta as _beta_fn
+                            beta_val = _beta_fn(_ret_ativo, _ret_bench)
+                            if beta_val is None:
+                                beta_val = 1.0
                 except Exception as e:
                     logger.debug(f"[health_engine] falha ao calcular beta para {ticker}: {e}")
                     beta_val = 1.0

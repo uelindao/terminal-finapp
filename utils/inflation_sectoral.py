@@ -24,17 +24,7 @@ de inflação é 0 e só o tilt de regime entra — o score nunca quebra.
 """
 from __future__ import annotations
 
-try:
-    import streamlit as st
-    _ST = True
-except ImportError:
-    class _NoOpCache:
-        def __call__(self, *a, **kw):
-            return lambda f: f
-    class _FakeSt:
-        cache_data = _NoOpCache()
-    st = _FakeSt()
-    _ST = False
+from utils.st_fallback import st, ST_AVAILABLE as _ST
 
 from utils.logger import get_logger
 from utils.macro_state import tilt_setor, normalizar_setor

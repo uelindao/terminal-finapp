@@ -36,7 +36,7 @@ from utils.components import (
 )
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime, get_impacto_setor
-from utils.formatters import fmt_preco, fmt_pct, fmt_numero
+from utils.formatters import fmt_preco, fmt_pct, fmt_numero, safe_float
 from utils.charts import base_layout, CORES_SERIES, base100, linha, chart_type_toggle, barras_verticais, _cores as _chart_cores
 
 # 1. barreira de segurança multi-usuário
@@ -71,15 +71,8 @@ CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 # ==========================================
 # MOTOR DE BUSCA GLOBAL (YAHOO FINANCE)
 # ==========================================
-def buscar_ativo_yahoo(query):
-    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
-    headers = {'user-agent': 'Mozilla/5.0'}
-    try:
-        r = requests.get(url, headers=headers, timeout=5)
-        return r.json().get('quotes', [])
-    except Exception as e:
-        logging.getLogger(__name__).debug(f"[buscar_ativo_yahoo] falha: {e}")
-        return []
+# buscar_ativo_yahoo consolidado em utils/market_data (era duplicado em Home).
+from utils.market_data import buscar_ativo_yahoo
 
 # ==========================================
 # GESTÃO DE ESTADO E SIDEBAR
@@ -281,11 +274,7 @@ with st.sidebar:
                 )
 
 # Trava de segurança para números
-def safe_float(val):
-    try:
-        if val is None or pd.isna(val): return None
-        return float(val)
-    except: return None
+# safe_float consolidado em utils/formatters (importado acima).
 
 def calcular_crescimento_implicito(preco, eps, wacc, g_terminal, n_anos):
     try:
@@ -1677,12 +1666,8 @@ with tab_analise:
         try:
             if not df_hist.empty and len(df_hist) >= 20:
                 _close = df_hist['Close']
-                _delta = _close.diff()
-                _gain = _delta.where(_delta > 0, 0).rolling(14).mean()
-                _loss = (-_delta.where(_delta < 0, 0)).rolling(14).mean()
-                _rs = _gain / _loss
-                _rsi_v = (100 - 100 / (1 + _rs)).iloc[-1]
-                _tec_data['rsi'] = float(_rsi_v) if pd.notna(_rsi_v) else None
+                from utils.indicators import rsi_last as _rsi_last
+                _tec_data['rsi'] = _rsi_last(_close, 14, default=None)
 
                 _hi52 = float(_close.tail(252).max()) if len(_close) >= 50 else float(_close.max())
                 _tec_data['dist_topo_52w'] = ((_close.iloc[-1] / _hi52) - 1) * 100 if _hi52 > 0 else None
@@ -1952,9 +1937,9 @@ with tab_analise:
                 _r_b = _h_bench['Close'].pct_change().dropna()
                 _df_b = pd.concat([_r_a, _r_b], axis=1).dropna()
                 if len(_df_b) >= 30:
-                    _cov_b = _df_b.cov().iloc[0, 1]
-                    _var_b = _df_b.iloc[:, 1].var()
-                    _beta_tab = round(_cov_b / _var_b, 2) if _var_b > 0 else None
+                    from utils.indicators import beta as _beta_fn
+                    _b = _beta_fn(_r_a, _r_b)
+                    _beta_tab = round(_b, 2) if _b is not None else None
         except Exception:
             pass
     if _de_tab is None:

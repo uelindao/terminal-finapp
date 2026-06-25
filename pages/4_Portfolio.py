@@ -641,10 +641,8 @@ def rodar_backtesting_score(
             _fonte_score = 'proxy_tecnico'
 
             # ── PROXY DE SCORE TÉCNICO-QUANTITATIVO ──────────────────
-            _delta   = _hist.diff()
-            _gain    = _delta.clip(lower=0).rolling(14).mean()
-            _loss    = (-_delta.clip(upper=0)).rolling(14).mean()
-            _rsi     = (100 - (100 / (1 + _gain / _loss.replace(0, np.nan)))).fillna(50)
+            from utils.indicators import rsi as _rsi_series
+            _rsi     = _rsi_series(_hist, 14).fillna(50)
 
             _mom_12_1 = pd.Series(np.nan, index=_hist.index)
             if len(_hist) >= 252:
