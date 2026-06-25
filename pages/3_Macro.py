@@ -28,8 +28,8 @@ from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
 from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores
 from utils.macro_context import garantir_macro_context
-from utils.macro_regime import classificar_regime, get_impacto_setor
-from utils.regime_classifier import classificar_regime_do_macro_context
+# Regime consolidado via macro_state.get_macro_state (substitui o uso direto de
+# macro_regime/regime_classifier no hero — agora há uma leitura única).
 from utils.macro_supabase import (
     carregar_fear_greed, salvar_fear_greed,
     carregar_snapshot, salvar_snapshot,
@@ -74,50 +74,60 @@ if "FRED_API_KEY" not in st.secrets:
         icone  = "⚠",
     )
 
-# ── Regime Macro — classificador automático ──────────────────────────────────
-section_title("regime macro — classificador automático")
+# ── Regime Macro — leitura CONSOLIDADA (fonte única: macro_state) ────────────
+# Antes havia 3 leituras concorrentes do regime (este hero + aba ciclo + setores
+# do macro_regime). Agora o hero é a síntese dos 3 motores via macro_state, com
+# o campo de CONSENSO. A aba ciclo continua como o deep-dive detalhado.
+section_title("regime macro — leitura consolidada (3 motores)")
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _regime_macro_cached():
+def _macro_state_cached():
     """
-    Cache 1h. O classificador faz 4-5 chamadas yfinance em sequência
-    (^TNX, ^VIX, ^IRX, SPY, ^BVSP). Sem cache, cada render da página
-    dispara todas elas — lento e arrisca rate limit.
+    Estado macro CANÔNICO consolidando os 3 motores de regime: selic×vix
+    (macro_regime), curva/vix/cpi/momentum (regime_classifier) e leading
+    indicators BR/US (ciclo_economico) — com campo de consenso. Cache 1h:
+    faz várias chamadas yfinance (compartilhadas via close_series).
     """
-    return classificar_regime_do_macro_context()
+    from utils.macro_state import get_macro_state
+    return get_macro_state()
+
+
+def _fase_tom(fase: str) -> str:
+    return {"expansao": "bull", "vale": "bull",
+            "pico": "amber", "contracao": "bear"}.get(fase, "amber")
+
 
 try:
-    _regime = _regime_macro_cached()
-    # Mapeia fase do regime → tom do hero_macro
+    _ms = _macro_state_cached()
     _tom_regime = {
-        "expansao":  "bull",
-        "pico":      "amber",
-        "contracao": "accent",
-        "vale":      "bear",
-    }.get(_regime.fase, "amber")
+        "alinhado_risk_on":  "bull",
+        "alinhado_risk_off": "bear",
+        "divergente":        "amber",
+    }.get(_ms.consenso, "amber")
 
-    # Converte sinais (dict) em lista de tuplas (nome, status, tipo, valor)
-    _sinais_lst = []
-    for k, v in _regime.sinais.items():
-        if v is True:
-            _status, _tipo, _val = "ativo", "bull", "✓"
-        elif v is False:
-            _status, _tipo, _val = "ausente", "bear", "✗"
-        else:
-            _status, _tipo, _val = "indef.", "amber", "—"
-        _sinais_lst.append((k, _status, _tipo, _val))
+    _sr_tom = "bear" if _ms.selic_real > 7 else ("amber" if _ms.selic_real > 4 else "bull")
+    _sinais_lst = [
+        ("ciclo (curva/vix/cpi/mom)", _ms.fase_ciclo, _fase_tom(_ms.fase_ciclo), f"{int(_ms.fase_prob*100)}%"),
+        ("ciclo br (leading)",        _ms.fase_br,    _fase_tom(_ms.fase_br),    "🇧🇷"),
+        ("ciclo us (leading)",        _ms.fase_us,    _fase_tom(_ms.fase_us),    "🇺🇸"),
+        ("regime juro×risco",         _ms.regime_label, _tom_regime,            f"{_ms.score_ambiente}/100"),
+        ("juro real (fisher)",        f"{_ms.selic_real:+.1f}%", _sr_tom,        "selic"),
+    ]
+    if _ms.curve_slope_10y_2y is not None:
+        _cs_tom = "bear" if _ms.curve_slope_10y_2y < 0 else "bull"
+        _sinais_lst.append(("curva us 10y-2y", f"{_ms.curve_slope_10y_2y:+.2f}pp", _cs_tom, "slope"))
 
     hero_macro(
-        score      = int(_regime.probabilidade * 100),
-        label      = _regime.fase.upper(),
-        descricao  = _regime.leitura,
-        tom        = _tom_regime,
-        sinais     = _sinais_lst,
+        score     = int(_ms.fase_prob * 100),
+        label     = f"{_ms.fase_ciclo.upper()} · {_ms.regime_label}",
+        descricao = _ms.consenso_nota,
+        tom       = _tom_regime,
+        sinais    = _sinais_lst,
     )
 except Exception as e:
     info_box(
         tipo   = "amber",
-        titulo = "classificador de regime indisponível",
+        titulo = "leitura de regime indisponível",
         texto  = str(e),
         icone  = "⚠",
     )
