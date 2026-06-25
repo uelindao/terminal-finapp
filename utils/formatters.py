@@ -54,19 +54,11 @@ def fmt_preco(n, moeda="R$"):
 
 
 def traduzir_setor(setor_raw: str) -> str:
-    """Traduz nome de setor em inglês (yfinance / FMP) para label PT-BR com emoji."""
-    mapa = {
-        "Energy":                 "⛽ energia",
-        "Financial Services":     "🏦 financeiro",
-        "Technology":             "💻 tecnologia",
-        "Healthcare":             "🏥 saúde",
-        "Consumer Cyclical":      "🛒 consumo cíclico",
-        "Consumer Defensive":     "🛒 consumo def.",
-        "Industrials":            "🏭 indústria",
-        "Basic Materials":        "⛏️ materiais",
-        "Real Estate":            "🏢 imobiliário",
-        "Utilities":              "⚡ utilities",
-        "Communication Services": "📡 telecom",
-        "Financeiro":             "🏦 financeiro",
-    }
-    return mapa.get(setor_raw, setor_raw.lower() if setor_raw else "—")
+    """
+    Rótulo PT-BR + emoji a partir do setor (EN do yfinance/FMP ou PT do cache).
+    Delega à taxonomia canônica em utils/setores (antes tinha mapa próprio).
+    Mesmos labels para os setores GICS; agora case-insensitive (entradas já em
+    PT/minúsculas também recebem o rótulo certo). Desconhecido → texto; vazio → '—'.
+    """
+    from utils.setores import label_setor
+    return label_setor(setor_raw)
