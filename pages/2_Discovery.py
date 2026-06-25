@@ -416,18 +416,19 @@ def rodar_screener(
 
 
 # 6. interface de separadores (tabs)
-tab_screen, tab_mom, tab_ia, tab_setorial, tab_radar = st.tabs([
+# Momentum e Radar fundidos numa única aba (antes eram duas que se sobrepunham):
+# momentum = força relativa técnica; radar = oportunidades por health×valuation×timing.
+tab_screen, tab_momradar, tab_ia, tab_setorial = st.tabs([
     "🔍 screener quantitativo",
-    "🚀 momentum (força relativa)",
+    "🚀 momentum & radar",
     "🧠 ia: oportunidades do dia",
     "🗺️ rotação setorial",
-    "⚡ radar de mercado",
 ])
 
 # ==========================================
 # tab 1 — momentum (força relativa)
 # ==========================================
-with tab_mom:
+with tab_momradar:
     section_title("🚀 momentum screener — força relativa")
 
     status_card(
@@ -1862,7 +1863,8 @@ with tab_setorial:
 # ==========================================
 # tab 5 — radar de mercado
 # ==========================================
-with tab_radar:
+with tab_momradar:
+    st.markdown("<hr style='margin:32px 0 8px;border:0;border-top:1px solid var(--border-subtle);'>", unsafe_allow_html=True)
     section_title("⚡ radar de mercado — oportunidades fora da sua watchlist")
     tooltip("score_assimetria")
 
