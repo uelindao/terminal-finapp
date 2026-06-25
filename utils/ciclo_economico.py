@@ -21,6 +21,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Série de Close cacheada (Tier 3): consolida o padrão yf.Ticker().history().
+from utils.market_data import close_series
+
 
 # ── Definição das 4 fases e implicações setoriais ─────────────────────────────
 # Baseado em Fama-French (1989) e MSCI Sector Rotation
@@ -220,7 +223,6 @@ def calcular_indicadores_ciclo_br() -> dict:
 
     Retorna dict com scores e valores dos indicadores.
     """
-    import yfinance as yf
 
     resultado = {
         'indicadores': {},
@@ -286,12 +288,8 @@ def calcular_indicadores_ciclo_br() -> dict:
         # Usa diferença entre ETFs de prazo diferente como proxy
         # IMA-B 5 (curto) vs IMA-B 5+ (longo) via IMAB11 e B5P211
         try:
-            _imab = yf.Ticker('IMAB11.SA').history(
-                period='3mo', auto_adjust=True
-            )['Close'].dropna()
-            _imab5p = yf.Ticker('B5P211.SA').history(
-                period='3mo', auto_adjust=True
-            )['Close'].dropna()
+            _imab = close_series('IMAB11.SA', '3mo')
+            _imab5p = close_series('B5P211.SA', '3mo')
 
             if len(_imab) >= 20 and len(_imab5p) >= 20:
                 _ret_longo = float(
@@ -329,9 +327,7 @@ def calcular_indicadores_ciclo_br() -> dict:
 
         # ── 3. Momentum do IBOV (proxy atividade econômica) ──────────────
         try:
-            _ibov = yf.Ticker('^BVSP').history(
-                period='1y', auto_adjust=True
-            )['Close'].dropna()
+            _ibov = close_series('^BVSP', '1y')
 
             if len(_ibov) >= 252:
                 _ibov_at   = float(_ibov.iloc[-1])
@@ -370,9 +366,7 @@ def calcular_indicadores_ciclo_br() -> dict:
 
         # ── 4. Câmbio USD/BRL (proxy aversão a risco emergente) ──────────
         try:
-            _brl = yf.Ticker('BRL=X').history(
-                period='6mo', auto_adjust=True
-            )['Close'].dropna()
+            _brl = close_series('BRL=X', '6mo')
 
             if len(_brl) >= 60:
                 _brl_at   = float(_brl.iloc[-1])
@@ -403,12 +397,8 @@ def calcular_indicadores_ciclo_br() -> dict:
 
         # ── 5. Commodities (proxy demanda global + termos de troca BR) ───
         try:
-            _oil = yf.Ticker('CL=F').history(
-                period='6mo', auto_adjust=True
-            )['Close'].dropna()
-            _iron = yf.Ticker('TIO=F').history(
-                period='6mo', auto_adjust=True
-            )['Close'].dropna()
+            _oil = close_series('CL=F', '6mo')
+            _iron = close_series('TIO=F', '6mo')
 
             _comm_score = 0
             _n_comm = 0
@@ -485,7 +475,6 @@ def calcular_indicadores_ciclo_us() -> dict:
     5. Credit spreads (HYG vs IEF como proxy)
     6. Desemprego trend
     """
-    import yfinance as yf
 
     resultado = {
         'indicadores': {},
@@ -512,9 +501,7 @@ def calcular_indicadores_ciclo_us() -> dict:
 
         # ── 1. Yield Curve 10y-2y (melhor predictor de recessão EUA) ────
         try:
-            _t2y = yf.Ticker('^IRX').history(
-                period='2d', auto_adjust=True
-            )['Close'].dropna()
+            _t2y = close_series('^IRX', '2d')
             if not _t2y.empty:
                 _yield_2y = float(_t2y.iloc[-1]) / 100
                 _spread_ycurve = treasury_10y - (_yield_2y * 100)
@@ -553,9 +540,7 @@ def calcular_indicadores_ciclo_us() -> dict:
 
         # ── 2. S&P500 Momentum (6 meses) ─────────────────────────────────
         try:
-            _sp500 = yf.Ticker('^GSPC').history(
-                period='1y', auto_adjust=True
-            )['Close'].dropna()
+            _sp500 = close_series('^GSPC', '1y')
 
             if len(_sp500) >= 126:
                 _sp_at   = float(_sp500.iloc[-1])
@@ -592,12 +577,8 @@ def calcular_indicadores_ciclo_us() -> dict:
         # HYG = High Yield bonds, IEF = Investment Grade Treasuries
         # Spread abrindo = stress de crédito = recessão
         try:
-            _hyg = yf.Ticker('HYG').history(
-                period='6mo', auto_adjust=True
-            )['Close'].dropna()
-            _ief = yf.Ticker('IEF').history(
-                period='6mo', auto_adjust=True
-            )['Close'].dropna()
+            _hyg = close_series('HYG', '6mo')
+            _ief = close_series('IEF', '6mo')
 
             if len(_hyg) >= 60 and len(_ief) >= 60:
                 # Ratio HYG/IEF — caindo = spreads abrindo = stress

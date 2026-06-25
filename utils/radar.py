@@ -56,13 +56,10 @@ def calcular_oportunidades_watchlist(
             continue
 
         try:
-            hist = yf.Ticker(t_base).history(
-                period="1y", auto_adjust=True
-            )
-            if hist.empty or len(hist) < 60:
+            from utils.market_data import close_series
+            close = close_series(t_base, "1y")
+            if len(close) < 60:
                 continue
-
-            close = hist['Close'].dropna()
 
             preco_atual = float(close.iloc[-1])
             high_52w    = float(close.max())

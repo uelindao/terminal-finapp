@@ -49,6 +49,31 @@ def buscar_ativo_yahoo(query: str) -> list[dict]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def close_series(ticker: str, period: str = "1y", auto_adjust: bool = True) -> pd.Series:
+    """
+    Série de Close (tz-naive, dropna) de UM ticker. Cacheada (5min) — substitui o
+    padrão repetido `yf.Ticker(t).history(period=p, auto_adjust=True)['Close'].dropna()`
+    espalhado pelo terminal, compartilhando o cache de benchmarks comuns (^BVSP,
+    ^GSPC, ^VIX, BRL=X) entre funções/páginas e reduzindo o risco de rate-limit.
+
+    Retorna Series vazia em falha/sem dados (nunca levanta).
+    """
+    try:
+        h = yf.Ticker(ticker).history(period=period, auto_adjust=auto_adjust)
+        if h is None or h.empty or "Close" not in h.columns:
+            return pd.Series(dtype=float)
+        if isinstance(h.columns, pd.MultiIndex):
+            h.columns = h.columns.get_level_values(0)
+        s = h["Close"].dropna()
+        if hasattr(s.index, "tz") and s.index.tz is not None:
+            s.index = s.index.tz_localize(None)
+        return s
+    except Exception as e:
+        logger.warning(f"[market_data] close_series({ticker},{period}) falhou: {e}")
+        return pd.Series(dtype=float)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def bulk_close_history(
     tickers: tuple[str, ...],
     period: str = "1mo",
