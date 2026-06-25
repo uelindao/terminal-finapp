@@ -79,12 +79,8 @@ pages = {
             icon="⚙️",
             url_path="Configuracoes",
         ),
-        st.Page(
-            "pages/6_Backfill.py",
-            title="Backfill",
-            icon="🗄️",
-            url_path="Backfill",
-        ),
+        # Backfill deixou de ser página própria — agora é uma aba em Configurações
+        # (utils/backfill_view.render). Dashboard e Watchlists foram removidos.
     ],
 }
 

@@ -9,7 +9,7 @@ Fontes:
 
 Portal: https://dados.cvm.gov.br/dados/CIA_ABERTA/
 
-Retorna o mesmo formato de _ratios_yf() em pages/6_Backfill.py:
+Retorna o mesmo formato de _ratios_yf() em utils/backfill_view.py:
     get_historico_cvm(ticker) → (list[(data, ratios, km)], yoy_offset, granular_str)
 """
 
@@ -996,7 +996,7 @@ def get_historico_cvm(
 
     Returns:
         (list[(data, ratios, km)], yoy_offset, granular_str)
-        Compatível com _ratios_yf() em pages/6_Backfill.py.
+        Compatível com _ratios_yf() em utils/backfill_view.py.
     """
     # Apenas para ativos BR
     tk_raiz = ticker.upper().replace(".SA", "")

@@ -47,13 +47,14 @@ page_header("⚙️ configurações", "conta · watchlists · portfólios · ia 
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
-tab_conta, tab_wl, tab_pf, tab_alertas, tab_ia, tab_aparencia, tab_admin = st.tabs([
+tab_conta, tab_wl, tab_pf, tab_alertas, tab_ia, tab_aparencia, tab_backfill, tab_admin = st.tabs([
     "👤 minha conta",
     "⭐ watchlists",
     "💼 portfólios",
     "🔔 alertas",
     "🤖 minha ia",
     "🎨 aparência",
+    "🗄️ backfill",
     "👑 administração",
 ])
 
@@ -1040,12 +1041,12 @@ with tab_aparencia:
 | Atalho | Ação |
 |--------|------|
 | `Ctrl+K` | Abre o command palette (busca tickers e páginas) |
-| `Alt+1` | Portfolio |
+| `Alt+1` | Home |
 | `Alt+2` | Research |
 | `Alt+3` | Discovery |
 | `Alt+4` | Macro |
-| `Alt+5` | Configurações |
-| `Alt+6` | Backfill |
+| `Alt+5` | Portfolio |
+| `Alt+6` | Configurações |
 | `↑ ↓` | Navegar no command palette |
 | `Enter` | Selecionar item / confirmar |
 | `Esc` | Fechar command palette |
@@ -1063,6 +1064,24 @@ with tab_aparencia:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 7 — ADMINISTRAÇÃO (apenas admins)
 # ══════════════════════════════════════════════════════════════════════════════
+with tab_backfill:
+    if not is_admin:
+        st.markdown(
+            '<div style="text-align:center; padding:60px 24px;">'
+            '<div style="font-size:2.4rem; opacity:0.25; margin-bottom:14px;">🔒</div>'
+            '<div style="font-family:var(--font-ui); font-size:0.85rem;'
+            ' color:var(--text-muted);">acesso restrito a administradores.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        try:
+            from utils.backfill_view import render as _render_backfill
+            _render_backfill()
+        except Exception as _e_bf:
+            st.error(f"falha ao carregar o painel de backfill: {_e_bf}")
+
+
 with tab_admin:
     if not is_admin:
         st.markdown(
