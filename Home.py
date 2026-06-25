@@ -145,39 +145,16 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_earnings_proximos(tickers_tuple: tuple) -> dict:
     """
-    Retorna dict {ticker: dias_ate_earnings} para ativos
-    com resultado nos próximos 14 dias.
-    Usa o banco de dados local (salvo pelo earnings_scraper).
+    Retorna dict {ticker: dias_ate_earnings} para ativos com resultado nos
+    próximos 14 dias. Derivado de buscar_earnings_watchlist (consolidação —
+    evita duplicar a leitura de datas e o cálculo de dias; o cache 1h da
+    watchlist é reaproveitado).
     """
-    import datetime
-    resultado = {}
     try:
-        from database.db import get_earnings_dates
-        tickers = list(tickers_tuple)
-        hoje    = datetime.date.today()
-
-        for ticker in tickers:
-            try:
-                data_str = get_earnings_dates(ticker)
-                if not data_str:
-                    continue
-                dt = None
-                for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%m/%d/%Y']:
-                    try:
-                        dt = datetime.datetime.strptime(data_str, fmt).date()
-                        break
-                    except ValueError:
-                        pass
-                if dt is None:
-                    continue
-                dias = (dt - hoje).days
-                if 0 <= dias <= 14:
-                    resultado[ticker] = dias
-            except Exception:
-                continue
+        _wl = buscar_earnings_watchlist(tickers_tuple)
+        return {item['ticker']: item['dias'] for item in _wl.get('proximos', [])}
     except Exception:
-        pass
-    return resultado
+        return {}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
