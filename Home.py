@@ -1175,7 +1175,7 @@ if ativos_alocados:
     def _serie_carteira_5d(tickers_tuple: tuple, qtds_tuple: tuple) -> list:
         """
         Reusa utils.market_data.bulk_close_history — mesmo cache 5min
-        compartilhado com Dashboard/Watchlists.
+        compartilhado entre as páginas.
         """
         from utils.market_data import bulk_close_history
         try:

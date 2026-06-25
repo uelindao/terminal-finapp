@@ -647,9 +647,9 @@ def inject_ui_enhancements():
     • Toast notifications — window.parent._fintermToast(msg, type, ms)
       Chame show_toast() no Python para acionar.
     • Keyboard shortcuts:
-        Alt+1 → Portfolio      Alt+2 → Research
+        Alt+1 → Home           Alt+2 → Research
         Alt+3 → Discovery      Alt+4 → Macro
-        Alt+5 → Configurações  Alt+6 → Backfill
+        Alt+5 → Portfolio      Alt+6 → Configurações
         Enter → clica botão primário (comportamento legado)
     """
     import json
@@ -662,15 +662,12 @@ def inject_ui_enhancements():
     tickers_json = json.dumps(tickers_b3 + tickers_fii + tickers_us)
 
     pages_json = json.dumps([
-        {"label": "Home",          "icon": "⚡", "nav": "Home",          "key": "0"},
-        {"label": "Dashboard",     "icon": "📈", "nav": "Dashboard",     "key": "1"},
-        {"label": "Watchlists",    "icon": "👁",  "nav": "Watchlists",    "key": "2"},
-        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "3"},
-        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "4"},
-        {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "5"},
-        {"label": "Portfolio",     "icon": "💼", "nav": "Portfolio",     "key": "6"},
-        {"label": "Configurações", "icon": "⚙",  "nav": "Configuracoes", "key": "7"},
-        {"label": "Backfill",      "icon": "🗄",  "nav": "Backfill",      "key": "8"},
+        {"label": "Home",          "icon": "⚡", "nav": "Home",          "key": "1"},
+        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "2"},
+        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "3"},
+        {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "4"},
+        {"label": "Portfolio",     "icon": "💼", "nav": "Portfolio",     "key": "5"},
+        {"label": "Configurações", "icon": "⚙",  "nav": "Configuracoes", "key": "6"},
     ])
 
     # IMPORTANTE: st.markdown() NÃO executa <script> no Streamlit moderno (React
