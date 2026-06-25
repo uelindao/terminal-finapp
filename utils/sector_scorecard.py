@@ -14,21 +14,7 @@ zero chamadas de rede, no mesmo espírito do heatmap da Discovery.
 """
 from __future__ import annotations
 
-try:
-    import streamlit as st
-    _ST = True
-except ImportError:
-    class _NoOpCache:
-        def __call__(self, *a, **kw):
-            return lambda f: f
-    class _FakeSt:
-        cache_data = _NoOpCache()
-        class session_state:
-            @staticmethod
-            def get(*a, **kw):
-                return kw.get('default', a[1] if len(a) > 1 else {})
-    st = _FakeSt()
-    _ST = False
+from utils.st_fallback import st, ST_AVAILABLE as _ST
 
 from utils.logger import get_logger
 from utils.macro_state import normalizar_setor

@@ -25,18 +25,9 @@ class RegimeResult:
     leitura: str          # texto curto explicativo
 
 
-def _momentum_12_1(serie_precos: list[float]) -> Optional[float]:
-    """Retorno 12-1: preço 1 mês atrás / preço 13 meses atrás - 1.
-
-    Recebe ~13 meses de dados diários (~252 trading days).
-    """
-    if not serie_precos or len(serie_precos) < 252:
-        return None
-    p13m = serie_precos[-252]
-    p1m = serie_precos[-21]
-    if p13m <= 0:
-        return None
-    return (p1m / p13m) - 1.0
+# Momentum 12-1 consolidado em utils/indicators (era duplicado aqui e no
+# health_engine). Recebe ~13 meses de dados diários (~252 pregões).
+from utils.indicators import momentum_12_1 as _momentum_12_1
 
 
 def classificar_regime(

@@ -82,17 +82,8 @@ def calcular_oportunidades_watchlist(
 
             dist_top = (preco_atual / high_52w - 1) * 100
 
-            def _calc_rsi(series, period=14):
-                delta = series.diff().dropna()
-                gain  = delta.clip(lower=0).rolling(period).mean()
-                loss  = (-delta.clip(upper=0)).rolling(period).mean()
-                rs    = gain / loss.replace(0, float('nan'))
-                return float(100 - (100 / (1 + rs)).iloc[-1])
-
-            try:
-                rsi = _calc_rsi(close)
-            except Exception:
-                rsi = 50.0
+            from utils.indicators import rsi_last as _rsi_last
+            rsi = _rsi_last(close, 14, default=50.0)
 
             pts_hs = round((score_hs / 100) * 55, 1)
 

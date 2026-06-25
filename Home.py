@@ -340,15 +340,8 @@ if _user_notif:
     if _health_all:
         verificar_e_disparar_alertas(_user_notif['user_id'], _health_all)
 
-def buscar_ativo_yahoo(query):
-    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
-    headers = {'user-agent': 'Mozilla/5.0'}
-    try:
-        r = requests.get(url, headers=headers, timeout=5)
-        return r.json().get('quotes', [])
-    except Exception as e:
-        logging.getLogger(__name__).debug(f"[buscar_ativo_yahoo] falha: {e}")
-        return []
+# buscar_ativo_yahoo consolidado em utils/market_data (era duplicado em Research).
+from utils.market_data import buscar_ativo_yahoo
 
 # ==========================================
 # HEADER E PAINÉIS DE UTILIZADOR (Fase 6 — shell visual)

@@ -33,6 +33,21 @@ logger = logging.getLogger(__name__)
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 
+def buscar_ativo_yahoo(query: str) -> list[dict]:
+    """
+    Busca tickers no Yahoo Finance search API (autocomplete de busca de ativos).
+    Retorna a lista de 'quotes' (ou [] em falha). Era duplicada em Home e Research.
+    """
+    import requests
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+    try:
+        r = requests.get(url, headers={'user-agent': 'Mozilla/5.0'}, timeout=5)
+        return r.json().get('quotes', [])
+    except Exception as e:
+        logger.debug(f"[buscar_ativo_yahoo] falha: {e}")
+        return []
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def bulk_close_history(
     tickers: tuple[str, ...],

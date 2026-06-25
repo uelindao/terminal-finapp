@@ -204,12 +204,8 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                 }
 
                 try:
-                    delta = s.diff().dropna()
-                    gain = delta.clip(lower=0).rolling(14).mean()
-                    loss = (-delta.clip(upper=0)).rolling(14).mean()
-                    rs = gain / loss.replace(0, float('nan'))
-                    rsi = float((100 - (100 / (1 + rs))).iloc[-1]) if len(rs.dropna()) >= 14 else 50.0
-                    price_data["rsi_14"] = round(rsi, 1)
+                    from utils.indicators import rsi_last as _rsi_last
+                    price_data["rsi_14"] = round(_rsi_last(s, 14, default=50.0), 1)
                 except Exception as e:
                     logger.debug(f"RSI indisponível para {ticker}: {e}")
 
