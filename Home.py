@@ -781,8 +781,12 @@ def buscar_dados_semaforo():
         "divida_pib": None, "tendencia_divida": None, "result_primario": None,
     }
     fontes = {k: None for k in dados}
+    # BUG FIX: lê o macro_cache 'ipca_12m' (série 13522, acumulado 12m anual) —
+    # NÃO o 'ipca' (série 433, print MENSAL), que ia parar no slot ipca_12m e
+    # estourava o juro real (Fisher) no cockpit da Macro. Ver contrato em
+    # utils/macro_context.py.
     _chaves_macro_map = {
-        "selic": "selic", "ipca": "ipca_12m",
+        "selic": "selic", "ipca_12m": "ipca_12m",
         "t10y2y": "t10y2y", "vix": "vix",
         "hy_spread": "hy_spread",
         "divida_pib": "divida_pib", "result_primario": "result_primario",
