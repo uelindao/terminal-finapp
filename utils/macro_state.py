@@ -362,18 +362,26 @@ def render_cockpit_macro(market: str = "BR") -> None:
         except Exception:
             pass
 
-        # inflação setorial (núcleo/serviços) do snapshot — degrada para None
-        nucleo = servicos = None
+        # inflação setorial: nível 12m + momentum 3m anualizado (capta inflexão
+        # que o 12m esconde). Degrada para None sem snapshot.
+        nucleo = servicos = nucleo_3m = servicos_3m = None
         try:
             from utils.inflation_sectoral import get_inflacao_atual
-            _infl = get_inflacao_atual(market)
-            servicos = _infl.get("servicos") if market == "BR" else _infl.get("servicos_core")
-            # núcleo: média dos cortes nucleo_* disponíveis
-            _nucs = [v for k, v in _infl.items() if k.startswith("nucleo")]
+            _skey = "servicos" if market == "BR" else "servicos_core"
+            _infl  = get_inflacao_atual(market)
+            _infl3 = get_inflacao_atual(market, horizonte="3m")
+            servicos    = _infl.get(_skey)
+            servicos_3m = _infl3.get(_skey)
+            _nucs  = [v for k, v in _infl.items()  if k.startswith("nucleo")]
+            _nucs3 = [v for k, v in _infl3.items() if k.startswith("nucleo")]
             if _nucs:
                 nucleo = round(sum(_nucs) / len(_nucs), 2)
             elif market != "BR":
-                nucleo = _infl.get("core")
+                nucleo = _infl.get("median") or _infl.get("core")
+            if _nucs3:
+                nucleo_3m = round(sum(_nucs3) / len(_nucs3), 2)
+            elif market != "BR":
+                nucleo_3m = _infl3.get("median") or _infl3.get("core")
         except Exception:
             pass
 
@@ -394,10 +402,24 @@ def render_cockpit_macro(market: str = "BR") -> None:
             _kpi("juro real (fisher)", f"{sreal:+.1f}%", _cor_juro),
             _kpi("ipca 12m", f"{ipca:.1f}%"),
         ]
+        def _mom(v3, v12):
+            """Seta + cor pela aceleração (3m vs 12m). Subindo = ruim p/ juro (bear)."""
+            if v3 is None or v12 is None:
+                return "", "var(--text-secondary)"
+            if v3 > v12 + 0.2:
+                return " ↑", "var(--bear)"
+            if v3 < v12 - 0.2:
+                return " ↓", "var(--bull)"
+            return " →", "var(--amber)"
+
         if nucleo is not None:
-            partes.append(_kpi("núcleo 12m", f"{nucleo:.1f}%"))
+            _a, _c = _mom(nucleo_3m, nucleo)
+            _v = f"{nucleo:.1f}%" if nucleo_3m is None else f"{nucleo:.1f}→{nucleo_3m:.1f}%{_a}"
+            partes.append(_kpi("núcleo 12m→3m", _v, _c))
         if servicos is not None:
-            partes.append(_kpi("serviços 12m", f"{servicos:.1f}%"))
+            _a, _c = _mom(servicos_3m, servicos)
+            _v = f"{servicos:.1f}%" if servicos_3m is None else f"{servicos:.1f}→{servicos_3m:.1f}%{_a}"
+            partes.append(_kpi("serviços 12m→3m", _v, _c))
         partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
 
         st.markdown(

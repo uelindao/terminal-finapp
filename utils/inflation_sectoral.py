@@ -103,16 +103,19 @@ def _carregar_inflacao_df(origem: str):
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def get_inflacao_atual(market: str = "BR") -> dict:
+def get_inflacao_atual(market: str = "BR", horizonte: str | None = None) -> dict:
     """
-    Retorna {corte: valor_anual_%} para o mercado.
-    BR usa colunas *_12m (acumulado 12m); US usa *_yoy.
-    Inclui 'headline' (IPCA/CPI 12m/YoY) quando disponível.
-    Retorna {} se snapshot ausente (degrada o pilar para 0).
+    Retorna {corte: valor_%} para o mercado, no horizonte pedido.
+    horizonte=None → nível padrão (BR: *_12m acumulado; US: *_yoy).
+    horizonte='3m'/'6m' → run-rate ANUALIZADO (momentum — capta inflexão).
+    Retorna {} se snapshot ausente (degrada o pilar/cockpit para neutro).
     """
     is_br = str(market).upper() == "BR"
     origem = "inflacao_br" if is_br else "inflacao_us"
-    suf = "_12m" if is_br else "_yoy"
+    if horizonte:
+        suf = "_" + str(horizonte).lstrip("_")
+    else:
+        suf = "_12m" if is_br else "_yoy"
 
     df = _carregar_inflacao_df(origem)
     out: dict[str, float] = {}
