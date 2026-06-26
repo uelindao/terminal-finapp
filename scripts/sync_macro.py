@@ -354,12 +354,34 @@ _CPI_COMPONENTES_US = {
     "servicos_core":  "CUSR0000SASLE",   # services less energy services
     "bens_core":      "CUSR0000SACL1E",  # commodities less food & energy
 }
+# Núcleos do CPI (já em % anualizado mensal — NÃO são índice) via FRED/Cleveland:
+_CPI_NUCLEOS_US = {
+    "median":       "MEDCPIM158SFRBCLE",      # median CPI (1m % anualizado)
+    "trimmed_mean": "TRMMEANCPIM158SFRBCLE",  # 16% trimmed-mean (1m % anualizado)
+}
 
 
 def _acumular_12m(serie: pd.Series) -> pd.Series:
     """Acumula uma série de variação mensal (%) em janela de 12 meses (composto)."""
     s = serie.dropna()
     return ((1 + s / 100).rolling(12).apply(lambda x: x.prod(), raw=True) - 1) * 100
+
+
+def _acumular_anualizado(serie_mensal: pd.Series, meses: int) -> pd.Series:
+    """
+    Run-rate ANUALIZADO de uma série de variação MENSAL (%) — compõe os últimos
+    `meses` e anualiza: ((Π(1+m/100))^(12/meses) − 1)·100. Capta a inflexão que
+    o YoY/12m esconde (ex.: administrados a 11% anualizado em 3m vs 5.8% no 12m).
+    """
+    s = serie_mensal.dropna()
+    prod = (1 + s / 100).rolling(meses).apply(lambda x: x.prod(), raw=True)
+    return (prod ** (12.0 / meses) - 1) * 100
+
+
+def _runrate_indice(serie_indice: pd.Series, meses: int) -> pd.Series:
+    """Run-rate ANUALIZADO de uma série de ÍNDICE (CPI): (idx_t/idx_{t-meses})^(12/meses)−1."""
+    s = serie_indice.dropna()
+    return ((s / s.shift(meses)) ** (12.0 / meses) - 1) * 100
 
 
 def fetch_inflacao_setorial():
@@ -391,32 +413,40 @@ def fetch_inflacao_setorial():
 
         if cols:
             df_infl_br = pd.DataFrame(cols)
-            # acumulado 12m por coluna (cost-push / pricing-power setorial)
+            # Por corte: acumulado 12m + run-rates ANUALIZADOS 3m/6m (momentum —
+            # capta a inflexão que o 12m esconde).
             for nome in list(df_infl_br.columns):
                 try:
                     df_infl_br[f"{nome}_12m"] = _acumular_12m(df_infl_br[nome]).reindex(df_infl_br.index)
+                    df_infl_br[f"{nome}_3m"]  = _acumular_anualizado(df_infl_br[nome], 3).reindex(df_infl_br.index)
+                    df_infl_br[f"{nome}_6m"]  = _acumular_anualizado(df_infl_br[nome], 6).reindex(df_infl_br.index)
                 except Exception as e:
-                    logger.debug(f"falha 12m {nome}: {e}")
+                    logger.debug(f"falha run-rate {nome}: {e}")
             _salvar_snapshot_historico("inflacao_br", df_infl_br)
 
-            # valores pontuais p/ cockpit (último 12m disponível)
-            def _last12(nome):
-                c = f"{nome}_12m"
+            def _last(nome, suf):
+                c = f"{nome}_{suf}"
                 if c in df_infl_br.columns and not df_infl_br[c].dropna().empty:
                     return round(float(df_infl_br[c].dropna().iloc[-1]), 2)
                 return None
 
-            _nuc = [_last12(n) for n in _IPCA_NUCLEOS_BR if _last12(n) is not None]
-            if _nuc:
-                upsert_macro("ipca_nucleo_12m", round(sum(_nuc) / len(_nuc), 2),
-                             label="IPCA Núcleo (média 12m)", unit="%", source="bcb")
-            for _k, _lbl in [("servicos", "IPCA Serviços 12m"),
-                             ("administrados", "IPCA Administrados 12m"),
-                             ("livres", "IPCA Livres 12m")]:
-                _v = _last12(_k)
-                if _v is not None:
-                    upsert_macro(f"ipca_{_k}_12m", _v, label=_lbl, unit="%", source="bcb")
-                    print(f"  [infl BR] ipca_{_k}_12m = {_v}")
+            def _nucleo_medio(suf):
+                vals = [_last(n, suf) for n in _IPCA_NUCLEOS_BR]
+                vals = [v for v in vals if v is not None]
+                return round(sum(vals) / len(vals), 2) if vals else None
+
+            # Pontual p/ cockpit: 12m (nível) + 3m anualizado (momentum)
+            for _suf, _lbl_suf in [("12m", "12m"), ("3m", "3m anualizado")]:
+                _nm = _nucleo_medio(_suf)
+                if _nm is not None:
+                    upsert_macro(f"ipca_nucleo_{_suf}", _nm,
+                                 label=f"IPCA Núcleo (média {_lbl_suf})", unit="%", source="bcb")
+                for _k in ("servicos", "administrados", "livres"):
+                    _v = _last(_k, _suf)
+                    if _v is not None:
+                        upsert_macro(f"ipca_{_k}_{_suf}", _v,
+                                     label=f"IPCA {_k.title()} {_lbl_suf}", unit="%", source="bcb")
+                        print(f"  [infl BR] ipca_{_k}_{_suf} = {_v}")
     except Exception as e:
         print(f"  [infl BR] ERRO: {e}")
 
@@ -441,6 +471,7 @@ def fetch_inflacao_setorial():
 
             if cols_us:
                 df_infl_us = pd.DataFrame(cols_us)
+                # Componentes são ÍNDICES → YoY (nível) + run-rates anualizados 3m/6m.
                 for nome in list(df_infl_us.columns):
                     try:
                         _m = df_infl_us[nome].dropna()
@@ -448,24 +479,47 @@ def fetch_inflacao_setorial():
                             df_infl_us[f"{nome}_yoy"] = (
                                 _m.pct_change(12, fill_method=None) * 100
                             ).reindex(df_infl_us.index)
+                        if len(_m) >= 7:
+                            df_infl_us[f"{nome}_6m"] = _runrate_indice(_m, 6).reindex(df_infl_us.index)
+                        if len(_m) >= 4:
+                            df_infl_us[f"{nome}_3m"] = _runrate_indice(_m, 3).reindex(df_infl_us.index)
                     except Exception as e:
-                        logger.debug(f"falha yoy {nome}: {e}")
+                        logger.debug(f"falha run-rate us {nome}: {e}")
+
+                # Núcleos Cleveland (median / trimmed-mean) — já vêm em % ANUALIZADO
+                # mensal; guarda o nível e a média móvel 3m (suaviza o ruído mensal).
+                for nome, serie_id in _CPI_NUCLEOS_US.items():
+                    try:
+                        _s = fred.get_series(serie_id, observation_start=inicio_10a)
+                        if _s is not None and not _s.empty:
+                            df_infl_us[nome] = _s
+                            df_infl_us[f"{nome}_3m"] = _s.rolling(3).mean().reindex(df_infl_us.index)
+                            print(f"  [infl US] {nome} ({serie_id}): {len(_s)} pts")
+                    except Exception as _e:
+                        print(f"  [infl US] {nome} ({serie_id}): {_e}")
+
                 _salvar_snapshot_historico("inflacao_us", df_infl_us)
 
-                def _last_yoy(nome):
-                    c = f"{nome}_yoy"
+                def _last_us(nome, suf):
+                    c = f"{nome}_{suf}"
                     if c in df_infl_us.columns and not df_infl_us[c].dropna().empty:
                         return round(float(df_infl_us[c].dropna().iloc[-1]), 2)
                     return None
 
-                for _k, _lbl in [("core", "US Core CPI YoY"),
-                                 ("shelter", "US Shelter CPI YoY"),
-                                 ("servicos_core", "US Core Services CPI YoY"),
-                                 ("bens_core", "US Core Goods CPI YoY")]:
-                    _v = _last_yoy(_k)
+                # Pontual: YoY (nível) + 3m anualizado (momentum) dos cortes-chave
+                for _k in ("core", "shelter", "servicos_core", "bens_core"):
+                    for _suf in ("yoy", "3m"):
+                        _v = _last_us(_k, _suf)
+                        if _v is not None:
+                            upsert_macro(f"us_cpi_{_k}_{_suf}", _v,
+                                         label=f"US CPI {_k} {_suf}", unit="%", source="fred")
+                            print(f"  [infl US] us_cpi_{_k}_{_suf} = {_v}")
+                for _k in ("median", "trimmed_mean"):
+                    _v = _last_us(_k, "3m")
                     if _v is not None:
-                        upsert_macro(f"us_cpi_{_k}_yoy", _v, label=_lbl, unit="%", source="fred")
-                        print(f"  [infl US] us_cpi_{_k}_yoy = {_v}")
+                        upsert_macro(f"us_cpi_{_k}_3m", _v,
+                                     label=f"US CPI {_k} (3m)", unit="%", source="fred")
+                        print(f"  [infl US] us_cpi_{_k}_3m = {_v}")
         except Exception as e:
             print(f"  [infl US] ERRO: {e}")
 
