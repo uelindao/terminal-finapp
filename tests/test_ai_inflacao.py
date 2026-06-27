@@ -21,9 +21,11 @@ def test_bloco_vazio_sem_snapshot():
 
 def test_bloco_decomposicao_e_momentum_br():
     infl12 = {"servicos": 6.0, "administrados": 5.8, "livres": 5.0, "alimentacao": 3.9,
-              "nucleo_dupla_pond": 4.1, "nucleo_ma_suav": 4.3}
+              "nucleo_dupla_pond": 4.1, "nucleo_ma_suav": 4.3,
+              "igpm": 7.0, "ipca_cheio": 4.5}
     infl3 = {"servicos": 4.0, "administrados": 11.2, "livres": 5.0, "alimentacao": 4.1,
-             "nucleo_dupla_pond": 5.5, "nucleo_ma_suav": 5.0}
+             "nucleo_dupla_pond": 5.5, "nucleo_ma_suav": 5.0,
+             "igpm": 9.0, "ipca_cheio": 4.0}
 
     def _fake(market, horizonte=None):
         return infl3 if horizonte == "3m" else infl12
@@ -40,3 +42,20 @@ def test_bloco_decomposicao_e_momentum_br():
     assert "administrados" in txt and "acelerando" in txt  # 5.8 → 11.2
     assert "núcleo" in txt
     assert "exposição deste setor" in txt
+    assert "gap de margem" in txt and "comprime margem" in txt   # 7.0−4.5 = +2.5pp
+
+
+def test_gap_margem():
+    from utils.inflation_sectoral import gap_margem
+    with patch("utils.inflation_sectoral.get_inflacao_atual",
+               return_value={"igpm": 7.0, "ipca_cheio": 4.5}):
+        g = gap_margem("BR")
+    assert g["gap"] == 2.5 and g["produtor"] == 7.0 and g["consumidor"] == 4.5
+    # US: ppi − core
+    with patch("utils.inflation_sectoral.get_inflacao_atual",
+               return_value={"ppi": 1.5, "core": 3.5}):
+        g2 = gap_margem("US")
+    assert g2["gap"] == -2.0           # produtor < consumidor → alívio de margem
+    # sem dados → None
+    with patch("utils.inflation_sectoral.get_inflacao_atual", return_value={}):
+        assert gap_margem("BR") is None

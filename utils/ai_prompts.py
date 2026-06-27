@@ -356,7 +356,9 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
     Vazio se o snapshot de inflação não estiver disponível (degrada gracioso).
     """
     try:
-        from utils.inflation_sectoral import get_inflacao_atual, pressao_inflacao_setor
+        from utils.inflation_sectoral import (
+            get_inflacao_atual, pressao_inflacao_setor, gap_margem,
+        )
         from utils.setores import normalizar_setor
     except Exception:
         return ""
@@ -405,6 +407,19 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
         pres = pressao_inflacao_setor(canon, market, infl12)
         if pres.get("motivos"):
             txt += "exposição deste setor à inflação: " + "; ".join(pres["motivos"]) + "\n"
+    except Exception:
+        pass
+    try:
+        _g = gap_margem(market)
+        if _g:
+            if _g["gap"] > 0.3:
+                _dir = "comprime margem da economia (custo do produtor > preço ao consumidor)"
+            elif _g["gap"] < -0.3:
+                _dir = "alivia margem (preço sobe mais que custo)"
+            else:
+                _dir = "neutro p/ margem"
+            txt += (f"gap de margem (produtor {_g['produtor']:.1f}% − consumidor "
+                    f"{_g['consumidor']:.1f}% = {_g['gap']:+.1f}pp) → {_dir}\n")
     except Exception:
         pass
     return txt

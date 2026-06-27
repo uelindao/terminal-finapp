@@ -345,6 +345,12 @@ _IPCA_NUCLEOS_BR = {
     "nucleo_ex2":         27838,    # exclusão EX2
     "nucleo_ex3":         27839,    # exclusão EX3
 }
+# Preços ao PRODUTOR/atacado vs consumidor (variação mensal %) — gap de margem.
+# igpm (atacado, IGP-M) − ipca_cheio (consumidor) = pressão de margem da economia.
+_PPI_BR = {
+    "igpm":       189,    # IGP-M (≈60% atacado/IPA) — proxy de preço ao produtor
+    "ipca_cheio": 433,    # IPCA cheio (consumidor) — para o gap PPI−CPI
+}
 # CPI EUA por componente (índice — YoY calculado abaixo) via FRED:
 _CPI_COMPONENTES_US = {
     "core":           "CPILFESL",        # all items less food & energy
@@ -353,6 +359,7 @@ _CPI_COMPONENTES_US = {
     "shelter":        "CUSR0000SAH1",    # shelter (40% do core — sticky)
     "servicos_core":  "CUSR0000SASLE",   # services less energy services
     "bens_core":      "CUSR0000SACL1E",  # commodities less food & energy
+    "ppi":            "PPIACO",          # Producer Price Index, all commodities
 }
 # Núcleos do CPI (já em % anualizado mensal — NÃO são índice) via FRED/Cleveland:
 _CPI_NUCLEOS_US = {
@@ -399,7 +406,7 @@ def fetch_inflacao_setorial():
     try:
         from bcb import sgs
         inicio_10a = (dt.date.today() - dt.timedelta(days=365 * 10)).isoformat()
-        todos = {**_IPCA_GRUPOS_BR, **_IPCA_CATEGORIAS_BR, **_IPCA_NUCLEOS_BR}
+        todos = {**_IPCA_GRUPOS_BR, **_IPCA_CATEGORIAS_BR, **_IPCA_NUCLEOS_BR, **_PPI_BR}
 
         cols = {}
         for nome, codigo in todos.items():
@@ -447,6 +454,19 @@ def fetch_inflacao_setorial():
                         upsert_macro(f"ipca_{_k}_{_suf}", _v,
                                      label=f"IPCA {_k.title()} {_lbl_suf}", unit="%", source="bcb")
                         print(f"  [infl BR] ipca_{_k}_{_suf} = {_v}")
+
+                # Gap de margem: atacado (IGP-M) − consumidor (IPCA cheio).
+                # Positivo = custo sobe mais que o preço final → compressão de margem.
+                _igpm = _last("igpm", _suf)
+                _ipca_c = _last("ipca_cheio", _suf)
+                if _igpm is not None:
+                    upsert_macro(f"br_igpm_{_suf}", _igpm,
+                                 label=f"IGP-M (atacado) {_lbl_suf}", unit="%", source="bcb")
+                if _igpm is not None and _ipca_c is not None:
+                    _gap = round(_igpm - _ipca_c, 2)
+                    upsert_macro(f"br_gap_margem_{_suf}", _gap,
+                                 label=f"Gap margem BR (IGP-M−IPCA) {_lbl_suf}", unit="pp", source="bcb")
+                    print(f"  [infl BR] br_gap_margem_{_suf} = {_gap}")
     except Exception as e:
         print(f"  [infl BR] ERRO: {e}")
 
@@ -520,6 +540,20 @@ def fetch_inflacao_setorial():
                         upsert_macro(f"us_cpi_{_k}_3m", _v,
                                      label=f"US CPI {_k} (3m)", unit="%", source="fred")
                         print(f"  [infl US] us_cpi_{_k}_3m = {_v}")
+
+                # Gap de margem US: PPI (produtor) − core CPI (consumidor).
+                # Positivo = custo do produtor subindo mais que o preço → margem aperta.
+                for _suf in ("yoy", "3m"):
+                    _ppi = _last_us("ppi", _suf)
+                    _core = _last_us("core", _suf)
+                    if _ppi is not None:
+                        upsert_macro(f"us_ppi_{_suf}", _ppi,
+                                     label=f"US PPI {_suf}", unit="%", source="fred")
+                    if _ppi is not None and _core is not None:
+                        _gap = round(_ppi - _core, 2)
+                        upsert_macro(f"us_gap_margem_{_suf}", _gap,
+                                     label=f"Gap margem US (PPI−core CPI) {_suf}", unit="pp", source="fred")
+                        print(f"  [infl US] us_gap_margem_{_suf} = {_gap}")
         except Exception as e:
             print(f"  [infl US] ERRO: {e}")
 
