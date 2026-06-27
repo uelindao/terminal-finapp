@@ -194,14 +194,29 @@ def pressao_inflacao_setor(setor_canon: str, market: str, infl: dict) -> dict:
     indexacao = cfg["indexacao"]
 
     squeeze = max(0.0, custo - headline) * (1 - indexacao)
+
+    # Ajuste PPI: o gap de margem AGREGADO (produtor − consumidor) aperta mais os
+    # setores de BAIXO repasse (não conseguem passar o custo do produtor). Modular
+    # pelo pricing power transforma um sinal macro num sinal de margem POR SETOR.
+    gap_ppi = 0.0
+    try:
+        _g = gap_margem(market)
+        if _g and _g.get("gap", 0) > 0:
+            gap_ppi = _g["gap"] * (1 - indexacao) * 0.5
+            squeeze += gap_ppi
+    except Exception:
+        pass
+
     tailwind = max(0.0, headline - meta) * indexacao
     pontos = int(max(-4, min(4, round(0.4 * tailwind - 0.8 * squeeze))))
 
     motivos: list[str] = []
     if pontos <= -1:
+        _g_txt = (" + gap produtor>consumidor (PPI) amplia a compressão"
+                  if gap_ppi > 0.3 else "")
         motivos.append(
             f"custo de insumo {custo:.1f}% acima da média ({headline:.1f}%) "
-            f"e baixo repasse (indexação {indexacao:.0%}) → compressão de margem"
+            f"e baixo repasse (indexação {indexacao:.0%}) → compressão de margem{_g_txt}"
         )
     elif pontos >= 1:
         motivos.append(
@@ -214,6 +229,7 @@ def pressao_inflacao_setor(setor_canon: str, market: str, infl: dict) -> dict:
         "custo_inflacao": round(custo, 2),
         "headline": round(headline, 2),
         "squeeze": round(squeeze, 2),
+        "gap_ppi": round(gap_ppi, 2),
         "tailwind": round(tailwind, 2),
         "motivos": motivos,
     }

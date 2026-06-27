@@ -45,6 +45,18 @@ def test_bloco_decomposicao_e_momentum_br():
     assert "gap de margem" in txt and "comprime margem" in txt   # 7.0−4.5 = +2.5pp
 
 
+def test_gap_ppi_diferencia_por_repasse():
+    """O gap de margem agregado aperta mais setores de BAIXO repasse (PPI→score)."""
+    import utils.inflation_sectoral as ins
+    infl = {"servicos": 6.0, "livres": 5.5, "administrados": 5.0,
+            "igpm": 9.0, "ipca_cheio": 4.5}   # produtor 9% >> consumidor 4.5%
+    with patch("utils.inflation_sectoral.get_inflacao_atual", return_value=infl):
+        baixo = ins.pressao_inflacao_setor("consumo_ciclico", "BR", infl)  # repasse 0.2
+        alto  = ins.pressao_inflacao_setor("utilities", "BR", infl)        # repasse 0.9
+    assert baixo["gap_ppi"] > alto["gap_ppi"]
+    assert baixo["pontos"] <= alto["pontos"]
+
+
 def test_gap_margem():
     from utils.inflation_sectoral import gap_margem
     with patch("utils.inflation_sectoral.get_inflacao_atual",
