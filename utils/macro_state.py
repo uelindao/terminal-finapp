@@ -405,6 +405,14 @@ def render_cockpit_macro(market: str = "BR") -> None:
         except Exception:
             pass
 
+        # difusão da inflação (breadth): % da cesta acima da meta.
+        dif_m = None
+        try:
+            from utils.inflation_sectoral import diffusion_inflacao as _dif
+            dif_m = _dif(market)
+        except Exception:
+            pass
+
         _cor_juro = "var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)")
         _cor_vix  = "var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)")
 
@@ -448,6 +456,11 @@ def render_cockpit_macro(market: str = "BR") -> None:
             # surpresa > 0 = inflação acima do precificado → hawkish (bear duration)
             _cs = "var(--bear)" if surp_m > 0.3 else ("var(--bull)" if surp_m < -0.3 else "var(--amber)")
             partes.append(_kpi("surpresa infl.", f"{surp_m:+.1f}pp", _cs))
+        if dif_m is not None:
+            # difusão alta = inflação ampla/disseminada (bear)
+            _pa = dif_m["pct_acima_meta"]
+            _cd = "var(--bear)" if _pa >= 60 else ("var(--amber)" if _pa >= 35 else "var(--bull)")
+            partes.append(_kpi("difusão >meta", f"{_pa}% ({dif_m['acima']}/{dif_m['total']})", _cd))
         partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
 
         st.markdown(

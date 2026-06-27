@@ -177,6 +177,47 @@ def surpresa_inflacao(market: str = "BR") -> dict | None:
         return None
 
 
+# Cesta para difusão (breadth): grupos do IPCA (BR) / componentes do CPI (US)
+# que ~particionam o índice. Núcleos/categorias agregadas ficam de fora.
+_DIFUSAO_BASKET = {
+    "BR": ["alimentacao", "habitacao", "artigos_residencia", "vestuario",
+           "transportes", "comunicacao", "saude", "despesas_pessoais", "educacao"],
+    "US": ["shelter", "servicos_core", "bens_core", "energia", "alimentos"],
+}
+
+
+def diffusion_inflacao(market: str = "BR") -> dict | None:
+    """
+    Difusão/breadth da inflação: de toda a cesta, % de cortes ACIMA DA META e %
+    ACELERANDO (run-rate 3m > 12m). Difusão alta = inflação ampla/disseminada
+    (mais difícil de combater); baixa = concentrada em poucos itens.
+
+    Usa só os snapshots já coletados — zero código externo. None se indisponível.
+    Retorna {'pct_acima_meta', 'pct_acelerando', 'n', 'acima', 'total'}.
+    """
+    mk = str(market).upper()
+    basket = _DIFUSAO_BASKET.get(mk, [])
+    meta = _META_BR if mk == "BR" else _META_US
+    infl12 = get_inflacao_atual(market)
+    if not infl12:
+        return None
+    infl3 = get_inflacao_atual(market, horizonte="3m")
+
+    vals = [(k, infl12.get(k)) for k in basket if infl12.get(k) is not None]
+    if not vals:
+        return None
+    n = len(vals)
+    acima = sum(1 for _k, v in vals if v > meta)
+    acel = sum(1 for k, v in vals
+               if infl3.get(k) is not None and infl3[k] > v + 0.2)
+    return {
+        "pct_acima_meta": round(acima / n * 100),
+        "pct_acelerando": round(acel / n * 100),
+        "acima": acima,
+        "total": n,
+    }
+
+
 def _headline(infl: dict, market: str) -> float:
     """Inflação headline (proxy de média) a partir dos cortes disponíveis."""
     if str(market).upper() == "BR":
