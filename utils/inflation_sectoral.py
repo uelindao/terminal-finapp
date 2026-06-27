@@ -151,6 +151,32 @@ def gap_margem(market: str = "BR", horizonte: str | None = None) -> dict | None:
     return {"gap": round(prod - cons, 2), "produtor": prod, "consumidor": cons}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def surpresa_inflacao(market: str = "BR") -> dict | None:
+    """
+    Surpresa de inflação = REALIZADA − ESPERADA (Focus 12m BR / Michigan 1y US).
+    Positivo = inflação acima do que o mercado precifica → surpresa HAWKISH (ruim
+    p/ duration); negativo = dovish. É o sinal de "o que já está no preço".
+    Lê do macro_cache (populado pelo ETL fetch_expectativas). None se indisponível.
+    """
+    try:
+        from database.db import get_macro_cache
+    except Exception:
+        return None
+    pref = "br" if str(market).upper() == "BR" else "us"
+    try:
+        surp = get_macro_cache(f"{pref}_surpresa_inflacao")
+        if surp is None:
+            return None
+        esp = get_macro_cache("br_focus_ipca_12m" if pref == "br" else "us_mich")
+        return {
+            "surpresa": round(float(surp), 2),
+            "esperada": round(float(esp), 2) if esp is not None else None,
+        }
+    except Exception:
+        return None
+
+
 def _headline(infl: dict, market: str) -> float:
     """Inflação headline (proxy de média) a partir dos cortes disponíveis."""
     if str(market).upper() == "BR":

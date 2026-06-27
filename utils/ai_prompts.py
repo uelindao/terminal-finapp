@@ -358,6 +358,7 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
     try:
         from utils.inflation_sectoral import (
             get_inflacao_atual, pressao_inflacao_setor, gap_margem,
+            surpresa_inflacao,
         )
         from utils.setores import normalizar_setor
     except Exception:
@@ -420,6 +421,20 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
                 _dir = "neutro p/ margem"
             txt += (f"gap de margem (produtor {_g['produtor']:.1f}% − consumidor "
                     f"{_g['consumidor']:.1f}% = {_g['gap']:+.1f}pp) → {_dir}\n")
+    except Exception:
+        pass
+    try:
+        _sp = surpresa_inflacao(market)
+        if _sp and _sp.get("surpresa") is not None:
+            _s = _sp["surpresa"]
+            if _s > 0.2:
+                _dir = "acima do precificado → surpresa hawkish (pressão p/ juro alto, ruim p/ duration)"
+            elif _s < -0.2:
+                _dir = "abaixo do precificado → surpresa dovish (espaço p/ corte)"
+            else:
+                _dir = "em linha com o precificado (sem surpresa)"
+            _esp = f" vs esperado {_sp['esperada']:.1f}%" if _sp.get("esperada") is not None else ""
+            txt += f"surpresa de inflação (realizado − esperado): {_s:+.1f}pp{_esp} → {_dir}\n"
     except Exception:
         pass
     return txt

@@ -57,6 +57,21 @@ def test_gap_ppi_diferencia_por_repasse():
     assert baixo["pontos"] <= alto["pontos"]
 
 
+def test_surpresa_inflacao():
+    import utils.inflation_sectoral as ins
+
+    def _cache(ind):
+        return {"br_surpresa_inflacao": 0.9, "br_focus_ipca_12m": 4.1}.get(ind)
+
+    _fn = (ins.surpresa_inflacao.__wrapped__
+           if hasattr(ins.surpresa_inflacao, "__wrapped__") else ins.surpresa_inflacao)
+    with patch("database.db.get_macro_cache", side_effect=_cache):
+        sp = _fn("BR")
+    assert sp["surpresa"] == 0.9 and sp["esperada"] == 4.1
+    with patch("database.db.get_macro_cache", return_value=None):
+        assert _fn("BR") is None
+
+
 def test_gap_margem():
     from utils.inflation_sectoral import gap_margem
     with patch("utils.inflation_sectoral.get_inflacao_atual",
