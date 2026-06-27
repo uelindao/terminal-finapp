@@ -385,6 +385,16 @@ def render_cockpit_macro(market: str = "BR") -> None:
         except Exception:
             pass
 
+        # gap de margem (produtor − consumidor): IGP-M−IPCA (BR) / PPI−core (US).
+        gap_m = None
+        try:
+            from utils.inflation_sectoral import gap_margem as _gap_margem
+            _g = _gap_margem(market)
+            if _g:
+                gap_m = _g["gap"]
+        except Exception:
+            pass
+
         _cor_juro = "var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)")
         _cor_vix  = "var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)")
 
@@ -420,6 +430,10 @@ def render_cockpit_macro(market: str = "BR") -> None:
             _a, _c = _mom(servicos_3m, servicos)
             _v = f"{servicos:.1f}%" if servicos_3m is None else f"{servicos:.1f}→{servicos_3m:.1f}%{_a}"
             partes.append(_kpi("serviços 12m→3m", _v, _c))
+        if gap_m is not None:
+            # gap > 0 = custo sobe mais que preço → aperta margem (bear)
+            _cg = "var(--bear)" if gap_m > 0.5 else ("var(--bull)" if gap_m < -0.5 else "var(--amber)")
+            partes.append(_kpi("margem prod−cons", f"{gap_m:+.1f}pp", _cg))
         partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
 
         st.markdown(

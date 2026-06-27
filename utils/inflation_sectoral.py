@@ -130,6 +130,27 @@ def get_inflacao_atual(market: str = "BR", horizonte: str | None = None) -> dict
     return out
 
 
+def gap_margem(market: str = "BR", horizonte: str | None = None) -> dict | None:
+    """
+    Gap de margem da economia = inflação ao PRODUTOR − inflação ao CONSUMIDOR.
+    BR: IGP-M (atacado) − IPCA cheio; US: PPI (all commodities) − core CPI.
+
+    Positivo = custo do produtor subindo mais rápido que o preço final →
+    compressão de margem agregada. Negativo = alívio de margem.
+
+    Retorna {'gap', 'produtor', 'consumidor'} (pp/%) ou None se indisponível.
+    """
+    is_br = str(market).upper() == "BR"
+    infl = get_inflacao_atual(market, horizonte=horizonte)
+    if not infl:
+        return None
+    prod = infl.get("igpm") if is_br else infl.get("ppi")
+    cons = infl.get("ipca_cheio") if is_br else infl.get("core")
+    if prod is None or cons is None:
+        return None
+    return {"gap": round(prod - cons, 2), "produtor": prod, "consumidor": cons}
+
+
 def _headline(infl: dict, market: str) -> float:
     """Inflação headline (proxy de média) a partir dos cortes disponíveis."""
     if str(market).upper() == "BR":
