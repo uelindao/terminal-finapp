@@ -336,6 +336,80 @@ def bloco_macro(macro_context: dict, impacto_setor: dict = None) -> str:
     return txt
 
 
+def _mom_label(v3, v12) -> str:
+    """Rótulo de aceleração comparando run-rate 3m vs nível 12m."""
+    if v3 is None or v12 is None:
+        return ""
+    if v3 > v12 + 0.3:
+        return " (acelerando)"
+    if v3 < v12 - 0.3:
+        return " (desacelerando)"
+    return " (estável)"
+
+
+def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
+    """
+    Inflação DECOMPOSTA (nível 12m + run-rate 3m anualizado = momentum) + a
+    exposição específica do setor (custo de insumo × pricing power), via
+    utils/inflation_sectoral. Dá à IA o que o headline esconde: a inflexão (ex.:
+    serviços desacelerando, administrados acelerando) e o canal de margem do setor.
+    Vazio se o snapshot de inflação não estiver disponível (degrada gracioso).
+    """
+    try:
+        from utils.inflation_sectoral import get_inflacao_atual, pressao_inflacao_setor
+        from utils.setores import normalizar_setor
+    except Exception:
+        return ""
+
+    is_br = str(market).upper() == "BR"
+    infl12 = get_inflacao_atual(market) or {}
+    if not infl12:
+        return ""
+    infl3 = get_inflacao_atual(market, horizonte="3m") or {}
+    canon = normalizar_setor(setor)
+
+    if is_br:
+        _nuc  = [v for k, v in infl12.items() if k.startswith("nucleo")]
+        _nuc3 = [v for k, v in infl3.items()  if k.startswith("nucleo")]
+        nucleo_12 = round(sum(_nuc) / len(_nuc), 1) if _nuc else None
+        nucleo_3  = round(sum(_nuc3) / len(_nuc3), 1) if _nuc3 else None
+        cuts = [("serviços", "servicos"), ("administrados", "administrados"),
+                ("livres", "livres"), ("alimentação", "alimentacao")]
+    else:
+        nucleo_12 = infl12.get("median") or infl12.get("core")
+        nucleo_3  = infl3.get("median") or infl3.get("core")
+        cuts = [("core", "core"), ("shelter", "shelter"),
+                ("serviços core", "servicos_core"), ("bens core", "bens_core")]
+
+    linhas = []
+    if nucleo_12 is not None:
+        _m = (f" → {nucleo_3:.1f}% 3m anual.{_mom_label(nucleo_3, nucleo_12)}"
+              if nucleo_3 is not None else "")
+        linhas.append(f"núcleo: {nucleo_12:.1f}% 12m{_m}")
+    for lbl, key in cuts:
+        v12 = infl12.get(key)
+        if v12 is None:
+            continue
+        v3 = infl3.get(key)
+        _m = f" → {v3:.1f}% 3m{_mom_label(v3, v12)}" if v3 is not None else ""
+        linhas.append(f"{lbl}: {v12:.1f}% 12m{_m}")
+
+    if not linhas:
+        return ""
+
+    txt = (
+        "\ninflação decomposta (nível 12m vs run-rate 3m anualizado — momentum):\n"
+        + "\n".join(f"- {l}" for l in linhas) + "\n"
+    )
+    try:
+        pres = pressao_inflacao_setor(canon, market, infl12)
+        if pres.get("motivos"):
+            txt += "exposição deste setor à inflação: " + "; ".join(pres["motivos"]) + "\n"
+    except Exception:
+        pass
+    return txt
+
+
 def bloco_volatil(preco_atual: float, var_1d: float, moeda: str = "r$") -> str:
     """SEMPRE último — dados que mudam a cada tick."""
     return (
@@ -391,6 +465,7 @@ def build_research_prompt(
             vol_anual=tec.get("vol_anual"),
         )
         + bloco_macro(macro_context, impacto_setor)
+        + bloco_inflacao_setorial(setor, "BR" if ticker.endswith(".SA") else "US")
         + bloco_volatil(preco_atual, var_1d, moeda)
     )
 
@@ -413,7 +488,10 @@ def build_research_prompt(
         "(c) quantifique gap em percentual.\n\n"
         "5. impacto macro (2 bullets): "
         "como selic real (Fisher), vix e regime atual afetam ESPECIFICAMENTE "
-        "este ativo. cite impacto setorial fornecido se houver.\n\n"
+        "este ativo. use a INFLAÇÃO DECOMPOSTA — o momentum 3m vs 12m e a exposição "
+        "setorial — para falar de MARGEM (ex.: 'serviços desacelerando alivia custo' "
+        "ou 'administrados acelerando + repasse baixo = compressão de margem'). "
+        "cite impacto setorial fornecido se houver.\n\n"
         "6. veredicto direcional: "
         "comprar / manter / evitar — com horizonte (6m / 12m / 24m) e "
         "qual gatilho monitorar para mudar a tese.\n\n"
