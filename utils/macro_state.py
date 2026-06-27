@@ -395,6 +395,16 @@ def render_cockpit_macro(market: str = "BR") -> None:
         except Exception:
             pass
 
+        # surpresa de inflação: realizado − esperado (Focus BR / Michigan US).
+        surp_m = None
+        try:
+            from utils.inflation_sectoral import surpresa_inflacao as _surp_infl
+            _sp = _surp_infl(market)
+            if _sp:
+                surp_m = _sp["surpresa"]
+        except Exception:
+            pass
+
         _cor_juro = "var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)")
         _cor_vix  = "var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)")
 
@@ -434,6 +444,10 @@ def render_cockpit_macro(market: str = "BR") -> None:
             # gap > 0 = custo sobe mais que preço → aperta margem (bear)
             _cg = "var(--bear)" if gap_m > 0.5 else ("var(--bull)" if gap_m < -0.5 else "var(--amber)")
             partes.append(_kpi("margem prod−cons", f"{gap_m:+.1f}pp", _cg))
+        if surp_m is not None:
+            # surpresa > 0 = inflação acima do precificado → hawkish (bear duration)
+            _cs = "var(--bear)" if surp_m > 0.3 else ("var(--bull)" if surp_m < -0.3 else "var(--amber)")
+            partes.append(_kpi("surpresa infl.", f"{surp_m:+.1f}pp", _cs))
         partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
 
         st.markdown(

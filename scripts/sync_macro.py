@@ -558,6 +558,79 @@ def fetch_inflacao_setorial():
             print(f"  [infl US] ERRO: {e}")
 
 
+def fetch_expectativas():
+    """
+    Expectativas de inflação + a SURPRESA (realizado − esperado) — o sinal de
+    "o que já está precificado". Surpresa positiva = inflação acima do esperado
+    → hawkish → ruim para duration; negativa = dovish.
+
+    BR: Focus 12m à frente (API Olinda do BCB, sem chave).
+    EUA: survey Michigan 1y (MICH) + breakevens (5y, 5y5y, 10y) via FRED.
+    """
+    # ── BR: Focus 12 meses (Olinda) ────────────────────────────────────────────
+    try:
+        import requests
+        from bcb import sgs
+        url = ("https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/"
+               "odata/ExpectativasMercadoInflacao12Meses?$top=1&$orderby=Data%20desc"
+               "&$format=json&$filter=Indicador%20eq%20'IPCA'%20and%20"
+               "Suavizada%20eq%20'S'%20and%20baseCalculo%20eq%200")
+        focus = None
+        r = requests.get(url, timeout=12)
+        if r.status_code == 200:
+            vals = r.json().get("value", [])
+            if vals and vals[0].get("Mediana") is not None:
+                focus = round(float(vals[0]["Mediana"]), 2)
+        if focus is not None:
+            upsert_macro("br_focus_ipca_12m", focus,
+                         label="Focus IPCA 12m à frente", unit="%", source="bcb")
+            _ipca12 = sgs.get({"x": 13522}, last=1)["x"].dropna()
+            if not _ipca12.empty:
+                _real = round(float(_ipca12.iloc[-1]), 2)
+                _surp = round(_real - focus, 2)
+                upsert_macro("br_surpresa_inflacao", _surp,
+                             label="Surpresa inflação BR (realizado−Focus)",
+                             unit="pp", source="bcb")
+                print(f"  [exp BR] focus={focus} realizado={_real} surpresa={_surp:+.2f}")
+    except Exception as e:
+        print(f"  [exp BR] ERRO: {e}")
+
+    # ── EUA: Michigan 1y + breakevens (FRED) ───────────────────────────────────
+    if not FRED_API_KEY:
+        print("  [exp US] FRED_API_KEY ausente, pulando")
+        return
+    try:
+        from fredapi import Fred
+        fred = Fred(api_key=FRED_API_KEY)
+        _vals = {}
+        for nome, sid, lbl in [
+            ("mich",    "MICH",   "Michigan 1y inflation expectation"),
+            ("be_5y",   "T5YIE",  "5y breakeven"),
+            ("be_5y5y", "T5YIFR", "5y5y forward breakeven"),
+            ("be_10y",  "T10YIE", "10y breakeven"),
+        ]:
+            try:
+                _s = fred.get_series(sid)
+                if _s is not None and not _s.dropna().empty:
+                    _vals[nome] = round(float(_s.dropna().iloc[-1]), 2)
+                    upsert_macro(f"us_{nome}", _vals[nome], label=f"US {lbl}", unit="%", source="fred")
+                    print(f"  [exp US] {nome} ({sid}) = {_vals[nome]}")
+            except Exception as _e:
+                print(f"  [exp US] {nome} ({sid}): {_e}")
+        # surpresa = core CPI YoY − Michigan 1y
+        if "mich" in _vals:
+            _core = fred.get_series("CPILFESL").dropna()
+            if len(_core) >= 13:
+                _yoy = round(float((_core.iloc[-1] / _core.iloc[-13] - 1) * 100), 2)
+                _surp = round(_yoy - _vals["mich"], 2)
+                upsert_macro("us_surpresa_inflacao", _surp,
+                             label="Surpresa inflação US (core−Michigan)",
+                             unit="pp", source="fred")
+                print(f"  [exp US] core={_yoy} mich={_vals['mich']} surpresa={_surp:+.2f}")
+    except Exception as e:
+        print(f"  [exp US] ERRO: {e}")
+
+
 def main():
     print("[sync_macro] inicio")
     log_id = log_etl_start("sync_macro")
@@ -570,6 +643,9 @@ def main():
 
     print("[sync_macro] inflação setorial (IPCA/CPI)...")
     fetch_inflacao_setorial()
+
+    print("[sync_macro] expectativas / surpresa (Focus + breakevens)...")
+    fetch_expectativas()
 
     print("[sync_macro] yfinance...")
     fetch_yfinance_macro()
