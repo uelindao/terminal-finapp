@@ -358,7 +358,7 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
     try:
         from utils.inflation_sectoral import (
             get_inflacao_atual, pressao_inflacao_setor, gap_margem,
-            surpresa_inflacao,
+            surpresa_inflacao, diffusion_inflacao,
         )
         from utils.setores import normalizar_setor
     except Exception:
@@ -435,6 +435,17 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
                 _dir = "em linha com o precificado (sem surpresa)"
             _esp = f" vs esperado {_sp['esperada']:.1f}%" if _sp.get("esperada") is not None else ""
             txt += f"surpresa de inflação (realizado − esperado): {_s:+.1f}pp{_esp} → {_dir}\n"
+    except Exception:
+        pass
+    try:
+        _d = diffusion_inflacao(market)
+        if _d:
+            _amplo = ("ampla/disseminada (difícil de combater)" if _d["pct_acima_meta"] >= 60
+                      else "concentrada em poucos itens" if _d["pct_acima_meta"] < 35
+                      else "moderadamente difundida")
+            txt += (f"difusão: {_d['acima']}/{_d['total']} cortes da cesta acima da meta "
+                    f"({_d['pct_acima_meta']}%), {_d['pct_acelerando']}% acelerando → "
+                    f"inflação {_amplo}\n")
     except Exception:
         pass
     return txt

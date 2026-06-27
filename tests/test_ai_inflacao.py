@@ -57,6 +57,23 @@ def test_gap_ppi_diferencia_por_repasse():
     assert baixo["pontos"] <= alto["pontos"]
 
 
+def test_diffusion_inflacao():
+    import utils.inflation_sectoral as ins
+    infl12 = {"alimentacao": 5, "habitacao": 4, "artigos_residencia": 2, "vestuario": 1,
+              "transportes": 4, "comunicacao": 2, "saude": 5, "despesas_pessoais": 4, "educacao": 6}
+    infl3 = {"alimentacao": 6, "habitacao": 3, "artigos_residencia": 2, "vestuario": 1,
+             "transportes": 5, "comunicacao": 2, "saude": 5, "despesas_pessoais": 3, "educacao": 7}
+
+    def _f(market, horizonte=None):
+        return infl3 if horizonte == "3m" else infl12
+
+    with patch("utils.inflation_sectoral.get_inflacao_atual", side_effect=_f):
+        d = ins.diffusion_inflacao("BR")
+    assert d["acima"] == 6 and d["total"] == 9         # 6/9 acima da meta 3.0
+    assert d["pct_acima_meta"] == round(6 / 9 * 100)
+    assert d["pct_acelerando"] == round(3 / 9 * 100)   # alim/transp/educ aceleram
+
+
 def test_surpresa_inflacao():
     import utils.inflation_sectoral as ins
 
