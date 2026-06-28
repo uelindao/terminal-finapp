@@ -24,10 +24,16 @@ Garantias:
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 import pandas as pd
-import streamlit as st
 import yfinance as yf
+
+# st real em produção; stub no-op no ETL (GitHub Actions sem streamlit).
+# Mesmo padrão de health_engine/macro_state — torna esta fachada importável
+# pelo ETL, requisito para centralizar o acesso ao yfinance.
+from utils.st_fallback import st  # noqa: F401
 
 logger = logging.getLogger(__name__)
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -152,6 +158,258 @@ def bulk_var_dia(
                 var = 0.0
             out[t] = {"preco": p_atual, "var_1d": var}
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CIRCUIT BREAKER + ENTRADA ÚNICA PARA yfinance.info
+# ═══════════════════════════════════════════════════════════════════════════
+# Problema: `yf.Ticker(t).info` é a chamada mais frágil do terminal — retorna
+# "Too Many Requests" sob carga e era invocada crua em ~10 lugares, cada um com
+# seu try/except. Quando o Yahoo limitava, dezenas de telas degradavam em
+# silêncio e o app continuava martelando o endpoint a cada render.
+#
+# Aqui isso vira UM ponto de passagem com disjuntor: após N falhas seguidas o
+# circuito ABRE e a fachada para de bater no Yahoo por um período de descanso,
+# servindo {} (os chamadores já tratam dict vazio). Passado o cooldown, entra
+# em meia-abertura e tenta de novo. provider_health() expõe o estado p/ a UI.
+
+class _CircuitBreaker:
+    """Disjuntor simples e thread-safe (yfinance baixa em threads)."""
+
+    def __init__(self, name: str, fail_threshold: int = 5, cooldown_s: float = 300.0):
+        self.name = name
+        self.fail_threshold = fail_threshold
+        self.cooldown_s = cooldown_s
+        self._fails = 0
+        self._opened_at = 0.0
+        self._lock = threading.Lock()
+
+    def is_open(self) -> bool:
+        """True = circuito aberto (pular a chamada). Meia-abertura após cooldown."""
+        with self._lock:
+            if self._opened_at == 0.0:
+                return False
+            if time.time() - self._opened_at >= self.cooldown_s:
+                # cooldown vencido → meia-abertura: zera e permite 1 tentativa
+                self._opened_at = 0.0
+                self._fails = 0
+                return False
+            return True
+
+    def record_success(self) -> None:
+        with self._lock:
+            self._fails = 0
+            self._opened_at = 0.0
+
+    def record_failure(self) -> None:
+        with self._lock:
+            self._fails += 1
+            if self._fails >= self.fail_threshold and self._opened_at == 0.0:
+                self._opened_at = time.time()
+                logger.warning(
+                    f"[market_data] circuito '{self.name}' ABERTO após "
+                    f"{self._fails} falhas — descanso de {self.cooldown_s:.0f}s."
+                )
+
+    def status(self) -> dict:
+        with self._lock:
+            aberto = self._opened_at != 0.0 and (
+                time.time() - self._opened_at < self.cooldown_s
+            )
+            restante = (
+                max(0.0, self.cooldown_s - (time.time() - self._opened_at))
+                if aberto else 0.0
+            )
+            return {
+                "provider": self.name,
+                "aberto": aberto,
+                "falhas_consecutivas": self._fails,
+                "cooldown_restante_s": round(restante, 1),
+            }
+
+
+# Disjuntor global do yfinance.info (estado por processo).
+_YF_INFO_BREAKER = _CircuitBreaker("yfinance.info", fail_threshold=5, cooldown_s=300.0)
+
+
+def yf_info(ticker: str, *, force: bool = False) -> dict:
+    """
+    ENTRADA ÚNICA para `yfinance.Ticker(ticker).info` em todo o terminal.
+
+    Protegida por circuit breaker: se o Yahoo está limitando (circuito aberto),
+    retorna {} imediatamente em vez de bater no endpoint. `force=True` ignora o
+    disjuntor (refresh explícito disparado pelo usuário).
+
+    Nunca levanta. Retorna {} em falha — os chamadores já tratam dict vazio.
+    Não é cacheada de propósito: o estado do disjuntor precisa refletir cada
+    tentativa real; cache de fundamentos é responsabilidade da camada acima.
+    """
+    if not force and _YF_INFO_BREAKER.is_open():
+        logger.debug(f"[market_data] yf_info({ticker}) pulado — circuito aberto.")
+        return {}
+    try:
+        info = yf.Ticker(ticker).info or {}
+        # info "real" tem dezenas de chaves; um dict quase vazio sob rate-limit
+        # é sintoma de bloqueio, não de ativo sem dado → conta como falha.
+        if len(info) > 3:
+            _YF_INFO_BREAKER.record_success()
+            return info
+        _YF_INFO_BREAKER.record_failure()
+        return {}
+    except Exception as e:
+        _YF_INFO_BREAKER.record_failure()
+        logger.warning(f"[market_data] yf_info({ticker}) falhou: {e}")
+        return {}
+
+
+def provider_health() -> dict:
+    """Estado dos disjuntores de provedores — para uma tela de admin/diagnóstico."""
+    return {"yfinance_info": _YF_INFO_BREAKER.status()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FACHADA DE FUNDAMENTOS — cascata cache → BRAPI/FMP → yfinance.info
+# ═══════════════════════════════════════════════════════════════════════════
+# Devolve SEMPRE o mesmo shape (chaves do fundamentals_cache), venha de qual
+# fonte vier. Páginas devem chamar isto (cache-first, allow_live=False); o ETL
+# usa allow_live=True para popular o cache.
+
+_FUND_KEYS = (
+    "nome", "setor", "preco", "p/l", "p/vp", "dy%", "roe%",
+    "margem%", "ev/ebitda", "market_cap", "beta",
+)
+
+
+def _fund_vazio(source: str = "") -> dict:
+    d: dict = {k: None for k in _FUND_KEYS}
+    d["qualidade_dados"] = None
+    d["data_source"] = source
+    return d
+
+
+def _sf(val):
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct(val):
+    """Normaliza margem/ROE/DY: yfinance entrega decimal (0.24); cache usa %."""
+    f = _sf(val)
+    if f is None:
+        return None
+    return round(f * 100, 2) if abs(f) < 2.0 else round(f, 2)
+
+
+def _normalizar_cache(d: dict) -> dict:
+    out = _fund_vazio(d.get("data_source") or "cache")
+    out["qualidade_dados"] = d.get("qualidade_dados") or d.get("data_quality_pct")
+    for k in _FUND_KEYS:
+        if d.get(k) is not None:
+            out[k] = d[k]
+    return out
+
+
+def _normalizar_brapi(q: dict) -> dict:
+    out = _fund_vazio("brapi")
+    out.update({
+        "nome": q.get("nome"), "setor": q.get("setor"),
+        "preco": q.get("preco"), "p/l": q.get("pe"), "p/vp": q.get("pb"),
+        "dy%": q.get("dy"), "roe%": q.get("roe"), "margem%": q.get("margem"),
+        "ev/ebitda": q.get("ev_ebitda"), "market_cap": q.get("market_cap"),
+        "beta": q.get("beta"),
+    })
+    return out
+
+
+def _normalizar_fmp(p: dict) -> dict:
+    out = _fund_vazio("fmp")
+    out.update({
+        "nome": p.get("nome"), "setor": p.get("setor"),
+        "preco": p.get("preco"), "market_cap": p.get("market_cap"),
+        "beta": p.get("beta"),
+    })
+    return out
+
+
+def _merge_yf_info(base: dict, ticker: str) -> dict:
+    """Completa campos None do `base` com yfinance.info (via disjuntor)."""
+    info = yf_info(ticker)
+    if not info:
+        return base
+    candidatos = {
+        "nome": info.get("longName") or info.get("shortName"),
+        "setor": info.get("sector"),
+        "preco": _sf(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "p/l": _sf(info.get("trailingPE") or info.get("forwardPE")),
+        "p/vp": _sf(info.get("priceToBook")),
+        "dy%": _pct(info.get("dividendYield") or info.get("trailingAnnualDividendYield")),
+        "roe%": _pct(info.get("returnOnEquity")),
+        "margem%": _pct(info.get("profitMargins")),
+        "ev/ebitda": _sf(info.get("enterpriseToEbitda")),
+        "market_cap": _sf(info.get("marketCap")),
+        "beta": _sf(info.get("beta")),
+    }
+    preencheu = False
+    for k, v in candidatos.items():
+        if base.get(k) is None and v is not None:
+            base[k] = v
+            preencheu = True
+    if preencheu and base.get("data_source") in (None, "", "cache_miss"):
+        base["data_source"] = "yfinance"
+    return base
+
+
+def fundamentos(ticker: str, *, allow_live: bool = True) -> dict:
+    """
+    Snapshot fundamental de UM ticker, no shape canônico do fundamentals_cache.
+    Substitui as ~123 chamadas cruas a `yfinance.Ticker().info` espalhadas.
+
+    Cascata:
+      1. cache Supabase (fundamentals_cache)  ← páginas param aqui (allow_live=False)
+      2. provedor primário por mercado: BRAPI (.SA) / FMP (US)
+      3. yfinance.info (via disjuntor) — completa lacunas / último recurso
+
+    A escolha BR-vs-US e o fallback ficam DENTRO da fachada; o chamador nunca
+    precisa saber a fonte. Nunca levanta — devolve dict de chaves None em falha.
+    """
+    # 1. cache Supabase
+    try:
+        from database.db import get_todos_fundamentos_cache
+        d = get_todos_fundamentos_cache().get(ticker)
+        if d and any(d.get(k) is not None for k in ("p/l", "p/vp", "roe%", "preco")):
+            return _normalizar_cache(d)
+    except Exception as e:
+        logger.debug(f"[market_data] fundamentos: cache indisponível p/ {ticker}: {e}")
+
+    if not allow_live:
+        return _fund_vazio("cache_miss")
+
+    is_br = ticker.endswith(".SA")
+
+    # 2. provedor primário por mercado (lazy import: clientes dependem de
+    #    streamlit/secrets — se indisponível no ETL, o try cai p/ o yfinance).
+    try:
+        if is_br:
+            from utils.brapi_client import get_quote
+            q = get_quote(ticker)
+            if q and q.get("preco") is not None:
+                base = _normalizar_brapi(q)
+                return _merge_yf_info(base, ticker)
+        else:
+            from utils.fmp_client import get_profile
+            p = get_profile(ticker)
+            if p and (p.get("preco") is not None or p.get("market_cap") is not None):
+                base = _normalizar_fmp(p)
+                return _merge_yf_info(base, ticker)
+    except Exception as e:
+        logger.debug(f"[market_data] fundamentos: provedor primário falhou p/ {ticker}: {e}")
+
+    # 3. yfinance puro (último recurso)
+    return _merge_yf_info(_fund_vazio("cache_miss"), ticker)
 
 
 @st.cache_data(ttl=300, show_spinner=False)

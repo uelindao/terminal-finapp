@@ -72,7 +72,8 @@ CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 # MOTOR DE BUSCA GLOBAL (YAHOO FINANCE)
 # ==========================================
 # buscar_ativo_yahoo consolidado em utils/market_data (era duplicado em Home).
-from utils.market_data import buscar_ativo_yahoo
+# yf_info: entrada única p/ yfinance.info (circuit breaker central) — Fase 2.
+from utils.market_data import buscar_ativo_yahoo, yf_info
 
 # ==========================================
 # GESTÃO DE ESTADO E SIDEBAR
@@ -349,11 +350,8 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                         or {}
                     )
 
-                    # Busca info do yfinance com timeout
-                    try:
-                        info = yf.Ticker(t_base).info or {}
-                    except Exception:
-                        info = {}
+                    # Busca info do yfinance via fachada (circuit breaker central)
+                    info = yf_info(t_base)
 
                     # Helper seguro
                     def _get_val(cache_key, yf_key, multiplier=1.0):
@@ -660,13 +658,9 @@ def carregar_dados_ativo(tk):
         pass  # hist permanece vazio — tratado logo abaixo
 
     # ── info: bloco isolado — falha aqui NÃO mata o histórico ──────────────
-    info = {}
-    try:
-        raw_info = acao.info
-        if isinstance(raw_info, dict):
-            info = raw_info
-    except Exception:
-        pass  # info fica {} — fallback para CACHE_FUNDAMENTOS
+    # Via fachada (yf_info): circuit breaker central. Devolve {} em falha/circuito
+    # aberto — o fallback para CACHE_FUNDAMENTOS abaixo trata isso.
+    info = yf_info(tk)
 
     if hist.empty:
         return None, pd.DataFrame(), {}
@@ -1944,8 +1938,7 @@ with tab_analise:
             pass
     if _de_tab is None:
         try:
-            _info_de = yf.Ticker(t_base).info
-            _de_raw = _info_de.get('debtToEquity')
+            _de_raw = yf_info(t_base).get('debtToEquity')
             if _de_raw is not None:
                 _de_tab = round(float(_de_raw), 2)
         except Exception:
