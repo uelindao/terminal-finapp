@@ -13,6 +13,7 @@ import time
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
+from utils.market_data import yf_info  # entrada única p/ yfinance.info (Fase 2)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -2027,7 +2028,7 @@ with tab_global:
             _pl_real_spx = None
             for _proxy_spx in ("SPY", "IVV", "VOO"):
                 try:
-                    _pe_val = (yf.Ticker(_proxy_spx).info or {}).get("trailingPE")
+                    _pe_val = yf_info(_proxy_spx).get("trailingPE")
                     if _pe_val is not None and _pe_val > 0:
                         _pl_real_spx = float(_pe_val)
                         break

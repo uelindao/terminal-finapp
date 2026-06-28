@@ -59,15 +59,14 @@ def enriquecer_com_yfinance(dados: dict, ticker_yf: str, logger=None) -> dict:
     if not faltantes:
         return dados
 
-    try:
-        import yfinance as yf
-        info = yf.Ticker(ticker_yf).info or {}
-    except Exception as e:
-        if logger:
-            logger.debug(f"[yf_enrich] {ticker_yf} info indisponível: {e}")
-        return dados
-
+    # Roteado pela fachada única (utils/market_data.yf_info): circuit breaker
+    # central + backoff. Protege o ETL inteiro do rate-limit do yfinance.info,
+    # antes chamado cru aqui (e em ~10 outros pontos).
+    from utils.market_data import yf_info
+    info = yf_info(ticker_yf)
     if not info:
+        if logger:
+            logger.debug(f"[yf_enrich] {ticker_yf} info indisponível (falha/circuito aberto)")
         return dados
 
     mapeamento = {
