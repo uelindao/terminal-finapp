@@ -1271,20 +1271,25 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 alertas.append("⚠️ fii sem histórico de proventos recentes.")
 
             # ── Score total FII e breakdown ───────────────────────────────
+            # Reusa `segmento` (já calculado no topo do bloco FII) em vez de
+            # rechamar _detectar_segmento_fii. Usa .update() para PRESERVAR as
+            # linhas já adicionadas ao breakdown (NTN-B benchmark, DY real,
+            # Spread vs NTN-B) — a antiga reatribuição `breakdown = {...}` as apagava.
             score += score_pvp + score_y
-            try:
-                _seg_fii = _detectar_segmento_fii(ticker, dados_base)
-            except Exception as e:
-                logger.debug(f"[health_engine] falha ao detectar segmento FII: {e}")
-                _seg_fii = "fii"
-            breakdown = {
-                f"Valuation P/VP ({_seg_fii})":   score_pvp,
+            breakdown.update({
+                f"Valuation P/VP ({segmento})":   score_pvp,
                 "Geração de Renda (Yield NTN-B)": score_y,
-                "Momento Técnico (MM200)":        0,
-            }
+                "Momento Técnico (MM200)":        penalidade_tec,
+            })
 
-            # ── Penalidade técnica ─────────────────────────────────────────
+            # ── Penalidades técnica e de volatilidade ──────────────────────
+            # penalidade_tec e penalidade_vix são calculadas antes do bloco FII.
+            # A técnica agora aparece no breakdown (acima); a de VIX era
+            # calculada mas descartada para FIIs — agora é somada e reportada.
             score += penalidade_tec
+            score += penalidade_vix
+            if penalidade_vix:
+                breakdown["Risco Volatilidade (VIX)"] = penalidade_vix
 
         # ==========================================
         # MOTOR 2 e 3: AÇÕES (B3 vs EUA)

@@ -329,6 +329,9 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             texto  = "use a barra lateral para escolher 2 ou mais ativos e iniciar a comparação.",
             icone  = "👈",
         )
+        # Sem ativos não há dados_comp: interromper aqui evita NameError no botão
+        # de veredito e no st.columns(len(ativos_comp)) mais abaixo na página.
+        st.stop()
     else:
         with st.spinner("sincronizando matriz de múltiplos..."):
             dados_comp = []
@@ -634,7 +637,11 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
 # ==========================================
 ticker = st.session_state['research_ticker']
 t_base = mapear_ticker_base(ticker)
-is_fii = ticker in FII_TODOS or (ticker.endswith("11.SA") and ticker not in ['TAEE11.SA', 'KLBN11.SA', 'ENGI11.SA'])
+# Fonte única da verdade para detecção de FII (mesma lógica do health_engine).
+# Antes uma lista de exceções local (3 tickers) divergia da do motor (15 tickers),
+# fazendo SANB11/BPAC11/ALUP11 renderizarem como FII (KPIs e modelo P/VP errados).
+from utils.health_engine import _is_fii
+is_fii = _is_fii(ticker)
 
 # Registra ativo no histórico de visitados (máx 5)
 _hist_key = 'research_historico'
@@ -2652,17 +2659,30 @@ with tab_analise:
     try:
         news = acao_obj.news
         if news:
-            for item in news[:5]:
+            # yfinance recente aninha os campos em item['content']; versões antigas
+            # os traziam no topo. Trata os dois formatos (igual a 3_Macro).
+            _n_render = 0
+            for item in news:
+                if _n_render >= 5:
+                    break
+                dados_n  = item.get('content', item)
+                titulo_n = dados_n.get('title', dados_n.get('headline', ''))
+                if not titulo_n:
+                    continue
+                _pub = dados_n.get('provider', dados_n.get('publisher', 'agência'))
+                if isinstance(_pub, dict):
+                    _pub = _pub.get('displayName', 'agência')
+                _uid = item.get('id') or item.get('uuid') or f"news_{_n_render}"
                 with st.container():
                     cn1, cn2 = st.columns([4, 1])
-                    cn1.markdown(f"**{item.get('title')}**")
-                    cn1.caption(f"{item.get('publisher')} | {datetime.datetime.fromtimestamp(item.get('providerPublishTime'))}")
-                    if cn2.button("ia: analisar", key=item.get('uuid')):
+                    cn1.markdown(f"**{titulo_n}**")
+                    cn1.caption(str(_pub or 'agência').lower())
+                    if cn2.button("ia: analisar", key=f"news_ia_{_uid}"):
                         with st.spinner("ia..."):
                             _res_news = chamar_ia(
                                 prompt_usuario=(
                                     f"ativo: {ticker}\n\n"
-                                    f"manchete: {item.get('title')}\n\n"
+                                    f"manchete: {titulo_n}\n\n"
                                     "em 1 frase curta com letra minúscula, diga se esta notícia é "
                                     "positiva, negativa ou neutra para o ativo e por quê."
                                 ),
@@ -2675,7 +2695,14 @@ with tab_analise:
                             if _res_news:
                                 st.info(_res_news)
                     st.markdown("---")
-    except: st.info("Sem notícias.")
+                _n_render += 1
+            if _n_render == 0:
+                st.info("sem notícias no formato esperado.")
+        else:
+            st.info("sem notícias disponíveis.")
+    except Exception as _e_news:
+        logging.getLogger(__name__).warning(f"[research] notícias: {_e_news}")
+        st.info("sem notícias.")
 
 with tab_macro:
     st.subheader("estudo de correlação estrutural (10 anos)")

@@ -3018,20 +3018,10 @@ with tab_global:
                     "cor":           "#8B00FF",
                     "nota":          "produção ~2.8Mboe/d · dividend policy: 45% lucro líquido",
                 },
-                {
-                    "empresa":       "Suzano",
-                    "ticker":        "SUZB3.SA",
-                    "comm_tk":       "BZUN",    # proxy — celulose não tem ticker yfinance direto
-                    "comm_nome":     "celulose (bhkp — proxy)",
-                    "unidade":       "us$/ton",
-                    "base":          650.0,
-                    "delta_label":   "cada us$100/t acima de us$650",
-                    "ebitda_delta":  3.5,    # R$bi por $100/t (11Mt de prod × 100 × 5.5 / 1000)
-                    "dy_delta":      0.010,
-                    "logica":        "long — sobe com celulose",
-                    "cor":           "#00C853",
-                    "nota":          "produção ~11Mt/a bhkp · suzano = maior produtora mundial",
-                },
+                # Suzano REMOVIDA: o proxy "BZUN" era a ação da Baozun (e-commerce
+                # chinês), não celulose — produzia EBITDA implícito absurdo. Celulose
+                # BHKP não tem série pública confiável no yfinance. Reintroduzir só
+                # com uma fonte real de preço de celulose (ex.: FOEX/CEPEA via scraper).
                 {
                     "empresa":       "JBS",
                     "ticker":        "JBSS3.SA",
