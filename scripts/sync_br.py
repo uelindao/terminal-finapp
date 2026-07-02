@@ -85,6 +85,12 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     Após mapear BRAPI, enriquece com yfinance.info para preencher lacunas."""
     fd = raw.get("fundamentalData") or {}
 
+    # ATENÇÃO (P0-6): a conversão por magnitude abaixo (`if abs(v) < N: v*=100`) é
+    # AMBÍGUA e corrompe valores pequenos legítimos — um DY real de 0.9% (já em %)
+    # vira 90%. Só dá para resolver em definitivo confirmando a unidade real que a
+    # BRAPI entrega (testar ITUB4/TAEE11/PETR4 com BRAPI_TOKEN e fixar a conversão).
+    # Enquanto isso, a validação de ranges no fim desta função (validar_fundamentos)
+    # descarta os valores estourados (90% DY, 150% ROE) → viram None, não valor falso.
     dy = _sf(fd.get("dividendYield") or raw.get("dividendYield"))
     if dy is not None and dy < 1.0:
         dy = dy * 100
@@ -135,6 +141,17 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
 
     if historico:
         data["historico_trimestral"] = historico
+
+    # Validação de ranges na escrita (P2-4): descarta valores fora de faixa
+    # realista (p/l, p/vp, roe%, dy%, ev/ebitda, margem%) antes de persistir —
+    # antes o ETL BRAPI não validava e valores estourados iam direto ao cache.
+    # validar_fundamentos só toca esses 6 campos; os demais (preco, historico,
+    # _raw, etc.) permanecem intactos.
+    try:
+        from utils.scrapers import validar_fundamentos
+        validar_fundamentos(data)  # muta in-place; clampa fora-de-range para None
+    except Exception as e:
+        logger.debug(f"[sync_br] validar_fundamentos falhou p/ {ticker}: {e}")
 
     return data
 

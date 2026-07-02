@@ -371,15 +371,26 @@ _COPOM_CALENDAR = {
     "6/2025": datetime.date(2025, 9, 17),
     "7/2025": datetime.date(2025, 10, 29),
     "8/2025": datetime.date(2025, 12, 10),
-    # 2026 — estimados pela cadência histórica (~6-8 semanas de intervalo)
+    # 2026 — datas OFICIAIS publicadas pelo BCB (decisão = 2º dia, quarta-feira)
     "1/2026": datetime.date(2026, 1, 28),
     "2/2026": datetime.date(2026, 3, 18),
-    "3/2026": datetime.date(2026, 5,  6),
+    "3/2026": datetime.date(2026, 4, 29),
     "4/2026": datetime.date(2026, 6, 17),
-    "5/2026": datetime.date(2026, 7, 29),
+    "5/2026": datetime.date(2026, 8,  5),
     "6/2026": datetime.date(2026, 9, 16),
-    "7/2026": datetime.date(2026, 10, 28),
+    "7/2026": datetime.date(2026, 11, 4),
     "8/2026": datetime.date(2026, 12,  9),
+    # 2027 — estimados pela cadência histórica (~6-8 semanas). Necessários para a
+    # curva DI ter horizonte >12m: o Focus projeta reuniões de 2027/2028 e sem
+    # estas datas os pontos além de dez/2026 são descartados.
+    "1/2027": datetime.date(2027, 1, 27),
+    "2/2027": datetime.date(2027, 3, 17),
+    "3/2027": datetime.date(2027, 5,  5),
+    "4/2027": datetime.date(2027, 6, 16),
+    "5/2027": datetime.date(2027, 7, 28),
+    "6/2027": datetime.date(2027, 9, 15),
+    "7/2027": datetime.date(2027, 10, 27),
+    "8/2027": datetime.date(2027, 12,  8),
 }
 
 
@@ -410,6 +421,14 @@ def puxar_curva_di():
         cutoff  = (hoje - datetime.timedelta(days=10)).isoformat()
         cutoff_hist = (hoje - datetime.timedelta(days=180)).isoformat()
 
+        def _norm_reuniao(v) -> str:
+            """Normaliza o campo de reunião do BCB para casar com _COPOM_CALENDAR.
+            A API entrega coluna 'Reuniao' (R maiúsculo) com valores 'R4/2026';
+            o calendário usa '4/2026'. Sem isto o lookup falhava e a curva sempre
+            caía no fallback anual."""
+            s = str(v or '').strip()
+            return s[1:] if s[:1].upper() == 'R' else s
+
         # ── Abordagem 1: por reunião COPOM ────────────────────────────────
         try:
             ep_sel = em.get_endpoint('ExpectativasMercadoSelic')
@@ -426,7 +445,7 @@ def puxar_curva_di():
                 # Curva do dia mais recente
                 pontos = []
                 for _, row in df_latest.iterrows():
-                    reuniao = str(row.get('reuniao', '')).strip()
+                    reuniao = _norm_reuniao(row.get('Reuniao', row.get('reuniao')))
                     if reuniao in _COPOM_CALENDAR:
                         dt_cop = _COPOM_CALENDAR[reuniao]
                         dias   = (dt_cop - hoje).days
@@ -439,6 +458,12 @@ def puxar_curva_di():
                                 'n_respondentes': row.get('numeroRespondentes', 0),
                             })
 
+                if len(pontos) < 3:
+                    logger.warning(
+                        f"[curva_di] só {len(pontos)} pontos casaram com _COPOM_CALENDAR "
+                        f"(reuniões vistas: {sorted(set(_norm_reuniao(r) for r in df_latest.get('Reuniao', df_latest.get('reuniao', [])) ))[:8]}) "
+                        "— caindo para expectativas anuais. verifique _COPOM_CALENDAR."
+                    )
                 if len(pontos) >= 3:
                     df_curve = pd.DataFrame(pontos).sort_values('tenor_dias').reset_index(drop=True)
 
@@ -459,7 +484,7 @@ def puxar_curva_di():
                                 _ld = _df_lb['Data'].max()
                                 _df_lb = _df_lb[_df_lb['Data'] == _ld]
                                 for _, _r in _df_lb.iterrows():
-                                    _reun = str(_r.get('reuniao', '')).strip()
+                                    _reun = _norm_reuniao(_r.get('Reuniao', _r.get('reuniao')))
                                     if _reun in _COPOM_CALENDAR:
                                         _dt_c = _COPOM_CALENDAR[_reun]
                                         _d = (hoje - _dt_c).days  # dias desde então
@@ -1047,18 +1072,19 @@ def get_eventos_macro_fixos() -> list[dict]:
     hoje = datetime.date.today()
 
     eventos = [
-        # COPOM 2026
-        {"data": datetime.date(2026, 5, 6),  "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        # COPOM 2026 — datas OFICIAIS do BCB (decisão no 2º dia da reunião)
+        {"data": datetime.date(2026, 4, 29), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
         {"data": datetime.date(2026, 6, 17), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": datetime.date(2026, 7, 29), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": datetime.date(2026, 8,  5), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
         {"data": datetime.date(2026, 9, 16), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
         {"data": datetime.date(2026, 11, 4), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
         {"data": datetime.date(2026, 12, 9), "evento": "COPOM — decisão de juros", "categoria": "brasil", "impacto": "alto"},
-        # Fed 2026
+        # Fed 2026 — datas OFICIAIS do FOMC (decisão no 2º dia, quarta-feira).
+        # Antes copiadas do COPOM (11/4 não é FOMC; faltava 28/10).
         {"data": datetime.date(2026, 6, 17), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
         {"data": datetime.date(2026, 7, 29), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
         {"data": datetime.date(2026, 9, 16), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
-        {"data": datetime.date(2026, 11, 4), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
+        {"data": datetime.date(2026, 10, 28), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
         {"data": datetime.date(2026, 12, 9), "evento": "Fed — decisão de juros (FOMC)", "categoria": "eua", "impacto": "alto"},
         # IPCA 2026
         {"data": datetime.date(2026, 5, 12), "evento": "IPCA — inflação mensal (IBGE)", "categoria": "brasil", "impacto": "medio"},
