@@ -148,6 +148,22 @@ def transform_fmp(ticker: str) -> dict | None:
     if data.get("preco") is None and data.get("market_cap") is None:
         return None
 
+    # Deriva múltiplos AUSENTES (p/l, p/vp, roe%, margem%, ev/ebitda) do histórico +
+    # preço (P2-1). FMP free deixa esses campos p/ o yfinance.info, que tem buracos;
+    # a derivação preenche o que ficou None (histórico US é trimestral → soma 4Q).
+    try:
+        from utils.derive_multiples import derivar_multiplos
+        derivar_multiplos(data, historico, logger=logger)
+    except Exception as e:
+        logger.debug(f"[sync_us] derivar_multiplos falhou p/ {ticker}: {e}")
+
+    # Validação de ranges na escrita (P2-4) — mesma proteção do sync_br.
+    try:
+        from utils.scrapers import validar_fundamentos
+        validar_fundamentos(data)
+    except Exception as e:
+        logger.debug(f"[sync_us] validar_fundamentos falhou p/ {ticker}: {e}")
+
     return data
 
 

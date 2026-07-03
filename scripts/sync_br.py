@@ -62,6 +62,38 @@ def _sf(val):
         return None
 
 
+def _dividendos_12m_de_raw(raw: dict) -> float | None:
+    """
+    Soma os proventos (por cota/ação) dos últimos 12 meses a partir do
+    `dividendsData.cashDividends` da BRAPI (campos documentados: 'rate' = valor
+    por ação, 'paymentDate' = 'YYYY-MM-DD'). Usado para derivar dy% quando ausente.
+
+    Retorna None se não houver dados (comum: o plano atual da BRAPI costuma
+    devolver cashDividends vazio — nesse caso o dy% simplesmente não é derivado).
+    """
+    from datetime import datetime, timedelta
+    dd = (raw or {}).get("dividendsData") or {}
+    cash = dd.get("cashDividends") or []
+    if not cash:
+        return None
+    corte = datetime.today().date() - timedelta(days=365)
+    total = 0.0
+    achou = False
+    for item in cash:
+        rate = _sf(item.get("rate") or item.get("value"))
+        dt_str = str(item.get("paymentDate") or item.get("lastDatePrior") or "")[:10]
+        if rate is None or not dt_str:
+            continue
+        try:
+            d = datetime.strptime(dt_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d >= corte and rate > 0:
+            total += rate
+            achou = True
+    return round(total, 6) if achou else None
+
+
 def fetch_brapi(ticker: str) -> dict | None:
     """Fetch fundamental data from BRAPI for one ticker."""
     t = ticker.replace(".SA", "").upper()
@@ -141,6 +173,26 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
 
     if historico:
         data["historico_trimestral"] = historico
+
+    # Deriva múltiplos AUSENTES (p/l, p/vp, roe%, margem%, ev/ebitda, market_cap)
+    # a partir do historico_trimestral + preço (P2-1). Com o plano atual da BRAPI o
+    # fundamentalData vem vazio e o yfinance.info falha em muitos tickers BR, então
+    # sem isto esses campos ficam None. A derivação só preenche o que está None
+    # (provedor/yfinance têm prioridade) e trata a anualização CVM vs yfinance.
+    try:
+        from utils.derive_multiples import derivar_multiplos
+        derivar_multiplos(data, historico, logger=logger)
+    except Exception as e:
+        logger.debug(f"[sync_br] derivar_multiplos falhou p/ {ticker}: {e}")
+
+    # DY derivado dos proventos dos últimos 12 meses (BRAPI dividendsData), quando ausente.
+    try:
+        from utils.derive_multiples import derivar_dy
+        _div12 = _dividendos_12m_de_raw(raw)
+        if _div12 is not None:
+            derivar_dy(data, _div12, logger=logger)
+    except Exception as e:
+        logger.debug(f"[sync_br] derivar_dy falhou p/ {ticker}: {e}")
 
     # Validação de ranges na escrita (P2-4): descarta valores fora de faixa
     # realista (p/l, p/vp, roe%, dy%, ev/ebitda, margem%) antes de persistir —
