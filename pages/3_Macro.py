@@ -1160,9 +1160,24 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
 # ==========================================
 # abas principais da página
 # ==========================================
-tab_global, tab_ciclo, tab_calendar, tab_overlay, tab_sentimento, tab_correlacoes = st.tabs(["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos", "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"])
+# LAZY RENDERING (P4-1): st.tabs renderiza TODAS as abas a cada rerun — nesta
+# página isso dispara fear&greed (5 downloads), correlações (16 tickers×2y),
+# ciclo e painel global de uma vez. Trocado por um seletor persistente que
+# renderiza SÓ a seção ativa (os blocos `with tab_X:` viraram `if _secao == ...`).
+_SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
+                 "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
+if hasattr(st, "segmented_control"):
+    _secao = st.segmented_control(
+        "seção", _SECOES_MACRO, default=_SECOES_MACRO[0],
+        key="macro_secao", label_visibility="collapsed",
+    ) or st.session_state.get("macro_secao") or _SECOES_MACRO[0]
+else:
+    _secao = st.radio(
+        "seção", _SECOES_MACRO, index=0, horizontal=True,
+        key="macro_secao", label_visibility="collapsed",
+    )
 
-with tab_global:
+if _secao == "🌐 painel global":
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
     
     with st.spinner("sincronizando feed de bancos centrais e mídia global via apis oficiais..."):
@@ -3204,7 +3219,7 @@ with tab_global:
             with col_news1: renderizar_noticias("SPY", "🇺🇸 radar global (spy etf)")
             with col_news2: renderizar_noticias("EWZ", "🇧🇷 radar brasil (ewz etf)")
 
-with tab_ciclo:
+if _secao == "🔄 ciclo econômico":
 
     from utils.ciclo_economico import (
         calcular_indicadores_ciclo_br,
@@ -3578,7 +3593,7 @@ with tab_ciclo:
             user_settings  = _us_ciclo,
         )
 
-with tab_calendar:
+if _secao == "📅 calendário de eventos":
     section_title("📅 calendário de eventos de mercado")
 
     cal_tab1, cal_tab2 = st.tabs(["🏛️ decisões macro", "📊 earnings"])
@@ -3664,7 +3679,7 @@ with tab_calendar:
             for ev in eventos_earnings:
                 _render_evento_card(ev, key_prefix=f"earn_{ev.get('ticker','')}_{ev.get('data','')}")
 
-with tab_overlay:
+if _secao == "🔭 overlay macro × preços":
     st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")
     
     col_sel_ov, col_man_ov, col_ind = st.columns([3, 2, 3])
@@ -3722,7 +3737,7 @@ with tab_overlay:
                     else: st.warning("não foi possível obter a série de dados macroeconómicos.")
                 except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
 
-with tab_sentimento:
+if _secao == "🧠 sentimento":
     section_title("😱 fear & greed — eua | brasil | global")
     tooltip("fear_greed")
 
@@ -3802,7 +3817,7 @@ with tab_sentimento:
         "global: média ponderada 50% eua + 50% brasil."
     )
 
-with tab_correlacoes:
+if _secao == "🔗 correlações":
     section_title("🔗 correlação dinâmica entre ativos")
 
     status_card(
