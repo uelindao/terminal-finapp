@@ -35,7 +35,7 @@ from utils.components import (
     topbar,
 )
 from utils.macro_context import garantir_macro_context
-from utils.macro_regime import classificar_regime, get_impacto_setor
+from utils.macro_regime import classificar_regime  # apenas o label do regime
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero, safe_float
 from utils.charts import base_layout, CORES_SERIES, base100, linha, chart_type_toggle, barras_verticais, _cores as _chart_cores
 
@@ -935,8 +935,34 @@ else:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── CARD DE IMPACTO MACRO DO SETOR ────────────────────────────────────
-_macro_regime = classificar_regime()
-_impacto_setor = get_impacto_setor(setor_nome=setor, regime_dict=_macro_regime)
+# Impacto setorial via pilar_macro_setorial — o MESMO motor do health score
+# (tilt de regime canônico + transmissão de inflação). Antes usava
+# macro_regime.get_impacto_setor (matching de substring, vocabulário livre),
+# que podia CONTRADIZER o breakdown do próprio score na mesma tela.
+_macro_regime = classificar_regime()   # apenas o label do regime (canônico)
+_market_rs = "US" if not ticker.endswith(".SA") else "BR"
+try:
+    from utils.inflation_sectoral import pilar_macro_setorial
+    _pilar_rs = pilar_macro_setorial(
+        setor, _market_rs, st.session_state.get("macro_context", {})
+    )
+except Exception:
+    _pilar_rs = {"impacto": "neutro", "pontos": 0, "alertas": [], "breakdown": {}}
+_pts_rs = int(_pilar_rs.get("pontos", 0) or 0)
+_imp_rs = _pilar_rs.get("impacto", "neutro")
+_motivos_rs = "; ".join(
+    _pilar_rs.get("alertas", []) or [str(v) for v in _pilar_rs.get("breakdown", {}).values()]
+)
+_impacto_setor = {
+    "impacto": _imp_rs,
+    "pontos": _pts_rs,
+    "cor": {"favoravel": "var(--bull)", "desfavoravel": "var(--bear)",
+            "neutro": "var(--amber)"}.get(_imp_rs, "var(--amber)"),
+    "justificativa": _motivos_rs or (
+        f"vento macro-setorial {'a favor' if _pts_rs > 0 else 'contra' if _pts_rs < 0 else 'neutro'} "
+        f"({_pts_rs:+d} pts)"
+    ),
+}
 _icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
 _cor_regime = "var(--bear)" if "stress" in _macro_regime["label"] else ("var(--amber)" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "var(--bull)")
 st.markdown(
