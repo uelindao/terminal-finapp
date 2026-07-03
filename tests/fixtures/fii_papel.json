@@ -1,0 +1,35 @@
+{
+  "ticker": "MXRF11.SA",
+  "tipo": "fii",
+  "inputs": {
+    "fundamentals": {
+      "qualidade_dados": 80,
+      "p/vp": 1.01,
+      "dy%": 12.5,
+      "liquidez_diaria": 15000000,
+      "vacancia%": 0.0,
+      "cap_rate%": 0.0,
+      "ffo_yield%": 13.5
+    },
+    "yf_info": {
+      "sector": "Real Estate",
+      "dividendYield": 0.125
+    },
+    "tecnico": {
+      "rsi_14": 52.0,
+      "start_price": 9.8,
+      "end_price": 10.2,
+      "trend": "up"
+    },
+    "macro": {
+      "selic": 14.75,
+      "vix": 16.5,
+      "ipca": 4.5
+    },
+    "ntnb_yield": 6.8
+  },
+  "expected": {
+    "score": 63,
+    "tolerancia": 3
+  }
+}

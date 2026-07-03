@@ -5,7 +5,11 @@
     "fundamentals": {
       "qualidade_dados": 65,
       "p/vp": 1.30,
-      "dy%": 6.0
+      "dy%": 6.0,
+      "liquidez_diaria": 30000,
+      "vacancia%": 22.0,
+      "cap_rate%": 5.5,
+      "ffo_yield%": 5.0
     },
     "yf_info": {
       "sector": "Real Estate",
@@ -25,7 +29,7 @@
     "ntnb_yield": 6.8
   },
   "expected": {
-    "score": 2,
+    "score": 4,
     "tolerancia": 2
   }
 }

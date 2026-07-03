@@ -1290,15 +1290,85 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 score_y = 0
                 alertas.append("⚠️ fii sem histórico de proventos recentes.")
 
+            # ── Pilar Liquidez (máx 8) — dado do Fundamentus (P1-5) ────────
+            # Liquidez baixa = risco real de não conseguir sair da posição.
+            score_liq = 0
+            _liq = safe_float(dados_base.get('liquidez_diaria'))
+            if _liq is not None:
+                if _liq >= 2_000_000:   score_liq = 8
+                elif _liq >= 1_000_000: score_liq = 6
+                elif _liq >= 500_000:   score_liq = 4
+                elif _liq >= 200_000:   score_liq = 2
+                elif _liq >= 50_000:    score_liq = 1
+                else:
+                    score_liq = 0
+                    alertas.append(
+                        f"⚠️ liquidez diária baixa (r$ {_liq:,.0f}). "
+                        f"risco de dificuldade na saída da posição."
+                    )
+                breakdown['Liquidez diária'] = f"r$ {_liq:,.0f}"
+            # sem dado → 0 (a maioria dos FIIs listados tem liquidez no Fundamentus)
+
+            # ── Pilar Estrutura (máx 12) ───────────────────────────────────
+            # Tijolo: vacância (0-8) + cap rate (0-4). Papel/FOF: sustentabilidade
+            # dos proventos via FFO yield vs DY (0-12).
+            _tijolo = segmento in ('logistica', 'lajes', 'shopping', 'residencial', 'hibrido')
+            score_estrutura = 0
+            if _tijolo:
+                _vac = safe_float(dados_base.get('vacancia%'))
+                _score_vac = 2  # neutro-baixo sem dado (não premia opacidade)
+                # Sanidade: Fundamentus às vezes traz glitch (ex.: 91% p/ XPML11) →
+                # ignora valores implausíveis (>40%) tratando como sem-dado.
+                if _vac is not None and 0 <= _vac <= 40:
+                    if _vac < 5:    _score_vac = 8
+                    elif _vac < 10: _score_vac = 6
+                    elif _vac < 15: _score_vac = 4
+                    elif _vac < 20: _score_vac = 2
+                    else:
+                        _score_vac = 0
+                        alertas.append(
+                            f"🚨 vacância elevada ({_vac:.1f}%) — "
+                            f"pressão direta sobre a distribuição de proventos."
+                        )
+                    breakdown['Vacância'] = f"{_vac:.1f}%"
+                _cap = safe_float(dados_base.get('cap_rate%'))
+                _score_cap = 1  # neutro-baixo sem dado
+                if _cap is not None and _cap > 0:
+                    if 6 <= _cap <= 11:                      _score_cap = 4
+                    elif (5 <= _cap < 6) or (11 < _cap <= 13): _score_cap = 2
+                    else:                                     _score_cap = 1
+                    breakdown['Cap Rate'] = f"{_cap:.1f}%"
+                score_estrutura = _score_vac + _score_cap
+            else:
+                _ffo = safe_float(dados_base.get('ffo_yield%'))
+                if _ffo is not None and dy and dy > 0:
+                    _cob = _ffo / dy
+                    if _cob >= 1.10:   score_estrutura = 12
+                    elif _cob >= 0.95: score_estrutura = 9
+                    elif _cob >= 0.80: score_estrutura = 5
+                    else:
+                        score_estrutura = 2
+                        alertas.append(
+                            f"⚠️ ffo yield ({_ffo:.1f}%) abaixo do dy ({dy:.1f}%) — "
+                            f"proventos podem não ser sustentáveis pela geração de caixa."
+                        )
+                    breakdown['Cobertura FFO/DY'] = f"{_cob:.2f}x"
+                else:
+                    score_estrutura = 4  # neutro sem dado de FFO
+
             # ── Score total FII e breakdown ───────────────────────────────
             # Reusa `segmento` (já calculado no topo do bloco FII) em vez de
             # rechamar _detectar_segmento_fii. Usa .update() para PRESERVAR as
             # linhas já adicionadas ao breakdown (NTN-B benchmark, DY real,
             # Spread vs NTN-B) — a antiga reatribuição `breakdown = {...}` as apagava.
-            score += score_pvp + score_y
+            # FII v2 (P1-5): pvp(40) + yield(40) + liquidez(8) + estrutura(12) = 100,
+            # comparável às ações (antes o teto de FII era ~80, enviesando o ranking).
+            score += score_pvp + score_y + score_liq + score_estrutura
             breakdown.update({
                 f"Valuation P/VP ({segmento})":   score_pvp,
                 "Geração de Renda (Yield NTN-B)": score_y,
+                "Liquidez":                       score_liq,
+                "Estrutura (vacância/cap/FFO)":   score_estrutura,
                 "Momento Técnico (MM200)":        penalidade_tec,
             })
 
