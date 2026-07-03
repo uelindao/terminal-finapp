@@ -87,6 +87,15 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
             logger.debug(f"[health_engine] falha ao carregar financials/balance/cashflow: {e}")
             fin = bal = cf = fin_q = bal_q = None
 
+        # Sem NENHUMA demonstração não há Piotroski — devolve (0, {}) igual ao
+        # caminho de erro. Isto sinaliza "sem dado" ao chamador (que só aplica a
+        # penalidade de -6 quando f_detalhamento é truthy), evitando um falso
+        # "balanço fraco" por ausência de dados em vez de balanço realmente ruim.
+        def _vazio(df):
+            return df is None or (isinstance(df, pd.DataFrame) and df.empty)
+        if _vazio(fin) and _vazio(bal) and _vazio(cf):
+            return 0, {}
+
         # Total Assets (dois períodos)
         total_assets_atual = None
         total_assets_ant   = None
@@ -318,10 +327,10 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
             if shares_atual and shares_ant:
                 f7 = 1 if shares_atual <= shares_ant * 1.01 else 0
             else:
-                f7 = 1
+                f7 = None  # sem dado de ações → não conta (antes era 1, viés otimista)
         except Exception as e:
             logger.debug(f"[health_engine] falha ao avaliar F7 (diluição): {e}")
-            f7 = 1
+            f7 = None
 
         try:
             f8 = 1 if (gross_margin_atual and gross_margin_ant and
@@ -349,7 +358,7 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
             "F4 qualidade lucro (FCF>ROA)":  f4,
             "F5 dívida reduzindo":           f5 if f5 is not None else "n/a (financeiro)",
             "F6 liquidez melhorando":        f6 if f6 is not None else "n/a (financeiro)",
-            "F7 sem diluição":               f7,
+            "F7 sem diluição":               f7 if f7 is not None else "n/a (sem dado de ações)",
             "F8 margem bruta crescendo":     f8,
             "F9 giro de ativos crescendo":   f9,
         }
@@ -449,7 +458,7 @@ def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_b
         if shares_0 is not None and shares_4 is not None:
             f7 = 1 if shares_0 <= shares_4 * 1.01 else 0
         else:
-            f7 = 1  # padrão otimista quando não tem dado
+            f7 = None  # sem dado de ações → não conta (antes era 1, viés otimista)
         # F8: ΔMargem bruta > 0
         f8 = 1 if (margem_bruta_0 is not None and margem_bruta_4 is not None
                     and margem_bruta_0 > margem_bruta_4) else 0
@@ -469,7 +478,7 @@ def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_b
             "F4 qualidade lucro (FCF>ROA)": f4,
             "F5 dívida reduzindo":          f5 if f5 is not None else "n/a (financeiro)",
             "F6 liquidez melhorando":       f6 if f6 is not None else "n/a (financeiro)",
-            "F7 sem diluição":              f7,
+            "F7 sem diluição":              f7 if f7 is not None else "n/a (sem dado de ações)",
             "F8 margem bruta crescendo":    f8,
             "F9 giro de ativos crescendo":  f9,
         }
@@ -533,13 +542,22 @@ def calcular_crescimento(acao, info: dict) -> tuple[int, dict]:
                 score_cresc -= 4
                 alertas_cresc.append("⚠️ receita em queda (sinal de deterioração).")
 
-        # --- Pontuação de lucro (máx 5pts) ---
+        # --- Pontuação de lucro (+5 / −5) ---
+        # Thresholds SIMÉTRICOS espelhando _calc_crescimento_do_historico (via cache):
+        # antes o caminho live só premiava crescimento e NÃO penalizava queda de lucro,
+        # fazendo o mesmo ticker pontuar diferente conforme a fonte de dados disponível.
         if earnings_growth is not None:
             if earnings_growth > 0.20:
                 score_cresc += 5
             elif earnings_growth > 0.05:
                 score_cresc += 3
-            elif earnings_growth < 0 and rev_growth is not None and rev_growth < 0:
+            elif earnings_growth < -0.20:
+                score_cresc -= 5
+                alertas_cresc.append(f"🚨 lucro caindo {earnings_growth*100:.0f}% YoY — colapso de rentabilidade.")
+            elif earnings_growth < -0.05:
+                score_cresc -= 3
+                alertas_cresc.append(f"⚠️ lucro caindo {earnings_growth*100:.0f}% YoY — deterioração de rentabilidade.")
+            if earnings_growth < 0 and rev_growth is not None and rev_growth < 0:
                 alertas_cresc.append("🚨 compressão de margem e queda de receita simultâneas.")
 
         # Qualidade do crescimento: receita caindo mas margem expandindo
@@ -979,8 +997,10 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
     is_us = not ticker.endswith('.SA') and not is_fii
     
     try:
-        # Se score foi calculado nas últimas 24h, retorna do cache (exceto se force=True)
-        # threshold > 50 para não servir o fallback de erro (que é exatamente 50)
+        # Se score foi calculado nas últimas 24h, retorna do cache (exceto se force=True).
+        # O caminho de erro salva score=None (não 50), então `is not None` já exclui
+        # falhas — e scores baixos LEGÍTIMOS (<50) passam a ser servidos do cache em
+        # vez de recalcular a cada acesso (antes o guard `> 50` os recalculava sempre).
         if not force:
             try:
                 todos_health = get_health_scores()
@@ -992,7 +1012,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                             from datetime import datetime as _dt
                             updated = _dt.fromisoformat(updated.replace('Z', '+00:00'))
                         idade = (datetime.now(timezone.utc) - updated).total_seconds()
-                        if idade < 86400 and h.get('score', 0) > 50:
+                        if idade < 86400 and h.get('score') is not None:
                             return {'score': h['score'], 'alertas': [], 'status': 'cached'}
             except Exception as e:
                 logger.debug(f"[health_engine] falha ao ler cache de health scores: {e}")
@@ -1301,7 +1321,16 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             # Prefere histórico trimestral do cache (ETL → fundamentals_cache) — independe
             # de yfinance ao vivo e tem janela YoY trimestral mais responsiva.
             historico_trim = dados_base.get('historico_trimestral')
-            if isinstance(historico_trim, list) and len(historico_trim) >= 5:
+            _usa_cache_trim = isinstance(historico_trim, list) and len(historico_trim) >= 5
+            # Fonte usada nos pilares fundamentalistas (Piotroski/Crescimento/ROIC/ND/ICR):
+            # registrada no breakdown para auditar por que dois cálculos do mesmo ticker
+            # podem divergir (a via cache e a via live foram unificadas em pontuação).
+            _fonte_fund = (
+                "cache trimestral (CVM/yf)" if _usa_cache_trim
+                else "yfinance live" if acao is not None
+                else "indisponível"
+            )
+            if _usa_cache_trim:
                 f_score, f_detalhamento = calcular_piotroski_do_historico(
                     historico_trim, setor_yf, is_br=ticker.endswith('.SA')
                 )
@@ -1655,6 +1684,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 "Risco Volatilidade (VIX)": penalidade_vix,
                 "Penalidade Dados (Qualidade)": penalidade_dados,
             }
+            # String (não numérica) → aparece como item informacional na UI, não vira barra.
+            breakdown["Fonte dos dados"] = _fonte_fund
             for _k_ms, _v_ms in ms_breakdown.items():
                 breakdown[f"  ↳ {_k_ms}"] = _v_ms
 
