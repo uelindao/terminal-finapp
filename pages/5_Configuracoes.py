@@ -1105,6 +1105,91 @@ with tab_admin:
         unsafe_allow_html=True,
     )
 
+    # ── QUALIDADE DOS DADOS (P2-2) ────────────────────────────────────────
+    section_title("qualidade dos dados — fundamentals_cache")
+    try:
+        from database.db import get_todos_fundamentos_cache
+        from utils.data_quality import calcular_cobertura, CAMPOS_CRITICOS
+        _cache_dq = get_todos_fundamentos_cache() or {}
+        _cov = calcular_cobertura(_cache_dq, top_piores=25)
+        st.caption(
+            f"{_cov['total']} tickers no cache. cobertura = % com o campo preenchido; "
+            "campos não aplicáveis por mercado (p/l de fii, ev/ebitda de banco) são ignorados."
+        )
+
+        _mkts = [m for m in ("BR", "US", "FII") if m in _cov["por_mercado"]]
+        if _mkts:
+            _cols_dq = st.columns(len(_mkts))
+            for _col_dq, _m in zip(_cols_dq, _mkts):
+                _d = _cov["por_mercado"][_m]
+                _tone = ("bull" if _d["cobertura_media"] >= 85
+                         else "amber" if _d["cobertura_media"] >= 60 else "bear")
+                with _col_dq:
+                    metric_card(f"{_m} — cobertura média",
+                                f"{_d['cobertura_media']:.0f}%",
+                                f"{_d['n']} tickers", _tone)
+
+            # Tabela campo × mercado
+            _mn_dq = 'var(--font-mono,monospace)'
+            _hdr = '<th style="padding:6px 10px;text-align:left;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">campo</th>'
+            for _m in _mkts:
+                _hdr += f'<th style="padding:6px 10px;text-align:right;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">{_m}</th>'
+            _rows_dq = ""
+            for _campo in CAMPOS_CRITICOS:
+                _cells = f'<td style="padding:6px 10px;font-family:{_mn_dq};font-size:0.78rem;color:var(--text-secondary);">{_campo}</td>'
+                for _m in _mkts:
+                    _pct = _cov["por_mercado"][_m]["campos"].get(_campo)
+                    if _pct is None:
+                        _cells += '<td style="padding:6px 10px;text-align:right;color:var(--text-muted);">n/a</td>'
+                    else:
+                        _c = ("#2ecc71" if _pct >= 85 else "#f39c12" if _pct >= 60 else "#e74c3c")
+                        _cells += f'<td style="padding:6px 10px;text-align:right;font-family:{_mn_dq};font-size:0.78rem;color:{_c};">{_pct:.0f}%</td>'
+                _rows_dq += f'<tr style="border-bottom:1px solid var(--border-subtle);">{_cells}</tr>'
+            st.markdown(
+                f'<div style="overflow-x:auto;margin:8px 0;"><table style="width:100%;border-collapse:collapse;'
+                f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_hdr}</tr></thead><tbody>{_rows_dq}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
+
+        # Piores tickers (mais campos faltando)
+        if _cov["piores"]:
+            with st.expander(f"🔎 {len(_cov['piores'])} tickers com mais campos faltando", expanded=False):
+                for _p in _cov["piores"]:
+                    _q = _p["quality"]
+                    _q_str = f"{_q:.0f}%" if isinstance(_q, (int, float)) else "—"
+                    st.markdown(
+                        f'<div style="display:flex;justify-content:space-between;gap:12px;'
+                        f'padding:3px 0;border-bottom:1px solid var(--border-subtle);font-size:0.75rem;">'
+                        f'<span style="font-family:var(--font-mono,monospace);color:var(--accent);">'
+                        f'{_p["ticker"]} <span style="color:var(--text-muted);">[{_p["mercado"]}·{_p["fonte"]}·q{_q_str}]</span></span>'
+                        f'<span style="color:var(--bear);">faltando: {", ".join(_p["faltando"])}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+        # Estado dos disjuntores de provedores
+        try:
+            from utils.market_data import provider_health
+            _ph = provider_health()
+            _yf = _ph.get("yfinance_info", {})
+            _ab = _yf.get("aberto")
+            _cor_ph = "var(--bear)" if _ab else "var(--bull)"
+            st.markdown(
+                f'<div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;">'
+                f'circuit breaker yfinance.info: '
+                f'<span style="color:{_cor_ph};">{"ABERTO (rate-limit)" if _ab else "fechado (ok)"}</span> · '
+                f'falhas consecutivas: {_yf.get("falhas_consecutivas", 0)}'
+                f'{" · cooldown " + str(_yf.get("cooldown_restante_s", 0)) + "s" if _ab else ""}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
+    except Exception as _e_dq:
+        st.info(f"cobertura de dados indisponível: {_e_dq}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
     section_title("usuários cadastrados")
 
     usuarios = listar_usuarios()
