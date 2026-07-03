@@ -94,6 +94,32 @@ def _dividendos_12m_de_raw(raw: dict) -> float | None:
     return round(total, 6) if achou else None
 
 
+# Campos estruturais de FII vindos do Fundamentus (listagem fii_resultado.php).
+_FII_CAMPOS_ESTRUTURAIS = (
+    "vacancia%", "liquidez_diaria", "cap_rate%", "qtd_imoveis",
+    "ffo_yield%", "segmento_fii",
+)
+
+
+def _merge_fii(dados: dict, fii_reg: dict) -> None:
+    """
+    Injeta os dados estruturais de FII (vacância, liquidez, cap rate, nº imóveis)
+    no dict de fundamentos, e usa p/vp + dy% do Fundamentus como fonte
+    AUTORITATIVA para FIIs (mais confiável que BRAPI/yfinance para fundos).
+    Muta `dados` in-place.
+    """
+    src = dados.setdefault("_field_source", {})
+    for k in _FII_CAMPOS_ESTRUTURAIS:
+        v = fii_reg.get(k)
+        if v is not None:
+            dados[k] = v
+    for k in ("p/vp", "dy%"):
+        v = fii_reg.get(k)
+        if v is not None:
+            dados[k] = v
+            src[k] = "fundamentus_fii"
+
+
 def fetch_brapi(ticker: str) -> dict | None:
     """Fetch fundamental data from BRAPI for one ticker."""
     t = ticker.replace(".SA", "").upper()
@@ -343,6 +369,16 @@ def main():
     rate_limit_remaining = 15000
     quality_map: dict[str, float] = {}
 
+    # Coleta ÚNICA dos dados estruturais de FII (vacância, liquidez, cap rate) —
+    # 1 request cobre ~560 FIIs. Usado no motor de FII v2 do health_engine (P1-5).
+    try:
+        from utils.fii_scraper import buscar_dados_fiis
+        _fii_listing = buscar_dados_fiis()
+        print(f"[sync_br] FIIs do Fundamentus: {len(_fii_listing)} coletados")
+    except Exception as e:
+        _fii_listing = {}
+        logger.warning(f"[sync_br] listagem de FIIs indisponível: {e}")
+
     for i, ticker in enumerate(BRASIL_TODOS):
         if rate_limit_remaining <= 10:
             print("  [sync_br] rate limit critico, parando...")
@@ -353,6 +389,11 @@ def main():
 
         if raw:
             dados = transform_brapi(raw, ticker)
+            # Enriquecimento estrutural de FII (vacância, liquidez, cap rate) +
+            # p/vp e dy% autoritativos do Fundamentus.
+            _fii_reg = _fii_listing.get(ticker.replace(".SA", ""))
+            if _fii_reg:
+                _merge_fii(dados, _fii_reg)
             quality = calcular_data_quality(dados)
             quality_map[ticker] = quality
             upsert_fundamentals(ticker, dados, source="brapi", data_quality_pct=quality)
