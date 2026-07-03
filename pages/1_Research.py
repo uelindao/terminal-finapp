@@ -1395,15 +1395,22 @@ def montar_prompt_ativo(
 
 
 # --- TABS ---
-tab_val, tab_tec, tab_fund, tab_analise, tab_macro = st.tabs([
-    "📊 valuation & peers",
-    "📈 técnico (10y)",
-    "💎 fundamentos",
-    "🧠 análise & ia",
-    "🌍 overlay macro",
-])
+# LAZY RENDERING (P4-1): st.tabs renderiza TODAS as abas a cada rerun. Aqui isso
+# recalcula FMP, técnico, DRE, IA e overlay de uma vez. Trocado por um seletor que
+# renderiza só a seção ativa (os blocos `with tab_X:` viraram `if _secao_r == ...`).
+# As abas leem apenas variáveis de módulo (calculadas antes) — sem dependência cruzada.
+_SECOES_R = ["📊 valuation & peers", "📈 técnico (10y)", "💎 fundamentos",
+             "🧠 análise & ia", "🌍 overlay macro"]
+if hasattr(st, "segmented_control"):
+    _secao_r = st.segmented_control(
+        "seção", _SECOES_R, default=_SECOES_R[0],
+        key="research_secao", label_visibility="collapsed",
+    ) or st.session_state.get("research_secao") or _SECOES_R[0]
+else:
+    _secao_r = st.radio("seção", _SECOES_R, index=0, horizontal=True,
+                        key="research_secao", label_visibility="collapsed")
 
-with tab_val:
+if _secao_r == "📊 valuation & peers":
     # ── VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
     if _medios:
         section_title("📊 valuation em contexto histórico (10 anos)")
@@ -1537,7 +1544,7 @@ with tab_val:
             unsafe_allow_html=True,
         )
 
-with tab_tec:
+if _secao_r == "📈 técnico (10y)":
     try:
         fig_tec = go.Figure()
         fig_tec.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="price"))
@@ -1548,7 +1555,7 @@ with tab_tec:
         st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True})
     except Exception as e: st.error(f"Erro gráfico técnico: {e}")
 
-with tab_fund:
+if _secao_r == "💎 fundamentos":
     section_title("📊 demonstrações financeiras (dre)")
     if is_fii: st.info("💡 FIIs não possuem DRE trimestral padrão. Avalie os Rendimentos em Fundamentos.")
     else:
@@ -1586,7 +1593,7 @@ with tab_fund:
             logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
             st.error(f"erro ao carregar demonstrações: {e}")
 
-with tab_analise:
+if _secao_r == "🧠 análise & ia":
     section_title("🧠 análise ia — deepseek v4 pro")
 
     # ── Tenta cache do Supabase (compartilhado entre sessões) ────────────
@@ -2730,7 +2737,7 @@ with tab_analise:
         logging.getLogger(__name__).warning(f"[research] notícias: {_e_news}")
         st.info("sem notícias.")
 
-with tab_macro:
+if _secao_r == "🌍 overlay macro":
     st.subheader("estudo de correlação estrutural (10 anos)")
     ind_macro = st.selectbox("comparar com:", ["Taxa Selic (Brasil)", "IPCA (Inflação BR)", "Dólar Comercial (BRL=X)", "VIX (Volatilidade Global)"])
     inicio_macro = (datetime.datetime.now() - datetime.timedelta(days=365*10)).strftime('%Y-%m-%d')

@@ -418,17 +418,24 @@ def rodar_screener(
 # 6. interface de separadores (tabs)
 # Momentum e Radar fundidos numa única aba (antes eram duas que se sobrepunham):
 # momentum = força relativa técnica; radar = oportunidades por health×valuation×timing.
-tab_screen, tab_momradar, tab_ia, tab_setorial = st.tabs([
-    "🔍 screener quantitativo",
-    "🚀 momentum & radar",
-    "🧠 ia: oportunidades do dia",
-    "🗺️ rotação setorial",
-])
+# LAZY RENDERING (P4-1): seletor persistente no lugar de st.tabs — renderiza só a
+# seção ativa (screener/momentum/ia/setorial rodam scans pesados). Blocos
+# `with tab_X:` viraram `if _secao_d == ...`. Sem dependência cruzada entre abas.
+_SECOES_D = ["🔍 screener quantitativo", "🚀 momentum & radar",
+             "🧠 ia: oportunidades do dia", "🗺️ rotação setorial"]
+if hasattr(st, "segmented_control"):
+    _secao_d = st.segmented_control(
+        "seção", _SECOES_D, default=_SECOES_D[0],
+        key="discovery_secao", label_visibility="collapsed",
+    ) or st.session_state.get("discovery_secao") or _SECOES_D[0]
+else:
+    _secao_d = st.radio("seção", _SECOES_D, index=0, horizontal=True,
+                        key="discovery_secao", label_visibility="collapsed")
 
 # ==========================================
 # tab 1 — momentum (força relativa)
 # ==========================================
-with tab_momradar:
+if _secao_d == "🚀 momentum & radar":
     section_title("🚀 momentum screener — força relativa")
 
     status_card(
@@ -647,7 +654,7 @@ with tab_momradar:
 # ==========================================
 # tab 2 — screener quantitativo
 # ==========================================
-with tab_screen:
+if _secao_d == "🔍 screener quantitativo":
     section_title("🕵️ screener quantitativo — filtros paramétricos")
 
     # ── 🌉 PONTE 4: CONTEXTO MACRO PARA O SCREENER ───────────────────────────
@@ -1032,7 +1039,7 @@ with tab_screen:
                         st.success(f"✅ {adicionados} ativo(s) adicionados à watchlist!")
                         st.rerun()
 
-with tab_ia:
+if _secao_d == "🧠 ia: oportunidades do dia":
     section_title("🧠 ia: oportunidades do dia")
 
     st.markdown(
@@ -1397,7 +1404,7 @@ with tab_ia:
                     except Exception as _e_add:
                         st.error(f"erro ao adicionar: {_e_add}")
 
-with tab_setorial:
+if _secao_d == "🗺️ rotação setorial":
     label_com_tooltip(
         "🗺️ ROTAÇÃO SETORIAL — HEALTH SCORE MÉDIO POR SETOR",
         chave="health_score",
@@ -1863,7 +1870,7 @@ with tab_setorial:
 # ==========================================
 # tab 5 — radar de mercado
 # ==========================================
-with tab_momradar:
+if _secao_d == "🚀 momentum & radar":
     st.markdown("<hr style='margin:32px 0 8px;border:0;border-top:1px solid var(--border-subtle);'>", unsafe_allow_html=True)
     section_title("⚡ radar de mercado — oportunidades fora da sua watchlist")
     tooltip("score_assimetria")

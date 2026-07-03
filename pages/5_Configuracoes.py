@@ -47,22 +47,24 @@ page_header("⚙️ configurações", "conta · watchlists · portfólios · ia 
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
-tab_conta, tab_wl, tab_pf, tab_alertas, tab_ia, tab_aparencia, tab_backfill, tab_admin = st.tabs([
-    "👤 minha conta",
-    "⭐ watchlists",
-    "💼 portfólios",
-    "🔔 alertas",
-    "🤖 minha ia",
-    "🎨 aparência",
-    "🗄️ backfill",
-    "👑 administração",
-])
+# LAZY RENDERING (P4-1): seletor persistente no lugar de st.tabs — renderiza só a
+# seção ativa. Abas independentes (verificado por AST: sem vazamento de variável).
+_SECOES_C = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "🔔 alertas",
+             "🤖 minha ia", "🎨 aparência", "🗄️ backfill", "👑 administração"]
+if hasattr(st, "segmented_control"):
+    _secao_c = st.segmented_control(
+        "seção", _SECOES_C, default=_SECOES_C[0],
+        key="config_secao", label_visibility="collapsed",
+    ) or st.session_state.get("config_secao") or _SECOES_C[0]
+else:
+    _secao_c = st.radio("seção", _SECOES_C, index=0, horizontal=True,
+                        key="config_secao", label_visibility="collapsed")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — MINHA CONTA
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_conta:
+if _secao_c == "👤 minha conta":
     section_title("informações da conta")
 
     if user:
@@ -163,7 +165,7 @@ with tab_conta:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — WATCHLISTS
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_wl:
+if _secao_c == "⭐ watchlists":
     section_title("suas watchlists")
 
     wls          = listar_watchlists()
@@ -252,7 +254,7 @@ with tab_wl:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — PORTFÓLIOS
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_pf:
+if _secao_c == "💼 portfólios":
     section_title("seus portfólios")
 
     pfs          = listar_portfolios()
@@ -341,7 +343,7 @@ with tab_pf:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — ALERTAS
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_alertas:
+if _secao_c == "🔔 alertas":
     section_title("e-mail e relatórios")
 
     try:
@@ -556,7 +558,7 @@ with tab_alertas:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — MINHA IA
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_ia:
+if _secao_c == "🤖 minha ia":
     section_title("⚡ modo de análise ia")
 
     settings     = get_user_settings(user_id_atual) if user else {}
@@ -796,7 +798,7 @@ with tab_ia:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 6 — APARÊNCIA / TEMAS
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_aparencia:
+if _secao_c == "🎨 aparência":
     section_title("🎨 tema visual")
 
     try:
@@ -1064,7 +1066,7 @@ with tab_aparencia:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 7 — ADMINISTRAÇÃO (apenas admins)
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_backfill:
+if _secao_c == "🗄️ backfill":
     if not is_admin:
         st.markdown(
             '<div style="text-align:center; padding:60px 24px;">'
@@ -1082,7 +1084,7 @@ with tab_backfill:
             st.error(f"falha ao carregar o painel de backfill: {_e_bf}")
 
 
-with tab_admin:
+if _secao_c == "👑 administração":
     if not is_admin:
         st.markdown(
             '<div style="text-align:center; padding:60px 24px;">'
