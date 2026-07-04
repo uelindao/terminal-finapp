@@ -417,6 +417,29 @@ def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_b
         divida_4 = _g(t4, "divida_total")
         shares_4 = _g(t4, "shares")
 
+        # TTM (P1-1.3): no caminho yfinance os FLUXOS vêm por trimestre → a janela
+        # T0 vs T-4 (1 trimestre YoY) amplifica sazonalidade e one-offs. Com ≥8
+        # trimestres, usa TTM (soma de 4) para os fluxos, comparando o ano corrente
+        # vs. o ano anterior — mais estável. No CVM os fluxos JÁ vêm anualizados por
+        # período (ver cvm_client) → mantém T0/T-4 para não somar 4× o mesmo ano.
+        _fonte_h = str((t0 or {}).get("_fonte") or "").lower()
+        if _fonte_h != "cvm" and len(historico) >= 8:
+            def _soma4(ini, k):
+                vals = [_g(historico[j], k) for j in range(ini, ini + 4)]
+                vals = [v for v in vals if v is not None]
+                return sum(vals) if len(vals) == 4 else None
+            _rec0, _rec4 = _soma4(0, "receita"), _soma4(4, "receita")
+            _luc0, _luc4 = _soma4(0, "lucro"),   _soma4(4, "lucro")
+            _gro0, _gro4 = _soma4(0, "gross"),   _soma4(4, "gross")
+            _cfo0_ttm    = _soma4(0, "cfo")
+            if _rec0 is not None: receita_0 = _rec0
+            if _rec4 is not None: receita_4 = _rec4
+            if _luc0 is not None: lucro_0 = _luc0
+            if _luc4 is not None: lucro_4 = _luc4
+            if _gro0 is not None: gross_0 = _gro0
+            if _gro4 is not None: gross_4 = _gro4
+            if _cfo0_ttm is not None: cfo_0 = _cfo0_ttm
+
         # Derivados
         roa_0 = (lucro_0 / ativos_0) if (lucro_0 is not None and ativos_0 and ativos_0 > 0) else None
         roa_4 = (lucro_4 / ativos_4) if (lucro_4 is not None and ativos_4 and ativos_4 > 0) else None

@@ -33,6 +33,44 @@ class TestSafeFloat:
         assert safe_float("abc") is None
 
 
+class TestPiotroskiTTM:
+    """P1-1.3: TTM no Piotroski do histórico (yfinance ≥8 tri) vs T0/T-4 (CVM)."""
+
+    @staticmethod
+    def _q(rec, luc, gr, cfo, fonte=None):
+        d = dict(receita=rec, lucro=luc, gross=gr, cfo=cfo, ativos_totais=1000,
+                 patrimonio=500, shares=100, divida_total=200,
+                 ativos_circ=300, passivos_circ=150)
+        if fonte:
+            d["_fonte"] = fonte
+        return d
+
+    def test_ttm_difere_de_trimestre_unico(self):
+        from utils.health_engine import calcular_piotroski_do_historico
+        # 8 trimestres yfinance: T0 é um trimestre forte, mas o TTM é mais moderado.
+        yf = [self._q(120, 14, 50, 15), self._q(100, 10, 40, 12),
+              self._q(110, 11, 45, 13), self._q(110, 9, 44, 11),
+              self._q(105, 10, 42, 12), self._q(95, 8, 38, 10),
+              self._q(105, 10, 43, 12), self._q(95, 8, 40, 11)]
+        s_ttm, _ = calcular_piotroski_do_historico(yf, "tech", is_br=False)
+        s_5, _ = calcular_piotroski_do_historico(yf[:5], "tech", is_br=False)
+        assert isinstance(s_ttm, int) and 0 <= s_ttm <= 9
+        # o TTM suaviza o trimestre forte → score <= o do trimestre único
+        assert s_ttm <= s_5
+
+    def test_cvm_nao_usa_ttm(self):
+        from utils.health_engine import calcular_piotroski_do_historico
+        # CVM (fluxos já anualizados) mantém T0 vs T-4 mesmo com ≥8 trimestres.
+        yf = [self._q(120, 14, 50, 15), self._q(100, 10, 40, 12),
+              self._q(110, 11, 45, 13), self._q(110, 9, 44, 11),
+              self._q(105, 10, 42, 12), self._q(95, 8, 38, 10),
+              self._q(105, 10, 43, 12), self._q(95, 8, 40, 11)]
+        cvm = [dict(x, _fonte="cvm") for x in yf]
+        s_cvm, _ = calcular_piotroski_do_historico(cvm, "tech", is_br=True)
+        s_5, _ = calcular_piotroski_do_historico(yf[:5], "tech", is_br=False)
+        assert s_cvm == s_5  # mesma janela T0/T-4
+
+
 class TestCalcPiotroski:
     """Testes para o cálculo do Piotroski F-Score."""
 
