@@ -1485,6 +1485,35 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif pvp <= limite_pvp_medio: score_v += 5
                 elif pvp > limite_pvp_medio:  alertas.append(f"⚠️ prêmio patrimonial excessivo (p/vp de {pvp:.1f}).")
 
+            # --- Valuation RELATIVO à própria história — percentil 10a (±4) ---
+            # (P1-4) Complementa o valuation ABSOLUTO acima com a dimensão temporal
+            # que o analista usa de fato: barato vs. a PRÓPRIA história pontua +,
+            # caro pontua −. Lê os percentis já calculados (get_multiplos_medios,
+            # populados no cache pelo ETL/Research). Ausente → 0 (não afeta o score).
+            score_v_rel = 0
+            _mh_pctl = dados_base.get('multiplos_hist_pctl') if dados_base else None
+            if isinstance(_mh_pctl, dict) and _mh_pctl:
+                def _aj_pctl(p):
+                    if p is None:
+                        return 0
+                    if p <= 20:  return 2   # no fundo da própria faixa histórica
+                    if p <= 40:  return 1
+                    if p >= 90:  return -2  # no topo — esticado vs. si mesmo
+                    if p >= 75:  return -1
+                    return 0
+                try:
+                    score_v_rel = int(max(-4, min(4,
+                        _aj_pctl(_mh_pctl.get('pe'))
+                        + _aj_pctl(_mh_pctl.get('pb'))
+                        + _aj_pctl(_mh_pctl.get('ev_ebitda'))
+                    )))
+                except Exception as e:
+                    logger.debug(f"[health_engine] percentil histórico falhou: {e}")
+                if score_v_rel >= 3:
+                    alertas.append("✅ múltiplos no fundo da faixa histórica de 10 anos (desconto vs. si mesmo).")
+                elif score_v_rel <= -3:
+                    alertas.append("⚠️ múltiplos no topo da faixa histórica de 10 anos (esticado vs. si mesmo).")
+
             # ── Net Debt / EBITDA — métrica complementar de alavancagem ──────
             # Prefere cache; usa (divida_total − cash) / ebitda; fallback yfinance live.
             # Bancos: pontuação neutra (alavancagem é estrutural, não risco discricionário).
@@ -1730,7 +1759,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 logger.debug(f"[health_engine] pilar macro-setorial falhou: {e}")
 
             score = (
-                score_q + score_v + score_r_final + score_y
+                score_q + score_v + score_v_rel + score_r_final + score_y
                 + score_piotroski + score_crescimento + score_roic
                 + score_momentum + score_icr + score_nd
                 + score_macro_setorial
@@ -1741,6 +1770,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             breakdown = {
                 "Qualidade e Rentabilidade": score_q,
                 f"Valuation ({setor_label})": score_v,
+                "Valuation Relativo (percentil 10a)": score_v_rel,
                 "Solvência e Risco Macro": score_r_final,
                 "Geração de Caixa / Yield": score_y,
                 "Qualidade de Balanço (Piotroski F-Score)": score_piotroski,
@@ -1761,6 +1791,12 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
             if roic_valor is not None:
                 breakdown["  ↳ ROIC"] = f"{roic_valor:.1f}%"
+
+            if isinstance(_mh_pctl, dict) and _mh_pctl:
+                for _k_p, _lbl_p in (('pe', 'P/L'), ('pb', 'P/VP'), ('ev_ebitda', 'EV/EBITDA')):
+                    _pv = _mh_pctl.get(_k_p)
+                    if _pv is not None:
+                        breakdown[f"  ↳ Percentil {_lbl_p} (10a)"] = f"{_pv}%"
 
             if det_mom:
                 for k, v in det_mom.items():

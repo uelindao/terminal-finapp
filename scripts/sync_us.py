@@ -157,6 +157,15 @@ def transform_fmp(ticker: str) -> dict | None:
     except Exception as e:
         logger.debug(f"[sync_us] derivar_multiplos falhou p/ {ticker}: {e}")
 
+    # Percentil histórico dos múltiplos (P1-4) — pilar de valuation relativo (best-effort).
+    try:
+        from utils.fmp_client import get_multiplos_percentis
+        _pctl = get_multiplos_percentis(ticker, anos=10)
+        if _pctl:
+            data["multiplos_hist_pctl"] = _pctl
+    except Exception as e:
+        logger.debug(f"[sync_us] percentil histórico falhou p/ {ticker}: {e}")
+
     # Validação de ranges na escrita (P2-4) — mesma proteção do sync_br.
     try:
         from utils.scrapers import validar_fundamentos

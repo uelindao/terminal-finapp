@@ -10,7 +10,8 @@
       "margem%": 18.0,
       "ev/ebitda": 18.0,
       "dy%": 0.8,
-      "setor": "Industrials"
+      "setor": "Industrials",
+      "multiplos_hist_pctl": {"pe": 15, "pb": 30, "ev_ebitda": 10}
     },
     "yf_info": {
       "trailingPE": 28.0,
@@ -100,7 +101,7 @@
     }
   },
   "expected": {
-    "score": 29,
+    "score": 33,
     "tolerancia": 2
   }
 }

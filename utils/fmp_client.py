@@ -494,6 +494,33 @@ def get_multiplos_medios(ticker: str, anos: int = 5) -> dict:
     }
 
 
+def percentil_na_faixa(stats: dict | None) -> int | None:
+    """Percentil (0-100) do valor ATUAL na faixa [min, max] histórica. None se indefinido."""
+    if not stats:
+        return None
+    lo, hi, at = stats.get("min"), stats.get("max"), stats.get("atual")
+    if lo is None or hi is None or at is None or hi == lo:
+        return None
+    return int(max(0, min(100, round((at - lo) / (hi - lo) * 100))))
+
+
+def get_multiplos_percentis(ticker: str, anos: int = 10) -> dict:
+    """
+    Percentil (0-100) do múltiplo ATUAL na própria faixa histórica de `anos`.
+    Retorna {'pe', 'pb', 'ev_ebitda'} (só as chaves com dado) — insumo do pilar
+    de valuation RELATIVO do health score (P1-4). {} se sem histórico.
+    """
+    m = get_multiplos_medios(ticker, anos)
+    if not m:
+        return {}
+    out: dict = {}
+    for k in ("pe", "pb", "ev_ebitda"):
+        p = percentil_na_faixa(m.get(k))
+        if p is not None:
+            out[k] = p
+    return out
+
+
 # ── Peers ─────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner=False)
