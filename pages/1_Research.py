@@ -1559,39 +1559,173 @@ if _secao_r == "💎 fundamentos":
     section_title("📊 demonstrações financeiras (dre)")
     if is_fii: st.info("💡 FIIs não possuem DRE trimestral padrão. Avalie os Rendimentos em Fundamentos.")
     else:
-        _earn_tipo = chart_type_toggle(key=f"earn_{t_base}", default="barras")
-        st.subheader("receita vs lucro (últimos períodos)")
-        try:
-            fin = acao_obj.quarterly_financials
-            if fin is None or (isinstance(fin, pd.DataFrame) and fin.empty): fin = acao_obj.financials
-            if fin is not None and not fin.empty:
-                l_rev = ['Total Revenue', 'Total Operating Revenue', 'Operating Revenue']
-                l_net = ['Net Income', 'Net Income Common Stockholders', 'Net Income From Continuing Operations']
-                row_rev = fin.index[fin.index.isin(l_rev)].tolist()
-                row_net = fin.index[fin.index.isin(l_net)].tolist()
-                if row_rev and row_net:
-                    df_earn = pd.DataFrame({'Receita': fin.loc[row_rev[0]], 'Lucro Líquido': fin.loc[row_net[0]]}).sort_index()
-                    df_earn.index = df_earn.index.astype(str)
-                    _cc = _chart_cores()
-                    fig_earn = go.Figure()
-                    if _earn_tipo == "barras":
-                        fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'],
-                            name="receita", marker_color=_cc["info"]))
-                        fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'],
-                            name="lucro", marker_color=_cc["bull"]))
-                        fig_earn.update_layout(**base_layout(height=400), barmode='group')
-                    else:
-                        fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Receita'],
-                            name="receita", mode="lines+markers",
-                            line=dict(color=_cc["info"], width=2)))
-                        fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Lucro Líquido'],
-                            name="lucro", mode="lines+markers",
-                            line=dict(color=_cc["bull"], width=2)))
-                        fig_earn.update_layout(**base_layout(height=400))
-                    st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
-            st.error(f"erro ao carregar demonstrações: {e}")
+        # Prefere o histórico trimestral JÁ no cache (CVM/yfinance) — sem novas
+        # chamadas de rede. Cai para o gráfico yfinance ao vivo se ausente.
+        _hist_tri = cache_d.get('historico_trimestral') if cache_d else None
+        if isinstance(_hist_tri, list) and len(_hist_tri) >= 2:
+            _rows_ft = _hist_tri[:12]  # mais recente primeiro
+
+            def _gt(d, k):
+                v = d.get(k) if d else None
+                try:
+                    return float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            def _fmt_val(v):
+                if v is None:
+                    return "—"
+                sig = "-" if v < 0 else ""
+                a = abs(v)
+                pref = moeda.upper() + " "
+                if a >= 1e9:
+                    return f"{sig}{pref}{a/1e9:,.1f}b"
+                if a >= 1e6:
+                    return f"{sig}{pref}{a/1e6:,.0f}m"
+                return f"{sig}{pref}{a:,.0f}"
+
+            def _yoy(rows, i, key):
+                if i + 4 >= len(rows):
+                    return None
+                a = _gt(rows[i], key)
+                b = _gt(rows[i + 4], key)
+                if a is None or b is None or b == 0:
+                    return None
+                return (a / abs(b) - 1) * 100
+
+            _mn_ft = 'var(--font-mono,monospace)'
+            _cols_ft = ['período', 'receita', 'mrg bruta', 'mrg líq', 'ebitda', 'lucro', 'cfo', 'dív. líq.']
+            _hdr_ft = "".join(
+                f'<th style="padding:6px 9px;text-align:{"left" if i==0 else "right"};font-size:0.62rem;'
+                f'color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);'
+                f'white-space:nowrap;">{c}</th>'
+                for i, c in enumerate(_cols_ft)
+            )
+
+            def _yoy_span(y):
+                if y is None:
+                    return ""
+                _c = "#2ecc71" if y >= 0 else "#e74c3c"
+                return f' <span style="font-size:0.6rem;color:{_c};">{y:+.0f}%</span>'
+
+            def _cell_ft(txt, cor=None):
+                _c = f'color:{cor};' if cor else ''
+                return f'<td style="padding:6px 9px;text-align:right;font-family:{_mn_ft};font-size:0.74rem;{_c}">{txt}</td>'
+
+            _body_ft = ""
+            for i, r in enumerate(_rows_ft):
+                _per = str(r.get('periodo', '—'))[:7]
+                _rec = _gt(r, 'receita'); _luc = _gt(r, 'lucro')
+                _gross = _gt(r, 'gross'); _ebitda = _gt(r, 'ebitda'); _cfo = _gt(r, 'cfo')
+                _div = _gt(r, 'divida_total'); _cash = _gt(r, 'cash')
+                _ndiv = (_div - (_cash or 0)) if _div is not None else None
+                _mb = (_gross / _rec * 100) if (_gross is not None and _rec) else None
+                _ml = (_luc / _rec * 100) if (_luc is not None and _rec) else None
+                _mlc = "#2ecc71" if (_ml is not None and _ml >= 0) else ("#e74c3c" if _ml is not None else None)
+                _ndc = "#e74c3c" if (_ndiv is not None and _ndiv > 0) else ("#2ecc71" if _ndiv is not None else None)
+                _body_ft += (
+                    f'<tr style="border-bottom:1px solid var(--border-subtle);">'
+                    f'<td style="padding:6px 9px;font-family:{_mn_ft};font-size:0.72rem;color:var(--text-muted);">{_per}</td>'
+                    + _cell_ft(_fmt_val(_rec) + _yoy_span(_yoy(_rows_ft, i, 'receita')))
+                    + _cell_ft(f"{_mb:.1f}%" if _mb is not None else "—")
+                    + _cell_ft(f"{_ml:.1f}%" if _ml is not None else "—", _mlc)
+                    + _cell_ft(_fmt_val(_ebitda))
+                    + _cell_ft(_fmt_val(_luc) + _yoy_span(_yoy(_rows_ft, i, 'lucro')))
+                    + _cell_ft(_fmt_val(_cfo))
+                    + _cell_ft(_fmt_val(_ndiv), _ndc)
+                    + '</tr>'
+                )
+            section_title("📑 demonstrações trimestrais")
+            st.markdown(
+                f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+                f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                f'<thead><tr>{_hdr_ft}</tr></thead><tbody>{_body_ft}</tbody></table></div>',
+                unsafe_allow_html=True,
+            )
+            _fonte_ft = str(_rows_ft[0].get('_fonte') or 'yfinance').lower()
+            _basis_ft = ("valores anualizados por período (fonte cvm — itr acumulado)"
+                         if _fonte_ft == 'cvm' else "valores trimestrais (fonte yfinance)")
+            st.caption(
+                f"{_basis_ft}. yoy = variação vs mesmo período 1 ano antes. "
+                "mrg bruta/líq = % da receita. dív. líq. = dívida total − caixa."
+            )
+
+            # ── mini-gráficos de tendência (cronológico) ───────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            _chron = list(reversed(_rows_ft))
+            _x_ft = [str(r.get('periodo', ''))[:7] for r in _chron]
+            _cc_ft = _chart_cores()
+            _mb_s = [(_gt(r, 'gross') / _gt(r, 'receita') * 100) if (_gt(r, 'gross') is not None and _gt(r, 'receita')) else None for r in _chron]
+            _ml_s = [(_gt(r, 'lucro') / _gt(r, 'receita') * 100) if (_gt(r, 'lucro') is not None and _gt(r, 'receita')) else None for r in _chron]
+            _cfo_s = [_gt(r, 'cfo') for r in _chron]
+            _luc_s = [_gt(r, 'lucro') for r in _chron]
+            _rec_s = [_gt(r, 'receita') for r in _chron]
+            _nd_s = [(_gt(r, 'divida_total') - (_gt(r, 'cash') or 0)) if _gt(r, 'divida_total') is not None else None for r in _chron]
+
+            def _mini_ft(titulo, series_list):
+                fig = go.Figure()
+                for nome, ys, cor in series_list:
+                    fig.add_trace(go.Scatter(
+                        x=_x_ft, y=ys, name=nome, mode="lines+markers",
+                        line=dict(color=cor, width=2), marker=dict(size=4),
+                    ))
+                _lay = base_layout(height=220, title=titulo)
+                _lay.update(
+                    xaxis=dict(showgrid=False, tickangle=-30, tickfont=dict(size=8, color=_cc_ft["muted"])),
+                    yaxis=dict(showgrid=True, gridcolor=_cc_ft["border"], tickfont=dict(size=9, color=_cc_ft["muted"])),
+                    margin=dict(l=48, r=10, t=42, b=42), showlegend=True,
+                    legend=dict(font=dict(size=9), orientation="h", y=1.18, x=0),
+                )
+                fig.update_layout(**_lay)
+                return fig
+
+            _fc1, _fc2 = st.columns(2)
+            with _fc1:
+                st.plotly_chart(_mini_ft("margens (%)", [("bruta", _mb_s, _cc_ft["info"]), ("líquida", _ml_s, _cc_ft["bull"])]),
+                                use_container_width=True, config={'responsive': True})
+                st.plotly_chart(_mini_ft("dívida líquida", [("dív. líq.", _nd_s, _cc_ft["bear"])]),
+                                use_container_width=True, config={'responsive': True})
+            with _fc2:
+                st.plotly_chart(_mini_ft("cfo vs lucro (qualidade do lucro)", [("cfo", _cfo_s, _cc_ft["accent"]), ("lucro", _luc_s, _cc_ft["bull"])]),
+                                use_container_width=True, config={'responsive': True})
+                st.plotly_chart(_mini_ft("receita", [("receita", _rec_s, _cc_ft["info"])]),
+                                use_container_width=True, config={'responsive': True})
+        else:
+            # Fallback: sem histórico no cache → gráfico receita vs lucro via yfinance
+            section_title("📊 demonstrações financeiras (dre)")
+            _earn_tipo = chart_type_toggle(key=f"earn_{t_base}", default="barras")
+            st.subheader("receita vs lucro (últimos períodos)")
+            try:
+                fin = acao_obj.quarterly_financials
+                if fin is None or (isinstance(fin, pd.DataFrame) and fin.empty): fin = acao_obj.financials
+                if fin is not None and not fin.empty:
+                    l_rev = ['Total Revenue', 'Total Operating Revenue', 'Operating Revenue']
+                    l_net = ['Net Income', 'Net Income Common Stockholders', 'Net Income From Continuing Operations']
+                    row_rev = fin.index[fin.index.isin(l_rev)].tolist()
+                    row_net = fin.index[fin.index.isin(l_net)].tolist()
+                    if row_rev and row_net:
+                        df_earn = pd.DataFrame({'Receita': fin.loc[row_rev[0]], 'Lucro Líquido': fin.loc[row_net[0]]}).sort_index()
+                        df_earn.index = df_earn.index.astype(str)
+                        _cc = _chart_cores()
+                        fig_earn = go.Figure()
+                        if _earn_tipo == "barras":
+                            fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Receita'],
+                                name="receita", marker_color=_cc["info"]))
+                            fig_earn.add_trace(go.Bar(x=df_earn.index, y=df_earn['Lucro Líquido'],
+                                name="lucro", marker_color=_cc["bull"]))
+                            fig_earn.update_layout(**base_layout(height=400), barmode='group')
+                        else:
+                            fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Receita'],
+                                name="receita", mode="lines+markers",
+                                line=dict(color=_cc["info"], width=2)))
+                            fig_earn.add_trace(go.Scatter(x=df_earn.index, y=df_earn['Lucro Líquido'],
+                                name="lucro", mode="lines+markers",
+                                line=dict(color=_cc["bull"], width=2)))
+                            fig_earn.update_layout(**base_layout(height=400))
+                        st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
+                st.error(f"erro ao carregar demonstrações: {e}")
 
 if _secao_r == "🧠 análise & ia":
     section_title("🧠 análise ia — deepseek v4 pro")
