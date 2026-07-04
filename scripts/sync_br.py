@@ -399,17 +399,29 @@ def main():
         print(f"  [{i+1}/{len(BRASIL_TODOS)}] {ticker}...", end=" ")
         raw = fetch_brapi(ticker)
 
+        # BRAPI free tier (15k/mês) NÃO cobre 2 syncs/dia × ~470 tickers → a cota
+        # estoura no meio do mês e fetch_brapi passa a retornar None. Como yfinance
+        # + o derivador (P2-1) cobrem os múltiplos, NÃO descartamos o ticker: caímos
+        # para transform_brapi({}, ...) = caminho yfinance-only. E os FIIs ainda
+        # recebem os dados do Fundamentus (independe do BRAPI). ETL resiliente à cota.
         if raw:
             dados = transform_brapi(raw, ticker)
-            # Enriquecimento estrutural de FII (vacância, liquidez, cap rate) +
-            # p/vp e dy% autoritativos do Fundamentus.
-            _fii_reg = _fii_listing.get(ticker.replace(".SA", ""))
-            if _fii_reg:
-                _merge_fii(dados, _fii_reg)
+            _src = "brapi"
+        else:
+            dados = transform_brapi({}, ticker)
+            _src = "yfinance"
+
+        # Enriquecimento estrutural de FII (vacância, liquidez, cap rate) +
+        # p/vp e dy% autoritativos do Fundamentus — independe do BRAPI ter respondido.
+        _fii_reg = _fii_listing.get(ticker.replace(".SA", ""))
+        if _fii_reg:
+            _merge_fii(dados, _fii_reg)
+
+        if dados.get("preco") is not None or dados.get("market_cap") is not None:
             quality = calcular_data_quality(dados)
             quality_map[ticker] = quality
-            upsert_fundamentals(ticker, dados, source="brapi", data_quality_pct=quality)
-            print("OK")
+            upsert_fundamentals(ticker, dados, source=_src, data_quality_pct=quality)
+            print("OK" if raw else "OK(yf)")
             ok += 1
         else:
             print("FALHA")
