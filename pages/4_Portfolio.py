@@ -1033,25 +1033,24 @@ if '_pending_entrada' in st.session_state:
     # quando forem renderizados ainda nesta execução
 
 # 4. criação das tabs
-tab_posicoes, tab_concentracao, tab_risco, tab_stress, tab_backtest, tab_diario, tab_ir, tab_chat = st.tabs([
-    "💼 posições & p&l",
-    "📊 concentração",
-    "📐 risco",
-    "⚡ stress test",
-    "📊 backtesting",
-    "📝 diário de decisões",
-    "🧾 imposto de renda",
-    "💬 chat ia",
-])
+# LAZY RENDERING (P4-1): as abas do Portfolio são ACOPLADAS — portfolio_id_ativo,
+# pesos_atuais, ativos_alocados e live_data são computados em "posições" e usados
+# pelas análises. Em vez do hoist arriscado desse setup, "posições" (o núcleo +
+# os dados compartilhados) fica SEMPRE renderizado no topo (st.container), e as 7
+# seções analíticas PESADAS (risco/stress/backtest/chat...) são gateadas por um
+# seletor abaixo — só a ativa renderiza. Elimina o custo de render de todas as
+# análises a cada rerun sem tocar no fluxo de dados.
+_SECOES_PF = ["📊 concentração", "📐 risco", "⚡ stress test", "📊 backtesting",
+              "📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"]
 
 # variáveis partilhadas entre tabs — preenchidas em tab_posicoes
 live_data: dict      = {}
 ativos_alocados: dict = {}
 
 # ==========================================
-# tab 1: posições e p&l
+# posições e p&l — SEMPRE renderizado (computa os dados compartilhados)
 # ==========================================
-with tab_posicoes:
+with st.container():
 
     portfolios_lista = listar_portfolios()
     if not portfolios_lista:
@@ -2312,10 +2311,24 @@ with tab_posicoes:
                             },
                         ])
 
+# ══════════════════════════════════════════════════════════════════════════
+# SELETOR DE ANÁLISE (P4-1) — renderiza SÓ a seção escolhida abaixo das posições
+# ══════════════════════════════════════════════════════════════════════════
+st.markdown("<br>", unsafe_allow_html=True)
+section_title("📈 análises da carteira")
+if hasattr(st, "segmented_control"):
+    _secao_pf = st.segmented_control(
+        "análise", _SECOES_PF, default=_SECOES_PF[0],
+        key="portfolio_secao", label_visibility="collapsed",
+    ) or st.session_state.get("portfolio_secao") or _SECOES_PF[0]
+else:
+    _secao_pf = st.radio("análise", _SECOES_PF, index=0, horizontal=True,
+                         key="portfolio_secao", label_visibility="collapsed")
+
 # ==========================================
 # tab 2: concentração de risco
 # ==========================================
-with tab_concentracao:
+if _secao_pf == "📊 concentração":
     # ── CARREGA DADOS INDEPENDENTE DA ABA POSIÇÕES ────────────────────────
     _pesos_conc = st.session_state.get("pesos_ativos_cache", [])
     if not _pesos_conc:
@@ -2740,7 +2753,7 @@ with tab_concentracao:
 # ==========================================
 # tab 3: risco institucional (VaR, Brinson, fatores, dividendos)
 # ==========================================
-with tab_risco:
+if _secao_pf == "📐 risco":
     section_title("📐 risco institucional do portfólio")
 
     if not ativos_alocados:
@@ -3573,7 +3586,7 @@ with tab_risco:
 # ==========================================
 # tab 4: stress test
 # ==========================================
-with tab_stress:
+if _secao_pf == "⚡ stress test":
     section_title("⚡ stress test de portfólio")
 
     status_card(
@@ -3940,7 +3953,7 @@ with tab_stress:
 # ==========================================
 # tab 3: backtesting
 # ==========================================
-with tab_backtest:
+if _secao_pf == "📊 backtesting":
     from utils.components import label_com_tooltip
     section_title("🔬 backtesting — estratégia baseada no health score")
 
@@ -4655,7 +4668,7 @@ with tab_backtest:
 # ==========================================
 # tab 3: diário de decisões
 # ==========================================
-with tab_diario:
+if _secao_pf == "📝 diário de decisões":
     
     with st.expander("➕ registrar nova decisão", expanded=False):
         with st.form("form_decisao", clear_on_submit=True):
@@ -4820,7 +4833,7 @@ with tab_diario:
 # ==========================================
 # tab 5: imposto de renda
 # ==========================================
-with tab_ir:
+if _secao_pf == "🧾 imposto de renda":
     from utils.ir_calculator import calcular_ir_venda, gerar_resumo_mensal
 
     section_title("🧾 calculadora de imposto de renda")
@@ -5039,7 +5052,7 @@ with tab_ir:
 # ==========================================
 # tab 6: chat ia
 # ==========================================
-with tab_chat:
+if _secao_pf == "💬 chat ia":
 
     section_title("💬 chat com sua carteira — deepseek v4 pro")
 
