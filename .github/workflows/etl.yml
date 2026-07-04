@@ -52,7 +52,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install requests supabase yfinance pandas numpy python-bcb fredapi
+          pip install requests supabase yfinance pandas numpy python-bcb fredapi beautifulsoup4
 
       - name: Executar sync_br
         run: python scripts/sync_br.py
@@ -80,7 +80,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install requests supabase yfinance pandas numpy
+          pip install requests supabase yfinance pandas numpy beautifulsoup4
 
       - name: Executar sync_us
         run: python scripts/sync_us.py
