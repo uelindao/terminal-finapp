@@ -380,6 +380,33 @@ def salvar_fundamento_cache(ticker: str, dados: dict):
         logger.warning(f"[db] falha ao salvar cache de fundamentos para {ticker}: {e}")
 
 
+def atualizar_multiplos_pctl(ticker: str, pctl: dict):
+    """
+    Merge (read-modify-write) do campo `multiplos_hist_pctl` no dados_json,
+    PRESERVANDO os demais campos. Usado pelo write-back do Research (P1-4): ao
+    abrir um ativo, a página já buscou get_multiplos_medios — aproveita para
+    gravar os percentis que o pilar de valuation relativo do score consome, sem
+    custo extra de rede no ETL (que é rate-limited).
+    """
+    if not pctl:
+        return
+    sb = get_supabase()
+    try:
+        rows = (sb.table('fundamentals_cache')
+                .select('dados_json').eq('ticker', ticker).limit(1).execute().data)
+        if not rows:
+            return
+        raw = rows[0].get('dados_json')
+        dados = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if not isinstance(dados, dict):
+            return
+        dados['multiplos_hist_pctl'] = pctl
+        (sb.table('fundamentals_cache')
+         .update({'dados_json': json.dumps(dados)}).eq('ticker', ticker).execute())
+    except Exception as e:
+        logger.warning(f"[db] falha ao atualizar percentil de {ticker}: {e}")
+
+
 _FUNDAMENTALS_EXTENDED_OK: bool | None = None  # None=ainda não testado, True=ok, False=falha conhecida
 
 

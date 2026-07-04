@@ -696,6 +696,24 @@ cache_d = CACHE_FUNDAMENTOS.get(t_base, {})
 with st.spinner("carregando histórico de múltiplos (fmp)..."):
     _medios = get_multiplos_medios(t_base, anos=10)
 
+# Write-back do percentil histórico (P1-4): aproveita os _medios já buscados para
+# gravar os percentis no cache, que o pilar de valuation RELATIVO do score consome.
+# 1× por ticker/sessão — o ETL não computa isto (era yfinance rate-limited).
+if _medios and not is_fii and not st.session_state.get(f"_pctl_wb_{t_base}"):
+    try:
+        from utils.fmp_client import percentil_na_faixa
+        _pctl_wb = {}
+        for _mk in ('pe', 'pb', 'ev_ebitda'):
+            _pv = percentil_na_faixa(_medios.get(_mk))
+            if _pv is not None:
+                _pctl_wb[_mk] = _pv
+        if _pctl_wb:
+            from database.db import atualizar_multiplos_pctl
+            atualizar_multiplos_pctl(t_base, _pctl_wb)
+        st.session_state[f"_pctl_wb_{t_base}"] = True
+    except Exception:
+        pass
+
 # ── Fallback: busca fundamentos diretamente quando não está no cache ──────
 # Ativos externos (buscados manualmente) não passam pelo sync do screener.
 _qualidade_cache = cache_d.get('qualidade_dados', 0) if cache_d else 0

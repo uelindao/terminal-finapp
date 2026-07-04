@@ -220,17 +220,10 @@ def transform_brapi(raw: dict, ticker: str) -> dict:
     except Exception as e:
         logger.debug(f"[sync_br] derivar_dy falhou p/ {ticker}: {e}")
 
-    # Percentil histórico dos múltiplos (P1-4) → pilar de valuation RELATIVO do score.
-    # Best-effort: get_multiplos_percentis usa yfinance (custo extra). Se virar gargalo
-    # de rate-limit, basta comentar este bloco — o score só perde o ajuste de ±4.
-    if not ticker.endswith("11.SA"):  # FII não tem P/L/EV convencional
-        try:
-            from utils.fmp_client import get_multiplos_percentis
-            _pctl = get_multiplos_percentis(ticker_yf, anos=10)
-            if _pctl:
-                data["multiplos_hist_pctl"] = _pctl
-        except Exception as e:
-            logger.debug(f"[sync_br] percentil histórico falhou p/ {ticker}: {e}")
+    # Percentil histórico (P1-4): NÃO computado aqui. get_multiplos_percentis usa
+    # yfinance e era rate-limited sob a carga do ETL (populava 0 tickers). Agora é
+    # gravado por write-back na página Research (database.db.atualizar_multiplos_pctl),
+    # que reusa o get_multiplos_medios já buscado ao abrir o ativo — sem custo de rede.
 
     # Validação de ranges na escrita (P2-4): descarta valores fora de faixa
     # realista (p/l, p/vp, roe%, dy%, ev/ebitda, margem%) antes de persistir —
