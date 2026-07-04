@@ -1453,6 +1453,7 @@ if _secao == "🌐 painel global":
                     st.caption("ipca acumulado dos últimos 12 meses (produto das taxas mensais). meta bcb: 3% ± 1.5pp. fonte: bcb sgs série 433.")
                 else:
                     st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
+                    st.caption("inflação mensal do ipca (print do mês). a versão acumulada 12m acima é a leitura relevante para o juro real; esta mostra o dado mais recente do mês.")
             # ── CURVA DI BRASILEIRA ───────────────────────────────────────────
             st.markdown("---")
             section_title("📈 curva di — expectativas de selic pelo mercado (focus/bcb)")
@@ -1797,6 +1798,7 @@ if _secao == "🌐 painel global":
                     annotation_font=dict(color=_cc_div["amber"], size=10, family="Inter, system-ui, sans-serif"),
                 )
                 st.plotly_chart(fig_divida, use_container_width=True, config={'responsive': True})
+                st.caption("dívida bruta do governo geral (% do pib). acima de ~80% e subindo eleva o prêmio de risco brasil, pressiona câmbio e juros longos. a tracejada marca o limite prudencial.")
             with gf2:
                 st.plotly_chart(
                     criar_grafico_macro(df_br, 'Result_Primario',
@@ -1804,6 +1806,7 @@ if _secao == "🌐 painel global":
                     use_container_width=True,
                     config={'responsive': True},
                 )
+                st.caption("resultado primário (receitas − despesas antes dos juros, % do pib). superávits estabilizam a dívida; déficits recorrentes a fazem crescer — chave da sustentabilidade fiscal.")
 
             if fiscal['status'] == 'critico':
                 corpo_fiscal = (
@@ -2254,6 +2257,7 @@ if _secao == "🌐 painel global":
                     fig_debt.add_hline(y=78, line_color=_cc_debt["amber"], line_dash="dash", line_width=1,
                                       annotation_text="patamar 2019 (pré-covid)", annotation_font_color=_cc_debt["amber"], annotation_font_size=9)
                     st.plotly_chart(fig_debt, use_container_width=True, config={'responsive': True})
+                    st.caption("dívida pública federal dos eua (% do pib). níveis altos pressionam a emissão de treasuries e os juros longos globais, elevando o custo de capital no mundo.")
 
         elif aba_sel == "🌍 europa/ásia":
             # ── EUROPA ───────────────────────────────────────────────────────────
@@ -3734,6 +3738,7 @@ if _secao == "🔭 overlay macro × preços":
                         fig.update_xaxes(showgrid=True, gridcolor=_cc_ov["border"])
 
                         st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
+                        st.caption("sobrepõe o preço do ativo (eixo esq.) ao indicador macro (eixo dir.) em 5 anos. movimentos alinhados ou opostos revelam a sensibilidade do ativo àquele fator.")
                     else: st.warning("não foi possível obter a série de dados macroeconómicos.")
                 except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
 

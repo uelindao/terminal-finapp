@@ -611,6 +611,7 @@ if _secao_d == "🚀 momentum & radar":
             _lay_mom["barmode"] = "group"
         fig_mom.update_layout(**_lay_mom)
         st.plotly_chart(fig_mom, use_container_width=True, config={'responsive': True})
+        st.caption("retorno acumulado dos ativos de maior momentum em cada janela (1m/3m/6m/12m). força relativa consistente entre as janelas é o sinal mais confiável; um único período forte pode ser ruído.")
 
         st.markdown("---")
 
@@ -1664,6 +1665,7 @@ if _secao_d == "🗺️ rotação setorial":
         )
         _fig_set.update_layout(**_lay_set)
         st.plotly_chart(_fig_set, use_container_width=True, config={'responsive': True})
+        st.caption("nota composta média por setor (fundamento + técnico + macro). setores no topo concentram os ativos mais bem posicionados para o regime atual — ponto de partida para a rotação setorial.")
 
         st.markdown("<br>", unsafe_allow_html=True)
         section_title("detalhamento por setor")

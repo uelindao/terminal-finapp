@@ -464,6 +464,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                     df_b100 = (hist_all / hist_all.iloc[0]) * 100
                     fig_b100 = base100(df_b100, height=350)
                     st.plotly_chart(fig_b100, use_container_width=True, config={'responsive': True})
+                    st.caption("cada ativo parte de 100 no início do período — mostra quem valorizou mais em termos relativos, ignorando o preço absoluto.")
 
     # ── HEALTH SCORES LADO A LADO ─────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1038,6 +1039,7 @@ if len(historico) >= 3:
                         line_width=1, annotation_text="reduzir")
     fig_score.update_yaxes(range=[0, 100])
     st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
+    st.caption("evolução do health score (0-100) nos últimos 180 dias. acima de 65 = zona de acumulação; abaixo de 40 = reduzir. quedas abruptas sinalizam deterioração de fundamentos ou técnico.")
 
     # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
     _breakdown_vis = health_result.get('breakdown', {})
@@ -1553,6 +1555,7 @@ if _secao_r == "📈 técnico (10y)":
         fig_tec.update_layout(**base_layout(height=500, title=f"price action histórico (10 anos): {ticker.lower()}"))
         fig_tec.update_layout(xaxis_rangeslider_visible=False)
         st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True})
+        st.caption("candlestick de 10 anos com médias de 50 e 200 dias. preço acima da mm200 = tendência de alta estrutural; mm50 cruzando abaixo da mm200 (cruz da morte) é sinal técnico de baixa.")
     except Exception as e: st.error(f"Erro gráfico técnico: {e}")
 
 if _secao_r == "💎 fundamentos":
@@ -1662,34 +1665,55 @@ if _secao_r == "💎 fundamentos":
             _rec_s = [_gt(r, 'receita') for r in _chron]
             _nd_s = [(_gt(r, 'divida_total') - (_gt(r, 'cash') or 0)) if _gt(r, 'divida_total') is not None else None for r in _chron]
 
-            def _mini_ft(titulo, series_list):
+            def _mini_ft(series_list):
+                # Sem título dentro do gráfico (evita sobreposição com a legenda);
+                # o título/explicação vai na caption abaixo de cada gráfico.
                 fig = go.Figure()
                 for nome, ys, cor in series_list:
                     fig.add_trace(go.Scatter(
                         x=_x_ft, y=ys, name=nome, mode="lines+markers",
                         line=dict(color=cor, width=2), marker=dict(size=4),
                     ))
-                _lay = base_layout(height=220, title=titulo)
+                _lay = base_layout(height=210)
                 _lay.update(
                     xaxis=dict(showgrid=False, tickangle=-30, tickfont=dict(size=8, color=_cc_ft["muted"])),
                     yaxis=dict(showgrid=True, gridcolor=_cc_ft["border"], tickfont=dict(size=9, color=_cc_ft["muted"])),
-                    margin=dict(l=48, r=10, t=42, b=42), showlegend=True,
-                    legend=dict(font=dict(size=9), orientation="h", y=1.18, x=0),
+                    margin=dict(l=48, r=10, t=24, b=42), showlegend=True,
+                    legend=dict(font=dict(size=9), orientation="h", yanchor="bottom", y=1.02, x=0),
                 )
                 fig.update_layout(**_lay)
                 return fig
 
             _fc1, _fc2 = st.columns(2)
             with _fc1:
-                st.plotly_chart(_mini_ft("margens (%)", [("bruta", _mb_s, _cc_ft["info"]), ("líquida", _ml_s, _cc_ft["bull"])]),
+                st.plotly_chart(_mini_ft([("bruta", _mb_s, _cc_ft["info"]), ("líquida", _ml_s, _cc_ft["bull"])]),
                                 use_container_width=True, config={'responsive': True})
-                st.plotly_chart(_mini_ft("dívida líquida", [("dív. líq.", _nd_s, _cc_ft["bear"])]),
+                st.caption(
+                    "**margens (%)** — margem bruta (receita − custos diretos) e margem líquida "
+                    "(lucro final ÷ receita). estáveis ou em expansão indicam poder de precificação "
+                    "e eficiência; queda sustentada sinaliza pressão de custos ou concorrência."
+                )
+                st.plotly_chart(_mini_ft([("dív. líq.", _nd_s, _cc_ft["bear"])]),
                                 use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "**dívida líquida** — dívida total − caixa. tendência de queda = desalavancagem "
+                    "(favorável com juros altos, reduz risco financeiro); alta rápida exige atenção "
+                    "ao custo da dívida e à cobertura de juros."
+                )
             with _fc2:
-                st.plotly_chart(_mini_ft("cfo vs lucro (qualidade do lucro)", [("cfo", _cfo_s, _cc_ft["accent"]), ("lucro", _luc_s, _cc_ft["bull"])]),
+                st.plotly_chart(_mini_ft([("cfo", _cfo_s, _cc_ft["accent"]), ("lucro", _luc_s, _cc_ft["bull"])]),
                                 use_container_width=True, config={'responsive': True})
-                st.plotly_chart(_mini_ft("receita", [("receita", _rec_s, _cc_ft["info"])]),
+                st.caption(
+                    "**cfo vs lucro (qualidade do lucro)** — fluxo de caixa operacional vs lucro líquido. "
+                    "cfo acompanhando ou acima do lucro = lucro de alta qualidade (vira caixa de verdade); "
+                    "lucro muito acima do cfo sugere resultado contábil sem geração de caixa."
+                )
+                st.plotly_chart(_mini_ft([("receita", _rec_s, _cc_ft["info"])]),
                                 use_container_width=True, config={'responsive': True})
+                st.caption(
+                    "**receita** — a linha de topo por período. crescimento consistente sustenta a tese; "
+                    "queda é o primeiro sinal de deterioração do negócio. compare com a variação yoy da tabela acima."
+                )
         else:
             # Fallback: sem histórico no cache → gráfico receita vs lucro via yfinance
             section_title("📊 demonstrações financeiras (dre)")
@@ -1723,6 +1747,7 @@ if _secao_r == "💎 fundamentos":
                                 line=dict(color=_cc["bull"], width=2)))
                             fig_earn.update_layout(**base_layout(height=400))
                         st.plotly_chart(fig_earn, use_container_width=True, config={'responsive': True})
+                        st.caption("receita e lucro líquido dos últimos períodos. o ideal é receita crescente com o lucro acompanhando (margem preservada).")
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[research] tab earnings: {e}")
                 st.error(f"erro ao carregar demonstrações: {e}")
@@ -2251,6 +2276,7 @@ if _secao_r == "🧠 análise & ia":
                         )
                         _fig_div.update_layout(**_lay_div)
                         st.plotly_chart(_fig_div, use_container_width=True, config={'responsive': True})
+                        st.caption("proventos mensais por cota (24 meses). a linha tracejada é a média e a de tendência mostra se os rendimentos crescem ou encolhem — chave para a sustentabilidade do dividend yield.")
 
                         st.markdown("<br>", unsafe_allow_html=True)
                         section_title("últimos 12 proventos")
@@ -2322,6 +2348,11 @@ if _secao_r == "🧠 análise & ia":
     # ── EVOLUÇÃO HISTÓRICA DE FUNDAMENTOS (FMP) ──────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("📈 evolução de fundamentos (histórico — fmp / yfinance)")
+    st.caption(
+        "trajetória de 10 anos dos principais indicadores. p/l e ev/ebitda mostram se o "
+        "valuation está esticado ou comprimido vs. a própria história; roe e margem líquida "
+        "revelam se a rentabilidade é consistente ou volátil ao longo do ciclo."
+    )
 
     with st.spinner("carregando histórico de fundamentos..."):
         _hist_fund = get_multiplos_historicos(t_base, anos=10)
@@ -2794,6 +2825,7 @@ if _secao_r == "🧠 análise & ia":
             fig.add_hline(y=preco_input, line_color=_chart_cores()["accent"], line_dash="dash", annotation_text="preço atual")
             fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
             st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
+            st.caption("preço justo estimado para cada combinação de crescimento e wacc. onde a curva cruza o preço atual está o crescimento que o mercado já embute — acima disso o ativo está caro; abaixo, barato.")
             
             st.markdown("---")
             if st.button("🧠 ia: interpretar o valuation e gerar tese", type="primary"):
@@ -2895,6 +2927,7 @@ if _secao_r == "🌍 overlay macro":
             fig_macro.add_trace(go.Scatter(x=m_data.index, y=m_data, name=m_name, line=dict(color="#00B0FF", dash="dot")), secondary_y=True)
             fig_macro.update_layout(**base_layout(height=450, title=f"{ticker.lower()} vs {ind_macro.lower()}"))
             st.plotly_chart(fig_macro, use_container_width=True, config={'responsive': True})
+            st.caption("sobrepõe o preço do ativo (eixo esq.) à série macro (eixo dir.). movimentos espelhados ou opostos revelam a sensibilidade do ativo àquele fator (juros, câmbio, inflação).")
     except: st.warning("Erro overlay.")
 
 # Fim da página

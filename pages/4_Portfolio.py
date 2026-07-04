@@ -1938,6 +1938,7 @@ with tab_posicoes:
                 layout_pie['yaxis']['visible'] = False
             fig_pie.update_layout(**layout_pie)
             st.plotly_chart(fig_pie, use_container_width=True, config={'responsive': True})
+            st.caption("distribuição do capital entre os ativos da carteira. concentração excessiva em poucos nomes eleva o risco idiossincrático — fatias muito grandes merecem atenção.")
 
         with col_g2:
             section_title("📈 p&l por ativo")
@@ -1954,6 +1955,7 @@ with tab_posicoes:
                 layout_bar['yaxis']['showgrid'] = False
             fig_bar.update_layout(**layout_bar)
             st.plotly_chart(fig_bar, use_container_width=True, config={'responsive': True})
+            st.caption("lucro/prejuízo não realizado por posição. identifica os ativos que puxam o resultado da carteira para cima ou para baixo.")
 
         # ── VISÃO CONSOLIDADA POR MOEDA ──────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2564,6 +2566,7 @@ with tab_concentracao:
                 use_container_width=True,
                 config={'responsive': True},
             )
+        st.caption("distribuição do capital por ativo, setor e moeda. boa diversificação evita concentração excessiva em um único nome, setor ou moeda — reduz o risco não-remunerado.")
 
         # ── MATRIZ DE CORRELAÇÃO ─────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -3032,6 +3035,7 @@ with tab_risco:
                         showlegend=False,
                     )
                     st.plotly_chart(_fig, use_container_width=True)
+                    st.caption("distribuição dos retornos diários da carteira. a cauda esquerda (perdas) define o var — quanto mais gorda, maior a probabilidade de quedas extremas.")
 
                     # Sumário em linguagem natural
                     _diag = ""
@@ -3194,6 +3198,7 @@ with tab_risco:
                         margin=dict(t=40, b=20, l=0, r=0),
                     )
                     st.plotly_chart(_fig_wf, use_container_width=True)
+                    st.caption("atribuição de brinson: decompõe o retorno vs. benchmark em efeito de alocação (escolha de setores) e de seleção (escolha de ativos dentro do setor).")
 
                     # Tabela por setor
                     st.markdown("##### atribuição por setor")
@@ -3395,6 +3400,7 @@ with tab_risco:
                     )
                     _fig_betas.add_hline(y=0, line_width=1, line_color=_chart_cores()["muted"])
                     st.plotly_chart(_fig_betas, use_container_width=True)
+                    st.caption("sensibilidade da carteira a cada fator de risco (mercado, câmbio, juros), com intervalo de 95%. betas altos indicam maior exposição àquele fator.")
 
                     # Sumário em linguagem natural
                     _interp_mkt = (
@@ -3495,6 +3501,7 @@ with tab_risco:
                         margin=dict(t=40, b=20, l=0, r=0),
                     )
                     st.plotly_chart(_fig_cal, use_container_width=True)
+                    st.caption("proventos projetados para os próximos 12 meses com base no histórico de distribuição das posições. ajuda a planejar o fluxo de renda passiva da carteira.")
 
                     # Top contribuidores
                     st.markdown("##### top contribuidores 12m")
@@ -3755,6 +3762,7 @@ with tab_stress:
             fig_stress.add_vline(x=0, line_color=_cc_stress["border"], line_width=1)
             fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
             st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
+            st.caption("impacto estimado de cada cenário de stress histórico sobre o valor da carteira. mostra a vulnerabilidade a choques como crises cambiais, alta de juros ou quedas de bolsa.")
 
             if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
                 with st.spinner("deepseek analisando exposições..."):
@@ -4539,6 +4547,7 @@ with tab_backtest:
                         )
                         _fig_ocean.update_layout(**_lay_ocean)
                         st.plotly_chart(_fig_ocean, use_container_width=True, config={'responsive': True})
+                        st.caption("curva de drawdown (underwater): quanto a estratégia esteve abaixo do topo anterior ao longo do tempo. quedas profundas e prolongadas indicam maior risco de perda.")
 
                     # ── Rolling Sharpe 252d (com proteção contra vol zero) ──
                     _series_rolling = {}
