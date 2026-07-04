@@ -1342,6 +1342,156 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
         unsafe_allow_html=True,
     )
 
+def _render_historico_proventos(divs_raw, modo, ticker, moeda):
+    """
+    Cards + gráfico + tabela do histórico de proventos (P3-3).
+    modo='fii'  → cadência mensal, janela 24 meses, por cota (4 casas decimais).
+    modo='acao' → agregação ANUAL, janela 5 anos, por ação (2 casas).
+    Extraído do bloco antes exclusivo de FII para reuso em ações pagadoras.
+    """
+    _cur = moeda.lower()
+    _dec = 4 if modo == 'fii' else 2
+    if divs_raw is None or (hasattr(divs_raw, 'empty') and divs_raw.empty):
+        st.info("empresa não distribuiu proventos no período ou dados indisponíveis.")
+        return
+    _divs = divs_raw.copy()
+    if getattr(_divs.index, 'tz', None) is not None:
+        _divs.index = _divs.index.tz_localize(None)
+
+    if modo == 'fii':
+        _cutoff = pd.Timestamp.now() - pd.DateOffset(months=24)
+        _serie = _divs[_divs.index >= _cutoff].sort_index()
+        _lbl_ult, _lbl_media, _lbl_cont = "último provento", "média mensal (24m)", "pagamentos no período"
+        _sub_ult, _sub_media = "por cota", "por cota"
+        _sub_janela, _cont_bom = "últimos 24 meses", 20
+        _titulo_graf = f"proventos mensais — {ticker.lower()} (24 meses)"
+        _y_titulo = f"{_cur} por cota"
+    else:
+        _cutoff = pd.Timestamp.now() - pd.DateOffset(years=5)
+        _d5 = _divs[_divs.index >= _cutoff].sort_index()
+        if _d5.empty:
+            st.info("empresa não distribuiu proventos nos últimos 5 anos.")
+            return
+        _serie = _d5.groupby(_d5.index.year).sum()
+        _serie.index = pd.to_datetime([f"{int(y)}-12-31" for y in _serie.index])
+        _lbl_ult, _lbl_media, _lbl_cont = "último ano", "média anual (5a)", "anos com pagamento"
+        _sub_ult, _sub_media = "total no ano", "por ação"
+        _sub_janela, _cont_bom = "últimos 5 anos", 5
+        _titulo_graf = f"proventos anuais — {ticker.lower()} (5 anos)"
+        _y_titulo = f"{_cur} por ação"
+
+    if _serie.empty:
+        st.info(f"nenhum provento encontrado nos {_sub_janela}.")
+        return
+
+    _n = len(_serie)
+    _media = float(_serie.mean())
+    _ult = float(_serie.iloc[-1])
+    _meio = _n // 2
+    _m1 = float(_serie.iloc[:_meio].mean()) if _meio > 0 else _media
+    _m2 = float(_serie.iloc[_meio:].mean()) if _meio > 0 else _media
+    _var_tend = (_m2 / _m1 - 1) * 100 if _m1 > 0 else 0
+
+    _cc = _chart_cores()
+    if _var_tend >= 5:
+        _tend_label, _tend_cor, _tend_tipo = "📈 crescendo", _cc["bull"], "bull"
+    elif _var_tend <= -5:
+        _tend_label, _tend_cor, _tend_tipo = "📉 caindo", _cc["bear"], "bear"
+    else:
+        _tend_label, _tend_cor, _tend_tipo = "➡️ estável", _cc["amber"], "amber"
+
+    _d1, _d2, _d3, _d4 = st.columns(4)
+    with _d1:
+        metric_card(_lbl_ult, f"{_cur} {_ult:.{_dec}f}", _sub_ult)
+    with _d2:
+        metric_card(_lbl_media, f"{_cur} {_media:.{_dec}f}", _sub_media)
+    with _d3:
+        metric_card("tendência dos proventos", _tend_label,
+                    f"{_var_tend:+.1f}% (1ª vs 2ª metade)", _tend_tipo)
+    with _d4:
+        metric_card(_lbl_cont, str(_n), _sub_janela, "bull" if _n >= _cont_bom else "amber")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    _tipo = chart_type_toggle(key=f"div_{ticker}_{modo}", default="barras")
+    _x = [str(d.year) for d in _serie.index] if modo == 'acao' else [str(d.date()) for d in _serie.index]
+    _vlist = _serie.values.tolist()
+    _cores = [_cc["bull"] if v >= _media else _cc["accent"] for v in _vlist]
+    _fig = go.Figure()
+    if _tipo == "barras":
+        _fig.add_trace(go.Bar(x=_x, y=_vlist, marker_color=_cores, name="provento"))
+    else:
+        _fig.add_trace(go.Scatter(x=_x, y=_vlist, mode="lines+markers",
+            line=dict(color=_cc["accent"], width=2), marker=dict(color=_cores, size=7), name="provento"))
+    _fig.add_hline(y=_media, line_color=_cc["accent"], line_dash="dash", line_width=1,
+        annotation_text=f"média {_cur} {_media:.{_dec}f}", annotation_font_color=_cc["accent"], annotation_font_size=9)
+    if _n >= 4:
+        _xr = list(range(_n))
+        _coef = np.polyfit(_xr, _vlist, 1)
+        _tr = [_coef[0] * x + _coef[1] for x in _xr]
+        _fig.add_trace(go.Scatter(x=_x, y=_tr, mode="lines",
+            line=dict(color=_tend_cor, width=1.5, dash="dot"), name="tendência"))
+    _lay = base_layout(height=280, title=_titulo_graf)
+    _lay.update(
+        xaxis=dict(showgrid=False, tickangle=-45, tickfont=dict(size=9)),
+        yaxis=dict(showgrid=True, gridcolor=_cc["border"], title=_y_titulo),
+        margin=dict(l=60, r=20, t=40, b=60),
+    )
+    _fig.update_layout(**_lay)
+    st.plotly_chart(_fig, use_container_width=True, config={'responsive': True})
+    if modo == 'fii':
+        st.caption("proventos mensais por cota (24 meses). a linha tracejada é a média e a de tendência mostra se os rendimentos crescem ou encolhem — chave para a sustentabilidade do dividend yield.")
+    else:
+        st.caption("proventos anuais por ação (5 anos). tendência de alta sinaliza política de dividendos consistente; cortes indicam pressão nos lucros ou mudança de alocação de capital.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    _ncols = 12 if modo == 'fii' else _n
+    section_title(f"últimos {_ncols} proventos" if modo == 'fii' else "proventos por ano")
+    _ult_serie = _serie.iloc[-_ncols:].sort_index(ascending=False)
+    _rows_div = []
+    _prev_val = None
+    for _idx_d, _val_d in _ult_serie.items():
+        _val_f = float(_val_d)
+        if _prev_val is not None and _prev_val > 0:
+            _var_m = (_val_f / _prev_val - 1) * 100
+            _var_s = f"{_var_m:+.1f}%"
+        else:
+            _var_s = "—"
+        _rows_div.append({
+            'data': str(_idx_d.year) if modo == 'acao' else str(_idx_d.date()),
+            'provento': f"{_cur} {_val_f:.{_dec}f}",
+            'vs anterior': _var_s,
+            'vs média': f"{(_val_f/_media - 1)*100:+.1f}%" if _media > 0 else "—",
+        })
+        _prev_val = _val_f
+
+    _mn = 'var(--font-mono,monospace)'
+    _hdrs = "".join(
+        f'<th style="padding:7px 10px;text-align:{"left" if i==0 else "right"};'
+        f'font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;'
+        f'border-bottom:1px solid var(--border-subtle);">{h}</th>'
+        for i, h in enumerate(['Período' if modo == 'acao' else 'Data', 'Provento', 'vs anterior', 'vs média'])
+    )
+    _body = ""
+    for r in _rows_div:
+        _va, _vm = r['vs anterior'], r['vs média']
+        _cv = "#2ecc71" if str(_va).startswith('+') else ("#e74c3c" if str(_va).startswith('-') else "var(--text-muted)")
+        _cvm = "#2ecc71" if str(_vm).startswith('+') else ("#e74c3c" if str(_vm).startswith('-') else "var(--text-muted)")
+        _body += (
+            f'<tr style="border-bottom:1px solid var(--border-subtle);">'
+            f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.78rem;color:var(--text-muted);">{r["data"]}</td>'
+            f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.82rem;font-weight:600;text-align:right;">{r["provento"]}</td>'
+            f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cv};text-align:right;">{_va}</td>'
+            f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cvm};text-align:right;">{_vm}</td>'
+            f'</tr>'
+        )
+    st.markdown(
+        f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;'
+        f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+        f'<thead><tr>{_hdrs}</tr></thead><tbody>{_body}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
+
+
 # (FMP valuation movido para tab_val)
 
 section_title("🧠 análise ia — deepseek v4 pro")
@@ -2256,170 +2406,17 @@ if _secao_r == "🧠 análise & ia":
             }
         st.table(pd.DataFrame(f_d))
 
-        # ── HISTÓRICO DE DIVIDENDOS (FII) ─────────────────────────────────
-        if is_fii:
-            st.markdown("<br>", unsafe_allow_html=True)
-            section_title("💰 histórico de proventos (últimos 24 meses)")
-
-            try:
-                _divs_raw = acao_obj.dividends
-                if _divs_raw is not None and not _divs_raw.empty:
-                    _divs = _divs_raw.copy()
-                    if getattr(_divs.index, 'tz', None) is not None:
-                        _divs.index = _divs.index.tz_localize(None)
-
-                    _cutoff = pd.Timestamp.now() - pd.DateOffset(months=24)
-                    _divs   = _divs[_divs.index >= _cutoff].sort_index()
-
-                    if not _divs.empty:
-                        _div_vals  = _divs.values
-                        _n_divs    = len(_div_vals)
-                        _media_div = float(_divs.mean())
-                        _ult_div   = float(_divs.iloc[-1])
-
-                        _meio     = _n_divs // 2
-                        _media_1h = float(_divs.iloc[:_meio].mean()) if _meio > 0 else _media_div
-                        _media_2h = float(_divs.iloc[_meio:].mean()) if _meio > 0 else _media_div
-                        _var_tend  = (_media_2h / _media_1h - 1) * 100 if _media_1h > 0 else 0
-
-                        _cc_div_tend = _chart_cores()
-                        if _var_tend >= 5:
-                            _tend_label = "📈 crescendo"
-                            _tend_cor   = _cc_div_tend["bull"]
-                            _tend_tipo  = "bull"
-                        elif _var_tend <= -5:
-                            _tend_label = "📉 caindo"
-                            _tend_cor   = _cc_div_tend["bear"]
-                            _tend_tipo  = "bear"
-                        else:
-                            _tend_label = "➡️ estável"
-                            _tend_cor   = _cc_div_tend["amber"]
-                            _tend_tipo  = "amber"
-
-                        _dv1, _dv2, _dv3, _dv4 = st.columns(4)
-                        with _dv1:
-                            metric_card("último provento", f"r$ {_ult_div:.4f}", "por cota")
-                        with _dv2:
-                            metric_card("média mensal (24m)", f"r$ {_media_div:.4f}", "por cota")
-                        with _dv3:
-                            metric_card("tendência dos proventos", _tend_label,
-                                        f"{_var_tend:+.1f}% (1ª vs 2ª metade)", _tend_tipo)
-                        with _dv4:
-                            metric_card("pagamentos no período", str(_n_divs),
-                                        "últimos 24 meses", "bull" if _n_divs >= 20 else "amber")
-
-                        st.markdown("<br>", unsafe_allow_html=True)
-
-                        _div_tipo = chart_type_toggle(key=f"div_{t_base}", default="barras")
-
-                        import plotly.graph_objects as go
-                        _datas_div = [str(d.date()) for d in _divs.index]
-                        _vals_div  = _divs.values.tolist()
-                        _cc_div    = _chart_cores()
-                        _cores_div = [_cc_div["bull"] if v >= _media_div else _cc_div["accent"] for v in _vals_div]
-
-                        _fig_div = go.Figure()
-                        if _div_tipo == "barras":
-                            _fig_div.add_trace(go.Bar(
-                                x=_datas_div, y=_vals_div,
-                                marker_color=_cores_div, name="provento",
-                            ))
-                        else:
-                            _fig_div.add_trace(go.Scatter(
-                                x=_datas_div, y=_vals_div,
-                                mode="lines+markers",
-                                line=dict(color=_cc_div["accent"], width=2),
-                                marker=dict(color=_cores_div, size=7),
-                                name="provento",
-                            ))
-                        _fig_div.add_hline(
-                            y=_media_div, line_color=_cc_div["accent"], line_dash="dash",
-                            line_width=1, annotation_text=f"média r$ {_media_div:.4f}",
-                            annotation_font_color=_cc_div["accent"], annotation_font_size=9,
-                        )
-
-                        if _n_divs >= 4:
-                            import numpy as np
-                            _x_reg = list(range(_n_divs))
-                            _coef  = np.polyfit(_x_reg, _vals_div, 1)
-                            _trend = [_coef[0] * x + _coef[1] for x in _x_reg]
-                            _fig_div.add_trace(go.Scatter(
-                                x=_datas_div, y=_trend,
-                                mode="lines",
-                                line=dict(color=_tend_cor, width=1.5, dash="dot"),
-                                name="tendência",
-                            ))
-
-                        _lay_div = base_layout(
-                            height=280,
-                            title=f"proventos mensais — {ticker.lower()} (24 meses)",
-                        )
-                        _lay_div.update(
-                            xaxis=dict(showgrid=False, tickangle=-45, tickfont=dict(size=9)),
-                            yaxis=dict(showgrid=True, gridcolor=_chart_cores()["border"], title="r$ por cota"),
-                            margin=dict(l=60, r=20, t=40, b=60),
-                        )
-                        _fig_div.update_layout(**_lay_div)
-                        st.plotly_chart(_fig_div, use_container_width=True, config={'responsive': True})
-                        st.caption("proventos mensais por cota (24 meses). a linha tracejada é a média e a de tendência mostra se os rendimentos crescem ou encolhem — chave para a sustentabilidade do dividend yield.")
-
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        section_title("últimos 12 proventos")
-                        _ultimos12 = _divs.iloc[-12:].sort_index(ascending=False)
-                        _rows_div  = []
-                        _prev_val  = None
-                        for _dt_div, _val_div in _ultimos12.items():
-                            _val_f = float(_val_div)
-                            if _prev_val is not None and _prev_val > 0:
-                                _var_m = (_val_f / _prev_val - 1) * 100
-                                _var_s = f"{_var_m:+.1f}%"
-                                _cor_v = "#00C853" if _var_m >= 0 else "#FF1744"
-                            else:
-                                _var_s = "—"
-                                _cor_v = "#555"
-                            _rows_div.append({
-                                'data': str(_dt_div.date()),
-                                'provento': f"r$ {_val_f:.4f}",
-                                'vs anterior': _var_s,
-                                'vs média': f"{(_val_f/_media_div - 1)*100:+.1f}%" if _media_div > 0 else "—",
-                            })
-                            _prev_val = _val_f
-                        def _div_table_html(rows: list) -> str:
-                            _mn = 'var(--font-mono,monospace)'
-                            _hdrs = "".join(
-                                f'<th style="padding:7px 10px;text-align:{"left" if i==0 else "right"};'
-                                f'font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;'
-                                f'border-bottom:1px solid var(--border-subtle);">{h}</th>'
-                                for i, h in enumerate(['Data','Provento','vs anterior','vs média'])
-                            )
-                            _body = ""
-                            for r in rows:
-                                _va = r['vs anterior']
-                                _vm = r['vs média']
-                                _cv = "#2ecc71" if str(_va).startswith('+') else ("#e74c3c" if str(_va).startswith('-') else "var(--text-muted)")
-                                _cvm = "#2ecc71" if str(_vm).startswith('+') else ("#e74c3c" if str(_vm).startswith('-') else "var(--text-muted)")
-                                _body += (
-                                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
-                                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                                    f'onmouseout="this.style.background=\'transparent\'">'
-                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.78rem;color:var(--text-muted);">{r["data"]}</td>'
-                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.82rem;font-weight:600;text-align:right;">{r["provento"]}</td>'
-                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cv};text-align:right;">{_va}</td>'
-                                    f'<td style="padding:7px 10px;font-family:{_mn};font-size:0.8rem;color:{_cvm};text-align:right;">{_vm}</td>'
-                                    f'</tr>'
-                                )
-                            return (
-                                f'<div style="overflow-x:auto;">'
-                                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                                f'<thead><tr>{_hdrs}</tr></thead><tbody>{_body}</tbody></table></div>'
-                            )
-                        st.markdown(_div_table_html(_rows_div), unsafe_allow_html=True)
-                    else:
-                        st.info("nenhum provento encontrado nos últimos 24 meses.")
-                else:
-                    st.info("dados de dividendos não disponíveis para este ativo.")
-            except Exception as _e_div:
-                st.warning(f"não foi possível carregar o histórico de proventos: {_e_div}")
+        # ── HISTÓRICO DE PROVENTOS (FII mensal 24m / ação anual 5a) ───────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title(f"💰 histórico de proventos (últimos {'24 meses' if is_fii else '5 anos'})")
+        try:
+            _render_historico_proventos(
+                acao_obj.dividends if acao_obj is not None else None,
+                'fii' if is_fii else 'acao',
+                ticker, moeda,
+            )
+        except Exception as _e_div:
+            st.warning(f"não foi possível carregar o histórico de proventos: {_e_div}")
 
     with c_f2:
         st.markdown("**descrição**")
