@@ -992,6 +992,91 @@ tooltip(
     )
 )
 
+# ── FORWARD-LOOKING (consenso de analistas + próximo resultado) ──────────
+# Preenche a lacuna "só passado" do deep dive: forward P/E, EPS projetado,
+# preço-alvo de consenso e próximo earnings — tudo de yfinance.info (BR e US).
+if not is_fii:
+    _fpe   = safe_float(info_dict.get('forwardPE'))
+    _tpe   = safe_float(info_dict.get('trailingPE'))
+    _feps  = safe_float(info_dict.get('forwardEps'))
+    _teps  = safe_float(info_dict.get('trailingEps'))
+    _tgt   = safe_float(info_dict.get('targetMeanPrice'))
+    _tgtlo = safe_float(info_dict.get('targetLowPrice'))
+    _tgthi = safe_float(info_dict.get('targetHighPrice'))
+    _nan   = info_dict.get('numberOfAnalystOpinions')
+    _reck  = str(info_dict.get('recommendationKey') or '').lower()
+    _preco_fw = _preco_atual_th or (safe_float(info_dict.get('currentPrice')) or 0)
+
+    if any(v is not None for v in (_fpe, _tgt, _feps)):
+        section_title("🔮 forward-looking — consenso de analistas")
+
+        # próximo earnings via acao_obj.calendar (objeto já cacheado; yfinance
+        # guarda o calendar no ticker após a 1ª leitura).
+        _earn_str, _earn_dias = None, None
+        try:
+            import datetime as _dt_e
+            _cal = acao_obj.calendar
+            _ed = _cal.get('Earnings Date') if isinstance(_cal, dict) else None
+            _d0 = _ed[0] if isinstance(_ed, (list, tuple)) and _ed else (_ed or None)
+            if _d0 is not None and hasattr(_d0, 'strftime'):
+                _earn_str = _d0.strftime('%d/%m/%Y')
+                try:
+                    _earn_dias = (_d0 - _dt_e.date.today()).days
+                except Exception:
+                    _earn_dias = None
+        except Exception:
+            pass
+
+        _fw1, _fw2, _fw3, _fw4 = st.columns(4)
+        with _fw1:
+            if _earn_str:
+                _sub_e = f"em {_earn_dias} dias" if (_earn_dias is not None and _earn_dias >= 0) else "estimado"
+                metric_card("próximo resultado", _earn_str, _sub_e,
+                            "amber" if (_earn_dias is not None and 0 <= _earn_dias <= 14) else "info")
+            else:
+                metric_card("próximo resultado", "n/d", "sem data de earnings")
+        with _fw2:
+            if _fpe is not None and _fpe > 0:
+                if _tpe and _fpe < _tpe:
+                    _dir_pe, _tone_pe = "lucro esperado ↑", "bull"
+                elif _tpe and _fpe > _tpe:
+                    _dir_pe, _tone_pe = "lucro esperado ↓", "bear"
+                else:
+                    _dir_pe, _tone_pe = "estável", "muted"
+                metric_card("forward p/l", f"{_fpe:.1f}x",
+                            (f"trailing {_tpe:.1f}x · {_dir_pe}" if _tpe else _dir_pe), _tone_pe)
+            else:
+                metric_card("forward p/l", "n/d", "sem estimativa")
+        with _fw3:
+            if _tgt is not None and _preco_fw > 0:
+                _upside = (_tgt / _preco_fw - 1) * 100
+                _rng = f"faixa {moeda.upper()} {_tgtlo:.0f}–{_tgthi:.0f}" if (_tgtlo and _tgthi) else ""
+                metric_card("preço-alvo (consenso)", f"{moeda.upper()} {_tgt:.2f}",
+                            f"{_upside:+.0f}% vs atual · {_rng}".strip(" ·"),
+                            "bull" if _upside > 10 else "bear" if _upside < -10 else "amber")
+            else:
+                metric_card("preço-alvo", "n/d", "sem cobertura de analistas")
+        with _fw4:
+            _rec_map = {'strong_buy': 'compra forte', 'buy': 'compra', 'hold': 'manter',
+                        'underperform': 'reduzir', 'sell': 'venda'}
+            _rec_txt = _rec_map.get(_reck, _reck or 'n/d')
+            _rec_tone = "bull" if _reck in ('strong_buy', 'buy') else ("bear" if _reck in ('sell', 'underperform') else "muted")
+            try:
+                _nan_txt = f"{int(_nan)} analistas" if _nan else "consenso"
+            except (TypeError, ValueError):
+                _nan_txt = "consenso"
+            metric_card("recomendação", _rec_txt, _nan_txt, _rec_tone)
+
+        if _feps is not None and _teps not in (None, 0):
+            _eps_g = (_feps / abs(_teps) - 1) * 100
+            st.caption(
+                f"eps projetado {moeda.upper()} {_feps:.2f} vs {moeda.upper()} {_teps:.2f} atual "
+                f"→ o mercado embute crescimento de lucro de {_eps_g:+.0f}% no próximo exercício. "
+                "compare com o crescimento realizado na tabela de fundamentos: projeção muito acima do "
+                "histórico = preço otimista (risco de decepção); abaixo = expectativa conservadora."
+            )
+        st.markdown("<br>", unsafe_allow_html=True)
+
 # ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
 _hs_all = get_health_scores()
 _hs_map = {r['ticker']: r for r in (_hs_all or [])}
