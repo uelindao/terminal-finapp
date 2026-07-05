@@ -432,6 +432,49 @@ def calcular_indicadores_ciclo_br() -> dict:
         except Exception:
             pass
 
+        # ── 6. IBC-Br — proxy MENSAL de atividade/PIB (BCB SGS 24364, dessaz) ──
+        # Antes o ciclo BR só tinha proxies de MERCADO (IBOV/câmbio/IMAB/commodities).
+        # O IBC-Br é o indicador de ATIVIDADE REAL que faltava — o mais próximo de um
+        # PIB mensal, publicado pelo BCB. Dá base "hard data" à classificação da fase.
+        try:
+            from bcb import sgs as _sgs
+            import datetime as _dt_ibc
+            _ini_ibc = (_dt_ibc.datetime.today() - _dt_ibc.timedelta(days=500)).strftime('%Y-%m-%d')
+            _df_ibc = _sgs.get({'ibc': 24364}, start=_ini_ibc)
+            _s_ibc = _df_ibc['ibc'].dropna() if (_df_ibc is not None and 'ibc' in _df_ibc.columns) else None
+            if _s_ibc is not None and len(_s_ibc) >= 13:
+                _ibc_yoy = float(_s_ibc.iloc[-1] / _s_ibc.iloc[-13] - 1) * 100
+                _ibc_3m = float(_s_ibc.iloc[-1] / _s_ibc.iloc[-4] - 1) * 100  # var 3m (dessaz)
+                resultado['indicadores']['ibc_br_yoy'] = round(_ibc_yoy, 2)
+                resultado['indicadores']['ibc_br_3m'] = round(_ibc_3m, 2)
+
+                if _ibc_yoy > 2.5 and _ibc_3m > 0.3:
+                    scores['expansao'] += 25          # atividade forte e acelerando
+                elif _ibc_yoy > 1.0:
+                    scores['expansao'] += 15
+                    scores['pico']     += 8
+                elif _ibc_yoy > 0 and _ibc_3m > 0:
+                    scores['expansao'] += 10
+                    scores['vale']     += 8
+                elif _ibc_yoy < 0 and _ibc_3m > 0.3:
+                    scores['vale']      += 18          # fundo virando — recuperação
+                    scores['contracao'] += 5
+                    resultado['alertas'].append(
+                        f"🔄 ibc-br recuperando (3m {_ibc_3m:+.1f}%) apesar do yoy "
+                        f"{_ibc_yoy:+.1f}% — possível vale do ciclo (early recovery)."
+                    )
+                elif _ibc_yoy < 0:
+                    scores['contracao'] += 20
+                    resultado['alertas'].append(
+                        f"📉 atividade econômica em contração (ibc-br yoy {_ibc_yoy:+.1f}%)."
+                    )
+                else:
+                    scores['pico']      += 10
+                    scores['contracao'] += 5
+                n_ind += 1
+        except Exception as e:
+            logger.debug(f"[ciclo_br] ibc-br indisponível: {e}")
+
     except Exception as e:
         logger.warning(f"[ciclo_br] erro: {e}")
 

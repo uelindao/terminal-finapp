@@ -3377,6 +3377,8 @@ if _secao == "🔄 ciclo econômico":
     _ind_cols = st.columns(2)
 
     _map_labels_br = {
+        'ibc_br_yoy':           ('IBC-Br atividade (YoY)', '%'),
+        'ibc_br_3m':            ('IBC-Br momentum (3m dessaz)', '%'),
         'selic_real':           ('Selic Real (Selic - IPCA 12m)', '%'),
         'spread_curva_br':      ('Spread Curva BR (IMA-B 5+ vs 5)', 'pp'),
         'ibov_ret_6m':          ('Retorno IBOV 6 meses', '%'),
