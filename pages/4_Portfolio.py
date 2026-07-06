@@ -47,6 +47,9 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
+# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
+from utils.components import busca_global_sidebar
+busca_global_sidebar()
 
 _user_top_pf = get_current_user() or {}
 topbar(
@@ -55,6 +58,12 @@ topbar(
     sync_label="ao vivo",
 )
 page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
+# Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
+try:
+    from utils.macro_state import render_cockpit_macro as _rcm
+    _rcm('BR')
+except Exception:
+    pass
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_betas(tickers_tuple: tuple) -> dict:

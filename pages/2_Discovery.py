@@ -48,6 +48,9 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
+# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
+from utils.components import busca_global_sidebar
+busca_global_sidebar()
 
 
 init_db()
@@ -60,6 +63,12 @@ topbar(
     sync_label="ao vivo",
 )
 page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
+# Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
+try:
+    from utils.macro_state import render_cockpit_macro as _rcm
+    _rcm('BR')
+except Exception:
+    pass
 
 _n_cache_br = sum(1 for t in CACHE_FUNDAMENTOS if str(t).endswith('.SA'))
 _n_cache_us = sum(1 for t in CACHE_FUNDAMENTOS if not str(t).endswith('.SA'))

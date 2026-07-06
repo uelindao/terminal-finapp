@@ -291,6 +291,9 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
+# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
+from utils.components import busca_global_sidebar
+busca_global_sidebar()
 
 # Garante macro_context atualizado em todas as páginas filhas
 garantir_macro_context()

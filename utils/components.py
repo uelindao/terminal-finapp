@@ -4222,3 +4222,58 @@ def lazy_chart(
                      use_container_width=True):
             st.session_state[state_key] = False
             st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BUSCA GLOBAL DE ATIVO (navegação) — disponível na sidebar de TODA página.
+# Torna o deep dive (Research) acessível de qualquer lugar, em 1 passo.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _resolver_ticker_busca(termo: str) -> str | None:
+    """Resolve o termo (ticker ou nome) para um símbolo. BR: 4 letras + dígito → .SA;
+    US: como está; nome → busca no Yahoo (fachada market_data)."""
+    import re
+    t = (termo or "").strip().upper()
+    if not t:
+        return None
+    if re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", t):          # PETR4, HGLG11 → .SA
+        return t + ".SA"
+    if re.fullmatch(r"[A-Z]{1,6}(\.SA)?[0-9]{0,2}", t):  # AAPL, PETR4.SA
+        return t
+    try:
+        from utils.market_data import buscar_ativo_yahoo
+        res = buscar_ativo_yahoo(termo)
+        if res:
+            return res[0].get("symbol")
+    except Exception:
+        pass
+    return None
+
+
+def busca_global_sidebar(research_page: str = "pages/1_Research.py") -> None:
+    """Campo de busca de ativo na sidebar. Resolve ticker/nome e salta para o
+    Research setando `research_ticker_externo`. Chamar 1× por página (após auth)."""
+    with st.sidebar:
+        st.markdown(
+            '<div style="font-size:0.62rem;color:var(--text-muted);'
+            'text-transform:uppercase;letter-spacing:.08em;margin:4px 0 2px;">'
+            '🔍 busca global de ativo</div>',
+            unsafe_allow_html=True,
+        )
+        _termo = st.text_input(
+            "busca global", key="_busca_global_termo",
+            placeholder="ticker ou nome (ex: petr4, nubank)",
+            label_visibility="collapsed",
+        )
+        if st.button("abrir no research →", key="_busca_global_btn",
+                     use_container_width=True) and _termo and _termo.strip():
+            _tk = _resolver_ticker_busca(_termo)
+            if _tk:
+                st.session_state["research_ticker_externo"] = _tk
+                try:
+                    st.switch_page(research_page)
+                except Exception:
+                    st.session_state["research_ticker"] = _tk
+                    st.rerun()
+            else:
+                st.warning("ativo não encontrado.")

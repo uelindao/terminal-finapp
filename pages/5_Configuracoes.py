@@ -31,6 +31,9 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
+# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
+from utils.components import busca_global_sidebar
+busca_global_sidebar()
 
 user          = get_current_user()
 user_id_atual = get_user_id()

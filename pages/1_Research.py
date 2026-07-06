@@ -52,6 +52,9 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
+# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
+from utils.components import busca_global_sidebar
+busca_global_sidebar()
 garantir_macro_context()
 init_db()
 
@@ -806,6 +809,14 @@ ticker_hero(
     health      = _health_th,
     serie_30d   = _serie_30d_th,
 )
+
+# Barra de contexto macro sempre-on (regime/juro real/vix) — UX: o pano de fundo
+# do regime junto do ativo, sem trocar de página.
+try:
+    from utils.macro_state import render_cockpit_macro as _rcm
+    _rcm("BR")
+except Exception:
+    pass
 
 # ── KPIs PRINCIPAIS (premium via portfolio_kpis) ───────────────────────────
 if is_fii:
