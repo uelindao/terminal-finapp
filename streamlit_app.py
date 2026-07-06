@@ -47,11 +47,14 @@ pages = {
             default=True,
             url_path="",
         ),
+        # Ordem = FUNIL DE DECISÃO (top-down): regime macro → rastreio/rotação →
+        # deep dive → carteira. A ordem desta lista define a barra lateral (não o
+        # número no nome do arquivo). Antes: Research vinha antes de Discovery/Macro.
         st.Page(
-            "pages/1_Research.py",
-            title="Research",
-            icon="🔬",
-            url_path="Research",
+            "pages/3_Macro.py",
+            title="Macro",
+            icon="🌐",
+            url_path="Macro",
         ),
         st.Page(
             "pages/2_Discovery.py",
@@ -60,10 +63,10 @@ pages = {
             url_path="Discovery",
         ),
         st.Page(
-            "pages/3_Macro.py",
-            title="Macro",
-            icon="🌐",
-            url_path="Macro",
+            "pages/1_Research.py",
+            title="Research",
+            icon="🔬",
+            url_path="Research",
         ),
         st.Page(
             "pages/4_Portfolio.py",
