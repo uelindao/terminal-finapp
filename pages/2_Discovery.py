@@ -430,8 +430,10 @@ def rodar_screener(
 # LAZY RENDERING (P4-1): seletor persistente no lugar de st.tabs — renderiza só a
 # seção ativa (screener/momentum/ia/setorial rodam scans pesados). Blocos
 # `with tab_X:` viraram `if _secao_d == ...`. Sem dependência cruzada entre abas.
-_SECOES_D = ["🔍 screener quantitativo", "🚀 momentum & radar",
-             "🧠 ia: oportunidades do dia", "🗺️ rotação setorial"]
+# Ordem = funil: a rotação setorial (visão estratégica "onde olhar") vem primeiro
+# e é o default; o screener é o drill-down ("agora me mostre os ativos do setor").
+_SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
+             "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
 if hasattr(st, "segmented_control"):
     _secao_d = st.segmented_control(
         "seção", _SECOES_D, default=_SECOES_D[0],

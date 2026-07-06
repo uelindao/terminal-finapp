@@ -133,6 +133,14 @@ except Exception as e:
         icone  = "⚠",
     )
 
+# Handoff do funil: do REGIME para a ROTAÇÃO SETORIAL (próximo passo do analista —
+# "onde olhar" dado o regime). Torna a navegação macro → discovery explícita.
+try:
+    st.page_link("pages/2_Discovery.py",
+                 label="🗺️ rastrear os setores favorecidos por este regime na Discovery →")
+except Exception:
+    pass
+
 # ==========================================
 # funções globais de cache e apoio
 # ==========================================
