@@ -343,6 +343,110 @@ page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo d
 # Placeholder para market pulse bar — preenchido após carregar índices (linha ~865)
 _pulse_bar_ph = st.empty()
 
+# ==========================================
+# ATENÇÃO HOJE (F1-1) — "o que mudou / exige atenção agora"
+# ==========================================
+# Responde ao job da manhã (J1 do PLANO_FRONT): num relance, os sinais que se
+# moveram na watchlist (score, técnico) + eventos macro de hoje/amanhã. Tudo
+# cache-first (health_score_history, price_cache, calendário fixo) — zero rede ao vivo.
+import datetime as dt_module
+from utils.atencao_hoje import coletar_atencao_hoje
+from utils.components import ticker_nav_url
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _calendario_macro_home():
+    """Calendário macro fixo (FONTE ÚNICA) — usado por 'atenção hoje' e pela
+    faixa 'próximos eventos'. Datas oficiais COPOM/FOMC/CPI/IPCA/payroll."""
+    return [
+        {"data": dt_module.date(2026, 6, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 6, 10), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 6, 17), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 6, 17), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 2),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 7, 14), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 7, 29), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 7, 29), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 8, 7),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 8, 12), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 8, 12), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 9, 16), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 9, 16), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 10, 7), "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 10, 9), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
+        {"data": dt_module.date(2026, 10, 14),"evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
+        {"data": dt_module.date(2026, 10, 28),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 11, 4), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+        {"data": dt_module.date(2026, 12, 10),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
+        {"data": dt_module.date(2026, 12, 15),"evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
+    ]
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _coletar_atencao_home(_wl_tickers: tuple):
+    """Coleta cache-first os sinais de 'atenção hoje' para a watchlist."""
+    from database.db import get_historico_score, get_all_price_cache
+    hist = {}
+    for tk in _wl_tickers:
+        try:
+            h = get_historico_score(tk, dias=10)
+            if h:
+                hist[tk] = h
+        except Exception:
+            pass
+    try:
+        pc = get_all_price_cache()
+    except Exception:
+        pc = {}
+    return coletar_atencao_hoje(
+        watchlist=list(_wl_tickers),
+        historico_por_ticker=hist,
+        price_cache=pc,
+        eventos=_calendario_macro_home(),
+    )
+
+
+def _render_atencao_hoje():
+    _tom_cor = {"bull": "var(--bull)", "bear": "var(--bear)",
+                "amber": "var(--amber)", "info": "var(--accent)"}
+    try:
+        _wl_at = [r["ticker"] for r in (listar_watchlist() or []) if r.get("ticker")]
+    except Exception:
+        _wl_at = []
+    itens = _coletar_atencao_home(tuple(sorted(set(_wl_at))))
+
+    section_title("🔔 atenção hoje")
+    if not itens:
+        empty_state("😌", "sem mudanças relevantes",
+                    "nenhum movimento de score, sinal técnico ou evento macro exige atenção agora.")
+        return
+
+    linhas = []
+    for it in itens:
+        cor = _tom_cor.get(it.get("tom", "info"), "var(--accent)")
+        titulo = it.get("titulo", "")
+        href = ticker_nav_url(it["ticker"]) if it.get("ticker") else None
+        if href:
+            titulo = (f'<a href="{href}" target="_self" '
+                      f'style="color:var(--text-primary);text-decoration:none;">{titulo} ↗</a>')
+        linhas.append(
+            f'<div style="display:flex;align-items:center;gap:12px;padding:9px 14px;'
+            f'background:var(--bg-surface);border:1px solid var(--border-subtle);'
+            f'border-left:3px solid {cor};border-radius:var(--radius-sm);margin-bottom:6px;">'
+            f'<span style="font-size:1.05rem;line-height:1;">{it.get("icone","•")}</span>'
+            f'<div style="flex:1;min-width:0;">'
+            f'<div style="font-family:var(--font-ui);font-size:0.86rem;font-weight:600;'
+            f'color:var(--text-primary);">{titulo}</div>'
+            f'<div style="font-family:var(--font-ui);font-size:0.72rem;color:var(--text-muted);">'
+            f'{it.get("detalhe","")}</div>'
+            f'</div></div>'
+        )
+    st.markdown("".join(linhas), unsafe_allow_html=True)
+
+
+_render_atencao_hoje()
+
 # ── Admin e Perfil na sidebar ───────────────────────────────────────────
 with st.sidebar:
     _user_sidebar = get_current_user()
@@ -1093,31 +1197,11 @@ import datetime as dt_module
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_proximos_eventos_home():
+    # Reusa o calendário macro único (_calendario_macro_home, definido no topo) —
+    # mesma fonte do bloco "atenção hoje". Evita duplicar a lista de eventos.
     hoje = dt_module.date.today()
-    eventos = [
-        {"data": dt_module.date(2026, 6, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
-        {"data": dt_module.date(2026, 6, 10), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
-        {"data": dt_module.date(2026, 6, 17), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": dt_module.date(2026, 6, 17), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 7, 2),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 7, 9),  "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
-        {"data": dt_module.date(2026, 7, 14), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
-        {"data": dt_module.date(2026, 7, 29), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": dt_module.date(2026, 7, 29), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 8, 7),  "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 8, 12), "evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
-        {"data": dt_module.date(2026, 8, 12), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
-        {"data": dt_module.date(2026, 9, 16), "evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": dt_module.date(2026, 9, 16), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 10, 7), "evento": "Payroll EUA", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 10, 9), "evento": "IPCA (IBGE)", "categoria": "brasil", "impacto": "medio"},
-        {"data": dt_module.date(2026, 10, 14),"evento": "CPI EUA", "categoria": "eua", "impacto": "medio"},
-        {"data": dt_module.date(2026, 10, 28),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": dt_module.date(2026, 11, 4), "evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
-        {"data": dt_module.date(2026, 12, 10),"evento": "COPOM — juros", "categoria": "brasil", "impacto": "alto"},
-        {"data": dt_module.date(2026, 12, 15),"evento": "Fed — FOMC", "categoria": "eua", "impacto": "alto"},
-    ]
-    proximos = sorted([e for e in eventos if e['data'] >= hoje], key=lambda x: x['data'])
+    proximos = sorted([e for e in _calendario_macro_home() if e['data'] >= hoje],
+                      key=lambda x: x['data'])
     return proximos[:4]
 
 proximos_eventos = get_proximos_eventos_home()
