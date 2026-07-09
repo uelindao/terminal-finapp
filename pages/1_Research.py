@@ -818,6 +818,110 @@ try:
 except Exception:
     pass
 
+# ==========================================
+# CARD-VEREDITO (PLANO_FRONT F2-1) — a decisão acima da dobra
+# ==========================================
+# Faixa única que responde ao job J4 ("compro/vendo/mantenho?") num relance:
+# status do score · score · alvo/upside (ou P/VP em FII) · forward P/L (ou DY) ·
+# próximo earnings · vento macro-setorial. É REARRANJO — todos os valores já
+# aparecem espalhados nos blocos abaixo (que viram o detalhe/evidência).
+try:
+    _ver_row    = _h_map_th.get(t_base, {}) if isinstance(_h_map_th, dict) else {}
+    _ver_score  = _ver_row.get('score')
+    try:
+        _ver_score = float(_ver_score) if _ver_score is not None else None
+    except (TypeError, ValueError):
+        _ver_score = None
+    try:
+        _vp_json    = _ver_row.get('alertas_venda', '{}')
+        _vp_json    = _json.loads(_vp_json) if isinstance(_vp_json, str) else (_vp_json or {})
+        _ver_status = (_vp_json.get('alertas') or ['—'])[0]
+    except Exception:
+        _ver_status = '—'
+
+    def _ver_banda(s):
+        if s is None:
+            return "var(--text-muted)"
+        return "var(--bull)" if s >= 65 else ("var(--amber)" if s >= 40 else "var(--bear)")
+
+    def _ver_seg(lbl, val, cor="var(--text-primary)"):
+        return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                f'<span style="font-family:var(--font-ui);font-size:0.58rem;color:var(--text-muted);'
+                f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
+                f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
+                f'color:{cor};white-space:nowrap;">{val}</span></div>')
+
+    _ver_cor = _ver_banda(_ver_score)
+    _ver_preco = _preco_atual_th or safe_float(info_dict.get('currentPrice')) or 0
+    _segs = []
+    # 1) veredito + score (sempre)
+    _segs.append(_ver_seg("veredito", _ver_status, _ver_cor))
+    _segs.append(_ver_seg("health score",
+                          f"{int(round(_ver_score))}/100" if _ver_score is not None else "n/d",
+                          _ver_cor))
+
+    if is_fii:
+        _ver_pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+        _dyr     = safe_float(info_dict.get('dividendYield', 0))
+        _ver_dy  = safe_float(cache_d.get('dy%')) or (_dyr * 100 if _dyr and _dyr <= 0.50 else 0)
+        if _ver_pvp:
+            _segs.append(_ver_seg("preço / vp", f"{_ver_pvp:.2f}",
+                                  "var(--bull)" if _ver_pvp < 1 else "var(--bear)" if _ver_pvp > 1.1 else "var(--amber)"))
+        if _ver_dy:
+            _segs.append(_ver_seg("dividend yield", f"{_ver_dy:.1f}%",
+                                  "var(--bull)" if _ver_dy > 8 else "var(--text-primary)"))
+    else:
+        _ver_tgt = safe_float(info_dict.get('targetMeanPrice'))
+        _ver_fpe = safe_float(info_dict.get('forwardPE'))
+        _ver_tpe = safe_float(info_dict.get('trailingPE'))
+        if _ver_tgt and _ver_preco > 0:
+            _ver_up = (_ver_tgt / _ver_preco - 1) * 100
+            _segs.append(_ver_seg("alvo consenso",
+                                  f"{moeda.upper()} {_ver_tgt:.2f} · {_ver_up:+.0f}%",
+                                  "var(--bull)" if _ver_up > 10 else "var(--bear)" if _ver_up < -10 else "var(--amber)"))
+        if _ver_fpe and _ver_fpe > 0:
+            if _ver_tpe and _ver_fpe < _ver_tpe:
+                _pe_txt, _pe_cor = f"{_ver_fpe:.1f}x · lucro ↑", "var(--bull)"
+            elif _ver_tpe and _ver_fpe > _ver_tpe:
+                _pe_txt, _pe_cor = f"{_ver_fpe:.1f}x · lucro ↓", "var(--bear)"
+            else:
+                _pe_txt, _pe_cor = f"{_ver_fpe:.1f}x", "var(--text-primary)"
+            _segs.append(_ver_seg("forward p/l", _pe_txt, _pe_cor))
+        # próximo earnings via timestamp já presente no info (sem chamada extra)
+        try:
+            import datetime as _dt_ver
+            _ets = info_dict.get('earningsTimestamp') or info_dict.get('earningsTimestampStart')
+            if _ets:
+                _ed_ver = _dt_ver.date.fromtimestamp(int(_ets))
+                _dias_ver = (_ed_ver - _dt_ver.date.today()).days
+                if _dias_ver is not None and _dias_ver >= 0:
+                    _segs.append(_ver_seg("próx. resultado", f"em {_dias_ver}d",
+                                          "var(--amber)" if _dias_ver <= 14 else "var(--text-primary)"))
+        except Exception:
+            pass
+
+    # vento macro-setorial (mesmo motor do health score)
+    try:
+        from utils.inflation_sectoral import pilar_macro_setorial as _pms_ver
+        _ver_tilt = int((_pms_ver(setor, "US" if not ticker.endswith(".SA") else "BR",
+                        st.session_state.get("macro_context", {})) or {}).get("pontos", 0) or 0)
+        _segs.append(_ver_seg("vento macro", f"{_ver_tilt:+d} pts",
+                              "var(--bull)" if _ver_tilt > 0 else "var(--bear)" if _ver_tilt < 0 else "var(--amber)"))
+    except Exception:
+        pass
+
+    # só renderiza se há um veredito real (score disponível) ou algo além do básico
+    if _ver_score is not None or len(_segs) > 2:
+        st.markdown(
+            f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+            f'border-left:4px solid {_ver_cor};border-radius:var(--radius-md);'
+            f'padding:12px 20px;margin-bottom:14px;display:flex;align-items:center;'
+            f'gap:28px;flex-wrap:wrap;">' + "".join(_segs) + '</div>',
+            unsafe_allow_html=True,
+        )
+except Exception:
+    pass
+
 # ── KPIs PRINCIPAIS (premium via portfolio_kpis) ───────────────────────────
 if is_fii:
     pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
