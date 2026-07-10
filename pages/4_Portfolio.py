@@ -1131,6 +1131,81 @@ with st.container():
     watchlist = listar_watchlist()
     pesos_atuais = {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}
 
+    # ── ALINHAMENTO CARTEIRA × REGIME (PLANO_FRONT F3-2) ──────────────────────
+    # Elo entre o motor macro (tilt setorial, mesmo do health score) e a carteira:
+    # quanto do capital está em setores FAVORECIDOS vs PENALIZADOS pelo regime.
+    # Ponderado por CUSTO (qtd × preço médio) — cache-first, sem cotação ao vivo.
+    try:
+        from utils.alinhamento_regime import alinhamento_regime as _alin_reg
+        _posicoes_al = [
+            {"ticker": t, "peso": float(d.get("quantidade") or 0) * float(d.get("preco_medio") or 0)}
+            for t, d in pesos_atuais.items()
+        ]
+        _posicoes_al = [p for p in _posicoes_al if p["peso"] > 0]
+        if not _posicoes_al:  # fallback: sem qtd/pm, usa o campo peso (peso-alvo)
+            _posicoes_al = [
+                {"ticker": t, "peso": float(d.get("peso") or 0)}
+                for t, d in pesos_atuais.items() if float(d.get("peso") or 0) > 0
+            ]
+        if _posicoes_al:
+            _al = _alin_reg(_posicoes_al, get_todos_fundamentos_cache(),
+                            st.session_state.get("macro_context", {}) or {})
+            _saldo = _al["saldo_pontos"]
+            _hl_cor = ("var(--bull)" if _saldo > 0.3 else
+                       "var(--bear)" if _saldo < -0.3 else "var(--amber)")
+            _hl_txt = ("carteira alinhada ao regime" if _saldo > 0.3 else
+                       "carteira contra o regime" if _saldo < -0.3 else
+                       "carteira neutra ao regime")
+
+            def _al_seg(lbl, val, cor):
+                return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                        f'<span style="font-family:var(--font-ui);font-size:0.58rem;color:var(--text-muted);'
+                        f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
+                        f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
+                        f'color:{cor};white-space:nowrap;">{val}</span></div>')
+
+            _segs_al = [
+                _al_seg("alinhamento", _hl_txt, _hl_cor),
+                _al_seg("🟢 favorecidos", f"{_al['favoravel_pct']:.0f}%", "var(--bull)"),
+                _al_seg("🔴 penalizados", f"{_al['desfavoravel_pct']:.0f}%", "var(--bear)"),
+                _al_seg("⚪ neutros", f"{_al['neutro_pct']:.0f}%", "var(--text-muted)"),
+            ]
+            if _al["sem_setor_pct"] >= 1:
+                _segs_al.append(_al_seg("sem setor", f"{_al['sem_setor_pct']:.0f}%", "var(--text-muted)"))
+
+            st.markdown(
+                f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+                f'border-left:4px solid {_hl_cor};border-radius:var(--radius-md);'
+                f'padding:12px 20px;margin:6px 0 14px 0;display:flex;align-items:center;'
+                f'gap:28px;flex-wrap:wrap;">' + "".join(_segs_al) + '</div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.expander("🧭 ver alinhamento por posição", expanded=False):
+                _imp_badge = {"favoravel": ("favorecido", "var(--bull)"),
+                              "desfavoravel": ("penalizado", "var(--bear)"),
+                              "neutro": ("neutro", "var(--text-muted)"),
+                              "sem_setor": ("sem setor", "var(--text-muted)")}
+                _linhas_al = []
+                for _it in _al["itens"]:
+                    _lbl_al, _cor_al = _imp_badge.get(_it["impacto"], ("neutro", "var(--text-muted)"))
+                    _setor_al = (_it["setor"] or "—")[:28]
+                    _linhas_al.append(
+                        f'<div style="display:flex;justify-content:space-between;gap:12px;'
+                        f'padding:5px 0;border-bottom:1px solid var(--border-subtle);">'
+                        f'<span style="font-family:var(--font-data);color:var(--text-primary);min-width:80px;">{_it["ticker"]}</span>'
+                        f'<span style="color:var(--text-muted);font-size:0.8rem;flex:1;">{_setor_al}</span>'
+                        f'<span style="font-family:var(--font-data);color:var(--text-secondary);min-width:52px;text-align:right;">{_it["peso_pct"]:.1f}%</span>'
+                        f'<span style="color:{_cor_al};font-size:0.78rem;min-width:82px;text-align:right;">{_lbl_al}</span>'
+                        f'</div>'
+                    )
+                st.markdown("".join(_linhas_al), unsafe_allow_html=True)
+                st.caption("ponderado pelo custo (quantidade × preço médio) de cada posição. "
+                           "favorecido / penalizado = tilt do setor no regime macro atual "
+                           "(mesmo motor do health score).")
+    except Exception:
+        pass
+
     tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
     posicoes_ativas = []
     
