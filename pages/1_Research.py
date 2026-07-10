@@ -1233,177 +1233,187 @@ else:
 # --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
 historico = get_historico_score(t_base, dias=180)
 if len(historico) >= 3:
-    label_com_tooltip(
-        "📈 EVOLUÇÃO DO HEALTH SCORE",
-        chave="health_score",
-        cor="var(--accent)",
-        tamanho="0.72rem",
-    )
-    df_hist_score = pd.DataFrame(historico)
-    df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'], format="ISO8601", utc=True)
-    df_hist_score = df_hist_score.set_index('calculado_em')
-    _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
-    _cc_hs    = _chart_cores()
-    from utils.charts import linha_ou_barras as _linha_ou_barras
-    fig_score = _linha_ou_barras(
-        df_hist_score, x_col=None, y_col='score',
-        tipo=_hs_tipo,
-        titulo=f"health score — {ticker} (180 dias)",
-        cor=_cc_hs["accent"], cor_negativo=_cc_hs["bear"], height=220,
-    )
-    fig_score.add_hline(y=65, line_color=_cc_hs["bull"], line_dash="dash",
-                        line_width=1, annotation_text="acumulação")
-    fig_score.add_hline(y=40, line_color=_cc_hs["bear"], line_dash="dash",
-                        line_width=1, annotation_text="reduzir")
-    fig_score.update_yaxes(range=[0, 100])
-    st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
-    st.caption("evolução do health score (0-100) nos últimos 180 dias. acima de 65 = zona de acumulação; abaixo de 40 = reduzir. quedas abruptas sinalizam deterioração de fundamentos ou técnico.")
-
-    # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
-    _breakdown_vis = health_result.get('breakdown', {})
-    if _breakdown_vis:
+    # F2-2: progressive disclosure — deep-dive do score recolhido num expander
+    # (o card-veredito acima da dobra já entrega o número; aqui fica a evidência).
+    with st.expander("🔬 por dentro do score — evolução e breakdown dos pilares", expanded=False):
         label_com_tooltip(
-            "🔬 BREAKDOWN DO HEALTH SCORE",
-            texto_custom=(
-                "decomposição do health score em seus pilares. "
-                "barras verdes = pontos positivos. "
-                "barras vermelhas = penalidades. "
-                "pilares: piotroski, roic vs wacc, valuation, "
-                "solvência, crescimento, momentum e dados macro."
-            ),
+            "📈 EVOLUÇÃO DO HEALTH SCORE",
+            chave="health_score",
             cor="var(--accent)",
             tamanho="0.72rem",
         )
+        df_hist_score = pd.DataFrame(historico)
+        df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'], format="ISO8601", utc=True)
+        df_hist_score = df_hist_score.set_index('calculado_em')
+        _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
+        _cc_hs    = _chart_cores()
+        from utils.charts import linha_ou_barras as _linha_ou_barras
+        fig_score = _linha_ou_barras(
+            df_hist_score, x_col=None, y_col='score',
+            tipo=_hs_tipo,
+            titulo=f"health score — {ticker} (180 dias)",
+            cor=_cc_hs["accent"], cor_negativo=_cc_hs["bear"], height=220,
+        )
+        fig_score.add_hline(y=65, line_color=_cc_hs["bull"], line_dash="dash",
+                            line_width=1, annotation_text="acumulação")
+        fig_score.add_hline(y=40, line_color=_cc_hs["bear"], line_dash="dash",
+                            line_width=1, annotation_text="reduzir")
+        fig_score.update_yaxes(range=[0, 100])
+        st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
+        st.caption("evolução do health score (0-100) nos últimos 180 dias. acima de 65 = zona de acumulação; abaixo de 40 = reduzir. quedas abruptas sinalizam deterioração de fundamentos ou técnico.")
 
-        # Mapeamento de nomes internos para labels amigáveis
-        _label_map = {
-            # Piotroski
-            'roa_positivo':          'ROA positivo (Piotroski)',
-            'fcf_positivo':          'FCF positivo (Piotroski)',
-            'roa_crescendo':         'ROA crescendo (Piotroski)',
-            'accrual_ok':            'Qualidade do lucro (Piotroski)',
-            'alavancagem_ok':        'Alavancagem saudável (Piotroski)',
-            'liquidez_ok':           'Liquidez corrente (Piotroski)',
-            'sem_diluicao':          'Sem diluição de ações (Piotroski)',
-            'margem_crescendo':      'Margem bruta crescendo (Piotroski)',
-            'giro_crescendo':        'Giro do ativo crescendo (Piotroski)',
-            # ROIC/WACC
-            'roic_vs_wacc':          'ROIC vs WACC (geração de valor)',
-            'roic_acima_wacc':       'ROIC acima do custo de capital',
-            # Valuation
-            'pl_atrativo':           'P/L atrativo',
-            'pvp_atrativo':          'P/VP atrativo',
-            'dy_atrativo':           'Dividend yield atrativo',
-            'ev_ebitda_ok':          'EV/EBITDA razoável',
-            # Qualidade
-            'roe_alto':              'ROE elevado',
-            'margem_liquida_ok':     'Margem líquida saudável',
-            'divida_controlada':     'Dívida controlada',
-            # Momentum
-            'momentum_12_1':         'Momentum 12-1 meses',
-            'acima_mm200':           'Preço acima da MM200',
-            'tendencia_alta':        'Tendência de alta',
-            # FII específicos
-            'pvp_fii_ok':            'P/VP atrativo (FII)',
-            'yield_vs_selic':        'Yield vs Selic (FII)',
-            'yield_atrativo':        'Dividend yield atrativo (FII)',
-        }
+        # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
+        _breakdown_vis = health_result.get('breakdown', {})
+        if _breakdown_vis:
+            label_com_tooltip(
+                "🔬 BREAKDOWN DO HEALTH SCORE",
+                texto_custom=(
+                    "decomposição do health score em seus pilares. "
+                    "barras verdes = pontos positivos. "
+                    "barras vermelhas = penalidades. "
+                    "pilares: piotroski, roic vs wacc, valuation, "
+                    "solvência, crescimento, momentum e dados macro."
+                ),
+                cor="var(--accent)",
+                tamanho="0.72rem",
+            )
 
-        # Separa pilares com pontuação numérica de sub-rows informacionais
-        # (ex.: "↳ ROIC = 3.0%", "↳ Momentum 12-1m = +51.6%" — strings que não
-        # contribuem com pontos, mas detalham os pilares). Sub-rows entram em
-        # uma lista expansível abaixo do gráfico, em vez de virar barra zerada.
-        _itens_bd = []
-        _itens_info = []  # [(label_curto, valor_str)]
-        for k, v in _breakdown_vis.items():
-            label = _label_map.get(k, k.replace('_', ' '))
-            # 1) numérico direto?
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
-                continue
-            if isinstance(v, bool):
-                _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
-                continue
-            # 2) string "X/Y" → pontuação fracionada (Piotroski legacy)
-            if isinstance(v, str) and '/' in v and v.count('/') == 1:
-                try:
-                    _itens_bd.append({'label': label, 'pontos': float(v.split('/')[0]),
-                                      'chave': k})
+            # Mapeamento de nomes internos para labels amigáveis
+            _label_map = {
+                # Piotroski
+                'roa_positivo':          'ROA positivo (Piotroski)',
+                'fcf_positivo':          'FCF positivo (Piotroski)',
+                'roa_crescendo':         'ROA crescendo (Piotroski)',
+                'accrual_ok':            'Qualidade do lucro (Piotroski)',
+                'alavancagem_ok':        'Alavancagem saudável (Piotroski)',
+                'liquidez_ok':           'Liquidez corrente (Piotroski)',
+                'sem_diluicao':          'Sem diluição de ações (Piotroski)',
+                'margem_crescendo':      'Margem bruta crescendo (Piotroski)',
+                'giro_crescendo':        'Giro do ativo crescendo (Piotroski)',
+                # ROIC/WACC
+                'roic_vs_wacc':          'ROIC vs WACC (geração de valor)',
+                'roic_acima_wacc':       'ROIC acima do custo de capital',
+                # Valuation
+                'pl_atrativo':           'P/L atrativo',
+                'pvp_atrativo':          'P/VP atrativo',
+                'dy_atrativo':           'Dividend yield atrativo',
+                'ev_ebitda_ok':          'EV/EBITDA razoável',
+                # Qualidade
+                'roe_alto':              'ROE elevado',
+                'margem_liquida_ok':     'Margem líquida saudável',
+                'divida_controlada':     'Dívida controlada',
+                # Momentum
+                'momentum_12_1':         'Momentum 12-1 meses',
+                'acima_mm200':           'Preço acima da MM200',
+                'tendencia_alta':        'Tendência de alta',
+                # FII específicos
+                'pvp_fii_ok':            'P/VP atrativo (FII)',
+                'yield_vs_selic':        'Yield vs Selic (FII)',
+                'yield_atrativo':        'Dividend yield atrativo (FII)',
+            }
+
+            # Separa pilares com pontuação numérica de sub-rows informacionais
+            # (ex.: "↳ ROIC = 3.0%", "↳ Momentum 12-1m = +51.6%" — strings que não
+            # contribuem com pontos, mas detalham os pilares). Sub-rows entram em
+            # uma lista expansível abaixo do gráfico, em vez de virar barra zerada.
+            _itens_bd = []
+            _itens_info = []  # [(label_curto, valor_str)]
+            for k, v in _breakdown_vis.items():
+                label = _label_map.get(k, k.replace('_', ' '))
+                # 1) numérico direto?
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
                     continue
-                except Exception:
-                    pass
-            # 3) string "sim"/"yes"/"✅"
-            if isinstance(v, str) and v.lower() in ('sim', 'yes', 'true', '✅'):
-                _itens_bd.append({'label': label, 'pontos': 1.0, 'chave': k})
-                continue
-            # 4) qualquer outra string = item informacional (não vai pro gráfico)
-            if v is not None and v != '':
-                _itens_info.append((label.lstrip('↳ ').strip(), str(v)))
+                if isinstance(v, bool):
+                    _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
+                    continue
+                # 2) string "X/Y" → pontuação fracionada (Piotroski legacy)
+                if isinstance(v, str) and '/' in v and v.count('/') == 1:
+                    try:
+                        _itens_bd.append({'label': label, 'pontos': float(v.split('/')[0]),
+                                          'chave': k})
+                        continue
+                    except Exception:
+                        pass
+                # 3) string "sim"/"yes"/"✅"
+                if isinstance(v, str) and v.lower() in ('sim', 'yes', 'true', '✅'):
+                    _itens_bd.append({'label': label, 'pontos': 1.0, 'chave': k})
+                    continue
+                # 4) qualquer outra string = item informacional (não vai pro gráfico)
+                if v is not None and v != '':
+                    _itens_info.append((label.lstrip('↳ ').strip(), str(v)))
 
-        if _itens_bd:
-            # Ordena: maiores pontos primeiro
-            _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
+            if _itens_bd:
+                # Ordena: maiores pontos primeiro
+                _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
 
-            _labels_bd = [i['label'] for i in _itens_bd]
-            _valores_bd = [i['pontos'] for i in _itens_bd]
-            _cc_bd = _chart_cores()
-            _cores_bd = [
-                _cc_bd["bull"] if v > 0 else _cc_bd["bear"]
-                for v in _valores_bd
-            ]
+                _labels_bd = [i['label'] for i in _itens_bd]
+                _valores_bd = [i['pontos'] for i in _itens_bd]
+                _cc_bd = _chart_cores()
+                _cores_bd = [
+                    _cc_bd["bull"] if v > 0 else _cc_bd["bear"]
+                    for v in _valores_bd
+                ]
 
-            _fig_bd = go.Figure(go.Bar(
-                x=_valores_bd,
-                y=_labels_bd,
-                orientation='h',
-                marker_color=_cores_bd,
-                hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
-                text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
-                textposition='outside',
-                textfont=dict(size=10, color=_cc_bd["muted"]),
-            ))
-            _lay_bd = base_layout(
-                height=max(200, len(_itens_bd) * 28),
-                title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
-            )
-            _lay_bd.update(
-                xaxis={**{'showgrid': True, 'gridcolor': _cc_bd["border"],
-                          'zeroline': True, 'zerolinecolor': _cc_bd["border"],
-                          'title': 'pontos contribuídos'},
-                       'range': [min(0, min(_valores_bd)) - 1,
-                                 max(_valores_bd) + 2]},
-                yaxis={'showgrid': False, 'title': ''},
-                margin=dict(l=220, r=60, t=40, b=20),
-            )
-            _fig_bd.update_layout(**_lay_bd)
-            st.plotly_chart(_fig_bd, use_container_width=True, config={'responsive': True})
+                _fig_bd = go.Figure(go.Bar(
+                    x=_valores_bd,
+                    y=_labels_bd,
+                    orientation='h',
+                    marker_color=_cores_bd,
+                    hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
+                    text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
+                    textposition='outside',
+                    textfont=dict(size=10, color=_cc_bd["muted"]),
+                ))
+                _lay_bd = base_layout(
+                    height=max(200, len(_itens_bd) * 28),
+                    title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
+                )
+                _lay_bd.update(
+                    xaxis={**{'showgrid': True, 'gridcolor': _cc_bd["border"],
+                              'zeroline': True, 'zerolinecolor': _cc_bd["border"],
+                              'title': 'pontos contribuídos'},
+                           'range': [min(0, min(_valores_bd)) - 1,
+                                     max(_valores_bd) + 2]},
+                    yaxis={'showgrid': False, 'title': ''},
+                    margin=dict(l=220, r=60, t=40, b=20),
+                )
+                _fig_bd.update_layout(**_lay_bd)
+                st.plotly_chart(_fig_bd, use_container_width=True, config={'responsive': True})
 
-            # Linha de resumo abaixo do gráfico
-            _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
-            _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
-            _qual_main = (
-                cache_d.get('data_quality_pct') if cache_d else None
-            ) or (
-                cache_d.get('qualidade_dados') if cache_d else None
-            )
-            _fonte_main = cache_d.get('data_source', '') if cache_d else ''
-            _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
-            _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)
-            st.markdown(
-                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
-                f'color:var(--text-muted); margin-top:-8px;">'
-                f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
-                f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
-                f'score total: {health_result.get("score", 0)}/100'
-                f'{_badge_main}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+                # Linha de resumo abaixo do gráfico
+                _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
+                _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
+                _qual_main = (
+                    cache_d.get('data_quality_pct') if cache_d else None
+                ) or (
+                    cache_d.get('qualidade_dados') if cache_d else None
+                )
+                _fonte_main = cache_d.get('data_source', '') if cache_d else ''
+                _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
+                _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)
+                st.markdown(
+                    f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
+                    f'color:var(--text-muted); margin-top:-8px;">'
+                    f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
+                    f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
+                    f'score total: {health_result.get("score", 0)}/100'
+                    f'{_badge_main}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
-            # ── Detalhes informacionais (valores absolutos dos sub-rows) ──
-            # ROIC%, momentum%, retorno último mês — não somam pontos, só explicam
-            if _itens_info:
-                with st.expander("📊 detalhes informacionais dos pilares", expanded=False):
+                # ── Detalhes informacionais (valores absolutos dos sub-rows) ──
+                # ROIC%, momentum%, retorno último mês — não somam pontos, só explicam
+                if _itens_info:
+                    # sub-linhas informacionais — NÃO usa expander: já estamos dentro
+                    # do expander "por dentro do score" e o Streamlit proíbe nesting.
+                    st.markdown(
+                        "<div style='font-size:0.72rem;color:var(--text-muted);"
+                        "text-transform:uppercase;letter-spacing:.05em;margin-top:8px;'>"
+                        "📊 detalhes informacionais dos pilares</div>",
+                        unsafe_allow_html=True,
+                    )
                     _linhas_info = "".join(
                         f'<div style="display:flex; justify-content:space-between; '
                         f'padding:4px 0; border-bottom:1px solid var(--border-subtle);">'
