@@ -7,6 +7,15 @@ import datetime
 import time
 import logging
 from utils.formatters import traduzir_setor
+from utils.setores import normalizar_setor as _norm_setor_disc, LABEL_SETOR as _LABEL_SETOR_DISC
+
+
+def _label_setor_scorecard(raw) -> str:
+    """Rótulo de setor IDÊNTICO ao do scorecard (normalizar_setor + LABEL_SETOR),
+    para o drill-down setor→screener (F4-1) casar com os labels da rotação setorial.
+    (traduzir_setor, de formatters, usa outro mapeamento — não serve para casar.)"""
+    _c = _norm_setor_disc(raw)
+    return _LABEL_SETOR_DISC.get(_c, _c)
 
 # ── silenciar alertas vermelhos do yahoo finance no terminal ──
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -316,10 +325,14 @@ def rodar_screener(
     score_min:       int,
     piotroski_min:   int,
     apenas_acima_mm: bool,
+    setor_filtro:    str = "",
 ) -> pd.DataFrame:
     """
     Filtra o universo de ativos usando o cache de fundamentos
     e os health scores já calculados.
+
+    setor_filtro: se não-vazio, mantém apenas ativos cujo setor traduzido bate
+    (drill-down vindo do scorecard de rotação setorial — F4-1).
     """
     if universo == 'b3':
         tickers = SCREENER_B3
@@ -350,6 +363,10 @@ def rodar_screener(
         nome    = fund.get('nome', '—')
         setor   = fund.get('setor', '—')
         score   = health.get('score', 0) or 0
+
+        # ── Filtro de setor (drill-down do scorecard, F4-1) ──────────
+        if setor_filtro and _label_setor_scorecard(setor) != setor_filtro:
+            continue
 
         # Score 0 = nunca calculado
         nao_calculado = (score == 0)
@@ -434,6 +451,11 @@ def rodar_screener(
 # e é o default; o screener é o drill-down ("agora me mostre os ativos do setor").
 _SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
              "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
+# drill-down do scorecard pode pedir troca de seção (F4-1): aplica ANTES do widget
+# ser instanciado — não se pode modificar a key de um widget já instanciado.
+_pending_secao_d = st.session_state.pop("_discovery_secao_pending", None)
+if _pending_secao_d in _SECOES_D:
+    st.session_state["discovery_secao"] = _pending_secao_d
 _secao_d = section_selector(_SECOES_D, key="discovery_secao")
 
 # ==========================================
@@ -735,6 +757,23 @@ if _secao_d == "🔍 screener quantitativo":
         else 'fii' if _univ_pick.startswith("🏢")
         else 'us'
     )
+
+    # ── drill-down do scorecard (F4-1): pode forçar universo + preselecionar setor ──
+    _forced_univ = st.session_state.pop("screener_univ_force", None)
+    if _forced_univ in ("b3", "fii", "us"):
+        universo_sel = _forced_univ
+    # setores (traduzidos) presentes no universo — opções do filtro de setor
+    _universo_tickers = (SCREENER_B3 if universo_sel == "b3"
+                         else FII_TODOS if universo_sel == "fii" else SCREENER_US)
+    _cache_setores = get_todos_fundamentos_cache()
+    _setor_opts = ["todos os setores"] + sorted({
+        _label_setor_scorecard(_sraw) for _t in _universo_tickers
+        for _sraw in [((_cache_setores.get(_t) or _cache_setores.get(mapear_ticker_base(_t)) or {}).get("setor"))]
+        if _sraw
+    })
+    # sanitiza preseleção do drill-down (setor pode não existir no universo atual)
+    if st.session_state.get("disc_setor_w") not in _setor_opts:
+        st.session_state["disc_setor_w"] = "todos os setores"
     _info_box_disc(
         tipo   = "info",
         titulo = "como funciona",
@@ -841,6 +880,14 @@ if _secao_d == "🔍 screener quantitativo":
             value=st.session_state.get('disc_mm_w', False),
         )
 
+    # ── filtro de setor (drill-down do scorecard, F4-1) ──────────────────────
+    st.selectbox(
+        "setor:", _setor_opts, key="disc_setor_w",
+        help="filtra por setor — usado pelo botão '🔍 ver ativos' da rotação setorial.",
+    )
+    _setor_sel    = st.session_state.get("disc_setor_w", "todos os setores")
+    _setor_filtro = "" if _setor_sel == "todos os setores" else _setor_sel
+
     # ══ LEITURA DOS VALORES (via session_state após render) ═══════════════════
     pl_min    = st.session_state["disc_pl_min_w"]
     pl_max    = st.session_state["disc_pl_max_w"]
@@ -851,8 +898,10 @@ if _secao_d == "🔍 screener quantitativo":
     apenas_mm = st.session_state["disc_mm_w"]
 
     # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
+    # auto-run quando chega via drill-down do scorecard (F4-1); senão, no botão
+    _auto_run_scr = st.session_state.pop("screener_auto_run", False)
     if st.button("🔍 rodar screener", type="primary",
-                 use_container_width=True, key="btn_rodar"):
+                 use_container_width=True, key="btn_rodar") or _auto_run_scr:
         with st.spinner("filtrando universo de ativos..."):
             df_result = rodar_screener(
                 universo        = universo_sel,
@@ -864,6 +913,7 @@ if _secao_d == "🔍 screener quantitativo":
                 score_min       = score_min,
                 piotroski_min   = 0,
                 apenas_acima_mm = apenas_mm,
+                setor_filtro    = _setor_filtro,
             )
         st.session_state["screener_resultado"] = df_result
         st.session_state["screener_universo"]  = universo_sel
@@ -1495,6 +1545,24 @@ if _secao_d == "🗺️ rotação setorial":
             f'</div>',
             unsafe_allow_html=True,
         )
+        # ── DRILL-DOWN: setor → screener (F4-1) ──────────────────────────────
+        _dd1, _dd2 = st.columns([3, 1])
+        with _dd1:
+            _setor_dd = st.selectbox(
+                "abrir setor no screener:",
+                [r["label"] for r in _scorecard],
+                key="scorecard_setor_dd", label_visibility="collapsed",
+            )
+        with _dd2:
+            if st.button("🔍 ver ativos", key="btn_drill_setor",
+                         use_container_width=True):
+                st.session_state["disc_setor_w"] = _setor_dd
+                st.session_state["screener_univ_force"] = "b3" if _univ_set == "BR" else "us"
+                st.session_state["screener_auto_run"] = True
+                st.session_state["_discovery_secao_pending"] = "🔍 screener quantitativo"
+                st.rerun()
+        st.caption("abre o screener já filtrado pelos ativos do setor escolhido.")
+
         st.markdown("<br>", unsafe_allow_html=True)
 
     with st.spinner("agrupando setores..."):
