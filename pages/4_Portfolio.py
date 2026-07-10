@@ -1047,10 +1047,8 @@ if '_pending_entrada' in st.session_state:
 # pelas análises. Em vez do hoist arriscado desse setup, "posições" (o núcleo +
 # os dados compartilhados) fica SEMPRE renderizado no topo (st.container), e as 7
 # seções analíticas PESADAS (risco/stress/backtest/chat...) são gateadas por um
-# seletor abaixo — só a ativa renderiza. Elimina o custo de render de todas as
-# análises a cada rerun sem tocar no fluxo de dados.
-_SECOES_PF = ["📊 concentração", "📐 risco", "⚡ stress test", "📊 backtesting",
-              "📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"]
+# seletor abaixo (F3-1: grupo → sub-seleção) — só a seção ativa renderiza. Elimina
+# o custo de render de todas as análises a cada rerun sem tocar no fluxo de dados.
 
 # variáveis partilhadas entre tabs — preenchidas em tab_posicoes
 live_data: dict      = {}
@@ -2400,7 +2398,29 @@ with st.container():
 # ══════════════════════════════════════════════════════════════════════════
 st.markdown("<br>", unsafe_allow_html=True)
 section_title("📈 análises da carteira")
-_secao_pf = section_selector(_SECOES_PF, key="portfolio_secao", label="análise")
+
+# F3-1: as 7 análises agrupadas em 4 GRUPOS (grupo → sub-seleção), dando hierarquia
+# e encurtando o seletor. Os branches `if _secao_pf == "<label>"` abaixo continuam
+# intactos — muda apenas COMO _secao_pf é derivado.
+_GRUPOS_PF = {
+    "📊 composição":  ["📊 concentração"],
+    "📐 risco":       ["📐 risco", "⚡ stress test"],
+    "📈 performance": ["📊 backtesting"],
+    "📋 gestão & ia": ["📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"],
+}
+_grupos_keys = list(_GRUPOS_PF.keys())
+_grupo_pf = section_selector(_grupos_keys, key="portfolio_grupo", label="análise")
+if _grupo_pf not in _GRUPOS_PF:
+    _grupo_pf = _grupos_keys[0]
+_subs_pf = _GRUPOS_PF[_grupo_pf]
+if len(_subs_pf) > 1:
+    from utils.components import tabs_pill as _tabs_pill_pf
+    _secao_pf = _tabs_pill_pf(
+        _subs_pf, key="portfolio_sub_" + str(_grupos_keys.index(_grupo_pf)),
+        default=_subs_pf[0],
+    )
+else:
+    _secao_pf = _subs_pf[0]
 
 # ==========================================
 # tab 2: concentração de risco
