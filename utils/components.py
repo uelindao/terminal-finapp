@@ -2430,7 +2430,7 @@ def html_table(
         return
 
     _inject_once(
-        "_htmltable_css_v5",
+        "_htmltable_css_v6",
         '.ft-table{width:100%;border-collapse:collapse;'
         '  font-family:var(--font-ui);background:var(--bg-surface);'
         '  border-radius:var(--radius-md);overflow:hidden;}'
@@ -2451,8 +2451,11 @@ def html_table(
         '.ft-table td.center,.ft-table th.center{text-align:center;}'
         '.ft-table td.bull{color:var(--bull);}'
         '.ft-table td.bear{color:var(--bear);}'
+        '.ft-table td.amber{color:var(--amber);}'
         '.ft-table td.muted{color:var(--text-muted);}'
         '.ft-table td.mono{font-family:var(--font-data);}'
+        '.ft-table td.strong{font-weight:600;}'
+        '.ft-table td.hl{background:var(--bull-soft,rgba(46,204,113,0.15));}'
         '.ft-table-caption{font-size:var(--text-xs);'
         '  color:var(--text-muted);margin-bottom:6px;}'
         '.ft-table-wrap{overflow-x:auto;width:100%;}'
