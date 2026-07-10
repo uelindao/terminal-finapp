@@ -344,9 +344,15 @@ def chamar_ia(
     }
 
     if thinking and tier == 'pro':
+        _budget_think = 2000
         kwargs["extra_body"] = {
-            "thinking": {"type": "enabled", "budget_tokens": 2000}
+            "thinking": {"type": "enabled", "budget_tokens": _budget_think}
         }
+        # o teto de tokens precisa cobrir RACIOCÍNIO + RESPOSTA. se max_tokens for o
+        # teto total (ex.: 1800 < 2000 de budget), o raciocínio consome tudo e a
+        # resposta sai truncada. garante espaço para a resposta além do budget.
+        kwargs["max_tokens"] = max(int(kwargs.get("max_tokens") or 0),
+                                   _budget_think + 2500)
 
     try:
         if stream:

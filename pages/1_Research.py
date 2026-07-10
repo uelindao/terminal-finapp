@@ -2288,8 +2288,10 @@ if _secao_r == "🧠 análise & ia":
 
         _resposta_ia = chamar_ia(
             prompt_usuario = _prompt_ia,
+            # 7 seções (tese, positivos, riscos, valuation, macro, veredito, métrica)
+            # não cabem em 1800 tokens — vinha truncando no meio. 3500 dá folga.
+            max_tokens     = 3500,
             system         = SYSTEM_ANALISTA,
-            max_tokens     = 1800,
             temperatura    = 0.3,
             stream         = True,
             thinking       = usar_thinking,
