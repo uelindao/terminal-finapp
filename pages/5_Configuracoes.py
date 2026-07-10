@@ -3,7 +3,7 @@ import streamlit as st
 from utils.auth   import require_auth, get_current_user, render_user_badge, logout
 from utils.style  import aplicar_tema
 from utils.components import (
-    page_header, section_title, metric_card, status_card, empty_state, topbar,
+    page_header, section_title, section_selector, metric_card, status_card, empty_state, topbar,
     portfolio_kpis, info_box, inject_keyboard_shortcuts,
 )
 from utils.ai_client import PROVIDERS
@@ -54,14 +54,7 @@ page_header("⚙️ configurações", "conta · watchlists · portfólios · ia 
 # seção ativa. Abas independentes (verificado por AST: sem vazamento de variável).
 _SECOES_C = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "🔔 alertas",
              "🤖 minha ia", "🎨 aparência", "🗄️ backfill", "👑 administração"]
-if hasattr(st, "segmented_control"):
-    _secao_c = st.segmented_control(
-        "seção", _SECOES_C, default=_SECOES_C[0],
-        key="config_secao", label_visibility="collapsed",
-    ) or st.session_state.get("config_secao") or _SECOES_C[0]
-else:
-    _secao_c = st.radio("seção", _SECOES_C, index=0, horizontal=True,
-                        key="config_secao", label_visibility="collapsed")
+_secao_c = section_selector(_SECOES_C, key="config_secao")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

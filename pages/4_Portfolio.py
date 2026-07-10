@@ -19,7 +19,7 @@ from database.db import registrar_decisao, listar_decisoes, atualizar_resultado,
 
 # componentes do design system
 from utils.components import (
-    page_header, section_title, metric_card, status_card, empty_state,
+    page_header, section_title, section_selector, metric_card, status_card, empty_state,
     inject_keyboard_shortcuts, tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url, topbar,
     portfolio_hero, portfolio_kpis, info_box,
@@ -2325,14 +2325,7 @@ with st.container():
 # ══════════════════════════════════════════════════════════════════════════
 st.markdown("<br>", unsafe_allow_html=True)
 section_title("📈 análises da carteira")
-if hasattr(st, "segmented_control"):
-    _secao_pf = st.segmented_control(
-        "análise", _SECOES_PF, default=_SECOES_PF[0],
-        key="portfolio_secao", label_visibility="collapsed",
-    ) or st.session_state.get("portfolio_secao") or _SECOES_PF[0]
-else:
-    _secao_pf = st.radio("análise", _SECOES_PF, index=0, horizontal=True,
-                         key="portfolio_secao", label_visibility="collapsed")
+_secao_pf = section_selector(_SECOES_PF, key="portfolio_secao", label="análise")
 
 # ==========================================
 # tab 2: concentração de risco

@@ -26,7 +26,7 @@ from utils.fmp_client import get_multiplos_medios, get_peers, get_multiplos_hist
 
 # componentes do design system
 from utils.components import (
-    page_header, section_title, metric_card, status_card,
+    page_header, section_title, section_selector, metric_card, status_card,
     ticker_hero, portfolio_kpis as _portfolio_kpis_v5, info_box as _info_box_v5,
     empty_state, inject_keyboard_shortcuts,
     tooltip, label_com_tooltip, TOOLTIPS,
@@ -1781,14 +1781,7 @@ def montar_prompt_ativo(
 # As abas leem apenas variáveis de módulo (calculadas antes) — sem dependência cruzada.
 _SECOES_R = ["📊 valuation & peers", "📈 técnico (10y)", "💎 fundamentos",
              "🧠 análise & ia", "🌍 overlay macro"]
-if hasattr(st, "segmented_control"):
-    _secao_r = st.segmented_control(
-        "seção", _SECOES_R, default=_SECOES_R[0],
-        key="research_secao", label_visibility="collapsed",
-    ) or st.session_state.get("research_secao") or _SECOES_R[0]
-else:
-    _secao_r = st.radio("seção", _SECOES_R, index=0, horizontal=True,
-                        key="research_secao", label_visibility="collapsed")
+_secao_r = section_selector(_SECOES_R, key="research_secao")
 
 if _secao_r == "📊 valuation & peers":
     # ── VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────

@@ -81,6 +81,44 @@ def section_title(titulo: str):
     )
 
 
+def section_selector(secoes: list[str], key: str, *,
+                     label: str = "seção", default: str | None = None) -> str:
+    """
+    Seletor de seção unificado (PLANO_FRONT F0-1).
+
+    Encapsula o padrão que estava duplicado inline em 5 páginas (Home/Research/
+    Discovery/Macro/Portfolio/Config): st.segmented_control quando disponível, com
+    fallback para st.radio nas versões antigas do Streamlit. Preserva a MESMA key
+    de session_state usada antes, para não resetar a seção de sessões já abertas.
+
+    secoes  : rótulos das seções (o 1º é o default se `default` não vier).
+    key     : chave de session_state (ex.: "research_secao").
+    label   : rótulo do widget (fica oculto via label_visibility).
+    default : seção inicial; se ausente ou inválida, usa secoes[0].
+
+    Retorna o rótulo da seção selecionada.
+    """
+    if not secoes:
+        return ""
+    _def = default if default in secoes else secoes[0]
+    if hasattr(st, "segmented_control"):
+        # segmented_control pode retornar None (nada selecionado) → cai no último
+        # valor guardado em session_state, e por fim no default. Mesma semântica
+        # dos blocos inline originais.
+        return (
+            st.segmented_control(
+                label, secoes, default=_def,
+                key=key, label_visibility="collapsed",
+            )
+            or st.session_state.get(key)
+            or _def
+        )
+    return st.radio(
+        label, secoes, index=secoes.index(_def), horizontal=True,
+        key=key, label_visibility="collapsed",
+    )
+
+
 def _fonte_badge(fonte: str = "") -> str:
     if not fonte:
         return ""

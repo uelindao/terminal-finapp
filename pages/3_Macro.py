@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 # componentes do design system (camada 2 e 4)
 from utils.components import (
-    page_header, section_title, metric_card, status_card, empty_state,
+    page_header, section_title, section_selector, metric_card, status_card, empty_state,
     inject_keyboard_shortcuts, auto_refresh_indicator, tooltip,
     label_com_tooltip, topbar, hero_macro, kpi_index_row, info_box,
 )
@@ -1174,16 +1174,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
 # renderiza SÓ a seção ativa (os blocos `with tab_X:` viraram `if _secao == ...`).
 _SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
                  "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
-if hasattr(st, "segmented_control"):
-    _secao = st.segmented_control(
-        "seção", _SECOES_MACRO, default=_SECOES_MACRO[0],
-        key="macro_secao", label_visibility="collapsed",
-    ) or st.session_state.get("macro_secao") or _SECOES_MACRO[0]
-else:
-    _secao = st.radio(
-        "seção", _SECOES_MACRO, index=0, horizontal=True,
-        key="macro_secao", label_visibility="collapsed",
-    )
+_secao = section_selector(_SECOES_MACRO, key="macro_secao")
 
 if _secao == "🌐 painel global":
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache

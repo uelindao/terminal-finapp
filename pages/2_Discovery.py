@@ -25,7 +25,7 @@ from utils.tickers import (
 )
 from utils.health_engine import calcular_health_score
 from utils.components import (
-    page_header, section_title, status_card, empty_state,
+    page_header, section_title, section_selector, status_card, empty_state,
     inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url, topbar,
     portfolio_kpis, info_box, chip_filter_row, tabs_pill,
@@ -434,14 +434,7 @@ def rodar_screener(
 # e é o default; o screener é o drill-down ("agora me mostre os ativos do setor").
 _SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
              "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
-if hasattr(st, "segmented_control"):
-    _secao_d = st.segmented_control(
-        "seção", _SECOES_D, default=_SECOES_D[0],
-        key="discovery_secao", label_visibility="collapsed",
-    ) or st.session_state.get("discovery_secao") or _SECOES_D[0]
-else:
-    _secao_d = st.radio("seção", _SECOES_D, index=0, horizontal=True,
-                        key="discovery_secao", label_visibility="collapsed")
+_secao_d = section_selector(_SECOES_D, key="discovery_secao")
 
 # ==========================================
 # tab 1 — momentum (força relativa)
