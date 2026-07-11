@@ -542,63 +542,47 @@ if _secao_d == "🚀 momentum & radar":
 
         cols_mostrar = ['ticker', 'nome', 'setor', 'ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)', 'acima mm50', 'acima mm200', 'score momentum']
 
-        def _momentum_table_html(df: "pd.DataFrame") -> str:
-            _mn = 'var(--font-mono,monospace)'
-            _show = [c for c in cols_mostrar if c in df.columns]
-            _ret_cols = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)']
-            _hdrs = "".join(
-                f'<th style="padding:7px 9px;text-align:{"left" if c in ("ticker","nome","setor") else "right"};'
-                f'font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;'
-                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
-                for c in _show
-            )
-            _rows = ""
-            for _, row in df.iterrows():
-                _cells = ""
-                for col in _show:
-                    _v = row[col]
-                    _align = "left" if col in ("ticker","nome","setor") else "right"
-                    if col == 'ticker':
-                        _url = f"/Research?research_ticker={_v}"
-                        _cell = (f'<a href="{_url}" target="_blank" style="color:var(--accent);'
-                                 f'font-family:{_mn};font-weight:600;font-size:0.78rem;text-decoration:none;" '
-                                 f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
-                                 f'{str(_v).replace(".SA","")}</a>')
-                    elif col == 'nome':
-                        _cell = f'<span style="font-size:0.78rem;color:var(--text-muted);">{str(_v)[:18] if _v else "—"}</span>'
-                    elif col == 'setor':
-                        _cell = f'<span style="font-size:0.75rem;color:var(--text-muted);">{str(_v)[:14] if _v else "—"}</span>'
-                    elif col == 'score momentum':
-                        try:
-                            _si = int(float(_v))
-                            _sc = "#2ecc71" if _si >= 60 else ("#f39c12" if _si >= 30 else "#e74c3c")
-                            _cell = f'<span style="font-family:{_mn};font-size:0.8rem;font-weight:600;color:{_sc};">{_si}</span>'
-                        except (TypeError, ValueError):
-                            _cell = '<span style="color:var(--text-muted);">—</span>'
-                    elif col in ('acima mm50','acima mm200'):
-                        try:
-                            _bv = bool(_v)
-                            _cell = f'<span style="color:{"#2ecc71" if _bv else "#e74c3c"};font-size:0.8rem;">{"✓" if _bv else "✗"}</span>'
-                        except (TypeError, ValueError):
-                            _cell = '<span style="color:var(--text-muted);">—</span>'
-                    elif col in _ret_cols:
-                        try:
-                            _fv = float(_v)
-                            _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
-                            _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.2f}%</span>'
-                        except (TypeError, ValueError):
-                            _cell = '<span style="color:var(--text-muted);">—</span>'
-                    else:
-                        _cell = f'<span style="font-family:{_mn};font-size:0.78rem;">{_v}</span>'
-                    _cells += f'<td style="padding:7px 9px;text-align:{_align};">{_cell}</td>'
-                _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
-                          f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                          f'onmouseout="this.style.background=\'transparent\'">{_cells}</tr>')
-            return (f'<div style="overflow-x:auto;">'
-                    f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                    f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
-
-        st.markdown(_momentum_table_html(df_m[cols_mostrar]), unsafe_allow_html=True)
+        # Tabela de momentum via html_table (F0-2): coloração via classes centrais.
+        from utils.components import html_table as _html_table_mom
+        _show_mom = [c for c in cols_mostrar if c in df_m.columns]
+        _ret_cols_mom = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)', 'dist. topo 52w (%)']
+        _aligns_mom = ["left" if c in ("ticker", "nome", "setor") else "right" for c in _show_mom]
+        _rows_mom, _classes_mom = [], []
+        for _, _row_mom in df_m[_show_mom].iterrows():
+            _cells_mom, _cls_mom = [], []
+            for col in _show_mom:
+                _v = _row_mom[col]
+                if col == 'ticker':
+                    _cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
+                             f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                             f'{str(_v).replace(".SA","")}</a>')
+                    _c = "mono"
+                elif col == 'nome':
+                    _cell = str(_v)[:18] if _v else "—"; _c = "muted"
+                elif col == 'setor':
+                    _cell = str(_v)[:14] if _v else "—"; _c = "muted"
+                elif col == 'score momentum':
+                    try:
+                        _si = int(float(_v)); _cell = str(_si)
+                        _c = "mono strong " + ("bull" if _si >= 60 else "amber" if _si >= 30 else "bear")
+                    except (TypeError, ValueError):
+                        _cell = "—"; _c = "muted"
+                elif col in ('acima mm50', 'acima mm200'):
+                    try:
+                        _bv = bool(_v); _cell = "✓" if _bv else "✗"; _c = "bull" if _bv else "bear"
+                    except (TypeError, ValueError):
+                        _cell = "—"; _c = "muted"
+                elif col in _ret_cols_mom:
+                    try:
+                        _fv = float(_v); _cell = f"{_fv:+.2f}%"
+                        _c = "mono " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
+                    except (TypeError, ValueError):
+                        _cell = "—"; _c = "muted"
+                else:
+                    _cell = str(_v); _c = "mono"
+                _cells_mom.append(_cell); _cls_mom.append(_c)
+            _rows_mom.append(_cells_mom); _classes_mom.append(_cls_mom)
+        _html_table_mom(_show_mom, _rows_mom, aligns=_aligns_mom, classes=_classes_mom)
 
         section_title("📊 mapa de retornos por janela temporal")
 
@@ -1003,55 +987,27 @@ if _secao_d == "🔍 screener quantitativo":
                     f'</div>'
                 )
 
-            # Tabela HTML com links no ticker — abre Research em nova aba
+            # Tabela de resultado via html_table (F0-2): health como barra na célula.
+            from utils.components import html_table as _html_table_scr
             _header_cols = ["Ticker", "Nome", "Health Score", "P/L", "P/VP", "ROE %", "DY %", "Margem %"]
             _data_cols   = ['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
-
-            _thead = "".join(
-                f'<th style="padding:8px 12px;text-align:left;font-size:0.7rem;'
-                f'color:var(--text-muted);text-transform:uppercase;'
-                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{h}</th>'
-                for h in _header_cols
-            )
-            _rows_html = ""
+            _rows_scr, _classes_scr = [], []
             for _, _row in df_display.iterrows():
                 _tk_full  = df_res.loc[_row.name, '_ticker_full'] if _row.name in df_res.index else _row['ticker']
                 _tk_label = _row['ticker']
-                _url      = f"/Research?research_ticker={_tk_full}"
-                _cells = (
-                    f'<td style="padding:8px 12px;white-space:nowrap;">'
-                    f'<a href="{_url}" target="_blank" '
-                    f'style="color:var(--accent);font-family:var(--font-mono,monospace);'
-                    f'font-weight:600;font-size:0.82rem;text-decoration:none;" '
-                    f'onmouseover="this.style.textDecoration=\'underline\'" '
-                    f'onmouseout="this.style.textDecoration=\'none\'">{_tk_label}</a></td>'
-                )
+                _cells = [
+                    f'<a href="/Research?research_ticker={_tk_full}" target="_blank" '
+                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk_label}</a>'
+                ]
+                _cls = ["mono"]
                 for col in _data_cols[1:]:
                     _val = _row.get(col, "—")
-                    if col == 'score':
-                        _cells += f'<td style="padding:8px 12px;min-width:160px;">{_health_bar_html(_val)}</td>'
-                    else:
-                        _cells += (
-                            f'<td style="padding:8px 12px;font-size:0.82rem;'
-                            f'color:var(--text-secondary,#ccc);white-space:nowrap;">{_val}</td>'
-                        )
-                _rows_html += (
-                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
-                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                    f'onmouseout="this.style.background=\'transparent\'">'
-                    f'{_cells}</tr>'
-                )
-
-            st.markdown(
-                f'<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:6px;">'
-                f'clique no ticker para abrir no research em nova aba ↗</div>'
-                f'<div style="overflow-x:auto;">'
-                f'<table style="width:100%;border-collapse:collapse;'
-                f'font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                f'<thead><tr>{_thead}</tr></thead>'
-                f'<tbody>{_rows_html}</tbody>'
-                f'</table></div>',
-                unsafe_allow_html=True,
+                    _cells.append(_health_bar_html(_val) if col == 'score' else str(_val))
+                    _cls.append("")
+                _rows_scr.append(_cells); _classes_scr.append(_cls)
+            _html_table_scr(
+                _header_cols, _rows_scr, classes=_classes_scr,
+                caption="clique no ticker para abrir no research em nova aba ↗",
             )
 
             # ── adicionar à watchlist ────────────────────────────────────────
@@ -1222,62 +1178,49 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 'rsi', '5d %', '3m %', 'topo %',
             ]
 
-            def _ia_table_html(df: "pd.DataFrame") -> str:
-                _mn = 'var(--font-mono,monospace)'
+            def _ia_table_html(df: "pd.DataFrame") -> None:
+                # Render via html_table (F0-2): coloração via classes centrais.
+                from utils.components import html_table as _ht_ia
                 _num_cols = ['score total','qualidade (hs)','valuation','timing','rsi','5d %','3m %','topo %']
-                _hdrs = "".join(
-                    f'<th style="padding:7px 10px;text-align:{"left" if c in ("ticker","nome","mercado") else "right"};'
-                    f'font-size:0.66rem;color:var(--text-muted);text-transform:uppercase;'
-                    f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
-                    for c in df.columns
-                )
-                _rows = ""
+                _cols_ia = list(df.columns)
+                _aligns_ia = ["left" if c in ("ticker","nome","mercado") else "right" for c in _cols_ia]
+                _rows_ia, _classes_ia = [], []
                 for _, row in df.iterrows():
-                    _cells = ""
-                    for col in df.columns:
+                    cells, cls = [], []
+                    for col in _cols_ia:
                         _v = row[col]
-                        _align = "left" if col in ("ticker","nome","mercado") else "right"
                         if col == 'ticker':
-                            _url = f"/Research?research_ticker={_v}"
-                            _cell = (f'<a href="{_url}" target="_blank" style="color:var(--accent);'
-                                     f'font-family:{_mn};font-weight:600;font-size:0.8rem;text-decoration:none;" '
-                                     f'onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'
-                                     f'{str(_v).replace(".SA","")}</a>')
+                            cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
+                                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                                    f'{str(_v).replace(".SA","")}</a>'); c = "mono"
                         elif col == 'nome':
-                            _cell = f'<span style="font-size:0.77rem;color:var(--text-muted);">{str(_v)[:18] if pd.notna(_v) else "—"}</span>'
+                            cell = str(_v)[:18] if pd.notna(_v) else "—"; c = "muted"
                         elif col == 'mercado':
-                            _cell = f'<span style="font-size:0.75rem;color:var(--text-muted);">{_v}</span>'
+                            cell = str(_v); c = "muted"
                         elif col == 'score total':
                             try:
-                                _si = int(float(_v))
-                                _sc = "#2ecc71" if _si >= 65 else ("#f39c12" if _si >= 45 else "#e74c3c")
-                                _cell = f'<span style="font-family:{_mn};font-size:0.85rem;font-weight:700;color:{_sc};">{_si}</span>'
+                                _si = int(float(_v)); cell = str(_si)
+                                c = "mono strong " + ("bull" if _si >= 65 else "amber" if _si >= 45 else "bear")
                             except (TypeError, ValueError):
-                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                                cell = "—"; c = "muted"
                         elif col in ('5d %','3m %'):
                             try:
-                                _fv = float(_v)
-                                _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
-                                _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.1f}%</span>'
+                                _fv = float(_v); cell = f"{_fv:+.1f}%"
+                                c = "mono " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
                             except (TypeError, ValueError):
-                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                                cell = "—"; c = "muted"
                         elif col in _num_cols:
                             try:
-                                _fv = float(_v)
-                                _cell = f'<span style="font-family:{_mn};font-size:0.78rem;">{_fv:.0f}</span>'
+                                cell = f"{float(_v):.0f}"; c = "mono"
                             except (TypeError, ValueError):
-                                _cell = '<span style="color:var(--text-muted);">—</span>'
+                                cell = "—"; c = "muted"
                         else:
-                            _cell = f'<span style="font-size:0.78rem;">{_v}</span>'
-                        _cells += f'<td style="padding:7px 10px;text-align:{_align};">{_cell}</td>'
-                    _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);" '
-                              f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                              f'onmouseout="this.style.background=\'transparent\'">{_cells}</tr>')
-                return (f'<div style="overflow-x:auto;">'
-                        f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                        f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
+                            cell = str(_v); c = ""
+                        cells.append(cell); cls.append(c)
+                    _rows_ia.append(cells); _classes_ia.append(cls)
+                _ht_ia(_cols_ia, _rows_ia, aligns=_aligns_ia, classes=_classes_ia)
 
-            st.markdown(_ia_table_html(_df_ia), unsafe_allow_html=True)
+            _ia_table_html(_df_ia)
 
             st.markdown("<br>", unsafe_allow_html=True)
             section_title("🤖 análise qualitativa — ia")
@@ -1811,50 +1754,44 @@ if _secao_d == "🗺️ rotação setorial":
             "topos seguidos de quedas bruscas = exaustão e possível reversão."
         )
 
-        def _rank_table_html(df: "pd.DataFrame") -> str:
+        def _rank_table_html(df: "pd.DataFrame") -> None:
+            # Render via html_table (F0-2): 1ª coluna label, resto % colorido;
+            # a linha do topo (idx 0) recebe realce .hl.
+            from utils.components import html_table as _ht_rk
             if df is None or df.empty:
-                return '<span style="color:var(--text-muted);font-size:0.8rem;">sem dados</span>'
-            _mn = 'var(--font-mono,monospace)'
-            _hdrs = "".join(
-                f'<th style="padding:6px 8px;text-align:{"left" if i==0 else "right"};'
-                f'font-size:0.64rem;color:var(--text-muted);text-transform:uppercase;'
-                f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
-                for i, c in enumerate(df.columns)
-            )
-            _rows = ""
+                st.caption("sem dados"); return
+            _cols_rk = list(df.columns)
+            _aligns_rk = ["left" if i == 0 else "right" for i in range(len(_cols_rk))]
+            _rows_rk, _classes_rk = [], []
             for idx, (_, row) in enumerate(df.iterrows()):
-                _cells = ""
+                cells, cls = [], []
                 for i, (col, val) in enumerate(row.items()):
-                    _align = "left" if i == 0 else "right"
+                    base = []
                     if i == 0:
-                        _cell = f'<span style="font-size:0.78rem;">{val}</span>'
+                        cell = str(val)
                     else:
                         try:
-                            _fv = float(val)
-                            _cv = "#2ecc71" if _fv > 0 else ("#e74c3c" if _fv < 0 else "var(--text-muted)")
-                            _cell = f'<span style="font-family:{_mn};font-size:0.78rem;color:{_cv};">{_fv:+.1f}%</span>'
+                            _fv = float(val); cell = f"{_fv:+.1f}%"
+                            base += ["mono", ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")]
                         except (TypeError, ValueError):
-                            _cell = f'<span style="font-size:0.78rem;">{val}</span>'
-                    _cells += f'<td style="padding:6px 8px;text-align:{_align};">{_cell}</td>'
-                _bg = "background:rgba(46,204,113,0.08);" if idx == 0 else ""
-                _rows += (f'<tr style="border-bottom:1px solid var(--border-subtle);{_bg}" '
-                          f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                          f'onmouseout="this.style.background=\'{("rgba(46,204,113,0.08)" if idx==0 else "transparent")}\'">{_cells}</tr>')
-            return (f'<div style="overflow-x:auto;">'
-                    f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                    f'<thead><tr>{_hdrs}</tr></thead><tbody>{_rows}</tbody></table></div>')
+                            cell = str(val)
+                    if idx == 0:
+                        base.append("hl")
+                    cells.append(cell); cls.append(" ".join(base))
+                _rows_rk.append(cells); _classes_rk.append(cls)
+            _ht_rk(_cols_rk, _rows_rk, aligns=_aligns_rk, classes=_classes_rk)
 
         st.markdown("<br>", unsafe_allow_html=True)
         _rc1, _rc2, _rc3 = st.columns(3)
         with _rc1:
             st.markdown("**Ranking 3 meses**")
-            st.markdown(_rank_table_html(rs.ranking_3m), unsafe_allow_html=True)
+            _rank_table_html(rs.ranking_3m)
         with _rc2:
             st.markdown("**Ranking 6 meses**")
-            st.markdown(_rank_table_html(rs.ranking_6m), unsafe_allow_html=True)
+            _rank_table_html(rs.ranking_6m)
         with _rc3:
             st.markdown("**Ranking 12 meses**")
-            st.markdown(_rank_table_html(rs.ranking_12m), unsafe_allow_html=True)
+            _rank_table_html(rs.ranking_12m)
         st.caption(
             "Δ rs (%) = variação percentual da rs line no período. "
             "valores positivos = setor venceu o spy no intervalo, negativos = perdeu. "
@@ -1897,39 +1834,24 @@ if _secao_d == "🗺️ rotação setorial":
             _breadth_disp = breadth.rename(columns={
                 "setor": "Setor", "n_total": "N", "n_pos": "Pos", "breadth_pct": "% revisões positivas",
             })
-            _mn_er = 'var(--font-mono,monospace)'
-            _hdrs_er = "".join(
-                f'<th style="padding:7px 10px;text-align:{"left" if c=="Setor" else "right"};'
-                f'font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;'
-                f'border-bottom:1px solid var(--border-subtle);">{c}</th>'
-                for c in _breadth_disp.columns
-            )
-            _rows_er = ""
+            # Tabela de breadth via html_table (F0-2): última coluna com barra.
+            from utils.components import html_table as _ht_er
+            _cols_er = list(_breadth_disp.columns)
+            _aligns_er = ["left" if c == "Setor" else "right" for c in _cols_er]
+            _rows_er, _classes_er = [], []
             for _, row in _breadth_disp.iterrows():
                 _pct = float(row['% revisões positivas'])
-                _bc = "#2ecc71" if _pct >= 60 else ("#f39c12" if _pct >= 40 else "#e74c3c")
-                _bar_w = min(_pct, 100)
-                _rows_er += (
-                    f'<tr style="border-bottom:1px solid var(--border-subtle);" '
-                    f'onmouseover="this.style.background=\'var(--bg-hover,rgba(255,255,255,0.04))\'" '
-                    f'onmouseout="this.style.background=\'transparent\'">'
-                    f'<td style="padding:7px 10px;font-size:0.8rem;">{row["Setor"]}</td>'
-                    f'<td style="padding:7px 10px;font-family:{_mn_er};font-size:0.78rem;text-align:right;color:var(--text-muted);">{int(row["N"])}</td>'
-                    f'<td style="padding:7px 10px;font-family:{_mn_er};font-size:0.78rem;text-align:right;color:var(--text-muted);">{int(row["Pos"])}</td>'
-                    f'<td style="padding:7px 10px;min-width:140px;">'
+                _bc = "var(--bull)" if _pct >= 60 else ("var(--amber)" if _pct >= 40 else "var(--bear)")
+                _bar = (
                     f'<div style="display:flex;align-items:center;gap:8px;">'
                     f'<div style="flex:1;background:var(--border-subtle);border-radius:3px;height:5px;overflow:hidden;">'
-                    f'<div style="width:{_bar_w:.0f}%;height:100%;background:{_bc};border-radius:3px;"></div></div>'
-                    f'<span style="font-family:{_mn_er};font-size:0.8rem;color:{_bc};min-width:38px;text-align:right;">{_pct:.1f}%</span>'
-                    f'</div></td>'
-                    f'</tr>'
+                    f'<div style="width:{min(_pct,100):.0f}%;height:100%;background:{_bc};border-radius:3px;"></div></div>'
+                    f'<span style="font-family:var(--font-data);font-size:0.8rem;color:{_bc};min-width:38px;text-align:right;">{_pct:.1f}%</span>'
+                    f'</div>'
                 )
-            st.markdown(
-                f'<div style="overflow-x:auto;">'
-                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                f'<thead><tr>{_hdrs_er}</tr></thead><tbody>{_rows_er}</tbody></table></div>',
-                unsafe_allow_html=True,
-            )
+                _rows_er.append([str(row["Setor"]), str(int(row["N"])), str(int(row["Pos"])), _bar])
+                _classes_er.append(["", "mono muted", "mono muted", ""])
+            _ht_er(_cols_er, _rows_er, aligns=_aligns_er, classes=_classes_er)
         st.caption(
             "earnings revisions breadth = % de empresas por setor com revisão positiva "
             "(>+1%) na estimativa média de eps de analistas nos últimos 30 dias. "
@@ -2063,7 +1985,7 @@ if _secao_d == "🚀 momentum & radar":
                 'rsi', '5d %', '3m %', 'topo %',
             ]
 
-            st.markdown(_ia_table_html(_df_radar), unsafe_allow_html=True)
+            _ia_table_html(_df_radar)
 
             _top1 = _resultado_radar[0]
             st.markdown("<br>", unsafe_allow_html=True)
