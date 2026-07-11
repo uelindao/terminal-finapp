@@ -478,6 +478,7 @@ def build_research_prompt(
     peer_data: list = None,
     tecnico: dict = None,
     dividendos: dict = None,
+    analise_anterior: dict = None,
 ) -> str:
     """
     Prompt institucional para análise de ativo único.
@@ -510,10 +511,32 @@ def build_research_prompt(
         + bloco_volatil(preco_atual, var_1d, moeda)
     )
 
+    # Tracking: realimenta a ANÁLISE ANTERIOR para a IA comparar a evolução do
+    # ativo e dos indicadores/gatilhos que ela mesma mandou monitorar.
+    _bloco_ant = ""
+    if analise_anterior and analise_anterior.get("texto"):
+        _data_ant = analise_anterior.get("data", "") or "data desconhecida"
+        _bloco_ant = (
+            f"\n\n=== sua análise anterior deste ativo (gerada em {_data_ant}) ===\n"
+            "faça o TRACKING antes de escrever a nova análise: compare os números de "
+            "então com os de agora (valuation, spread, momentum, health score, macro), "
+            "verifique se as MÉTRICAS-CHAVE que você mandou monitorar cruzaram os "
+            "gatilhos, e diga se o veredicto anterior se confirmou ou mudou. incorpore "
+            "essa evolução ao longo das seções (ex.: 'o spread caiu de +3,0pp para "
+            "+2,4pp, aproximando-se do gatilho de redução de +2,0pp').\n"
+            "----- início da análise anterior -----\n"
+            f"{analise_anterior['texto']}\n"
+            "----- fim da análise anterior -----\n"
+        )
+
     instrucao = (
         "\n\nentregue análise institucional com a estrutura abaixo. "
         "use exclusivamente os dados acima — não invente números. "
-        "quando referenciar uma métrica, cite o número específico.\n\n"
+        "quando referenciar uma métrica, cite o número específico.\n"
+        + ("se houver análise anterior acima, comece a tese central pela EVOLUÇÃO "
+           "desde então e sinalize os gatilhos que se aproximaram ou dispararam.\n"
+           if _bloco_ant else "")
+        + "\n"
         "1. tese central (2 linhas): "
         "argumento principal de bull/bear, ancorado em ROIC vs WACC, "
         "valuation histórico e regime macro.\n\n"
@@ -539,7 +562,7 @@ def build_research_prompt(
         "7. métrica-chave para monitorar (1 linha): "
         "número específico + frequência (ex.: 'ROE trimestral > 15%')."
     )
-    return prompt + instrucao
+    return prompt + _bloco_ant + instrucao
 
 
 def build_discovery_prompt(

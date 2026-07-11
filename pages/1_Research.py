@@ -2250,6 +2250,20 @@ if _secao_r == "🧠 análise & ia":
         except Exception:
             _peer_payload = None
 
+        # Análise ANTERIOR (tracking): busca a última salva no Supabase SEM
+        # invalidar por threshold/hash — é justamente quando os números mudam que a
+        # comparação importa. Alimenta o prompt p/ a IA rastrear a evolução.
+        _analise_ant = None
+        try:
+            from database.db import get_ai_analysis as _get_ai_prev
+            _prev_ia = _get_ai_prev(tipo="research", ticker=t_base,
+                                    user_id=None, modo=None)
+            if _prev_ia and _prev_ia.get("conteudo"):
+                _dt_prev = str(_prev_ia.get("created_at", ""))[:16].replace("T", " ")
+                _analise_ant = {"texto": _prev_ia["conteudo"], "data": _dt_prev}
+        except Exception as _e_prev_ia:
+            logging.getLogger(__name__).warning(f"[research] busca analise anterior: {_e_prev_ia}")
+
         from utils.ai_prompts import build_research_prompt
         _prompt_ia = build_research_prompt(
             ticker        = t_base,
@@ -2266,6 +2280,7 @@ if _secao_r == "🧠 análise & ia":
             peer_data     = _peer_payload,
             tecnico       = _tec_data,
             dividendos    = None,
+            analise_anterior = _analise_ant,
         )
 
         _resposta_ia = chamar_ia(
@@ -2304,7 +2319,10 @@ if _secao_r == "🧠 análise & ia":
                     modelo="auto",
                     contexto_hash=_hash_ctx,
                     health_score_snapshot=int(health_result.get('score', 50)),
-                    ttl_horas=168,                   # 7 dias
+                    # 30 dias: mantém a análise viva p/ o TRACKING mesmo com cadência
+                    # mensal. O cache de EXIBIÇÃO invalida antes por delta de score /
+                    # contexto_hash, então não fica stale.
+                    ttl_horas=720,
                 )
             except Exception as _e_save_ia:
                 logging.getLogger(__name__).warning(f"[research] save ai cache: {_e_save_ia}")
