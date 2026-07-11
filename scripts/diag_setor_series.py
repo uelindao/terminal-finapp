@@ -40,7 +40,18 @@ def main():
     _dist = {}
     for s in setor_por_ticker.values():
         _dist[s] = _dist.get(s, 0) + 1
-    _p(f"    setores distintos: {len(_dist)} -> {dict(sorted(_dist.items(), key=lambda x:-x[1])[:12])}")
+    _p(f"    setores distintos (canonizados): {len(_dist)} -> {dict(sorted(_dist.items(), key=lambda x:-x[1])[:12])}")
+
+    # Dump dos valores CRUS de setor (reversivel via repr — preserva acentos) para
+    # construir o mapa exato B3-subsetor -> canonico.
+    _p("    --- valores CRUS de 'setor' no cache (repr + contagem) ---")
+    _raw_count = {}
+    for tk in list(SCREENER_B3) + list(FII_TODOS):
+        raw = (cache.get(tk) or cache.get(mapear_ticker_base(tk)) or {}).get("setor")
+        if raw:
+            _raw_count[str(raw)] = _raw_count.get(str(raw), 0) + 1
+    for raw, n in sorted(_raw_count.items(), key=lambda x: -x[1]):
+        _p(f"      {n:>3}x  {raw!r}")
 
     # 2) price_history: cobertura de uma amostra de B3
     amostra = list(SCREENER_B3[:30])
