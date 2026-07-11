@@ -116,6 +116,28 @@ def rs_setorial_atual(
     return validas.iloc[-1].dropna().to_dict()
 
 
+def breadth_setorial(
+    retornos: pd.DataFrame,
+    janela_mm: int = 10,
+) -> pd.Series:
+    """
+    Amplitude interna (PLANO_MACRO M4-2): % de setores cujo índice de preço está
+    ACIMA da própria média móvel de `janela_mm` períodos, por data.
+
+    Divergência de amplitude: índice forte com breadth caindo = topo estreito
+    (poucos setores sustentando a alta — frágil); índice fraco com breadth
+    subindo = fundo largo (melhora difusa — construtivo).
+    """
+    if retornos is None or retornos.empty:
+        return pd.Series(dtype=float)
+    idx = (1 + retornos.fillna(0.0)).cumprod()
+    mm = idx.rolling(janela_mm).mean()
+    valido = mm.notna()
+    n_acima = (idx > mm).where(valido, other=False).sum(axis=1)
+    n_total = valido.sum(axis=1)
+    return (n_acima / n_total * 100.0).where(n_total > 0)
+
+
 # ── loader (I/O — fora do núcleo puro/testes) ─────────────────────────────────
 
 def carregar_retornos_setoriais_br(

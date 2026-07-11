@@ -61,6 +61,18 @@ def estatistica_divergencias_br(anos: int = 8, min_persist: int = 2) -> dict:
         return {}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def breadth_atual_br(janela_semanas: int = 10) -> float | None:
+    """Amplitude interna BR: % de setores acima da própria MM (~janela_semanas).
+    None se sem dados."""
+    from utils.setor_series import carregar_retornos_setoriais_br, breadth_setorial
+    ret = carregar_retornos_setoriais_br(dias=260)
+    if ret.empty:
+        return None
+    b = breadth_setorial(ret, janela_mm=int(janela_semanas * 5)).dropna()
+    return float(b.iloc[-1]) if len(b) else None
+
+
 def stat_para_quadrante(estatistica: dict, quadrante: str, horizonte: int = 13) -> dict | None:
     """Extrai {n, media, mediana, hit_rate} do resultado do backtest p/ um
     quadrante/horizonte, ou None se ausente."""

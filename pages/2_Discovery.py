@@ -1528,7 +1528,8 @@ if _secao_d == "🗺️ rotação setorial":
                 '</div>', unsafe_allow_html=True)
             try:
                 from utils.divergencia_live import (
-                    divergencias_atuais_br, estatistica_divergencias_br, stat_para_quadrante)
+                    divergencias_atuais_br, estatistica_divergencias_br,
+                    stat_para_quadrante, breadth_atual_br)
                 from utils.divergencia_setorial import (
                     DIVERG_A, DIVERG_B, CONFIRMA_BULL, CONFIRMA_BEAR, CATCH_UP, NEUTRO)
                 from utils.components import html_table as _ht_dv
@@ -1566,6 +1567,19 @@ if _secao_d == "🗺️ rotação setorial":
                         classes=_classes_dv,
                         caption="ordenado por magnitude · equal-weight · viés de survivorship (só tickers atuais)",
                     )
+                    # M4-2: amplitude interna (breadth) — leitura de topo estreito/fundo largo
+                    _bd = breadth_atual_br()
+                    if _bd is not None:
+                        _bd_cor = "var(--bull)" if _bd >= 60 else "var(--bear)" if _bd <= 35 else "var(--amber)"
+                        _bd_txt = ("amplitude ampla" if _bd >= 60 else
+                                   "amplitude estreita" if _bd <= 35 else "amplitude mista")
+                        st.markdown(
+                            f'<div style="font-size:0.74rem;color:var(--text-muted);margin-top:6px;">'
+                            f'📐 amplitude interna: <span style="color:{_bd_cor};font-family:var(--font-data);'
+                            f'font-weight:600;">{_bd:.0f}%</span> dos setores acima da própria MM de 10 semanas '
+                            f'— {_bd_txt}. amplitude caindo com índice em alta = topo estreito (frágil); '
+                            f'amplitude subindo com índice fraco = fundo largo (construtivo).</div>',
+                            unsafe_allow_html=True)
             except Exception:
                 pass
             st.markdown("<br>", unsafe_allow_html=True)

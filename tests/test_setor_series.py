@@ -10,6 +10,7 @@ from utils.setor_series import (
     retorno_acumulado,
     rs_setorial,
     rs_setorial_atual,
+    breadth_setorial,
 )
 
 
@@ -106,3 +107,31 @@ def test_setor_sem_mapeamento_ignorado():
     setor = {"A1": "x", "A2": "x", "A3": "x"}   # B* sem setor
     r = retorno_diario_setorial(precos, setor)
     assert list(r.columns) == ["x"]
+
+
+# ── breadth (M4-2) ────────────────────────────────────────────────────────────
+
+def test_breadth_todos_subindo_100pct():
+    idx = pd.date_range("2026-01-01", periods=15, freq="B")
+    rets = pd.DataFrame({"x": [0.01] * 15, "y": [0.02] * 15}, index=idx)
+    b = breadth_setorial(rets, janela_mm=5)
+    # em tendência de alta constante, o índice fica acima da própria MM → 100%
+    assert b.dropna().iloc[-1] == 100.0
+
+
+def test_breadth_todos_caindo_0pct():
+    idx = pd.date_range("2026-01-01", periods=15, freq="B")
+    rets = pd.DataFrame({"x": [-0.01] * 15, "y": [-0.02] * 15}, index=idx)
+    b = breadth_setorial(rets, janela_mm=5)
+    assert b.dropna().iloc[-1] == 0.0
+
+
+def test_breadth_misto_50pct():
+    idx = pd.date_range("2026-01-01", periods=15, freq="B")
+    rets = pd.DataFrame({"sobe": [0.01] * 15, "cai": [-0.01] * 15}, index=idx)
+    b = breadth_setorial(rets, janela_mm=5)
+    assert abs(b.dropna().iloc[-1] - 50.0) < 1e-9
+
+
+def test_breadth_vazio():
+    assert breadth_setorial(pd.DataFrame()).empty
