@@ -773,33 +773,40 @@ if _secao_d == "🔍 screener quantitativo":
     # ══ BOTÕES DE PRESET E RESET ════════════════════════════════════════════
     section_title("⚙️ filtros")
 
-    col_p1, col_p2, col_p3 = st.columns([1, 1, 4])
+    def _aplicar_preset(_univ=None, **vals):
+        # F4-3: zera todos os filtros, limpa setor e aplica os valores do preset;
+        # opcionalmente força o universo (reusa screener_univ_force do F4-1).
+        st.session_state.update({
+            "disc_pl_min_w": 0.0, "disc_pl_max_w": 0.0, "disc_roe_w": 0.0,
+            "disc_dy_w": 0.0, "disc_pvp_w": 0.0, "disc_score_w": 0,
+            "disc_mm_w": False, "disc_setor_w": "todos os setores",
+        })
+        if _univ:
+            st.session_state["screener_univ_force"] = _univ
+        st.session_state.update(vals)
+        st.rerun()
+
+    col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1, 1, 1.4, 1.4, 1.2])
     with col_p1:
-        if st.button("💎 valor", key="btn_preset_valor",
-                     use_container_width=True, help="P/L baixo + ROE alto"):
-            st.session_state["disc_pl_max_w"]  = 15.0
-            st.session_state["disc_pl_min_w"]  = 0.0
-            st.session_state["disc_roe_w"]     = 12.0
-            st.session_state["disc_score_w"]   = 55
-            st.session_state["disc_dy_w"]      = 0.0
-            st.session_state["disc_pvp_w"]     = 0.0
-            st.rerun()
+        if st.button("💎 valor", key="btn_preset_valor", use_container_width=True,
+                     help="P/L ≤ 15 · ROE ≥ 12 · score ≥ 55"):
+            _aplicar_preset(disc_pl_max_w=15.0, disc_roe_w=12.0, disc_score_w=55)
     with col_p2:
-        if st.button("💰 dividendo", key="btn_preset_div",
-                     use_container_width=True, help="DY alto + score ok"):
-            st.session_state["disc_dy_w"]      = 6.0
-            st.session_state["disc_score_w"]   = 45
-            st.session_state["disc_pl_max_w"]  = 0.0
-            st.session_state["disc_pl_min_w"]  = 0.0
-            st.session_state["disc_roe_w"]     = 0.0
-            st.session_state["disc_pvp_w"]     = 0.0
-            st.rerun()
+        if st.button("💰 dividendo", key="btn_preset_div", use_container_width=True,
+                     help="DY ≥ 6 · score ≥ 45"):
+            _aplicar_preset(disc_dy_w=6.0, disc_score_w=45)
     with col_p3:
-        if st.button("↺ resetar filtros", key="btn_reset_filtros",
-                     use_container_width=True):
-            for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w',
-                       'disc_dy_w', 'disc_score_w', 'disc_pvp_w',
-                       'disc_mm_w']:
+        if st.button("🏢 FIIs descontados", key="btn_preset_fii", use_container_width=True,
+                     help="universo FIIs · P/VP ≤ 0,95 · DY ≥ 7 · score ≥ 50"):
+            _aplicar_preset(_univ="fii", disc_pvp_w=0.95, disc_dy_w=7.0, disc_score_w=50)
+    with col_p4:
+        if st.button("⭐ qualidade barata", key="btn_preset_qb", use_container_width=True,
+                     help="P/L ≤ 12 · ROE ≥ 15 · score ≥ 55"):
+            _aplicar_preset(disc_pl_max_w=12.0, disc_roe_w=15.0, disc_score_w=55)
+    with col_p5:
+        if st.button("↺ resetar", key="btn_reset_filtros", use_container_width=True):
+            for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w', 'disc_dy_w',
+                       'disc_score_w', 'disc_pvp_w', 'disc_mm_w', 'disc_setor_w']:
                 st.session_state.pop(_k, None)
             st.rerun()
 
