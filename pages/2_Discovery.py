@@ -1515,6 +1515,61 @@ if _secao_d == "🗺️ rotação setorial":
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # ── DIVERGÊNCIAS MACRO × SETOR (PLANO_MACRO M2-3/M3-2) ─────────────────
+        if _univ_set == "BR":
+            section_title("🧭 divergências macro × setor")
+            st.markdown(
+                '<div style="font-size:0.72rem;color:var(--text-muted);margin:-4px 0 10px 0;line-height:1.55;">'
+                'confronta o TILT do regime (o que o macro favorece) com a FORÇA RELATIVA '
+                'realizada (RS 3m — o que o preço fez). divergência A = macro favorece mas o '
+                'preço não reagiu (desconto/catch-up ou alerta); divergência B = preço forte '
+                'contra o macro (mercado pode antecipar virada). a coluna “histórico” é o '
+                'forward RS 13 semanas médio do quadrante no backtest por episódio.'
+                '</div>', unsafe_allow_html=True)
+            try:
+                from utils.divergencia_live import (
+                    divergencias_atuais_br, estatistica_divergencias_br, stat_para_quadrante)
+                from utils.divergencia_setorial import (
+                    DIVERG_A, DIVERG_B, CONFIRMA_BULL, CONFIRMA_BEAR, CATCH_UP, NEUTRO)
+                from utils.components import html_table as _ht_dv
+
+                _matriz_dv = divergencias_atuais_br(st.session_state.get("macro_context", {}))
+                if not _matriz_dv:
+                    info_box(tipo="info", titulo="sem dados de divergência",
+                             texto="rode o sync de preços/fundamentos p/ popular as séries setoriais.",
+                             icone="📭")
+                else:
+                    _stats_dv = estatistica_divergencias_br()
+                    _chip_dv = {
+                        DIVERG_A: ("🔶 divergência A", "amber"),
+                        DIVERG_B: ("🔷 divergência B", ""),
+                        CONFIRMA_BULL: ("✅ confirma bull", "bull"),
+                        CONFIRMA_BEAR: ("⛔ confirma bear", "bear"),
+                        CATCH_UP: ("⏳ catch-up", "muted"),
+                        NEUTRO: ("· neutro", "muted"),
+                    }
+                    _rows_dv, _classes_dv = [], []
+                    for _it in _matriz_dv:
+                        _lbl_dv, _tone_dv = _chip_dv.get(_it["quadrante"], ("· neutro", "muted"))
+                        _stq = stat_para_quadrante(_stats_dv, _it["quadrante"], 13)
+                        _hist_dv = (f"{_stq['media']*100:+.1f}% · hit {_stq['hit_rate']*100:.0f}% · n={_stq['n']}"
+                                    if _stq and _stq.get("n") else "—")
+                        _rs_tone = "bull" if _it["rs"] > 0 else "bear" if _it["rs"] < 0 else "muted"
+                        _rows_dv.append([
+                            _LABEL_SETOR_DISC.get(_it["setor"], _it["setor"]),
+                            _lbl_dv, f"{int(_it['tilt']):+d}", f"{_it['rs']*100:+.1f}%", _hist_dv,
+                        ])
+                        _classes_dv.append(["", _tone_dv, "mono", f"mono {_rs_tone}", "mono muted"])
+                    _ht_dv(
+                        ["setor", "quadrante", "tilt", "RS 3m", "histórico (fwd 13s)"],
+                        _rows_dv, aligns=["left", "left", "right", "right", "right"],
+                        classes=_classes_dv,
+                        caption="ordenado por magnitude · equal-weight · viés de survivorship (só tickers atuais)",
+                    )
+            except Exception:
+                pass
+            st.markdown("<br>", unsafe_allow_html=True)
+
     with st.spinner("agrupando setores..."):
         _dados_set = calcular_heatmap_setorial(_univ_set)
 
