@@ -479,6 +479,7 @@ def build_research_prompt(
     tecnico: dict = None,
     dividendos: dict = None,
     analise_anterior: dict = None,
+    divergencia_setor: dict = None,
 ) -> str:
     """
     Prompt institucional para análise de ativo único.
@@ -529,6 +530,34 @@ def build_research_prompt(
             "----- fim da análise anterior -----\n"
         )
 
+    # Divergência macro × setor (PLANO_MACRO M5-1): o quadrante do SETOR deste ativo
+    # + o resultado histórico do backtest, para a IA citar o sinal COM o edge medido.
+    _bloco_div = ""
+    if divergencia_setor and divergencia_setor.get("quadrante"):
+        _dv = divergencia_setor
+        _rot = {
+            "divergencia_a": "DIVERGÊNCIA A (macro favorece o setor, mas o preço ainda não reagiu)",
+            "divergencia_b": "DIVERGÊNCIA B (preço forte contra o macro — possível antecipação de virada)",
+            "confirmacao_bull": "confirmação bull (macro e preço alinhados a favor)",
+            "confirmacao_bear": "confirmação bear (macro e preço alinhados contra)",
+            "catch_up": "catch-up pendente (macro favorece, preço ainda morno)",
+            "neutro": "neutro",
+        }.get(_dv["quadrante"], _dv["quadrante"])
+        _hist = ""
+        if _dv.get("hist_n"):
+            _hist = (f" resultado histórico do quadrante (backtest por episódio): "
+                     f"forward RS 13 semanas médio {_dv['hist_media']*100:+.1f}%, "
+                     f"hit rate {_dv['hist_hit']*100:.0f}%, n={_dv['hist_n']}"
+                     f"{' (amostra pequena — baixa confiança)' if _dv['hist_n'] < 10 else ''}.")
+        _bloco_div = (
+            f"\n\ndivergência macro × setor: o setor está em {_rot} — tilt de regime "
+            f"{int(_dv.get('tilt', 0)):+d}, força relativa 3m {_dv.get('rs', 0)*100:+.1f}%"
+            f"{(', há ~' + str(_dv['dias']) + ' semanas') if _dv.get('dias') else ''}."
+            f"{_hist} incorpore isso no impacto macro e no veredicto: uma divergência com "
+            "edge histórico favorável reforça a tese; sem edge (ou n pequeno), trate como "
+            "hipótese e rebaixe a confiança.\n"
+        )
+
     instrucao = (
         "\n\nentregue análise institucional com a estrutura abaixo. "
         "use exclusivamente os dados acima — não invente números. "
@@ -562,7 +591,7 @@ def build_research_prompt(
         "7. métrica-chave para monitorar (1 linha): "
         "número específico + frequência (ex.: 'ROE trimestral > 15%')."
     )
-    return prompt + _bloco_ant + instrucao
+    return prompt + _bloco_ant + _bloco_div + instrucao
 
 
 def build_discovery_prompt(

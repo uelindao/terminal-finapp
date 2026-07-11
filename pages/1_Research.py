@@ -2264,6 +2264,28 @@ if _secao_r == "🧠 análise & ia":
         except Exception as _e_prev_ia:
             logging.getLogger(__name__).warning(f"[research] busca analise anterior: {_e_prev_ia}")
 
+        # Divergência macro × setor do ativo (PLANO_MACRO M5-1) — só BR; enriquece
+        # com a estatística histórica do backtest. Best-effort, cache-first.
+        _div_setor = None
+        if t_base.endswith(".SA"):
+            try:
+                from utils.divergencia_live import (
+                    divergencias_atuais_br, estatistica_divergencias_br, stat_para_quadrante)
+                from utils.setores import normalizar_setor as _ns_div
+                _canon_div = _ns_div(setor)
+                _mtz = divergencias_atuais_br(macro_ctx)
+                _hit = next((x for x in _mtz if x.get("setor") == _canon_div), None)
+                if _hit:
+                    _st_div = stat_para_quadrante(estatistica_divergencias_br(), _hit["quadrante"], 13)
+                    _div_setor = {
+                        "quadrante": _hit["quadrante"], "tilt": _hit["tilt"], "rs": _hit["rs"],
+                        "hist_media": (_st_div or {}).get("media"),
+                        "hist_hit": (_st_div or {}).get("hit_rate"),
+                        "hist_n": (_st_div or {}).get("n"),
+                    }
+            except Exception as _e_div:
+                logging.getLogger(__name__).warning(f"[research] divergencia setor: {_e_div}")
+
         from utils.ai_prompts import build_research_prompt
         _prompt_ia = build_research_prompt(
             ticker        = t_base,
@@ -2281,6 +2303,7 @@ if _secao_r == "🧠 análise & ia":
             tecnico       = _tec_data,
             dividendos    = None,
             analise_anterior = _analise_ant,
+            divergencia_setor = _div_setor,
         )
 
         _resposta_ia = chamar_ia(
