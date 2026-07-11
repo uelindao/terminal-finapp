@@ -507,14 +507,43 @@ def get_price_history_batch(tickers: list[str], dias: int = 252) -> "pd.DataFram
     if not tickers:
         return pd.DataFrame()
     sb = get_supabase()
+    # PAGINAÇÃO: o PostgREST limita cada resposta (default 1000 linhas). Sem paginar,
+    # consultas grandes (muitos tickers × anos) voltam TRUNCADAS silenciosamente e
+    # corrompem series/backtest. Paginamos por range até esgotar. Custo nulo p/
+    # consultas pequenas (1 chamada quando o lote < passo).
+    # Filtro de data no servidor: só buscamos ~dias pregões (com folga p/ fins de
+    # semana/feriados), em vez de todo o histórico + tail depois. Reduz linhas e páginas.
+    _cutoff = None
+    if dias:
+        from datetime import date, timedelta
+        _cutoff = (date.today() - timedelta(days=int(dias * 1.6) + 10)).isoformat()
+
+    rows: list = []
+    passo = 1000
+    inicio = 0
     try:
-        res = sb.table('price_history').select(
-            'ticker, data, close'
-        ).in_('ticker', tickers).order('data', desc=False).execute()
+        while True:
+            _q = (
+                sb.table('price_history')
+                .select('ticker, data, close')
+                .in_('ticker', tickers)
+            )
+            if _cutoff:
+                _q = _q.gte('data', _cutoff)
+            res = (
+                _q.order('ticker', desc=False)
+                .order('data', desc=False)
+                .range(inicio, inicio + passo - 1)
+                .execute()
+            )
+            lote = res.data or []
+            rows.extend(lote)
+            if len(lote) < passo:
+                break
+            inicio += passo
     except Exception as e:
         logger.warning(f"[db] get_price_history_batch falhou: {e}")
         return pd.DataFrame()
-    rows = res.data or []
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
