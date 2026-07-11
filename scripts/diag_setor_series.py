@@ -28,6 +28,21 @@ def main():
     # 1) fundamentals_cache tem setor?
     cache = get_todos_fundamentos_cache() or {}
     _p(f"[1] fundamentals_cache: {len(cache)} tickers")
+
+    # 1a) cobertura de 'setor' em TODO o cache + formato das chaves
+    _com_setor_total = sum(1 for v in cache.values() if isinstance(v, dict) and v.get("setor"))
+    _p(f"    entradas com 'setor' preenchido: {_com_setor_total} de {len(cache)}")
+    _amostra_chaves = list(cache.keys())[:10]
+    _p(f"    amostra de CHAVES do cache: {_amostra_chaves}")
+    # 1b) tickers BR famosos: o que o cache retorna?
+    _p("    --- lookup de tickers conhecidos (chave -> setor) ---")
+    for tk in ["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBAS3.SA", "ABEV3.SA", "WEGE3.SA"]:
+        _base = mapear_ticker_base(tk)
+        _e_sa = cache.get(tk)
+        _e_base = cache.get(_base)
+        _hit = _e_sa if isinstance(_e_sa, dict) else (_e_base if isinstance(_e_base, dict) else {})
+        _via = "tk" if isinstance(_e_sa, dict) else ("base:" + _base if isinstance(_e_base, dict) else "AUSENTE")
+        _p(f"      {tk:<10} [{_via}] setor={_hit.get('setor')!r}  nome={str(_hit.get('nome'))[:18]!r}")
     com_setor = 0
     setor_por_ticker = {}
     for tk in list(SCREENER_B3) + list(FII_TODOS):
