@@ -1941,7 +1941,25 @@ with st.container():
             _ht_pf(_hdrs, _rows, aligns=_aligns, classes=_classes)
 
         _pf_table_html(df_portfolio)
-        
+
+        # F3-3: ação rápida — registrar decisão de uma posição direto no diário
+        # (o ticker da tabela já linka p/ Research). Salta para gestão & ia › diário
+        # com o ticker preenchido.
+        _tk_pos_list = [str(r['ativo']) for _, r in df_portfolio.iterrows()]
+        if _tk_pos_list:
+            _qa1, _qa2 = st.columns([3, 1])
+            with _qa1:
+                _tk_dec = st.selectbox("registrar decisão de:", _tk_pos_list,
+                                       key="qa_dec_ticker", label_visibility="collapsed")
+            with _qa2:
+                if st.button("📝 registrar decisão", key="qa_dec_btn",
+                             use_container_width=True):
+                    st.session_state["diario_ticker_manual"] = _tk_dec
+                    st.session_state["_diario_expandir"] = True
+                    st.session_state["portfolio_grupo"] = "📋 gestão & ia"
+                    st.session_state["portfolio_sub_3"] = "📝 diário de decisões"
+                    st.rerun()
+
         st.markdown("<br>", unsafe_allow_html=True)
         csv = df_portfolio.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -4637,13 +4655,18 @@ if _secao_pf == "📊 backtesting":
 # ==========================================
 if _secao_pf == "📝 diário de decisões":
     
-    with st.expander("➕ registrar nova decisão", expanded=False):
+    # F3-3: abre o expander automaticamente quando chega via "registrar decisão"
+    # de uma posição (pop é seguro: é st.form, sem reruns até o submit).
+    with st.expander("➕ registrar nova decisão",
+                     expanded=st.session_state.pop("_diario_expandir", False)):
         with st.form("form_decisao", clear_on_submit=True):
             c1, c2, c3 = st.columns([3, 2, 2])
             with c1:
                 opcoes = get_opcoes_selectbox()
                 selecao = st.selectbox("ativo:", opcoes, format_func=lambda x: x.lower())
-                ticker_manual = st.text_input("ou digite o ticker manualmente:", "").strip().upper()
+                # key p/ pré-preenchimento vindo da ação rápida (F3-3)
+                ticker_manual = st.text_input("ou digite o ticker manualmente:",
+                                              key="diario_ticker_manual").strip().upper()
             with c2:
                 tipo_decisao = st.selectbox("tipo de operação:", ['compra', 'venda', 'aumento posição', 'redução'])
                 data_dec = st.date_input("data da decisão", datetime.date.today())
