@@ -384,6 +384,21 @@ def main():
         _fii_listing = {}
         logger.warning(f"[sync_br] listagem de FIIs indisponível: {e}")
 
+    # Setor existente por ticker: o BRAPI free tier quase não retorna 'sector' e o
+    # caminho yfinance-only o deixa vazio → sem isto, o upsert (replace de dados_json)
+    # APAGARIA o setor populado pelo backfill_setores. Preservamos o valor bom.
+    try:
+        from database.db import get_todos_fundamentos_cache as _gtf
+        _setor_existente = {
+            t: (v or {}).get("setor")
+            for t, v in (_gtf() or {}).items()
+            if isinstance(v, dict) and (v or {}).get("setor")
+        }
+        print(f"[sync_br] setores preservados do cache: {len(_setor_existente)}")
+    except Exception as e:
+        _setor_existente = {}
+        logger.warning(f"[sync_br] falha ao carregar setores existentes: {e}")
+
     for i, ticker in enumerate(BRASIL_TODOS):
         if rate_limit_remaining <= 10:
             print("  [sync_br] rate limit critico, parando...")
@@ -403,6 +418,11 @@ def main():
         else:
             dados = transform_brapi({}, ticker)
             _src = "yfinance"
+
+        # Preserva o setor bom (do backfill) quando esta coleta veio sem setor —
+        # evita que o replace de dados_json apague a taxonomia setorial.
+        if not dados.get("setor") and _setor_existente.get(ticker):
+            dados["setor"] = _setor_existente[ticker]
 
         # Enriquecimento estrutural de FII (vacância, liquidez, cap rate) +
         # p/vp e dy% autoritativos do Fundamentus — independe do BRAPI ter respondido.

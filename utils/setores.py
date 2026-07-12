@@ -67,16 +67,90 @@ LABEL_SETOR: dict[str, str] = {
 }
 
 
+# Subsetores GRANULARES da B3/Fundamentus (PT) → chave canônica. Match EXATO
+# (após remover acentos) — evita os falsos-positivos do substring com nomes
+# ambíguos (ex.: "comércio" vs "comércio e distribuição"). Chaves SEM acento.
+_SETOR_CANON_B3: dict[str, str] = {
+    # energia
+    "petroleo, gas e biocombustiveis": "energia",
+    "petroleo. gas e biocombustiveis": "energia",
+    # materiais
+    "mineracao": "materiais",
+    "siderurgia e metalurgia": "materiais",
+    "quimicos": "materiais",
+    "madeira e papel": "materiais",
+    "materiais diversos": "materiais",
+    "embalagens": "materiais",
+    # industria (bens industriais)
+    "transporte": "industria",
+    "material de transporte": "industria",
+    "maquinas e equipamentos": "industria",
+    "construcao e engenharia": "industria",
+    "servicos diversos": "industria",
+    "equipamentos eletricos": "industria",
+    # consumo ciclico
+    "comercio": "consumo_ciclico",
+    "tecidos, vestuario e calcados": "consumo_ciclico",
+    "utilidades domesticas": "consumo_ciclico",
+    "automoveis e motocicletas": "consumo_ciclico",
+    "hoteis e restaurantes": "consumo_ciclico",
+    "viagens e lazer": "consumo_ciclico",
+    "construcao civil": "consumo_ciclico",
+    "diversos": "consumo_ciclico",
+    # consumo defensivo (nao ciclico)
+    "alimentos processados": "consumo_defensivo",
+    "bebidas": "consumo_defensivo",
+    "agropecuaria": "consumo_defensivo",
+    "produtos de uso pessoal e de limpeza": "consumo_defensivo",
+    "comercio e distribuicao": "consumo_defensivo",
+    # saude
+    "serv.med.hospit. analises e diagnosticos": "saude",
+    "medicamentos e outros produtos": "saude",
+    # financeiro
+    "servicos financeiros diversos": "financeiro",
+    "previdencia e seguros": "financeiro",
+    "intermediarios financeiros": "financeiro",
+    "holdings diversificadas": "financeiro",
+    "bancos": "financeiro",
+    # imobiliario
+    "exploracao de imoveis": "imobiliario",
+    "incorporacoes": "imobiliario",
+    # utilities
+    "energia eletrica": "utilities",
+    "agua e saneamento": "utilities",
+    "gas": "utilities",
+    # tecnologia
+    "programas e servicos": "tecnologia",
+    "computadores e equipamentos": "tecnologia",
+    # comunicacao
+    "telecomunicacoes": "comunicacao",
+    "midia": "comunicacao",
+}
+
+
+def _sem_acento(s: str) -> str:
+    import unicodedata
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def normalizar_setor(setor: str | None) -> str:
     """
-    Reduz um rótulo de setor (EN ou PT, com ou sem emoji) à chave canônica.
-    Ex.: 'Financial Services' → 'financeiro'; '🏦 financeiro' → 'financeiro'.
-    Devolve o texto em minúsculas se não reconhecer; '' para entrada vazia.
+    Reduz um rótulo de setor (EN, PT amplo, ou subsetor granular B3) à chave
+    canônica. Ex.: 'Financial Services' → 'financeiro'; 'Transporte' → 'industria';
+    'Exploração de Imóveis' → 'imobiliario'. Devolve o texto em minúsculas se não
+    reconhecer; '' para entrada vazia.
     """
     if not setor:
         return ""
     s = str(setor).strip().lower()
-    # match por substring (cobre prefixos de emoji e sufixos tipo " br")
+    # 1) subsetor B3 por match EXATO (sem acento) — preciso, sem falso-positivo
+    s_na = _sem_acento(s)
+    if s_na in _SETOR_CANON_B3:
+        return _SETOR_CANON_B3[s_na]
+    # 2) match por substring (EN/PT amplo; cobre prefixos de emoji e sufixos " br")
     for label, canon in _SETOR_CANON.items():
         if label in s:
             return canon
