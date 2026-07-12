@@ -30,6 +30,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="0 = todos")
     ap.add_argument("--sleep", type=float, default=0.5)
+    ap.add_argument("--force", action="store_true",
+                    help="reprocessa todos (default: só os que ainda não têm setor canônico)")
     args = ap.parse_args()
 
     import yfinance as yf
@@ -56,11 +58,40 @@ def main():
         except Exception as e:
             _p(f"  aviso: falha ao ler lote {i}: {e}")
 
+    # INCREMENTAL: por padrão pula quem já tem setor canônico (re-run só preenche
+    # as lacunas que falharam por 404/timeout do yfinance — barato e rápido).
+    if not args.force:
+        def _ja_tem(tk):
+            row = existentes.get(tk)
+            if not row or not row.get("dados_json"):
+                return False
+            try:
+                _s = json.loads(row["dados_json"]).get("setor")
+            except Exception:
+                return False
+            return bool(normalizar_setor(_s))
+        antes = len(universo)
+        universo = [tk for tk in universo if not _ja_tem(tk)]
+        _p(f"    incremental: {antes - len(universo)} já com setor, "
+           f"{len(universo)} a processar (use --force p/ refazer todos)")
+
+    def _fetch_info(tk, tentativas=3):
+        # yfinance quoteSummary 404/timeout de forma intermitente — retry com backoff.
+        for t in range(tentativas):
+            try:
+                info = yf.Ticker(tk).info or {}
+                if info.get("sector") or info.get("longName"):
+                    return info
+            except Exception:
+                pass
+            time.sleep(1.0 + t)
+        return {}
+
     ok = pulado = falha = 0
     _dist: dict = {}
     for idx, tk in enumerate(universo):
         try:
-            info = yf.Ticker(tk).info or {}
+            info = _fetch_info(tk)
             setor_raw = (info.get("sector") or "").strip()
             if not setor_raw:
                 # FIIs no yfinance costumam vir sem sector → assume imobiliário
