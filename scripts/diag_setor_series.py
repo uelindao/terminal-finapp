@@ -11,6 +11,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import logging as _logging  # silencia "missing ScriptRunContext" (modo bare)
+_logging.getLogger("streamlit").setLevel(_logging.ERROR)
+
 
 def _p(txt=""):
     print(str(txt).encode("ascii", "replace").decode())

@@ -17,6 +17,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Silencia o dilúvio de "missing ScriptRunContext" do Streamlit em modo bare
+# (classificar_regime/tilt_setor tocam st.session_state — inofensivo fora do app).
+import logging as _logging  # noqa: E402
+_logging.getLogger("streamlit").setLevel(_logging.ERROR)
+
 import pandas as pd  # noqa: E402
 
 from utils.setor_series import carregar_retornos_setoriais_br  # noqa: E402
