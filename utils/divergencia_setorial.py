@@ -36,14 +36,19 @@ NEUTRO = "neutro"
 
 _DIVERGENCIAS = (DIVERG_A, DIVERG_B)
 
+# Leituras CALIBRADAS pelo backtest por episódio (8+ anos, BR): divergência B tem
+# edge forte (+3% fwd RS 13s, hit 61%); divergência A não tem (fraqueza persiste);
+# confirmação bull tende a mean-reverter. O número histórico aparece ao lado na UI.
 _LEITURA = {
-    CONFIRMA_BULL: "macro e preço alinhados a favor — tendência com suporte do regime.",
-    CONFIRMA_BEAR: "macro e preço alinhados contra — fraqueza coerente com o regime.",
-    DIVERG_A: ("macro favorece mas o preço ainda não reagiu: ou desconto/catch-up, "
-               "ou o mercado antecipa deterioração — checar micro antes de comprar."),
-    DIVERG_B: ("preço forte contra o macro: o mercado pode estar antecipando uma "
-               "virada de regime — validar com atividade e amplitude."),
-    CATCH_UP: "macro favorece e o preço ainda é morno — vigiar por início de catch-up.",
+    CONFIRMA_BULL: ("macro e preço a favor — mas no histórico esse alinhamento já "
+                    "precificado tendeu a mean-reverter (forward RS negativo); não perseguir."),
+    CONFIRMA_BEAR: "macro e preço contra — fraqueza coerente com o regime, sem reversão clara.",
+    DIVERG_A: ("cuidado: no histórico a fraqueza de preço TENDEU A PERSISTIR mesmo com o "
+               "macro a favor (não houve catch-up — o mercado costuma estar certo). "
+               "checar micro antes de comprar a tese macro; risco de value trap."),
+    DIVERG_B: ("sinal com EDGE histórico: setores que sobem CONTRA o macro tenderam a "
+               "CONTINUAR superando (o preço antecipa a virada de regime). ver o histórico."),
+    CATCH_UP: "macro favorece e o preço ainda é morno — sem edge claro no histórico; vigiar.",
     NEUTRO: "sem sinal claro (tilt neutro).",
 }
 

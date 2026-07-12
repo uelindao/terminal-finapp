@@ -46,7 +46,9 @@ def retorno_diario_setorial(
     """
     if precos is None or precos.empty:
         return pd.DataFrame()
-    rets = precos.pct_change()
+    # fill_method=None: gaps viram NaN (correto — a média EW ignora NaN e min_tickers
+    # trata), em vez do pad deprecado que fabricava retorno 0 em dias sem cotação.
+    rets = precos.pct_change(fill_method=None)
 
     grupos: dict[str, list] = {}
     for tk in rets.columns:
