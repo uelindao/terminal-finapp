@@ -39,11 +39,25 @@ def divergencias_atuais_br(_macro_context: dict) -> list[dict]:
     return matriz_divergencia(tilts, rs)
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def estatistica_divergencias_br(anos: int = 8, min_persist: int = 2) -> dict:
-    """Backtest por episódio (cache diário). {} se dados/APIs indisponíveis."""
+    """
+    Estatística do backtest por quadrante. PREFERE a versão PERSISTIDA no Supabase
+    (rápida/robusta — popular com `python scripts/backtest_divergencias.py --save`);
+    só cai no compute LIVE (lento/flaky na Cloud) se não houver persistida.
+    """
+    # 1) persistida (rápido)
     try:
-        import pandas as pd
+        import json
+        from database.db import get_ai_analysis
+        row = get_ai_analysis(tipo="backtest_div_v1", ticker=None,
+                              user_id=None, modo=None)
+        if row and row.get("conteudo"):
+            return json.loads(row["conteudo"])
+    except Exception:
+        pass
+    # 2) fallback: compute live
+    try:
         from utils.setor_series import carregar_retornos_setoriais_br
         from utils.regime_historico import reconstruir_regime_tilt_br
         from utils.backtest_divergencia import rodar_backtest
@@ -75,8 +89,10 @@ def breadth_atual_br(janela_semanas: int = 10) -> float | None:
 
 def stat_para_quadrante(estatistica: dict, quadrante: str, horizonte: int = 13) -> dict | None:
     """Extrai {n, media, mediana, hit_rate} do resultado do backtest p/ um
-    quadrante/horizonte, ou None se ausente."""
+    quadrante/horizonte, ou None. Tolera chave de horizonte int OU str (o JSON
+    persistido serializa os horizontes como string)."""
     try:
-        return (estatistica or {}).get("estatistica", {}).get(quadrante, {}).get(horizonte)
+        _hs = (estatistica or {}).get("estatistica", {}).get(quadrante, {})
+        return _hs.get(horizonte) or _hs.get(str(horizonte))
     except Exception:
         return None

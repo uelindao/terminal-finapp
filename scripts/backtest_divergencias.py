@@ -47,6 +47,8 @@ def main():
     ap.add_argument("--min-persist", type=int, default=2,
                     help="comprimento minimo do episodio (semanas) p/ entrar na stat")
     ap.add_argument("--janela-rs", type=int, default=13)
+    ap.add_argument("--save", action="store_true",
+                    help="persiste a estatistica no Supabase p/ a UI ler (rapido/robusto)")
     args = ap.parse_args()
 
     _p("[1/3] carregando retornos setoriais BR (price_history)...")
@@ -98,6 +100,25 @@ def main():
     _p("  antecipacao de virada; divergencia A idem para catch-up. n<10 = baixa")
     _p("  confianca (mostrar o numero, rebaixar a certeza na UI). Vies: survivorship")
     _p("  (price_history so tem tickers atuais) e equal-weight BR.")
+
+    if args.save:
+        try:
+            import json
+            from datetime import date
+            from database.db import save_ai_analysis
+            payload = dict(out)
+            payload["gerado_em"] = date.today().isoformat()
+            payload["min_persist"] = args.min_persist
+            save_ai_analysis(
+                tipo="backtest_div_v1", conteudo=json.dumps(payload),
+                ticker=None, user_id=None, modelo="backtest",
+                ttl_horas=24 * 120,   # 120 dias — re-rodar o script atualiza
+            )
+            _p("")
+            _p("  [save] estatistica persistida no Supabase (backtest_div_v1) — a UI")
+            _p("         (Discovery > divergencias) e a IA vao LER isto, sem recomputar.")
+        except Exception as e:
+            _p(f"  [save] FALHA ao persistir: {e}")
 
 
 if __name__ == "__main__":
