@@ -16,6 +16,8 @@ on:
     - cron: '0 */2 * * *'
     # Domingo 03:00 UTC — historico OHLCV semanal (incremental)
     - cron: '0 3 * * 0'
+    # Domingo 05:00 UTC — backtest de divergencias macro x setor (apos o price_history)
+    - cron: '0 5 * * 0'
   workflow_dispatch:  # permite execucao manual
 
 concurrency:
@@ -114,6 +116,34 @@ jobs:
 
       - name: Executar sync_price_history
         run: python scripts/sync_price_history.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+  backtest-divergencias:
+    name: Backtest de Divergencias Macro x Setor (semanal)
+    runs-on: ubuntu-latest
+    # Domingo 05:00 UTC (apos o price_history semanal das 03:00) ou manualmente.
+    # Recalcula e PERSISTE a estatistica por quadrante (fwd RS/hit/n) que a UI le.
+    if: github.event.schedule == '0 5 * * 0' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install supabase yfinance pandas numpy python-bcb
+
+      - name: Executar backtest de divergencias (--save)
+        run: python scripts/backtest_divergencias.py --anos 8 --min-persist 2 --save
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
