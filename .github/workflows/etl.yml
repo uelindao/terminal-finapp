@@ -126,7 +126,7 @@ jobs:
     # Domingo 05:00 UTC (apos o price_history semanal das 03:00) ou manualmente.
     # Recalcula e PERSISTE a estatistica por quadrante (fwd RS/hit/n) que a UI le.
     if: github.event.schedule == '0 5 * * 0' || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -141,6 +141,16 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install supabase yfinance pandas numpy python-bcb
+
+      # Preenche o setor de tickers novos/faltantes ANTES do backtest (incremental:
+      # pula quem ja tem setor -> rapido). continue-on-error: um soluco do yfinance
+      # nao pode bloquear o backtest, que roda com os setores ja existentes.
+      - name: Backfill de setores (incremental)
+        continue-on-error: true
+        run: python scripts/backfill_setores.py --sleep 0.3
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       - name: Executar backtest de divergencias (--save)
         run: python scripts/backtest_divergencias.py --anos 8 --min-persist 2 --save
