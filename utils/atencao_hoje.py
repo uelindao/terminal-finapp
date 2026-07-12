@@ -175,6 +175,35 @@ def _sinais_eventos(eventos: list[dict], hoje: date) -> list[dict]:
     return out
 
 
+def _sinais_divergencia(divergencias: list[dict]) -> list[dict]:
+    """
+    Divergência B setorial (PLANO_MACRO M2-4) — o único quadrante com edge validado
+    no backtest (preço forte CONTRA o macro tende a continuar superando). Recém-aberta
+    entra no topo; persistente aparece com severidade menor. Só B (A não tem edge).
+    """
+    out: list[dict] = []
+    for d in divergencias or []:
+        if d.get("quadrante") != "divergencia_b":
+            continue
+        setor = d.get("setor_label") or d.get("setor") or "setor"
+        novo = bool(d.get("novo"))
+        _hist = ""
+        if d.get("hist_n"):
+            _hist = (f" — histórico do quadrante: fwd RS {float(d['hist_media']) * 100:+.1f}% "
+                     f"em 13s, hit {float(d['hist_hit']) * 100:.0f}% (n={d['hist_n']})")
+        out.append({
+            "tipo": "divergencia",
+            "ticker": None,
+            "icone": "🚀" if novo else "🔷",
+            "titulo": f"{setor}: divergência B{' (recém-aberta)' if novo else ''}",
+            "detalhe": ("preço forte contra o macro — o quadrante com edge de continuação"
+                        + _hist),
+            "tom": "bull",
+            "severidade": 27.0 if novo else 14.0,
+        })
+    return out
+
+
 def coletar_atencao_hoje(
     watchlist: list[str],
     historico_por_ticker: dict[str, list[dict]],
@@ -182,6 +211,7 @@ def coletar_atencao_hoje(
     eventos: Optional[list[dict]] = None,
     hoje: Optional[date] = None,
     *,
+    divergencias: Optional[list[dict]] = None,
     limite: int = 8,
 ) -> list[dict]:
     """
@@ -211,6 +241,7 @@ def coletar_atencao_hoje(
                 itens.append(t)
 
     itens.extend(_sinais_eventos(eventos or [], hoje))
+    itens.extend(_sinais_divergencia(divergencias or []))
 
     # ranqueia por severidade; limita itens por ticker para não concentrar
     itens.sort(key=lambda i: i["severidade"], reverse=True)

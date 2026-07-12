@@ -399,11 +399,20 @@ def _coletar_atencao_home(_wl_tickers: tuple):
         pc = get_all_price_cache()
     except Exception:
         pc = {}
+    # Divergências B setoriais (PLANO_MACRO M2-4) — o sinal com edge validado;
+    # recém-abertas entram no topo do "atenção hoje". Best-effort, cache-first.
+    _div_b = []
+    try:
+        from utils.divergencia_live import divergencias_b_br
+        _div_b = divergencias_b_br(st.session_state.get("macro_context", {}))
+    except Exception:
+        _div_b = []
     return coletar_atencao_hoje(
         watchlist=list(_wl_tickers),
         historico_por_ticker=hist,
         price_cache=pc,
         eventos=_calendario_macro_home(),
+        divergencias=_div_b,
     )
 
 

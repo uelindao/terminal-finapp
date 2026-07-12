@@ -87,6 +87,62 @@ def breadth_atual_br(janela_semanas: int = 10) -> float | None:
     return float(b.iloc[-1]) if len(b) else None
 
 
+def divergencias_b_br(macro_context: dict) -> list[dict]:
+    """
+    Divergências B setoriais ATUAIS (BR), enriquecidas p/ o "atenção hoje" (M2-4):
+    setor, label, flag `novo` (entrou em B desde o último snapshot diário), e a
+    estatística do quadrante (fwd RS/hit/n). Persiste um snapshot diário em
+    ai_analyses (divergencia_snap) — write-on-read, 1x/dia — p/ detectar transições.
+    NÃO cacheado (efeito colateral + comparação); as fontes internas já são cacheadas.
+    """
+    import json
+    from datetime import date
+    from utils.setores import LABEL_SETOR
+    from utils.divergencia_setorial import DIVERG_B
+
+    matriz = divergencias_atuais_br(macro_context)
+    b_hoje = [it for it in matriz if it.get("quadrante") == DIVERG_B]
+    if not b_hoje and not matriz:
+        return []
+    setores_b = {it["setor"] for it in b_hoje}
+    hoje = date.today().isoformat()
+
+    # snapshot diário (freshness): reusa ai_analyses como KV
+    novas: set = set()
+    try:
+        from database.db import get_ai_analysis, save_ai_analysis
+        prev = get_ai_analysis(tipo="divergencia_snap", ticker=None, user_id=None, modo=None)
+        prev_json = json.loads(prev["conteudo"]) if (prev and prev.get("conteudo")) else {}
+        if prev_json.get("data") == hoje:
+            novas = set(prev_json.get("b_novas", []))
+        else:
+            prev_b = {s for s, q in (prev_json.get("estado") or {}).items() if q == DIVERG_B}
+            novas = setores_b - prev_b
+            estado = {it["setor"]: it["quadrante"] for it in matriz}
+            save_ai_analysis(
+                tipo="divergencia_snap",
+                conteudo=json.dumps({"data": hoje, "estado": estado,
+                                     "b_novas": sorted(novas)}),
+                ticker=None, user_id=None, modelo="snap", ttl_horas=24 * 40,
+            )
+    except Exception:
+        pass
+
+    _st = stat_para_quadrante(estatistica_divergencias_br(), DIVERG_B, 13) or {}
+    out = []
+    for it in b_hoje:
+        out.append({
+            "setor": it["setor"],
+            "setor_label": LABEL_SETOR.get(it["setor"], it["setor"]),
+            "quadrante": DIVERG_B,
+            "novo": it["setor"] in novas,
+            "hist_media": _st.get("media"),
+            "hist_hit": _st.get("hit_rate"),
+            "hist_n": _st.get("n"),
+        })
+    return out
+
+
 def stat_para_quadrante(estatistica: dict, quadrante: str, horizonte: int = 13) -> dict | None:
     """Extrai {n, media, mediana, hit_rate} do resultado do backtest p/ um
     quadrante/horizonte, ou None. Tolera chave de horizonte int OU str (o JSON

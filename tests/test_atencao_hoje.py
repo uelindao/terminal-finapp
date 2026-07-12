@@ -154,6 +154,40 @@ def test_max_dois_itens_por_ticker():
     assert len([i for i in itens if i["ticker"] == "DUP.SA"]) <= 2
 
 
+def test_divergencia_b_entra_e_recem_aberta_no_topo():
+    itens = coletar_atencao_hoje(
+        watchlist=[], historico_por_ticker={}, price_cache={},
+        divergencias=[
+            {"setor": "financeiro", "setor_label": "🏦 financeiro", "quadrante": "divergencia_b",
+             "novo": True, "hist_media": 0.032, "hist_hit": 0.61, "hist_n": 77},
+        ],
+    )
+    assert len(itens) == 1
+    it = itens[0]
+    assert it["tipo"] == "divergencia" and it["ticker"] is None
+    assert "recém-aberta" in it["titulo"] and it["icone"] == "🚀"
+    assert "hit 61%" in it["detalhe"] and "n=77" in it["detalhe"]
+
+
+def test_divergencia_a_ignorada():
+    itens = coletar_atencao_hoje(
+        watchlist=[], historico_por_ticker={}, price_cache={},
+        divergencias=[{"setor": "energia", "quadrante": "divergencia_a", "novo": True}],
+    )
+    assert itens == []          # só divergência B entra (A não tem edge)
+
+
+def test_divergencia_b_recem_aberta_ranqueia_acima_de_score():
+    itens = coletar_atencao_hoje(
+        watchlist=["X.SA"],
+        historico_por_ticker={"X.SA": _hist(70, 63)},   # Δ=-7, severidade ~14
+        price_cache={},
+        divergencias=[{"setor": "financeiro", "quadrante": "divergencia_b", "novo": True,
+                       "hist_n": 50, "hist_media": 0.03, "hist_hit": 0.6}],
+    )
+    assert itens[0]["tipo"] == "divergencia"   # recém-aberta (sev 27) no topo
+
+
 def test_mercado_calmo_retorna_vazio():
     assert coletar_atencao_hoje(
         watchlist=["CALM.SA"],
