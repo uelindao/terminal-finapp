@@ -410,11 +410,18 @@ def atualizar_multiplos_pctl(ticker: str, pctl: dict):
 _FUNDAMENTALS_EXTENDED_OK: bool | None = None  # None=ainda não testado, True=ok, False=falha conhecida
 
 
+@_st_cache(ttl=1800, show_spinner=False)
 def get_todos_fundamentos_cache() -> dict:
     """
     Lê fundamentals_cache. Combina o JSON legado (dados_json) com as colunas
     novas do ETL (data_quality_pct, updated_at, source) para que o app enxergue
     os dois fluxos de gravação.
+
+    CACHEADO (30 min) — crítico para EGRESS: puxa o dados_json de ~475 tickers
+    (~2 MB) e é chamado em 17 pontos da UI, alguns no topo de módulo (reexecutados
+    a CADA rerun do Streamlit, isto é, a cada clique). Sem cache, uma sessão ativa
+    consumia GBs/mês sozinha. Os fundamentos mudam ~2x/dia (ETL), então 30 min de
+    TTL não atrasa nada perceptível.
 
     Memoiza o resultado de schema (existência das colunas ETL): após a 1ª falha,
     as chamadas seguintes vão direto ao fallback sem re-logar — evita spam quando
@@ -977,7 +984,15 @@ def atualizar_resultado(id_decisao, resultado):
 # HEALTH SCORES
 # ==========================================
 
+@_st_cache(ttl=600, show_spinner=False)
 def get_health_scores():
+    """
+    CACHEADO (10 min) — crítico para EGRESS: lê a health_scores inteira (~475
+    linhas com alertas_venda em JSON, ~1 MB) e é chamada em 24 pontos da UI,
+    reexecutados a cada rerun do Streamlit. TTL curto (não 30 min) porque o
+    health_engine grava scores ao vivo; 10 min corta as releituras por clique
+    sem esconder um score recém-calculado por muito tempo.
+    """
     sb = get_supabase()
     rows = sb.table('health_scores').select('*').execute().data
     # Alias de compatibilidade: updated_at → atualizado_em
