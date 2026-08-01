@@ -1529,7 +1529,7 @@ if _secao_d == "🗺️ rotação setorial":
             try:
                 from utils.divergencia_live import (
                     divergencias_atuais_br, estatistica_divergencias_br,
-                    stat_para_quadrante, breadth_atual_br)
+                    stat_para_quadrante, breadth_atual_br, data_snapshot_br)
                 from utils.divergencia_setorial import (
                     DIVERG_A, DIVERG_B, CONFIRMA_BULL, CONFIRMA_BEAR, CATCH_UP, NEUTRO)
                 from utils.components import html_table as _ht_dv
@@ -1537,7 +1537,9 @@ if _secao_d == "🗺️ rotação setorial":
                 _matriz_dv = divergencias_atuais_br(st.session_state.get("macro_context", {}))
                 if not _matriz_dv:
                     info_box(tipo="info", titulo="sem dados de divergência",
-                             texto="rode o sync de preços/fundamentos p/ popular as séries setoriais.",
+                             texto=("o snapshot semanal ainda não foi gerado — rode o job "
+                                    "'Backtest de Divergencias' (GitHub Actions) ou "
+                                    "`python scripts/backtest_divergencias.py --save`."),
                              icone="📭")
                 else:
                     _stats_dv = estatistica_divergencias_br()
@@ -1565,7 +1567,8 @@ if _secao_d == "🗺️ rotação setorial":
                         ["setor", "quadrante", "tilt", "RS 3m", "histórico (fwd 13s)"],
                         _rows_dv, aligns=["left", "left", "right", "right", "right"],
                         classes=_classes_dv,
-                        caption="ordenado por magnitude · equal-weight · viés de survivorship (só tickers atuais)",
+                        caption=(f"RS do snapshot de {data_snapshot_br() or 'n/d'} (semanal) × tilt de regime "
+                                 f"atual · ordenado por magnitude · equal-weight · viés de survivorship"),
                     )
                     # M4-2: amplitude interna (breadth) — leitura de topo estreito/fundo largo
                     _bd = breadth_atual_br()

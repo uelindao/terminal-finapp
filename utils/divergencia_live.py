@@ -1,113 +1,114 @@
 """
-utils/divergencia_live.py — divergências ao vivo + estatística (PLANO_MACRO M2-3/M3-2).
+utils/divergencia_live.py — divergências para a UI (PLANO_MACRO M2-3/M3-2).
 
-Cola o motor de quadrantes (puro) às fontes de dados para a UI:
-  • `divergencias_atuais_br` — matriz de divergência de HOJE (tilt atual × RS 3m).
-  • `estatistica_divergencias_br` — backtest por episódio (cache diário) p/ a coluna
-    "resultado histórico" da UI. Degrada em silêncio se as APIs macro falharem.
+REGRA DE OURO (aprendida na marra): a UI NUNCA lê o price_history.
 
-Ambas cacheadas: a UI nunca recomputa o pesado a cada rerun.
+A versão anterior computava RS/breadth ao vivo, puxando ~470 tickers × 400 dias
+(~11 MB) por chamada, com cache de 1h que reseta a cada restart do Streamlit —
+isso estourou a cota de EGRESS do Supabase e derrubou o projeto inteiro.
+
+Agora: o job semanal (scripts/backtest_divergencias.py --save) persiste dois JSONs
+minúsculos (~2 KB) — `divergencia_rs_v1` (RS por setor + breadth) e
+`backtest_div_v1` (estatística por quadrante). A UI só LÊ isso.
+
+O TILT continua fresco: é função pura (tilt_setor), custo zero, calculado aqui a
+partir do macro_context da sessão. Ou seja, o lado macro reage a mudanças de
+Selic/VIX na hora; o lado preço (RS) é semanal — que é a cadência real dele.
 """
 from __future__ import annotations
 
-import streamlit as st
+import json
 
-_JANELA_RS = 63     # ~3 meses
+import streamlit as st
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def divergencias_atuais_br(_macro_context: dict) -> list[dict]:
-    """Matriz de divergência atual (BR): tilt de regime de hoje × RS setorial 3m.
-    `_macro_context` não é hasheado (underscore) — refresca no ttl de 1h."""
-    from utils.setor_series import carregar_retornos_setoriais_br, rs_setorial_atual
+def _snapshot_rs() -> dict:
+    """Lê o snapshot de RS/breadth persistido pelo job semanal. {} se ausente."""
+    try:
+        from database.db import get_ai_analysis
+        row = get_ai_analysis(tipo="divergencia_rs_v1", ticker=None,
+                              user_id=None, modo=None)
+        if row and row.get("conteudo"):
+            return json.loads(row["conteudo"]) or {}
+    except Exception:
+        pass
+    return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def estatistica_divergencias_br() -> dict:
+    """
+    Estatística do backtest por quadrante (persistida pelo job semanal).
+    {} se ainda não houver — a UI então omite a coluna de histórico.
+    Sem fallback de compute ao vivo: recalcular custaria ~59 MB de egress.
+    """
+    try:
+        from database.db import get_ai_analysis
+        row = get_ai_analysis(tipo="backtest_div_v1", ticker=None,
+                              user_id=None, modo=None)
+        if row and row.get("conteudo"):
+            return json.loads(row["conteudo"]) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def divergencias_atuais_br(macro_context: dict) -> list[dict]:
+    """
+    Matriz de divergência atual (BR): RS do snapshot (semanal, barato) × tilt
+    calculado AGORA (função pura, custo zero) a partir do macro_context.
+    Lista vazia se não há snapshot (rodar o job semanal).
+    """
+    snap = _snapshot_rs()
+    rs = snap.get("rs") or {}
+    if not rs:
+        return []
     from utils.macro_state import tilt_setor
     from utils.regime_historico import SETORES_TILT
     from utils.divergencia_setorial import matriz_divergencia
 
-    ret = carregar_retornos_setoriais_br(dias=400)
-    if ret.empty:
-        return []
-    rs = rs_setorial_atual(ret, janela=_JANELA_RS)
-    if not rs:
-        return []
     tilts = {}
     for s in SETORES_TILT:
         try:
-            tilts[s] = int((tilt_setor(s, _macro_context or {}, "BR") or {}).get("pontos", 0) or 0)
+            tilts[s] = int((tilt_setor(s, macro_context or {}, "BR") or {}).get("pontos", 0) or 0)
         except Exception:
             pass
     return matriz_divergencia(tilts, rs)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def estatistica_divergencias_br(anos: int = 8, min_persist: int = 2) -> dict:
-    """
-    Estatística do backtest por quadrante. PREFERE a versão PERSISTIDA no Supabase
-    (rápida/robusta — popular com `python scripts/backtest_divergencias.py --save`);
-    só cai no compute LIVE (lento/flaky na Cloud) se não houver persistida.
-    """
-    # 1) persistida (rápido)
+def breadth_atual_br() -> float | None:
+    """Amplitude interna (% de setores acima da própria MM ~10 semanas), do snapshot."""
+    v = _snapshot_rs().get("breadth")
     try:
-        import json
-        from database.db import get_ai_analysis
-        row = get_ai_analysis(tipo="backtest_div_v1", ticker=None,
-                              user_id=None, modo=None)
-        if row and row.get("conteudo"):
-            return json.loads(row["conteudo"])
-    except Exception:
-        pass
-    # 2) fallback: compute live
-    try:
-        from utils.setor_series import carregar_retornos_setoriais_br
-        from utils.regime_historico import reconstruir_regime_tilt_br
-        from utils.backtest_divergencia import rodar_backtest
-
-        ret = carregar_retornos_setoriais_br(dias=int(anos * 260))
-        if ret.empty:
-            return {}
-        ret_sem = (1 + ret.fillna(0.0)).resample("W-FRI").prod() - 1.0
-        tilt = reconstruir_regime_tilt_br(anos=anos)
-        if tilt.empty:
-            return {}
-        return rodar_backtest(ret_sem, tilt, janela_rs=13,
-                              horizontes=(4, 13, 26), min_persistencia=min_persist)
-    except Exception:
-        return {}
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def breadth_atual_br(janela_semanas: int = 10) -> float | None:
-    """Amplitude interna BR: % de setores acima da própria MM (~janela_semanas).
-    None se sem dados."""
-    from utils.setor_series import carregar_retornos_setoriais_br, breadth_setorial
-    ret = carregar_retornos_setoriais_br(dias=260)
-    if ret.empty:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
         return None
-    b = breadth_setorial(ret, janela_mm=int(janela_semanas * 5)).dropna()
-    return float(b.iloc[-1]) if len(b) else None
+
+
+def data_snapshot_br() -> str:
+    """Data em que o snapshot foi gerado (p/ a UI mostrar a defasagem). '' se ausente."""
+    return str(_snapshot_rs().get("data") or "")
 
 
 def divergencias_b_br(macro_context: dict) -> list[dict]:
     """
-    Divergências B setoriais ATUAIS (BR), enriquecidas p/ o "atenção hoje" (M2-4):
-    setor, label, flag `novo` (entrou em B desde o último snapshot diário), e a
-    estatística do quadrante (fwd RS/hit/n). Persiste um snapshot diário em
-    ai_analyses (divergencia_snap) — write-on-read, 1x/dia — p/ detectar transições.
-    NÃO cacheado (efeito colateral + comparação); as fontes internas já são cacheadas.
+    Divergências B setoriais ATUAIS (BR) p/ o "atenção hoje" (M2-4): setor, label,
+    flag `novo` (entrou em B desde o último snapshot diário de estado) e a
+    estatística do quadrante. Custo: só leitura de JSONs pequenos.
     """
-    import json
     from datetime import date
     from utils.setores import LABEL_SETOR
     from utils.divergencia_setorial import DIVERG_B
 
     matriz = divergencias_atuais_br(macro_context)
-    b_hoje = [it for it in matriz if it.get("quadrante") == DIVERG_B]
-    if not b_hoje and not matriz:
+    if not matriz:
         return []
+    b_hoje = [it for it in matriz if it.get("quadrante") == DIVERG_B]
     setores_b = {it["setor"] for it in b_hoje}
     hoje = date.today().isoformat()
 
-    # snapshot diário (freshness): reusa ai_analyses como KV
+    # snapshot diário de ESTADO (só p/ detectar transições) — KV pequeno
     novas: set = set()
     try:
         from database.db import get_ai_analysis, save_ai_analysis
@@ -129,18 +130,15 @@ def divergencias_b_br(macro_context: dict) -> list[dict]:
         pass
 
     _st = stat_para_quadrante(estatistica_divergencias_br(), DIVERG_B, 13) or {}
-    out = []
-    for it in b_hoje:
-        out.append({
-            "setor": it["setor"],
-            "setor_label": LABEL_SETOR.get(it["setor"], it["setor"]),
-            "quadrante": DIVERG_B,
-            "novo": it["setor"] in novas,
-            "hist_media": _st.get("media"),
-            "hist_hit": _st.get("hit_rate"),
-            "hist_n": _st.get("n"),
-        })
-    return out
+    return [{
+        "setor": it["setor"],
+        "setor_label": LABEL_SETOR.get(it["setor"], it["setor"]),
+        "quadrante": DIVERG_B,
+        "novo": it["setor"] in novas,
+        "hist_media": _st.get("media"),
+        "hist_hit": _st.get("hit_rate"),
+        "hist_n": _st.get("n"),
+    } for it in b_hoje]
 
 
 def stat_para_quadrante(estatistica: dict, quadrante: str, horizonte: int = 13) -> dict | None:

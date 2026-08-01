@@ -122,6 +122,26 @@ def main():
             _p("")
             _p("  [save] estatistica persistida no Supabase (backtest_div_v1) — a UI")
             _p("         (Discovery > divergencias) e a IA vao LER isto, sem recomputar.")
+
+            # SNAPSHOT DE RS + BREADTH (custo de EGRESS zero: reusa o ret_diario ja
+            # em memoria). A UI le este JSON minusculo (~2 KB) em vez de puxar o
+            # price_history inteiro (~18 MB/chamada) — foi o que estourou a cota.
+            from utils.setor_series import rs_setorial_atual, breadth_setorial
+            _rs = rs_setorial_atual(ret_diario, janela=63)          # RS ~3 meses
+            _bd_serie = breadth_setorial(ret_diario, janela_mm=50).dropna()   # MM ~10 semanas
+            _snap = {
+                "data": date.today().isoformat(),
+                "rs": {k: round(float(v), 6) for k, v in (_rs or {}).items()},
+                "breadth": (round(float(_bd_serie.iloc[-1]), 2) if len(_bd_serie) else None),
+                "janela_rs_dias": 63,
+            }
+            save_ai_analysis(
+                tipo="divergencia_rs_v1", conteudo=json.dumps(_snap),
+                ticker=None, user_id=None, modelo="snapshot",
+                ttl_horas=24 * 30,
+            )
+            _p(f"  [save] snapshot RS+breadth persistido (divergencia_rs_v1): "
+               f"{len(_snap['rs'])} setores, breadth={_snap['breadth']}")
         except Exception as e:
             _p(f"  [save] FALHA ao persistir: {e}")
 
