@@ -20,10 +20,19 @@ def _p(txt=""):
     print(str(txt).encode("ascii", "replace").decode())
 
 
-def main():
+def _client():
+    """Cliente Supabase: tenta secrets.toml (local) e cai p/ env vars (CI)."""
     try:
         from database.db import get_supabase
-        sb = get_supabase()
+        return get_supabase()
+    except Exception:
+        from scripts.supabase_helper import get_client
+        return get_client()
+
+
+def main():
+    try:
+        sb = _client()
         sb.table("etl_log").select("id").limit(1).execute()
     except Exception as e:
         msg = str(e)

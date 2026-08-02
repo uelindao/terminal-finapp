@@ -56,7 +56,15 @@ jobs:
           pip install --upgrade pip
           pip install requests supabase yfinance pandas numpy python-bcb fredapi beautifulsoup4
 
+      # Gate: se o projeto estiver restrito por cota, PULA o ETL em vez de
+      # falhar em vermelho a cada 2h (o erro 402 nao e um bug do codigo).
+      - name: Verificar Supabase
+        id: check
+        continue-on-error: true
+        run: python scripts/check_supabase.py
+
       - name: Executar sync_br
+        if: steps.check.outcome == 'success'
         run: python scripts/sync_br.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -84,7 +92,13 @@ jobs:
           pip install --upgrade pip
           pip install requests supabase yfinance pandas numpy beautifulsoup4
 
+      - name: Verificar Supabase
+        id: check
+        continue-on-error: true
+        run: python scripts/check_supabase.py
+
       - name: Executar sync_us
+        if: steps.check.outcome == 'success'
         run: python scripts/sync_us.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -114,7 +128,13 @@ jobs:
           pip install --upgrade pip
           pip install requests supabase yfinance pandas numpy
 
+      - name: Verificar Supabase
+        id: check
+        continue-on-error: true
+        run: python scripts/check_supabase.py
+
       - name: Executar sync_price_history
+        if: steps.check.outcome == 'success'
         run: python scripts/sync_price_history.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -145,7 +165,13 @@ jobs:
       # Preenche o setor de tickers novos/faltantes ANTES do backtest (incremental:
       # pula quem ja tem setor -> rapido). continue-on-error: um soluco do yfinance
       # nao pode bloquear o backtest, que roda com os setores ja existentes.
+      - name: Verificar Supabase
+        id: check
+        continue-on-error: true
+        run: python scripts/check_supabase.py
+
       - name: Backfill de setores (incremental)
+        if: steps.check.outcome == 'success'
         continue-on-error: true
         run: python scripts/backfill_setores.py --sleep 0.3
         env:
@@ -153,6 +179,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       - name: Executar backtest de divergencias (--save)
+        if: steps.check.outcome == 'success'
         run: python scripts/backtest_divergencias.py --anos 8 --min-persist 2 --save
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -177,7 +204,13 @@ jobs:
           pip install --upgrade pip
           pip install requests supabase yfinance pandas numpy python-bcb fredapi
 
+      - name: Verificar Supabase
+        id: check
+        continue-on-error: true
+        run: python scripts/check_supabase.py
+
       - name: Executar sync_macro
+        if: steps.check.outcome == 'success'
         run: python scripts/sync_macro.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
