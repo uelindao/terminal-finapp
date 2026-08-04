@@ -62,7 +62,10 @@ from utils.components import busca_global_sidebar
 busca_global_sidebar()
 
 
-init_db()
+if not init_db():
+    st.error("🔌 serviço de dados indisponível (banco fora do ar ou cota do Supabase "
+             "excedida). o app volta sozinho quando o serviço for restabelecido.")
+    st.stop()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
 _user_top_disc = get_current_user() or {}

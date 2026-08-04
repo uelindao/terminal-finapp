@@ -332,9 +332,24 @@ def _criar_admin_padrao():
 # INICIALIZAÇÃO DA BASE DE DADOS
 # ==========================================
 
-def init_db():
+def banco_indisponivel(erro) -> bool:
+    """True se o erro indica banco fora do ar / projeto restrito por cota
+    (402 exceed_egress_quota, indisponibilidade de rede) — e não um bug nosso."""
+    m = str(erro).lower()
+    return any(t in m for t in (
+        "egress", "quota", "402", "restricted", "timeout",
+        "connection", "unavailable", "service for this project",
+    ))
+
+
+def init_db() -> bool:
     """
     Verifica a conexão com Supabase e garante o admin padrão.
+    Retorna True se o banco está operacional, False caso contrário.
+
+    NÃO levanta exceção: o chamador (UI) decide como degradar — mostrar uma tela
+    amigável é melhor que derrubar o app inteiro com traceback quando o projeto
+    Supabase está restrito por cota ou fora do ar.
 
     O schema NÃO é criado automaticamente aqui — execute antes:
         database/migrations/001_initial_schema.sql
@@ -347,12 +362,16 @@ def init_db():
         _criar_admin_padrao()
         _migrar_watchlist_para_default()
         _migrar_portfolio_para_default()
+        return True
     except Exception as e:
-        logger.error(
-            f"[db] falha na inicialização do Supabase: {e}. "
-            "Execute database/migrations/001_initial_schema.sql no Supabase Dashboard."
-        )
-        raise
+        if banco_indisponivel(e):
+            logger.error(f"[db] Supabase indisponível/restrito: {e}")
+        else:
+            logger.error(
+                f"[db] falha na inicialização do Supabase: {e}. "
+                "Execute database/migrations/001_initial_schema.sql no Supabase Dashboard."
+            )
+        return False
 
 
 def _migrar_watchlist_para_default():
@@ -993,8 +1012,14 @@ def get_health_scores():
     health_engine grava scores ao vivo; 10 min corta as releituras por clique
     sem esconder um score recém-calculado por muito tempo.
     """
-    sb = get_supabase()
-    rows = sb.table('health_scores').select('*').execute().data
+    # Degrada em silêncio se o banco estiver fora/restrito — esta função é chamada
+    # em 24 pontos da UI; explodir aqui derrubaria a página inteira.
+    try:
+        sb = get_supabase()
+        rows = sb.table('health_scores').select('*').execute().data or []
+    except Exception as e:
+        logger.warning(f"[db] get_health_scores indisponível: {e}")
+        return []
     # Alias de compatibilidade: updated_at → atualizado_em
     for r in rows:
         r.setdefault('atualizado_em', r.get('updated_at'))

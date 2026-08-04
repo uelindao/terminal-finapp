@@ -271,8 +271,22 @@ from utils.radar import calcular_oportunidades_watchlist
 # 1. configuração da página (tem de ser o primeiro comando)
 st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
 
-# 1.5 CRIAR AS TABELAS NO BANCO DE DADOS ANTES DE QUALQUER COISA (CORREÇÃO PARA A NUVEM)
-init_db()
+# 1.5 CONECTA AO BANCO. Se estiver fora/restrito (ex.: cota do Supabase), mostra
+# uma tela clara em vez de derrubar o app com traceback.
+if not init_db():
+    st.markdown(
+        "<div style='max-width:640px;margin:12vh auto;text-align:center;'>"
+        "<div style='font-size:2.4rem;'>🔌</div>"
+        "<h3 style='margin:.4rem 0;'>serviço de dados indisponível</h3>"
+        "<p style='color:#9aa0a6;line-height:1.6;'>não foi possível conectar ao banco de dados. "
+        "a causa mais comum é a <b>cota mensal do Supabase</b> ter sido excedida — nesse caso o "
+        "projeto fica restrito até o início do próximo ciclo de faturamento.</p>"
+        "<p style='color:#9aa0a6;line-height:1.6;'>verifique o painel do Supabase "
+        "(<i>Organization → Usage</i>). o app volta sozinho assim que o serviço for restabelecido.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.stop()
 popular_watchlist_inicial()
 
 # 2. barreira de segurança multi-usuário

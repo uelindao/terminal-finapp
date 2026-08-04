@@ -56,7 +56,10 @@ except Exception:
 from utils.components import busca_global_sidebar
 busca_global_sidebar()
 garantir_macro_context()
-init_db()
+if not init_db():
+    st.error("🔌 serviço de dados indisponível (banco fora do ar ou cota do Supabase "
+             "excedida). o app volta sozinho quando o serviço for restabelecido.")
+    st.stop()
 
 # Carrega configurações pessoais do usuário (chave de IA, provider, etc.)
 _current_user = get_current_user()
