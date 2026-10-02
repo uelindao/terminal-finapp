@@ -3,6 +3,9 @@
 Terminal de análise financeira construído em Python/Streamlit.  
 Analise ações B3, FIIs e ações EUA com fundamentos, health score e IA.
 
+A interface usa o tema Carbon, navegação por tarefas e layouts adaptados ao celular.
+Veja [as decisões de interface e os fluxos de UX](UI_DESIGN.md).
+
 ---
 
 ## Stack

@@ -418,8 +418,8 @@ def render_cockpit_macro(market: str = "BR") -> None:
 
         def _kpi(lbl, val, cor="var(--text-secondary)"):
             return (
-                f'<div style="display:flex;flex-direction:column;gap:1px;">'
-                f'<span style="font-size:0.56rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">{lbl}</span>'
+                f'<div class="ft-context-kpi">'
+                f'<span style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">{lbl}</span>'
                 f'<span style="font-size:0.86rem;font-weight:600;color:{cor};font-family:var(--font-data,monospace);">{val}</span>'
                 f'</div>'
             )
@@ -463,14 +463,11 @@ def render_cockpit_macro(market: str = "BR") -> None:
             partes.append(_kpi("difusão >meta", f"{_pa}% ({dif_m['acima']}/{dif_m['total']})", _cd))
         partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
 
-        st.markdown(
-            '<div style="display:flex;gap:26px;flex-wrap:wrap;align-items:center;'
-            'background:var(--bg-surface);border:1px solid var(--border-subtle);'
-            'border-left:3px solid var(--accent);border-radius:6px;'
-            'padding:8px 18px;margin-bottom:14px;font-family:var(--font-ui,sans-serif);">'
-            + "".join(partes) +
-            '</div>',
-            unsafe_allow_html=True,
-        )
+        primary = partes[:4] + partes[-1:]
+        details = partes[4:-1]
+        st.markdown('<div class="ft-macro-context">' + ''.join(primary) + '</div>', unsafe_allow_html=True)
+        if details:
+            with st.expander("Detalhes do contexto macro", expanded=False):
+                st.markdown('<div class="ft-macro-context ft-context-details">' + ''.join(details) + '</div>', unsafe_allow_html=True)
     except Exception as e:
         logger.debug(f"[macro_state] render_cockpit_macro falhou: {e}")

@@ -51,7 +51,7 @@ FONTES_DATA: dict[str, dict] = {
 
 # Padrões tipográficos por tema (chaves nos catálogos acima)
 TEMAS_FONTES_DEFAULT: dict[str, dict] = {
-    "dark":     {"titulo": "space_grotesk", "ui": "inter",        "data": "jetbrains_mono"},
+    "dark":     {"titulo": "ibm_plex_sans", "ui": "dm_sans",      "data": "ibm_plex_mono"},
     "navy":     {"titulo": "ibm_plex_sans", "ui": "ibm_plex_sans","data": "ibm_plex_mono"},
     "emerald":  {"titulo": "plus_jakarta",  "ui": "plus_jakarta", "data": "fira_code"},
     "graphite": {"titulo": "dm_sans",       "ui": "dm_sans",      "data": "dm_mono"},
@@ -71,41 +71,41 @@ TEMAS_FONTES_DEFAULT: dict[str, dict] = {
 
 TEMAS: dict[str, dict] = {
 
-    # ── 1. Dark Terminal ──────────────────────────────────────────────────────
-    # Intenção: terminal moderno, preto profundo (próximo das refs 1, 2), acento laranja.
+    # ── 1. Carbon ──────────────────────────────────────────────────────
+    # Intenção: terminal sóbrio, grafite e tipografia legível, com acento lima.
     "dark": {
-        "nome":    "Dark Terminal",
+        "nome":    "Carbon",
         "emoji":   "🖤",
-        "desc":    "preto profundo · acento laranja",
-        "sidebar": "#070811",
+        "desc":    "grafite · contraste suave · acento lima",
+        "sidebar": "#101312",
         "vars": {
-            "--sidebar-bg":     "#070811",
-            "--bg-base":        "#0E0F18",
-            "--bg-surface":     "#17182A",
-            "--bg-elevated":    "#1F2138",
-            "--bg-overlay":     "#28293F",
-            "--border-subtle":  "#262839",
-            "--border-normal":  "#353755",
-            "--border-focus":   "#FF8C00",
-            "--text-primary":   "#F0F2FF",
-            "--text-secondary": "#9CA3B8",
-            "--text-muted":     "#6B7280",
-            "--accent":         "#FF8C00",
-            "--accent-rgb":     "255,140,0",
-            "--accent-hover":   "#FF6B00",
-            "--accent-soft":    "rgba(255,140,0,0.08)",
-            "--accent-border":  "rgba(255,140,0,0.25)",
-            "--bull":           "#10B981",
-            "--bull-soft":      "rgba(16,185,129,0.10)",
-            "--bear":           "#EF4444",
-            "--bear-soft":      "rgba(239,68,68,0.10)",
-            "--amber":          "#F59E0B",
-            "--amber-soft":     "rgba(245,158,11,0.10)",
-            "--info":           "#3B82F6",
-            "--info-soft":      "rgba(59,130,246,0.10)",
+            "--sidebar-bg":     "#101312",
+            "--bg-base":        "#151918",
+            "--bg-surface":     "#1C211F",
+            "--bg-elevated":    "#242A27",
+            "--bg-overlay":     "#2C3430",
+            "--border-subtle":  "#303832",
+            "--border-normal":  "#66766B",
+            "--border-focus":   "#C7F36B",
+            "--text-primary":   "#EDF2EE",
+            "--text-secondary": "#B8C3BC",
+            "--text-muted":     "#98A69D",
+            "--accent":         "#C7F36B",
+            "--accent-rgb":     "199,243,107",
+            "--accent-hover":   "#B4DF5B",
+            "--accent-soft":    "rgba(199,243,107,0.08)",
+            "--accent-border":  "rgba(199,243,107,0.25)",
+            "--bull":           "#73D9AC",
+            "--bull-soft":      "rgba(115,217,172,0.10)",
+            "--bear":           "#F38B89",
+            "--bear-soft":      "rgba(243,139,137,0.10)",
+            "--amber":          "#E6BF74",
+            "--amber-soft":     "rgba(230,191,116,0.10)",
+            "--info":           "#8ABAE0",
+            "--info-soft":      "rgba(138,186,224,0.10)",
             "--radius-sm":      "8px",
-            "--radius-md":      "14px",
-            "--radius-lg":      "18px",
+            "--radius-md":      "8px",
+            "--radius-lg":      "10px",
         },
     },
 
@@ -283,24 +283,24 @@ TEMAS: dict[str, dict] = {
             "--bg-elevated":    "#E8EBF4",
             "--bg-overlay":     "#DDE1EE",
             "--border-subtle":  "#DDE1EE",
-            "--border-normal":  "#C8CDE0",
+            "--border-normal":  "#7E89A3",
             "--border-focus":   "#2563EB",
             "--text-primary":   "#1A1D2E",
             "--text-secondary": "#3B4259",
-            "--text-muted":     "#6F7796",
+            "--text-muted":     "#616B87",
             "--accent":         "#2563EB",
             "--accent-rgb":     "37,99,235",
             "--accent-hover":   "#1D4ED8",
             "--accent-soft":    "rgba(37,99,235,0.08)",
             "--accent-border":  "rgba(37,99,235,0.22)",
-            "--bull":           "#059669",
-            "--bull-soft":      "rgba(5,150,105,0.10)",
-            "--bear":           "#DC2626",
-            "--bear-soft":      "rgba(220,38,38,0.10)",
-            "--amber":          "#D97706",
-            "--amber-soft":     "rgba(217,119,6,0.10)",
-            "--info":           "#0891B2",
-            "--info-soft":      "rgba(8,145,178,0.10)",
+            "--bull":           "#047857",
+            "--bull-soft":      "rgba(4,120,87,0.10)",
+            "--bear":           "#B91C1C",
+            "--bear-soft":      "rgba(185,28,28,0.10)",
+            "--amber":          "#A64B08",
+            "--amber-soft":     "rgba(166,75,8,0.10)",
+            "--info":           "#0E7490",
+            "--info-soft":      "rgba(14,116,144,0.10)",
             "--radius-sm":      "8px",
             "--radius-md":      "14px",
             "--radius-lg":      "18px",
@@ -309,7 +309,7 @@ TEMAS: dict[str, dict] = {
 
     # ── 7. Papel (Bloomberg Print / Apresentação) ─────────────────────────────
     # Intenção: print elegante para apresentação/relatório. Acento laranja
-    # escurecido pra passar WCAG AA sobre creme (era #FF6900 = 2.76; agora #CC5200 = 4.5+).
+    # escurecido pra passar WCAG AA sobre creme (era #FF6900 = 2.76; agora #B84A00 mantém contraste para texto pequeno).
     "papel": {
         "nome":    "Papel",
         "emoji":   "📄",
@@ -324,15 +324,15 @@ TEMAS: dict[str, dict] = {
             "--bg-overlay":     "#E8E4D9",
             "--border-subtle":  "#E5E0D5",
             "--border-normal":  "#CFC9BB",
-            "--border-focus":   "#CC5200",
+            "--border-focus":   "#B84A00",
             "--text-primary":   "#1C1C1E",
             "--text-secondary": "#3C3C3F",
             "--text-muted":     "#6E6E73",
-            "--accent":         "#CC5200",
-            "--accent-rgb":     "204,82,0",
+            "--accent":         "#B84A00",
+            "--accent-rgb":     "184,74,0",
             "--accent-hover":   "#A84300",
-            "--accent-soft":    "rgba(204,82,0,0.08)",
-            "--accent-border":  "rgba(204,82,0,0.28)",
+            "--accent-soft":    "rgba(184,74,0,0.08)",
+            "--accent-border":  "rgba(184,74,0,0.28)",
             "--bull":           "#1A7F4B",
             "--bull-soft":      "rgba(26,127,75,0.10)",
             "--bear":           "#C0392B",
@@ -532,8 +532,8 @@ TOKENS_BASE: dict[str, str] = {
     "--space-8": "40px",
 
     # Tipografia — escala harmônica
-    "--text-xs":   "0.7rem",
-    "--text-sm":   "0.8rem",
+    "--text-xs":   "0.78rem",
+    "--text-sm":   "0.88rem",
     "--text-base": "0.9rem",
     "--text-md":   "1rem",
     "--text-lg":   "1.2rem",
@@ -544,8 +544,8 @@ TOKENS_BASE: dict[str, str] = {
     # Letter-spacing — uppercase labels estilo Bloomberg
     "--ls-tight":  "-0.01em",
     "--ls-normal": "0",
-    "--ls-wide":   "0.08em",
-    "--ls-wider":  "0.12em",
+    "--ls-wide":   "0.035em",
+    "--ls-wider":  "0.065em",
 
     # Motion
     "--motion-fast":   "120ms",
@@ -555,7 +555,7 @@ TOKENS_BASE: dict[str, str] = {
     "--ease-in-out":   "cubic-bezier(.65,0,.35,1)",
 
     # Radius extra (xl) para cards grandes / modais — cada tema mantém sm/md/lg próprios
-    "--radius-xl": "20px",
+    "--radius-xl": "10px",
 
     # Glass blur (compartilhado — surface-glass varia por tema)
     "--glass-blur": "blur(16px) saturate(160%)",
@@ -565,7 +565,7 @@ TOKENS_BASE: dict[str, str] = {
 # Paletas de séries para charts (Plotly) — 8 cores qualitativas por tema.
 # Pensadas para boa separação visual e razoável para daltonismo.
 CHART_PALETTES: dict[str, list[str]] = {
-    "dark":     ["#FF8C00", "#3B82F6", "#10B981", "#A855F7", "#F59E0B", "#06B6D4", "#EC4899", "#94A3B8"],
+    "dark":     ["#C7F36B", "#8ABAE0", "#73D9AC", "#E6BF74", "#F38B89", "#82CDD2", "#C2AFE4", "#98A69D"],
     "navy":     ["#F97316", "#38BDF8", "#22C55E", "#A78BFA", "#FBBF24", "#06B6D4", "#F472B6", "#94A3B8"],
     "emerald":  ["#22E47C", "#34D399", "#60A5FA", "#FBBF24", "#FB7185", "#A78BFA", "#06B6D4", "#90B89F"],
     "graphite": ["#60A5FA", "#818CF8", "#4ADE80", "#FBBF24", "#F87171", "#A78BFA", "#06B6D4", "#A3A6B5"],
@@ -669,7 +669,7 @@ def _compute_derived(vars: dict, is_light: bool, tema_id: str) -> dict[str, str]
         "--bg-hover":  _rgba(vars.get("--text-primary", "#F0F2FF"), 0.06),
     }
 
-    return {**derived, **shadows, **chart_vars}
+    return {**derived, **shadows, **chart_vars, "--ink-on-accent": "#FFFFFF" if is_light else "#11150E"}
 
 
 def get_design_tokens() -> dict[str, str]:
@@ -843,7 +843,7 @@ def get_tema_css() -> str:
         background-color: {t['--bg-base']} !important;
         color: {t['--text-primary']} !important;
     }}
-    .stMarkdown p, .stMarkdown li, .stMarkdown span,
+    .stMarkdown p, .stMarkdown li,
     [data-testid="stText"], [data-testid="stCaptionContainer"],
     label, .stSelectbox label, .stTextInput label,
     .stSlider label, .stNumberInput label, .stRadio label,
@@ -927,45 +927,15 @@ def get_tema_css() -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_theme_switcher_sidebar() -> None:
-    """Selectbox de tema na sidebar com preview de paleta. Escuros e Claros agrupados."""
+    """Preferências secundárias ficam recolhidas, mantendo a busca acessível."""
     ativo = get_tema_ativo()
-
-    st.sidebar.markdown(
-        '<div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;'
-        'color:var(--text-muted);font-family:var(--font-ui);'
-        'padding:0 4px;margin-bottom:4px;margin-top:12px;">tema</div>',
-        unsafe_allow_html=True,
-    )
-
-    idx = TEMAS_ORDER.index(ativo) if ativo in TEMAS_ORDER else 0
-    escolha = st.sidebar.selectbox(
-        "Tema",
-        options=TEMAS_ORDER,
-        format_func=lambda tid: (
-            f"{TEMAS[tid]['emoji']}  {TEMAS[tid]['nome']}"
-            + ("  ·  claro" if TEMAS[tid].get("is_light") else "")
-        ),
-        index=idx,
-        label_visibility="collapsed",
-        key="_theme_selectbox",
-    )
-
-    if escolha != ativo:
-        set_tema(escolha)
-        st.rerun()
-
-    # Preview de cores do tema ativo
-    v = TEMAS[ativo]["vars"]
-    dots = "".join(
-        f'<div style="width:7px;height:7px;border-radius:50%;background:{v[c]};'
-        f'flex-shrink:0;border:1px solid rgba(0,0,0,0.1);"></div>'
-        for c in ("--accent", "--bull", "--bear", "--info")
-    )
-    st.sidebar.markdown(
-        f'<div style="display:flex;align-items:center;gap:5px;padding:2px 4px 10px;">'
-        f'{dots}'
-        f'<span style="font-size:.58rem;color:var(--text-muted);font-family:var(--font-ui);'
-        f'margin-left:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
-        f'{TEMAS[ativo]["desc"]}</span></div>',
-        unsafe_allow_html=True,
-    )
+    with st.sidebar.expander("Aparência", expanded=False):
+        escolha = st.selectbox(
+            "Tema da interface", options=TEMAS_ORDER,
+            format_func=lambda tid: TEMAS[tid]["nome"] + (" · claro" if TEMAS[tid].get("is_light") else ""),
+            index=TEMAS_ORDER.index(ativo), key="_theme_selectbox",
+        )
+        st.caption("Personalize as fontes em Configurações → Aparência.")
+        if escolha != ativo:
+            set_tema(escolha)
+            st.rerun()

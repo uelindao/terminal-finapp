@@ -101,28 +101,28 @@ def _template_para_tema(tema_id: str) -> "go.layout.Template":
             colorway      = palette,
             paper_bgcolor = surface,
             plot_bgcolor  = surface,
-            font          = dict(family=font_ui, color=muted, size=11),
+            font          = dict(family=font_ui, color=muted, size=12),
             hovermode     = "x unified",
             hoverlabel    = dict(
                 bgcolor    = elev,
                 bordercolor= border,
-                font       = dict(family=font_ui, color=text, size=11),
+                font       = dict(family=font_ui, color=text, size=12),
             ),
             legend = dict(
                 orientation="h", yanchor="bottom", y=1.02,
                 xanchor="right", x=1,
-                font=dict(color=muted, size=10, family=font_ui),
+                font=dict(color=muted, size=11, family=font_ui),
                 bgcolor="rgba(0,0,0,0)", borderwidth=0,
             ),
             xaxis = dict(
                 showgrid=True, gridcolor=border, gridwidth=1,
                 zeroline=False, linecolor=border,
-                tickfont=dict(family=font_ui, size=10, color=muted),
+                tickfont=dict(family=font_ui, size=11, color=muted),
             ),
             yaxis = dict(
                 showgrid=True, gridcolor=border, gridwidth=1,
                 zeroline=False, linecolor=border,
-                tickfont=dict(family=font_ui, size=10, color=muted),
+                tickfont=dict(family=font_ui, size=11, color=muted),
             ),
             colorscale = dict(
                 # bear (vermelho) -> muted -> bull (verde) — divergente
@@ -170,19 +170,19 @@ def base_layout(height: int = 400, title: str = "") -> dict:
     layout = dict(
         paper_bgcolor=c["surface"],
         plot_bgcolor=c["surface"],
-        font=dict(family=fu, color=c["muted"], size=11),
+        font=dict(family=fu, color=c["muted"], size=12),
         margin=dict(l=0, r=0, t=30 if title else 12, b=0),
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor=c["elevated"],
             bordercolor=c["border"],
-            font=dict(family=fu, color=c["text"], size=11),
+            font=dict(family=fu, color=c["text"], size=12),
         ),
         legend=dict(
             orientation="h",
             yanchor="bottom", y=1.02,
             xanchor="right",  x=1,
-            font=dict(color=c["muted"], size=10, family=fu),
+            font=dict(color=c["muted"], size=11, family=fu),
             bgcolor="rgba(0,0,0,0)", borderwidth=0,
         ),
         height=height,
@@ -190,7 +190,7 @@ def base_layout(height: int = 400, title: str = "") -> dict:
     if title:
         layout["title"] = dict(
             text=title,
-            font=dict(color=c["muted"], size=11, family=fd),
+            font=dict(color=c["muted"], size=12, family=fd),
             x=0,
         )
     return layout
@@ -206,7 +206,7 @@ def _axis() -> dict:
         gridwidth=1,
         zeroline=False,
         linecolor=c["border"],
-        tickfont=dict(family=fu, size=10, color=c["muted"]),
+        tickfont=dict(family=fu, size=11, color=c["muted"]),
     )
 
 
@@ -218,11 +218,11 @@ def _axis_base_compat():
 AXIS_BASE = dict(
     showgrid=True, gridcolor="#2A2C3E", gridwidth=1,
     zeroline=False, linecolor="#353755",
-    tickfont=dict(family="Inter, system-ui, sans-serif", size=10, color="#4A4D6A"),
+    tickfont=dict(family="Inter, system-ui, sans-serif", size=11, color="#4A4D6A"),
 )
 LAYOUT_BASE = dict(
     paper_bgcolor="#13141E", plot_bgcolor="#13141E",
-    font=dict(family="Inter, system-ui, sans-serif", color="#8B8FA8", size=11),
+    font=dict(family="Inter, system-ui, sans-serif", color="#8B8FA8", size=12),
     margin=dict(l=0, r=0, t=30, b=0),
     hovermode="x unified",
 )

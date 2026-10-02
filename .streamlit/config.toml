@@ -13,10 +13,10 @@
 
 [theme]
 base                     = "dark"
-primaryColor             = "#FF8C00"
-backgroundColor          = "#13141E"
-secondaryBackgroundColor = "#1C1D2B"
-textColor                = "#F0F2FF"
+primaryColor             = "#C7F36B"
+backgroundColor          = "#151918"
+secondaryBackgroundColor = "#1C211F"
+textColor                = "#EDF2EE"
 
 [browser]
 gatherUsageStats = false

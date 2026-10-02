@@ -56,9 +56,14 @@ _user_top_macro = get_current_user() or {}
 topbar(
     breadcrumb_itens=[("⚡ finterminal", "/"), ("macro", None)],
     user_name=_user_top_macro.get('username', '') or _user_top_macro.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
 )
-page_header("🌍 ambiente macroeconómico", "monitoramento de juros, inflação, atividade e apetite ao risco global.")
+page_header("Cenário macro", "Entenda o ciclo econômico e o contexto por trás das suas decisões.")
+
+_SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
+                 "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
+_secao = section_selector(_SECOES_MACRO, key="macro_secao")
+
 
 # Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
 try:
@@ -1064,7 +1069,7 @@ def _render_evento_card(evento: dict, key_prefix: str = "ev"):
                 st.markdown(
                     f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                     f'border-left:3px solid {cor_cat};border-radius:4px;padding:8px 12px;margin-bottom:4px;">'
-                    f'<span style="font-size:0.7rem;color:{cor_cat};font-weight:bold;text-transform:uppercase;">{label_cat}</span>'
+                    f'<span style="font-size:0.78rem;color:{cor_cat};font-weight:bold;text-transform:uppercase;">{label_cat}</span>'
                     f'<span style="font-size:0.8rem;margin-left:6px;">{texto}</span>'
                     f'</div>', unsafe_allow_html=True
                 )
@@ -1172,9 +1177,7 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
 # página isso dispara fear&greed (5 downloads), correlações (16 tickers×2y),
 # ciclo e painel global de uma vez. Trocado por um seletor persistente que
 # renderiza SÓ a seção ativa (os blocos `with tab_X:` viraram `if _secao == ...`).
-_SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
-                 "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
-_secao = section_selector(_SECOES_MACRO, key="macro_secao")
+
 
 if _secao == "🌐 painel global":
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
@@ -1184,7 +1187,7 @@ if _secao == "🌐 painel global":
         
         col_espaco, col_btn, col_filtro = st.columns([5, 2, 3])
         with col_btn:
-            if st.button("🔄 recarregar dados", use_container_width=True):
+            if st.button("Recarregar dados", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
         with col_filtro:
@@ -1267,7 +1270,7 @@ if _secao == "🌐 painel global":
             }
 
         section_title("leitura macroeconômica (ai synthesis)")
-        if st.button("gerar relatório do cenário atual >>", type="primary"):
+        if st.button("Gerar relatório do cenário atual >>", type="primary"):
             with st.spinner("processando vetores de juros, inflação e risco global..."):
                 _prompt_macro = (
                     "dados macroeconômicos atuais:\n"
@@ -3123,10 +3126,10 @@ if _secao == "🌐 painel global":
                     st.markdown(
                         f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                         f'border-top:3px solid {_t["cor"]};border-radius:6px;'
-                        f'padding:12px;margin-bottom:8px;font-family:var(--font-ui,sans-serif);font-size:0.7rem;">'
+                        f'padding:12px;margin-bottom:8px;font-family:var(--font-ui,sans-serif);font-size:0.78rem;">'
                         f'<div style="color:{_t["cor"]};font-weight:bold;font-size:0.75rem;margin-bottom:6px;">'
                         f'{_t["empresa"]}</div>'
-                        f'<div style="color:var(--text-muted);font-size:0.62rem;margin-bottom:4px;">{_t["logica"]}</div>'
+                        f'<div style="color:var(--text-muted);font-size:0.78rem;margin-bottom:4px;">{_t["logica"]}</div>'
                         f'<div style="color:var(--text-secondary);margin-bottom:4px;">'
                         f'{_t["comm_nome"]}: <span style="color:var(--text-primary);">'
                         f'{"us${:,.1f}".format(_preco_comm) if _preco_comm else "n/d"}</span></div>'
@@ -3136,7 +3139,7 @@ if _secao == "🌐 painel global":
                         f'<div style="color:var(--text-secondary);">ebitda implícito: '
                         f'<span style="color:{"var(--bull)" if (_impacto_ebitda or 0) > 0 else "var(--bear)"};">'
                         f'{"R${:+.1f}bi".format(_impacto_ebitda) if _impacto_ebitda is not None else "n/d"}</span></div>'
-                        f'<div style="color:var(--text-muted);font-size:0.58rem;margin-top:6px;">{_t["nota"]}</div>'
+                        f'<div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px;">{_t["nota"]}</div>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
@@ -3263,7 +3266,7 @@ if _secao == "🔄 ciclo econômico":
                 f'margin-bottom:12px;">'
 
                 f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.65rem;color:var(--text-muted);'
+                f'font-size:0.78rem;color:var(--text-muted);'
                 f'text-transform:uppercase;'
                 f'margin-bottom:4px;">'
                 f'{_pais} — fase do ciclo</div>'
@@ -3278,7 +3281,7 @@ if _secao == "🔄 ciclo econômico":
                 f'{_dados_f["label"].upper()}</div>'
 
                 f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.7rem;color:var(--text-muted);'
+                f'font-size:0.78rem;color:var(--text-muted);'
                 f'line-height:1.6;margin-bottom:10px;">'
                 f'{_dados_f["descricao"]}</div>'
 
@@ -3287,7 +3290,7 @@ if _secao == "🔄 ciclo econômico":
                 f'padding-top:8px;">'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.6rem;color:var(--text-muted);'
+                f'<div style="font-size:0.78rem;color:var(--text-muted);'
                 f'text-transform:uppercase;">confiança</div>'
                 f'<div style="font-family:var(--font-data,monospace);'
                 f'color:{_cor_f};font-weight:600;">'
@@ -3295,7 +3298,7 @@ if _secao == "🔄 ciclo econômico":
                 f'</div>'
 
                 f'<div style="text-align:center;">'
-                f'<div style="font-size:0.6rem;color:var(--text-muted);'
+                f'<div style="font-size:0.78rem;color:var(--text-muted);'
                 f'text-transform:uppercase;">indicadores</div>'
                 f'<div style="font-family:var(--font-data,monospace);'
                 f'color:var(--text-secondary);">{_n_ind} usados</div>'
@@ -3331,7 +3334,7 @@ if _secao == "🔄 ciclo econômico":
                     f'align-items:center;gap:8px;'
                     f'margin-bottom:4px;">'
                     f'<div style="font-family:var(--font-ui,sans-serif);'
-                    f'font-size:0.65rem;color:var(--text-muted);'
+                    f'font-size:0.78rem;color:var(--text-muted);'
                     f'min-width:70px;">{_fn}</div>'
                     f'<div style="flex:1;background:var(--bg-elevated,#111);'
                     f'border-radius:2px;height:6px;">'
@@ -3340,7 +3343,7 @@ if _secao == "🔄 ciclo econômico":
                     f'width:{_sv}%;"></div>'
                     f'</div>'
                     f'<div style="font-family:var(--font-data,monospace);'
-                    f'font-size:0.65rem;'
+                    f'font-size:0.78rem;'
                     f'color:{"var(--accent)" if _destaque else "var(--text-muted)"};'
                     f'min-width:30px;text-align:right;">'
                     f'{_sv}%</div>'
@@ -3397,7 +3400,7 @@ if _secao == "🔄 ciclo econômico":
     with _ind_cols[0]:
         st.markdown(
             '<div style="font-family:var(--font-ui,sans-serif);'
-            'font-size:0.68rem;color:var(--accent);'
+            'font-size:0.78rem;color:var(--accent);'
             'margin-bottom:8px;">🇧🇷 indicadores br</div>',
             unsafe_allow_html=True,
         )
@@ -3415,7 +3418,7 @@ if _secao == "🔄 ciclo econômico":
                 f'justify-content:space-between;'
                 f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
                 f'<span style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.68rem;color:var(--text-muted);">{_lbl}</span>'
+                f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
                 f'<span style="font-family:var(--font-data,monospace);'
                 f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
                 f'</div>',
@@ -3425,7 +3428,7 @@ if _secao == "🔄 ciclo econômico":
     with _ind_cols[1]:
         st.markdown(
             '<div style="font-family:var(--font-ui,sans-serif);'
-            'font-size:0.68rem;color:var(--accent);'
+            'font-size:0.78rem;color:var(--accent);'
             'margin-bottom:8px;">🇺🇸 indicadores eua</div>',
             unsafe_allow_html=True,
         )
@@ -3443,7 +3446,7 @@ if _secao == "🔄 ciclo econômico":
                 f'justify-content:space-between;'
                 f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
                 f'<span style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.68rem;color:var(--text-muted);">{_lbl}</span>'
+                f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
                 f'<span style="font-family:var(--font-data,monospace);'
                 f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
                 f'</div>',
@@ -3463,7 +3466,7 @@ if _secao == "🔄 ciclo econômico":
         with _col_r:
             st.markdown(
                 f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.68rem;color:{_dados_f["cor"]};'
+                f'font-size:0.78rem;color:{_dados_f["cor"]};'
                 f'margin-bottom:6px;font-weight:600;">'
                 f'{_pais} — {_dados_f["label"]}</div>',
                 unsafe_allow_html=True,
@@ -3475,7 +3478,7 @@ if _secao == "🔄 ciclo econômico":
             )
 
             st.markdown(
-                '<div style="font-size:0.6rem;color:var(--bull);'
+                '<div style="font-size:0.78rem;color:var(--bull);'
                 'text-transform:uppercase;margin-bottom:3px;">'
                 '✅ favorecidos</div>',
                 unsafe_allow_html=True,
@@ -3489,7 +3492,7 @@ if _secao == "🔄 ciclo econômico":
                 )
 
             st.markdown(
-                '<div style="font-size:0.6rem;color:var(--bear);'
+                '<div style="font-size:0.78rem;color:var(--bear);'
                 'text-transform:uppercase;margin:8px 0 3px;">'
                 '✗ evitar</div>',
                 unsafe_allow_html=True,
@@ -3537,7 +3540,7 @@ if _secao == "🔄 ciclo econômico":
     # ── Análise IA do ciclo ───────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button(
-        "🧠 ia: análise profunda do ciclo econômico",
+        "Ia: análise profunda do ciclo econômico",
         type="primary",
         use_container_width=True,
         key="btn_ia_ciclo",
@@ -3699,7 +3702,7 @@ if _secao == "🔭 overlay macro × preços":
     ticker_input = ticker_manual_ov if ticker_manual_ov else (ticker_from_label(selecao_ov) or "PETR4.SA")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("gerar overlay macro", type="primary", use_container_width=True):
+    if st.button("Gerar overlay macro", type="primary", use_container_width=True):
         if not ticker_input or ticker_input.startswith("─"):
             st.warning("selecione um ativo válido para iniciar a análise.")
         else:

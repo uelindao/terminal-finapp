@@ -51,10 +51,10 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
     if step == 0:
         st.markdown(
             '<div style="text-align:center; padding:32px 0;">'
-            '<div style="font-family:Courier New; font-size:2rem; '
-            'color:#FF9900; font-weight:bold;">⚡ bem-vindo ao finterminal</div>'
-            '<div style="font-family:Courier New; font-size:0.88rem; '
-            'color:#555; margin-top:12px; line-height:1.8;">'
+            '<div style="font-family:var(--font-ui); font-size:2rem; '
+            'color:var(--accent); font-weight:bold;">⚡ bem-vindo ao finterminal</div>'
+            '<div style="font-family:var(--font-ui); font-size:0.88rem; '
+            'color:var(--text-secondary); margin-top:12px; line-height:1.8;">'
             'seu terminal de análise financeira pessoal.<br>'
             'vamos configurar sua watchlist em 2 passos simples.'
             '</div>'
@@ -75,20 +75,20 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
         for icone, titulo, descr in features:
             st.markdown(
                 f'<div style="display:flex; gap:12px; align-items:center; '
-                f'padding:8px 0; border-bottom:1px solid #111;">'
+                f'padding:8px 0; border-bottom:1px solid var(--border-subtle);">'
                 f'<span style="font-size:1.2rem;">{icone}</span>'
                 f'<div>'
-                f'<span style="font-family:Courier New; font-size:0.78rem; '
-                f'color:#FF9900; text-transform:uppercase;">{titulo}</span>'
-                f'<span style="font-family:Courier New; font-size:0.75rem; '
-                f'color:#555; margin-left:8px;">{descr}</span>'
+                f'<span style="font-family:var(--font-ui); font-size:0.78rem; '
+                f'color:var(--accent); text-transform:uppercase;">{titulo}</span>'
+                f'<span style="font-family:var(--font-ui); font-size:0.85rem; '
+                f'color:var(--text-secondary); margin-left:8px;">{descr}</span>'
                 f'</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("começar →", type="primary",
+        if st.button("Começar →", type="primary",
                      use_container_width=True, key="ob_comecar"):
             st.session_state['onboarding_step'] = 1
             st.rerun()
@@ -96,8 +96,8 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
     # ── STEP 1: ADICIONAR PRIMEIRO ATIVO ────────────────────────────────────
     elif step == 1:
         st.markdown(
-            '<div style="font-family:Courier New; font-size:0.88rem; '
-            'color:#555; margin-bottom:20px;">'
+            '<div style="font-family:var(--font-ui); font-size:0.88rem; '
+            'color:var(--text-secondary); margin-bottom:20px;">'
             'escolha um ponto de partida ou adicione manualmente. '
             'você pode modificar sua watchlist a qualquer momento.'
             '</div>',
@@ -112,19 +112,19 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
             with cols_pack[i]:
                 ativos_str = ", ".join([t.replace('.SA', '') for t in pack['tickers']])
                 is_sel     = st.session_state.get('onboarding_pack') == key
-                borda_cor  = "#FF9900" if is_sel else "#1e1e1e"
+                borda_cor  = "var(--accent)" if is_sel else "var(--border-subtle)"
                 st.markdown(
-                    f'<div style="background:#0d0d0d; border:1px solid {borda_cor}; '
-                    f'border-top:2px solid #FF9900; border-radius:4px; '
+                    f'<div style="background:var(--bg-surface); border:1px solid {borda_cor}; '
+                    f'border-top:2px solid var(--accent); border-radius:4px; '
                     f'text-align:center; min-height:120px; padding:12px; '
                     f'margin-bottom:6px;">'
-                    f'<div style="font-family:Courier New; font-size:0.82rem; '
-                    f'color:#FF9900; font-weight:bold; margin-bottom:4px;">'
+                    f'<div style="font-family:var(--font-ui); font-size:0.82rem; '
+                    f'color:var(--accent); font-weight:bold; margin-bottom:4px;">'
                     f'{pack["label"]}</div>'
-                    f'<div style="font-family:Courier New; font-size:0.7rem; '
-                    f'color:#555; margin-bottom:6px;">{pack["descr"]}</div>'
-                    f'<div style="font-family:Courier New; font-size:0.65rem; '
-                    f'color:#333;">{ativos_str}</div>'
+                    f'<div style="font-family:var(--font-ui); font-size:0.82rem; '
+                    f'color:var(--text-secondary); margin-bottom:6px;">{pack["descr"]}</div>'
+                    f'<div style="font-family:var(--font-ui); font-size:0.78rem; '
+                    f'color:var(--text-muted);">{ativos_str}</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -173,7 +173,7 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
 
         with col_ob2:
             if st.button(
-                "adicionar manualmente e continuar →",
+                "Adicionar manualmente e continuar →",
                 type="secondary",
                 use_container_width=True,
                 disabled=not ticker_manual,
@@ -195,11 +195,11 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
         st.markdown(
             '<div style="text-align:center; padding:32px 0;">'
             '<div style="font-size:3rem;">✅</div>'
-            '<div style="font-family:Courier New; font-size:1.4rem; '
+            '<div style="font-family:var(--font-ui); font-size:1.4rem; '
             'color:#00C853; font-weight:bold; margin-top:12px;">'
             'watchlist configurada!</div>'
-            '<div style="font-family:Courier New; font-size:0.82rem; '
-            'color:#555; margin-top:8px; line-height:1.8;">'
+            '<div style="font-family:var(--font-ui); font-size:0.82rem; '
+            'color:var(--text-secondary); margin-top:8px; line-height:1.8;">'
             'os health scores serão calculados em alguns instantes.<br>'
             'explore o menu lateral para acessar todas as ferramentas.'
             '</div>'
@@ -221,7 +221,7 @@ def render_onboarding(user_id: int, watchlist_id: int) -> bool:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button("ir para a watchlist →", type="primary",
+        if st.button("Ir para a watchlist →", type="primary",
                      use_container_width=True, key="ob_finalizar"):
             from database.db import marcar_onboarding_completo
             marcar_onboarding_completo(user_id)

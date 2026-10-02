@@ -4,7 +4,7 @@ from utils.auth   import require_auth, get_current_user, render_user_badge, logo
 from utils.style  import aplicar_tema
 from utils.components import (
     page_header, section_title, section_selector, metric_card, status_card, empty_state, topbar,
-    portfolio_kpis, info_box, inject_keyboard_shortcuts,
+    portfolio_kpis, info_box, inject_keyboard_shortcuts, confirm_action,
 )
 from utils.ai_client import PROVIDERS
 from database.db import (
@@ -43,9 +43,9 @@ _user_top_cfg = get_current_user() or {}
 topbar(
     breadcrumb_itens=[("⚡ finterminal", "/"), ("configurações", None)],
     user_name=_user_top_cfg.get('username', '') or _user_top_cfg.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
 )
-page_header("⚙️ configurações", "conta · watchlists · portfólios · ia · administração")
+page_header("Configurações", "Organize sua conta, suas listas e as preferências do terminal.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
@@ -53,7 +53,9 @@ page_header("⚙️ configurações", "conta · watchlists · portfólios · ia 
 # LAZY RENDERING (P4-1): seletor persistente no lugar de st.tabs — renderiza só a
 # seção ativa. Abas independentes (verificado por AST: sem vazamento de variável).
 _SECOES_C = ["👤 minha conta", "⭐ watchlists", "💼 portfólios", "🔔 alertas",
-             "🤖 minha ia", "🎨 aparência", "🗄️ backfill", "👑 administração"]
+             "🤖 minha ia", "🎨 aparência"]
+if is_admin:
+    _SECOES_C += ["🗄️ backfill", "👑 administração"]
 _secao_c = section_selector(_SECOES_C, key="config_secao")
 
 
@@ -102,7 +104,7 @@ if _secao_c == "👤 minha conta":
             with s3:
                 conf_senha  = st.text_input("confirmar:", type="password", key="cfg_s_conf")
 
-            if st.form_submit_button("🔒 alterar senha", type="primary"):
+            if st.form_submit_button("Alterar senha", type="primary"):
                 if not senha_atual or not nova_senha:
                     st.error("preencha todos os campos.")
                 elif nova_senha != conf_senha:
@@ -154,7 +156,7 @@ if _secao_c == "👤 minha conta":
     ])
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🚪 encerrar sessão", type="secondary"):
+    if st.button("Encerrar sessão", type="secondary"):
         logout()  # revoga token no banco e limpa session_state
 
 
@@ -167,7 +169,7 @@ if _secao_c == "⭐ watchlists":
     wls          = listar_watchlists()
     wl_padrao_id = get_watchlist_padrao()
 
-    with st.expander("➕ criar nova watchlist", expanded=False):
+    with st.expander("Criar nova watchlist", expanded=False):
         with st.form("form_criar_wl"):
             c1, c2, c3 = st.columns([3, 1, 1])
             with c1:
@@ -178,7 +180,7 @@ if _secao_c == "⭐ watchlists":
                 nova_cor_wl_criar   = st.color_picker("cor", value="#FF9900")
             nova_desc_wl_criar = st.text_area("descrição (opcional)", height=60)
 
-            if st.form_submit_button("✅ criar watchlist", use_container_width=True, type="primary"):
+            if st.form_submit_button("Criar watchlist", use_container_width=True, type="primary"):
                 if not novo_nome_wl_criar.strip():
                     st.error("informe um nome para a watchlist.")
                 else:
@@ -214,7 +216,7 @@ if _secao_c == "⭐ watchlists":
                             nova_cor_wl = st.color_picker("cor", value=wl.get('cor','#FF9900'), key=f"cr_wl_{wl['id']}")
                         nova_desc_wl = st.text_area("descrição", value=wl.get('descricao',''), height=60, key=f"dc_wl_{wl['id']}")
 
-                        if st.form_submit_button("💾 salvar", use_container_width=True):
+                        if st.form_submit_button("Salvar", use_container_width=True):
                             if not novo_nome_wl.strip():
                                 st.error("nome não pode ser vazio.")
                             else:
@@ -228,7 +230,7 @@ if _secao_c == "⭐ watchlists":
                 with col_acoes:
                     st.markdown("**ações**")
                     if not is_padrao:
-                        if st.button("⭐ definir padrão", key=f"pad_wl_{wl['id']}", use_container_width=True):
+                        if st.button("Definir padrão", key=f"pad_wl_{wl['id']}", use_container_width=True):
                             definir_watchlist_padrao(wl['id'])
                             st.success(f"'{wl['nome']}' definida como padrão.")
                             st.rerun()
@@ -239,10 +241,9 @@ if _secao_c == "⭐ watchlists":
                         )
                     st.markdown("")
                     if wl.get('total_ativos', 0) == 0:
-                        if st.button("🗑️ deletar", key=f"del_wl_{wl['id']}", use_container_width=True, type="secondary"):
-                            deletar_watchlist(wl['id'])
-                            st.warning(f"watchlist '{wl['nome']}' removida.")
-                            st.rerun()
+                        if st.button("Deletar", key=f"del_wl_{wl['id']}", use_container_width=True, type="secondary"):
+                            confirm_action("Remover watchlist?", f"A watchlist '{wl['nome']}' será removida.",
+                                           lambda item_id=wl['id']: deletar_watchlist(item_id), key=f"delete_watchlist_{wl['id']}")
                     else:
                         st.caption(f"remova os {wl.get('total_ativos')} ativos antes de deletar.")
 
@@ -256,7 +257,7 @@ if _secao_c == "💼 portfólios":
     pfs          = listar_portfolios()
     pf_padrao_id = get_portfolio_padrao()
 
-    with st.expander("➕ criar novo portfólio", expanded=False):
+    with st.expander("Criar novo portfólio", expanded=False):
         with st.form("form_criar_pf"):
             pc1, pc2, pc3 = st.columns([3, 1, 1])
             with pc1:
@@ -267,7 +268,7 @@ if _secao_c == "💼 portfólios":
                 nova_cor_pf_criar   = st.color_picker("cor", value="#3b82f6")
             nova_desc_pf_criar = st.text_area("descrição (opcional)", height=60)
 
-            if st.form_submit_button("✅ criar portfólio", use_container_width=True, type="primary"):
+            if st.form_submit_button("Criar portfólio", use_container_width=True, type="primary"):
                 if not novo_nome_pf_criar.strip():
                     st.error("informe um nome para o portfólio.")
                 else:
@@ -303,7 +304,7 @@ if _secao_c == "💼 portfólios":
                             nova_cor_pf = st.color_picker("cor", value=pf.get('cor','#FF9900'), key=f"cr_pf_{pf['id']}")
                         nova_desc_pf = st.text_area("descrição", value=pf.get('descricao',''), height=60, key=f"dc_pf_{pf['id']}")
 
-                        if st.form_submit_button("💾 salvar", use_container_width=True):
+                        if st.form_submit_button("Salvar", use_container_width=True):
                             if not novo_nome_pf.strip():
                                 st.error("nome não pode ser vazio.")
                             else:
@@ -317,7 +318,7 @@ if _secao_c == "💼 portfólios":
                 with col_acoes_pf:
                     st.markdown("**ações**")
                     if not is_padrao:
-                        if st.button("⭐ definir padrão", key=f"pad_pf_{pf['id']}", use_container_width=True):
+                        if st.button("Definir padrão", key=f"pad_pf_{pf['id']}", use_container_width=True):
                             definir_portfolio_padrao(pf['id'])
                             st.success(f"'{pf['nome']}' definido como padrão.")
                             st.rerun()
@@ -328,10 +329,9 @@ if _secao_c == "💼 portfólios":
                         )
                     st.markdown("")
                     if pf.get('total_ativos', 0) == 0:
-                        if st.button("🗑️ deletar", key=f"del_pf_{pf['id']}", use_container_width=True, type="secondary"):
-                            deletar_portfolio(pf['id'])
-                            st.warning(f"portfólio '{pf['nome']}' removido.")
-                            st.rerun()
+                        if st.button("Deletar", key=f"del_pf_{pf['id']}", use_container_width=True, type="secondary"):
+                            confirm_action("Remover carteira?", f"A carteira '{pf['nome']}' será removida.",
+                                           lambda item_id=pf['id']: deletar_portfolio(item_id), key=f"delete_portfolio_{pf['id']}")
                     else:
                         st.caption(f"remova os {pf.get('total_ativos')} ativos antes de deletar.")
 
@@ -381,12 +381,12 @@ if _secao_c == "🔔 alertas":
             inc_alertas   = st.checkbox("alertas de venda ativos", value=True)
             inc_benchmark = st.checkbox("comparação com benchmark", value=False)
 
-            if st.form_submit_button("💾 salvar preferências", use_container_width=True, type="primary"):
+            if st.form_submit_button("Salvar preferências", use_container_width=True, type="primary"):
                 st.session_state['email_relatorio']    = email_input
                 st.session_state['freq_relatorio_idx'] = freq_opcoes.index(frequencia)
                 st.success("✅ preferências salvas!")
 
-        if st.button("📤 enviar relatório agora", use_container_width=True):
+        if st.button("Enviar relatório agora", use_container_width=True):
             email_destino = st.session_state.get('email_relatorio', email_salvo)
             if not email_destino:
                 st.error("configure um e-mail acima antes de enviar.")
@@ -427,10 +427,10 @@ if _secao_c == "🔔 alertas":
                     f'<div style="display:flex; justify-content:space-between;">'
                     f'<span style="font-family:var(--font-data); font-size:0.80rem;'
                     f' color:var(--text-secondary);">📅 {enviado_em}</span>'
-                    f'<span style="font-family:var(--font-ui); font-size:0.68rem;'
+                    f'<span style="font-family:var(--font-ui); font-size:0.78rem;'
                     f' font-weight:600; color:{cor_st};">● {status}</span>'
                     f'</div>'
-                    f'<div style="font-family:var(--font-ui); font-size:0.68rem;'
+                    f'<div style="font-family:var(--font-ui); font-size:0.78rem;'
                     f' color:var(--text-muted); margin-top:3px;">'
                     f'{n_tickers} ticker(s) · tipo: {r.get("tipo","semanal")}'
                     f'</div></div>',
@@ -454,7 +454,7 @@ if _secao_c == "🔔 alertas":
             _mn_al = 'var(--font-mono,monospace)'
             _hdrs_al = "".join(
                 f'<th style="padding:7px 10px;text-align:{"right" if c=="threshold" else "left"};'
-                f'font-size:0.66rem;color:var(--text-muted);text-transform:uppercase;'
+                f'font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;'
                 f'border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
                 for c in _df_al_s.columns
             )
@@ -500,7 +500,7 @@ if _secao_c == "🔔 alertas":
     )
 
     from utils.notificacoes import solicitar_permissao_notificacao
-    if st.button("🔔 ativar notificações no browser", type="secondary", key="btn_notif"):
+    if st.button("Ativar notificações no browser", type="secondary", key="btn_notif"):
         solicitar_permissao_notificacao()
         st.success("solicitação enviada! aceite a permissão no popup do browser.")
 
@@ -531,16 +531,16 @@ if _secao_c == "🔔 alertas":
                 )
             with col_btn:
                 if t in _configs_hs:
-                    if st.button("🗑️", key=f"del_alert_{t}", help="remover alerta"):
+                    if st.button("Remover", key=f"del_alert_{t}", help="Remover alerta", icon=":material/delete_outline:"):
                         deletar_config_alerta(user_id_atual, t)
                         st.rerun()
                 else:
-                    if st.button("➕", key=f"add_alert_{t}", help="ativar alerta"):
+                    if st.button("Ativar", key=f"add_alert_{t}", help="Ativar alerta", icon=":material/add:"):
                         salvar_config_alerta(user_id_atual, t, threshold_val)
                         st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("💾 salvar todos os alertas de health score", type="primary",
+        if st.button("Salvar todos os alertas de health score", type="primary",
                      use_container_width=True, key="btn_salvar_alertas"):
             for item in _wl_items:
                 t  = item['ticker']
@@ -574,13 +574,13 @@ if _secao_c == "🤖 minha ia":
             f'<div style="font-size:1.2rem;">🆓</div>'
             f'<div style="font-family:var(--font-ui,sans-serif);color:var(--accent);'
             f'font-weight:700;margin:4px 0;">tier gratuito</div>'
-            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.7rem;'
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;'
             f'color:var(--text-muted);">gemini 2.0 flash · sem chave necessária</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
         if st.button(
-            "✅ usar gratuito" if _modo_atual == 'free' else "usar gratuito",
+            "Usar gratuito" if _modo_atual == 'free' else "usar gratuito",
             key="btn_modo_free",
             use_container_width=True,
             type="primary" if _modo_atual == 'free' else "secondary",
@@ -599,13 +599,13 @@ if _secao_c == "🤖 minha ia":
             f'<div style="font-size:1.2rem;">⚡</div>'
             f'<div style="font-family:var(--font-ui,sans-serif);color:var(--accent);'
             f'font-weight:700;margin:4px 0;">tier pro</div>'
-            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.7rem;'
+            f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;'
             f'color:var(--text-muted);">deepseek v4 / openai · chave pessoal</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
         if st.button(
-            "✅ usar pro" if _modo_atual == 'pro' else "usar pro",
+            "Usar pro" if _modo_atual == 'pro' else "usar pro",
             key="btn_modo_pro",
             use_container_width=True,
             type="primary" if _modo_atual == 'pro' else "secondary",
@@ -618,7 +618,7 @@ if _secao_c == "🤖 minha ia":
 
     st.markdown("<br>", unsafe_allow_html=True)
     section_title("configurar chave pro (opcional)")
-    
+
     _provider_labels = {
         'deepseek':         '⚡ DeepSeek V4 Pro',
         'openai':           '🟢 OpenAI GPT-4o',
@@ -665,11 +665,11 @@ if _secao_c == "🤖 minha ia":
 
         col_bt1, col_bt2, col_bt3 = st.columns([2, 1, 1])
         with col_bt1:
-            btn_salvar  = st.form_submit_button("💾 salvar", type="primary", use_container_width=True)
+            btn_salvar  = st.form_submit_button("Salvar", type="primary", use_container_width=True)
         with col_bt2:
-            btn_testar  = st.form_submit_button("🧪 testar", use_container_width=True)
+            btn_testar  = st.form_submit_button("Testar", use_container_width=True)
         with col_bt3:
-            btn_remover = st.form_submit_button("🗑 remover chave", use_container_width=True)
+            btn_remover = st.form_submit_button("Remover chave", use_container_width=True)
 
         _model_map = {
             'deepseek':         'deepseek-chat',
@@ -744,7 +744,7 @@ if _secao_c == "🤖 minha ia":
 
     # ── Como obter chaves ─────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("📚 como obter uma chave de api", expanded=False):
+    with st.expander("Como obter uma chave de api", expanded=False):
         st.markdown("""
 **DeepSeek V4 Pro** *(recomendado — mais barato)*
 → [platform.deepseek.com](https://platform.deepseek.com) → API Keys
@@ -762,7 +762,7 @@ if _secao_c == "🤖 minha ia":
         """)
 
     # ── Referência de providers ───────────────────────────────────────────────
-    with st.expander("📋 referência de providers", expanded=False):
+    with st.expander("Referência de providers", expanded=False):
         _prov_rows = [
             {'provider': k, 'nome': v['label'], 'modelo padrão': v['model_default'], 'secret': v['secret_key']}
             for k, v in PROVIDERS.items()
@@ -770,7 +770,7 @@ if _secao_c == "🤖 minha ia":
         _mn_pv = 'var(--font-mono,monospace)'
         _prov_cols = ['provider', 'nome', 'modelo padrão', 'secret']
         _hdrs_pv = "".join(
-            f'<th style="padding:7px 10px;text-align:left;font-size:0.66rem;color:var(--text-muted);'
+            f'<th style="padding:7px 10px;text-align:left;font-size:0.78rem;color:var(--text-muted);'
             f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
             for c in _prov_cols
         )
@@ -827,7 +827,7 @@ if _secao_c == "🎨 aparência":
             _border_w  = "2px" if _is_active else "1px"
             _border_c  = _acc if _is_active else _brd
             _selected_badge = (
-                f'<span style="font-size:.55rem;background:{_acc};'
+                f'<span style="font-size:0.78rem;background:{_acc};'
                 f'color:{"#fff" if _light else "#000"};'
                 f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
                 if _is_active else ""
@@ -847,7 +847,7 @@ if _secao_c == "🎨 aparência":
                     </div>
                     <div style="font-family:'Inter',system-ui;font-size:.78rem;
                         font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
-                    <div style="font-family:'Inter',system-ui;font-size:.62rem;
+                    <div style="font-family:'Inter',system-ui;font-size:0.78rem;
                         color:{_vars['--text-muted']};margin-bottom:10px;">{tema['desc']}</div>
                     <div style="display:flex;gap:5px;margin-bottom:10px;">
                         <div style="width:18px;height:18px;border-radius:50%;background:{_acc};
@@ -885,7 +885,7 @@ if _secao_c == "🎨 aparência":
         _claros  = [t for t in TEMAS_ORDER if TEMAS[t].get("is_light")]
 
         st.markdown(
-            '<div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;'
+            '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
             'color:var(--text-muted);font-family:var(--font-ui);margin:8px 0 6px;">🌙 temas escuros</div>',
             unsafe_allow_html=True,
         )
@@ -897,7 +897,7 @@ if _secao_c == "🎨 aparência":
                 _render_tema_card(_col, tid, ativo)
 
         st.markdown(
-            '<div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;'
+            '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
             'color:var(--text-muted);font-family:var(--font-ui);margin:16px 0 6px;">☀️ temas claros</div>',
             unsafe_allow_html=True,
         )
@@ -930,7 +930,7 @@ if _secao_c == "🎨 aparência":
 
         with col_ft:
             st.markdown(
-                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
                 'color:var(--text-muted);margin-bottom:4px;">Títulos / Display</div>',
                 unsafe_allow_html=True,
             )
@@ -955,7 +955,7 @@ if _secao_c == "🎨 aparência":
 
         with col_fu:
             st.markdown(
-                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
                 'color:var(--text-muted);margin-bottom:4px;">Interface / Corpo</div>',
                 unsafe_allow_html=True,
             )
@@ -974,14 +974,14 @@ if _secao_c == "🎨 aparência":
                 f'font-size:.85rem;color:var(--text-secondary);margin-top:6px;">'
                 f'Labels, botões e texto corrido</div>'
                 f'<div style="font-family:{FONTES_UI.get(st.session_state.get("_font_ui", fontes_ativas["ui"]), FONTES_UI[fontes_ativas["ui"]])["css"]};'
-                f'font-size:.70rem;text-transform:uppercase;letter-spacing:.06em;'
+                f'font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;'
                 f'color:var(--text-muted);">Preview de label</div>',
                 unsafe_allow_html=True,
             )
 
         with col_fd:
             st.markdown(
-                '<div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;'
+                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
                 'color:var(--text-muted);margin-bottom:4px;">Dados / Números</div>',
                 unsafe_allow_html=True,
             )
@@ -1008,7 +1008,7 @@ if _secao_c == "🎨 aparência":
         st.markdown("<br>", unsafe_allow_html=True)
         c1, c2 = st.columns([1, 4])
         with c1:
-            if st.button("↺ padrão do tema", key="_reset_fonts", use_container_width=True):
+            if st.button("Padrão do tema", key="_reset_fonts", use_container_width=True):
                 resetar_fontes()
                 st.rerun()
         with c2:
@@ -1129,9 +1129,9 @@ if _secao_c == "👑 administração":
 
             # Tabela campo × mercado
             _mn_dq = 'var(--font-mono,monospace)'
-            _hdr = '<th style="padding:6px 10px;text-align:left;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">campo</th>'
+            _hdr = '<th style="padding:6px 10px;text-align:left;font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">campo</th>'
             for _m in _mkts:
-                _hdr += f'<th style="padding:6px 10px;text-align:right;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">{_m}</th>'
+                _hdr += f'<th style="padding:6px 10px;text-align:right;font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">{_m}</th>'
             _rows_dq = ""
             for _campo in CAMPOS_CRITICOS:
                 _cells = f'<td style="padding:6px 10px;font-family:{_mn_dq};font-size:0.78rem;color:var(--text-secondary);">{_campo}</td>'
@@ -1152,7 +1152,7 @@ if _secao_c == "👑 administração":
 
         # Piores tickers (mais campos faltando)
         if _cov["piores"]:
-            with st.expander(f"🔎 {len(_cov['piores'])} tickers com mais campos faltando", expanded=False):
+            with st.expander(f"{len(_cov['piores'])} tickers com mais campos faltando", expanded=False):
                 for _p in _cov["piores"]:
                     _q = _p["quality"]
                     _q_str = f"{_q:.0f}%" if isinstance(_q, (int, float)) else "—"
@@ -1199,7 +1199,7 @@ if _secao_c == "👑 administração":
         ul_str          = ultimo_login[:16] if ultimo_login else 'nunca'
         criado_em       = u.get('criado_em', '')[:10] if u.get('criado_em') else '—'
 
-        with st.expander(f"**{u['username']}** · {tag_admin}  —  {u.get('nome','')}", expanded=False):
+        with st.expander(f"{u['username']} · {tag_admin}  —  {u.get('nome','')}", expanded=False):
             i1, i2, i3 = st.columns(3)
             i1.metric("id", f"#{u['id']}")
             i2.metric("criado em", criado_em)
@@ -1214,7 +1214,7 @@ if _secao_c == "👑 administração":
                         placeholder="mín. 6 chars",
                         key=f"adm_pwd_{u['id']}"
                     )
-                    if st.form_submit_button("🔑 redefinir senha", use_container_width=True):
+                    if st.form_submit_button("Redefinir senha", use_container_width=True):
                         if len(nova_senha_adm) < 6:
                             st.error("mínimo 6 caracteres.")
                         else:
@@ -1227,19 +1227,18 @@ if _secao_c == "👑 administração":
                         ' background:rgba(239,68,68,0.05);'
                         ' border-radius:var(--radius-sm);'
                         ' padding:8px 10px; margin-bottom:8px;">'
-                        '<span style="font-family:var(--font-ui); font-size:0.68rem;'
+                        '<span style="font-family:var(--font-ui); font-size:0.78rem;'
                         ' color:var(--bear);">⚠️ zona de risco</span></div>',
                         unsafe_allow_html=True,
                     )
                     if st.button(
-                        f"🗑️ deletar '{u['username']}'",
+                        f"Deletar '{u['username']}'",
                         key=f"del_usr_{u['id']}",
                         use_container_width=True,
                         type="secondary",
                     ):
-                        deletar_usuario(u['id'])
-                        st.warning(f"usuário '{u['username']}' removido.")
-                        st.rerun()
+                        confirm_action("Remover usuário?", f"O usuário '{u['username']}' e os dados vinculados à conta serão removidos.",
+                                       lambda user_id=u['id']: deletar_usuario(user_id), key=f"delete_user_{u['id']}")
                 else:
                     st.info("você não pode deletar sua própria conta.", icon="ℹ️")
 
@@ -1257,7 +1256,7 @@ if _secao_c == "👑 administração":
 
         novo_admin_flag = st.checkbox("conceder permissão de administrador")
 
-        if st.form_submit_button("✅ criar usuário", use_container_width=True, type="primary"):
+        if st.form_submit_button("Criar usuário", use_container_width=True, type="primary"):
             if not novo_username.strip():
                 st.error("informe um username.")
             elif len(nova_senha_novo) < 6:
@@ -1297,9 +1296,9 @@ if _secao_c == "👑 administração":
                 rows.append({'tabela': t, 'registros': '—'})
         _mn_db = 'var(--font-mono,monospace)'
         _hdrs_db = (
-            f'<th style="padding:7px 10px;text-align:left;font-size:0.66rem;color:var(--text-muted);'
+            f'<th style="padding:7px 10px;text-align:left;font-size:0.78rem;color:var(--text-muted);'
             f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">tabela</th>'
-            f'<th style="padding:7px 10px;text-align:right;font-size:0.66rem;color:var(--text-muted);'
+            f'<th style="padding:7px 10px;text-align:right;font-size:0.78rem;color:var(--text-muted);'
             f'text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">registros</th>'
         )
         _rows_db = ""
@@ -1329,11 +1328,11 @@ if _secao_c == "👑 administração":
 
     mn1, mn2 = st.columns(2)
     with mn1:
-        if st.button("🧹 limpar cache do Streamlit", use_container_width=True):
+        if st.button("Limpar cache do Streamlit", use_container_width=True):
             st.cache_data.clear()
             st.success("cache limpo!")
     with mn2:
-        if st.button("🗑️ limpar cache de IA (análises > 30 dias)", use_container_width=True):
+        if st.button("Limpar cache de IA (análises > 30 dias)", use_container_width=True):
             try:
                 from database.db import limpar_cache_ia_antigo
                 removidos = limpar_cache_ia_antigo(dias=30)

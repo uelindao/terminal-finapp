@@ -53,7 +53,7 @@ from utils.components import (
     # UX percebida — skeleton loaders
     skeleton_hero, skeleton_kpi_row,
 )
-from utils.formatters import fmt_preco, fmt_pct
+from utils.formatters import fmt_numero, fmt_preco, fmt_pct
 import plotly.graph_objects as go
 from utils.charts import base_layout, _cores as _chart_cores
 from utils.notificacoes import (solicitar_permissao_notificacao,
@@ -269,23 +269,18 @@ def buscar_earnings_watchlist(tickers_tuple: tuple) -> dict:
 from utils.radar import calcular_oportunidades_watchlist
 
 # 1. configuração da página (tem de ser o primeiro comando)
-st.set_page_config(page_title="terminal finapp | home", layout="wide", initial_sidebar_state="expanded", page_icon="🏠")
+if not st.session_state.get("_finterm_router"):
+    st.set_page_config(page_title="FinTerminal · Visão geral", layout="wide", initial_sidebar_state="auto", page_icon="📊")
+
+aplicar_tema()
 
 # 1.5 CONECTA AO BANCO. Se estiver fora/restrito (ex.: cota do Supabase), mostra
 # uma tela clara em vez de derrubar o app com traceback.
 if not init_db():
-    st.markdown(
-        "<div style='max-width:640px;margin:12vh auto;text-align:center;'>"
-        "<div style='font-size:2.4rem;'>🔌</div>"
-        "<h3 style='margin:.4rem 0;'>serviço de dados indisponível</h3>"
-        "<p style='color:#9aa0a6;line-height:1.6;'>não foi possível conectar ao banco de dados. "
-        "a causa mais comum é a <b>cota mensal do Supabase</b> ter sido excedida — nesse caso o "
-        "projeto fica restrito até o início do próximo ciclo de faturamento.</p>"
-        "<p style='color:#9aa0a6;line-height:1.6;'>verifique o painel do Supabase "
-        "(<i>Organization → Usage</i>). o app volta sozinho assim que o serviço for restabelecido.</p>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    page_header("Seu terminal está temporariamente indisponível", "Não foi possível conectar ao serviço de dados.")
+    empty_state("↻", "Conexão indisponível", "Tente novamente em alguns instantes. Se o problema persistir, verifique o status e a cota do projeto no Supabase.")
+    if st.button("Tentar novamente", type="primary", key="retry_database"):
+        st.rerun()
     st.stop()
 popular_watchlist_inicial()
 
@@ -322,10 +317,7 @@ if 'user_settings' not in st.session_state:
             st.session_state['user_settings'] = _settings
             st.session_state['ai_modo_atual'] = 'pro' if _settings.get('ai_api_key', '').strip() else 'free'
 
-# Solicita permissão de notificação browser (uma vez por sessão)
-if not st.session_state.get('notif_permission_asked'):
-    solicitar_permissao_notificacao()
-    st.session_state['notif_permission_asked'] = True
+# Notificações são ativadas por escolha explícita em Configurações → Alertas.
 
 # Verifica alertas de health score ao carregar a página
 _user_notif = get_current_user()
@@ -346,13 +338,15 @@ _user_top = get_current_user() or {}
 topbar(
     breadcrumb_itens=[("⚡ finterminal", None), ("home", None)],
     user_name=_user_top.get('username', '') or _user_top.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
     show_search=True,
     show_sync=True,
     show_user=True,
 )
 
-page_header("🏠 terminal finapp", "centro de comando: mercado global, resumo do portfólio e watchlist.")
+page_header("Visão geral", "O que mudou no mercado, na sua carteira e nos ativos que você acompanha.")
+from utils.components import page_jump_links
+page_jump_links([("Mercado", "ft-home-market"), ("Carteira", "ft-home-portfolio"), ("Watchlist", "ft-home-watchlist"), ("Relatórios", "ft-home-reports")])
 
 # Placeholder para market pulse bar — preenchido após carregar índices (linha ~865)
 _pulse_bar_ph = st.empty()
@@ -441,8 +435,7 @@ def _render_atencao_hoje():
 
     section_title("🔔 atenção hoje")
     if not itens:
-        empty_state("😌", "sem mudanças relevantes",
-                    "nenhum movimento de score, sinal técnico ou evento macro exige atenção agora.")
+        info_box("info", "Nenhum movimento de score, sinal técnico ou evento macro exige atenção agora.", titulo="Tudo em ordem por aqui")
         return
 
     linhas = []
@@ -470,105 +463,6 @@ def _render_atencao_hoje():
 
 _render_atencao_hoje()
 
-# ── Admin e Perfil na sidebar ───────────────────────────────────────────
-with st.sidebar:
-    _user_sidebar = get_current_user()
-
-    # Perfil compacto
-    if _user_sidebar:
-        with st.expander("👤 meu perfil", expanded=False):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**usuário:** {_user_sidebar['username']}")
-                st.markdown(f"**nome:** {_user_sidebar['nome'] or '—'}")
-                st.markdown(f"**perfil:** {'administrador' if _user_sidebar['is_admin'] else 'usuário'}")
-            with c2:
-                with st.form("form_minha_senha", clear_on_submit=True):
-                    st.markdown("**alterar senha:**")
-                    senha_atual = st.text_input("senha atual:", type="password", key="sb_pwd_atual")
-                    senha_nova  = st.text_input("nova senha:", type="password", key="sb_pwd_nova")
-                    senha_conf  = st.text_input("confirmar:", type="password", key="sb_pwd_conf")
-                    if st.form_submit_button("alterar senha"):
-                        from database.db import autenticar_usuario, alterar_senha
-                        if autenticar_usuario(_user_sidebar['username'], senha_atual):
-                            if senha_nova == senha_conf and len(senha_nova) >= 4:
-                                alterar_senha(_user_sidebar['user_id'], senha_nova)
-                                st.success("✅ senha alterada!")
-                            elif senha_nova != senha_conf:
-                                st.error("senhas não coincidem.")
-                            else:
-                                st.error("mínimo 4 caracteres.")
-                        else:
-                            st.error("senha atual incorreta.")
-
-    # ---- CARD DE REGIME MACRO ----
-    _regime_dict = classificar_regime()
-    _regime_label = _regime_dict["label"]
-    _score_amb = _regime_dict.get("score_ambiente", 50)
-    _fav = _regime_dict.get("setores_favorecidos", [])
-    _prej = _regime_dict.get("setores_prejudicados", [])
-    _pos = _regime_dict.get("posicionamento", "")
-
-    _cor_regime = (
-        "var(--bear)" if "stress" in _regime_label
-        else "var(--amber)" if "altos" in _regime_label
-        else "var(--bull)"
-    )
-    _vix_val = _regime_dict.get("vix", 15.0)
-    _icone_vix = "🔴" if _vix_val > 25 else ("🟡" if _vix_val > 18 else "🟢")
-    _cor_score = "var(--bull)" if _score_amb >= 60 else ("var(--amber)" if _score_amb >= 35 else "var(--bear)")
-
-    _html = [
-        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-left:3px solid {_cor_regime};border-radius:var(--radius-md);padding:12px 20px;margin-bottom:20px;">',
-        f'<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">',
-        f'<div style="font-family:var(--font-ui);font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;min-width:80px;">regime macro</div>',
-        f'<div style="font-family:var(--font-ui);font-size:0.82rem;color:{_cor_regime};font-weight:600;">{_regime_label}</div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">score amb.</div><div style="font-size:0.9rem;color:{_cor_score};font-family:var(--font-data);font-weight:600;">{_score_amb}</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">selic</div><div style="font-size:0.9rem;color:var(--accent);font-family:var(--font-data);font-weight:600;">{_regime_dict.get("selic", 10.75):.2f}%</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">ipca</div><div style="font-size:0.9rem;color:var(--text-secondary);font-family:var(--font-data);">{_regime_dict.get("ipca", 4.5):.1f}%</div></div>',
-        f'<div style="text-align:center;"><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">vix {_icone_vix}</div><div style="font-size:0.9rem;color:var(--text-secondary);font-family:var(--font-data);">{_regime_dict.get("vix", 15.0):.1f}</div></div>',
-        '</div>',
-    ]
-
-    if _fav or _prej:
-        _html.append('<div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">')
-
-        if _fav:
-            fav_spans = ''.join(
-                f'<span style="background:var(--bull-soft);color:var(--bull);font-family:var(--font-ui);font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
-                for s in _fav
-            )
-            _html.append(
-                f'<div style="flex:1;min-width:120px;">'
-                f'<div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos</div>'
-                f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{fav_spans}</div>'
-                f'</div>'
-            )
-
-        if _prej:
-            prej_spans = ''.join(
-                f'<span style="background:var(--bear-soft);color:var(--bear);font-family:var(--font-ui);font-size:0.62rem;padding:2px 6px;border-radius:3px;">{s}</span>'
-                for s in _prej
-            )
-            _html.append(
-                f'<div style="flex:1;min-width:120px;">'
-                f'<div style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados</div>'
-                f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{prej_spans}</div>'
-                f'</div>'
-            )
-
-        _html.append('</div>')
-
-    if _pos:
-        _html.append(
-            f'<div style="font-family:var(--font-ui);font-size:0.65rem;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border-subtle);padding-top:6px;">{_pos}</div>'
-        )
-
-    _html.append('</div>')
-
-    st.markdown(''.join(_html), unsafe_allow_html=True)
-    tooltip("vix")
-
 # ── PAINEL DE EARNINGS ────────────────────────────────────────────────
 _wl_earn = listar_watchlist()
 _tickers_earn = tuple([
@@ -592,7 +486,7 @@ if _tickers_earn:
         with _earn_cols[0]:
             st.markdown(
                 '<div style="font-family:var(--font-ui);'
-                'font-size:0.68rem;color:var(--accent);'
+                'font-size:0.78rem;color:var(--accent);'
                 'margin-bottom:8px;font-weight:600;">'
                 '📅 próximos 14 dias</div>',
                 unsafe_allow_html=True,
@@ -619,8 +513,8 @@ if _tickers_earn:
                     )
 
                     st.markdown(
-                        f'<div style="background:#0d0d0d;'
-                        f'border:1px solid #1e1e1e;'
+                        f'<div style="background:var(--bg-surface);'
+                        f'border:1px solid var(--border-subtle);'
                         f'border-left:3px solid {_cor_ep};'
                         f'border-radius:4px;padding:8px 12px;'
                         f'margin-bottom:6px;display:flex;'
@@ -632,7 +526,7 @@ if _tickers_earn:
                         f'style="font-size:0.82rem;" title="abrir research">'
                         f'{_ep["ticker"].replace(".SA","")}</a>'
                         f'<div style="font-family:var(--font-ui);'
-                        f'font-size:0.65rem;color:var(--text-muted);">'
+                        f'font-size:0.78rem;color:var(--text-muted);">'
                         f'{_ep["data_str"]}</div>'
                         f'</div>'
 
@@ -641,7 +535,7 @@ if _tickers_earn:
                         f'font-size:0.72rem;color:{_cor_ep};'
                         f'font-weight:600;">{_urgencia}</div>'
                         f'<div style="font-family:var(--font-data);'
-                        f'font-size:0.65rem;color:{_cor_hs};">'
+                        f'font-size:0.78rem;color:{_cor_hs};">'
                         f'hs: {_hs_ep}/100</div>'
                         f'</div>'
 
@@ -650,7 +544,7 @@ if _tickers_earn:
                     )
 
                     if st.button(
-                        f"🔬 {_ep['ticker'].replace('.SA','')}",
+                        f"{_ep['ticker'].replace('.SA','')}",
                         key=f"earn_research_{_ep['ticker']}",
                         use_container_width=True,
                     ):
@@ -668,7 +562,7 @@ if _tickers_earn:
         with _earn_cols[1]:
             st.markdown(
                 '<div style="font-family:var(--font-ui);'
-                'font-size:0.68rem;color:var(--text-muted);'
+                'font-size:0.78rem;color:var(--text-muted);'
                 'margin-bottom:8px;font-weight:600;'
                 'text-transform:uppercase;letter-spacing:var(--ls-wide);">'
                 '📋 reportaram recentemente (30 dias)</div>',
@@ -698,16 +592,16 @@ if _tickers_earn:
                         f'color:var(--text-primary);">'
                         f'{_er["ticker"].replace(".SA","")}</div>'
                         f'<div style="font-family:var(--font-ui);'
-                        f'font-size:0.65rem;color:var(--text-muted);">'
+                        f'font-size:0.78rem;color:var(--text-muted);">'
                         f'{_er["data_str"]}</div>'
                         f'</div>'
 
                         f'<div style="text-align:right;">'
                         f'<div style="font-family:var(--font-ui);'
-                        f'font-size:0.65rem;color:var(--text-muted);">'
+                        f'font-size:0.78rem;color:var(--text-muted);">'
                         f'há {_er["dias_atras"]} dias</div>'
                         f'<div style="font-family:var(--font-ui);'
-                        f'font-size:0.65rem;color:{_cor_hs};">'
+                        f'font-size:0.78rem;color:{_cor_hs};">'
                         f'hs: {_hs_er}/100</div>'
                         f'</div>'
 
@@ -767,7 +661,7 @@ if _tickers_wl_home:
 
             _btn_key = f"btn_opp_research_{_opp['ticker']}_{_rank}"
             if st.button(
-                f"🔬 analisar {_opp['ticker'].replace('.SA','')}",
+                f"Analisar {_opp['ticker'].replace('.SA','')}",
                 key=_btn_key,
                 use_container_width=True,
             ):
@@ -901,7 +795,8 @@ if indices:
 # ==========================================
 # FAIXA 2 — SEMÁFORO MACRO
 # ==========================================
-section_title("🚦 semáforo macro")
+st.markdown('<div id="ft-home-market"></div>', unsafe_allow_html=True)
+section_title("Contexto do mercado")
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_dados_semaforo():
@@ -1250,6 +1145,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 pesos_atuais = get_pesos()
 ativos_alocados = {p['ticker']: p for p in pesos_atuais if p['peso'] > 0}
 
+st.markdown('<div id="ft-home-portfolio"></div>', unsafe_allow_html=True)
 if ativos_alocados:
     # Header da seção é embutido no portfolio_hero abaixo (não usa section_title).
     tickers_com_peso = list(ativos_alocados.keys())
@@ -1342,36 +1238,34 @@ if ativos_alocados:
     )
     _serie_pf = _serie_carteira_5d(tuple(tickers_com_peso), _qtds_port)
 
-    # ── Zona 3: Hero do portfólio ────────────────────────────────────────────
-    portfolio_hero(
-        titulo      = "PORTFÓLIO",
-        valor_atual = valor_atual,
-        custo_total = custo_total,
-        pnl_valor   = pnl_valor,
-        pnl_pct     = pnl_pct,
-        moeda       = "R$",
-        serie_valor = _serie_pf,
-        data_source = fonte_port,
-    )
-
-    # ── Zona 3: Grid 4-KPI premium ───────────────────────────────────────────
-    _kpis_items = [
-        {
-            "nome":     "patrimônio",
-            "valor":    valor_atual,
-            "sublabel": "marcação a mercado",
-            "var_pct":  pnl_pct,
-            "icone":    "💎",
-            "serie":    _serie_pf,
-        },
-        {
-            "nome":     "p&l acumulado",
-            "valor":    pnl_valor,
-            "sublabel": f"R$ {abs(custo_total):,.0f}".replace(",", ".") + " investido",
-            "tone":     "bull" if pnl_valor >= 0 else "bear",
-            "icone":    "📈" if pnl_valor >= 0 else "📉",
-        },
-    ]
+    from utils.portfolio_view import currency_totals
+    _currency_groups = currency_totals(ativos_alocados, live_data_port)
+    _kpis_items = []
+    _summary_cols = st.columns(max(len(_currency_groups), 1))
+    for _group, _summary_col in zip(_currency_groups, _summary_cols):
+        _currency = "R$" if _group["currency"] == "BRL" else "US$"
+        with _summary_col:
+            if _group["missing_prices"]:
+                empty_state("↻", f"Posições em {_group['currency']}",
+                            f"Aguardando cotação de {_group['missing_prices']} ativo(s) para completar o resumo.")
+            else:
+                portfolio_hero(
+                    titulo="Posições em reais" if _group["currency"] == "BRL" else "Posições em dólares",
+                    valor_atual=_group["value"], custo_total=_group["cost"],
+                    pnl_valor=_group["pnl"], pnl_pct=_group["pnl_pct"], moeda=_currency,
+                    serie_valor=_serie_pf if len(_currency_groups) == 1 else None,
+                    data_source=fonte_port,
+                )
+        _kpis_items.append({
+            "nome": f"Resultado em {_group['currency']}",
+            "valor": f"{_currency} {fmt_numero(_group['pnl'])}" if not _group["missing_prices"] else "—",
+            "sublabel": f"{_currency} {fmt_numero(_group['cost'])} investido",
+            "tone": "bull" if _group["pnl"] >= 0 else "bear",
+        })
+    if len(_currency_groups) == 1:
+        _only = _currency_groups[0]
+        _kpis_items.insert(0, {"nome": "Posições", "valor": str(_only["positions"]),
+                               "sublabel": f"Ativos em {_only['currency']}", "tone": "info"})
 
     if var_dia_port:
         melhor_t = max(var_dia_port, key=var_dia_port.get)
@@ -1439,7 +1333,8 @@ if ativos_alocados:
 # ==========================================
 # WATCHLIST INTELIGENTE E SELETOR
 # ==========================================
-section_title("👁️ watchlist & radar de alertas")
+st.markdown('<div id="ft-home-watchlist"></div>', unsafe_allow_html=True)
+section_title("Sua watchlist")
 
 # ── MODAIS DA WATCHLIST (definidos aqui — chamados dentro do fragment) ──
 @st.dialog("➕ criar nova watchlist")
@@ -1611,7 +1506,7 @@ def exibir_memorial(ticker_nome, score_final, breakdown_dict, alertas_lista):
         for a in alertas_lista:
             st.markdown(
                 f"<div style='font-size:0.8rem; color:var(--text-secondary); margin-bottom:4px; "
-                f"padding-left:10px; border-left:2px solid #444;'>{a}</div>",
+                f"padding-left:10px; border-left:2px solid var(--border-normal);'>{a}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1663,21 +1558,21 @@ watchlist_id_ativo = st.session_state.get('watchlist_ativa_id') or (watchlists_d
 # ── BUSCAR E ADICIONAR ATIVO ──
 expandir_busca = bool(st.session_state.get('resultados_busca'))
 
-with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
+with st.expander("Buscar e adicionar novo ativo", expanded=expandir_busca):
     with st.form("form_busca_ativo", clear_on_submit=False):
         c1, c2 = st.columns([4, 1])
         with c1:
             termo = st.text_input("digite o nome da empresa ou ativo:", key="input_busca", label_visibility="collapsed", placeholder="buscar ativo (ex: aapl, wege3)...")
         with c2:
-            btn_buscar = st.form_submit_button("buscar", use_container_width=True, type="primary")
-            
+            btn_buscar = st.form_submit_button("Buscar", use_container_width=True, type="primary")
+
     if btn_buscar and termo:
         with st.spinner("procurando na api global..."):
             resultados = buscar_ativo_yahoo(termo)
             st.session_state['resultados_busca'] = resultados
             if not resultados:
                 st.warning("nenhum ativo encontrado.")
-                
+
     if st.session_state.get('resultados_busca'):
         opcoes_formatadas = []
         ativos_validos = []
@@ -1687,7 +1582,7 @@ with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
                 bolsa = q.get('exchDisp', 'desconhecida')
                 opcoes_formatadas.append(f"{tk} | {nm.lower()} ({bolsa.lower()})")
                 ativos_validos.append(q)
-        
+
         if opcoes_formatadas:
             st.markdown("---")
             cs1, cs2, cs3 = st.columns([4, 3, 2])
@@ -1701,17 +1596,17 @@ with st.expander("🔍 buscar e adicionar novo ativo", expanded=expandir_busca):
                 destino_wl_nome = st.selectbox("adicionar à:", list(opcoes_destino.keys()), index=idx_dest, label_visibility="collapsed", key="busca_destino_wl")
                 destino_wl_id = opcoes_destino[destino_wl_nome]
             with cs3:
-                if st.button("salvar na watchlist", type="primary", use_container_width=True, key="btn_salvar_novo_ativo"):
+                if st.button("Salvar na watchlist", type="primary", use_container_width=True, key="btn_salvar_novo_ativo"):
                     tk = ativo_escolhido['symbol']
                     nm = ativo_escolhido.get('shortname') or ativo_escolhido.get('longname', tk)
                     bolsa_str = ativo_escolhido.get('exchDisp', '').lower()
                     tipo_str = ativo_escolhido.get('quoteType', '').lower()
-                    
+
                     if "são paulo" in bolsa_str or tk.endswith(".SA"): mercado = "brasil"
                     elif "nyse" in bolsa_str or "nasdaq" in bolsa_str: mercado = "eua"
                     elif "cryptocurrency" in tipo_str: mercado = "criptomoedas"
                     else: mercado = "outros"
-                    
+
                     adicionar_ativo(tk, nm, mercado, watchlist_id=destino_wl_id)
                     st.success(f"{tk.lower()} adicionado!")
                     st.session_state['resultados_busca'] = []
@@ -1729,14 +1624,14 @@ if col_btn.button("🚨 atualizar scores", use_container_width=True, type="prima
         barra = st.progress(0)
         txt = st.empty()
         total = len(ativos_atuais)
-        
+
         for idx, item in enumerate(ativos_atuais):
             t = item['ticker']
             txt.caption(f"a analisar {t.lower()}...")
             calcular_health_score(mapear_ticker_base(t), force=True)
             barra.progress((idx + 1) / total)
             time.sleep(1.5)  # evita rate limit do Yahoo Finance
-            
+
         txt.empty()
         barra.empty()
         progress_steps(["inicializando", "coletando dados", "calculando scores"], current=3)
@@ -1755,7 +1650,7 @@ if (not watchlist
     from utils.onboarding import render_onboarding
     render_onboarding(_user_home['user_id'], watchlist_id_ativo)
     st.markdown("---")
-    if st.button("pular onboarding e ir direto →", key="btn_skip_ob"):
+    if st.button("Pular onboarding e ir direto →", key="btn_skip_ob"):
         st.session_state['skip_onboarding'] = True
         st.rerun()
     st.stop()
@@ -1790,7 +1685,7 @@ else:
             try:
                 tickers_base = list(set([mapear_ticker_base(t) for t in missing]))
                 data = yf.download(tickers_base, period="1mo", auto_adjust=True, progress=False)
-                
+
                 if not data.empty:
                     if isinstance(data.columns, pd.MultiIndex):
                         try:
@@ -1801,10 +1696,10 @@ else:
                         hist = data.get('Close', data)
                 else:
                     hist = pd.DataFrame()
-                    if isinstance(hist, pd.Series): 
+                    if isinstance(hist, pd.Series):
                         hist = hist.to_frame(name=tickers_base[0])
                     hist = hist.ffill()
-                    
+
                     for t in missing:
                         t_base = mapear_ticker_base(t)
                         try:
@@ -1902,7 +1797,7 @@ else:
     st.markdown(
         '<div style="display:flex;align-items:center;gap:10px;'
         'margin-top:14px;margin-bottom:4px;">'
-        '<span style="font-family:var(--font-ui);font-size:.6rem;'
+        '<span style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wider);font-weight:700;">🔍 filtros</span>'
         '<span style="flex:1;height:1px;background:var(--border-subtle);'
@@ -1923,7 +1818,7 @@ else:
     mkt_opcoes = ["Todos"] + [_mkt_label_map[m] for m in mercados_disponiveis]
 
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
         'font-weight:600;opacity:.7;">mercado</div>',
@@ -1937,7 +1832,7 @@ else:
     tags_disponiveis = listar_tags_watchlist(watchlist_id_ativo)
     if tags_disponiveis:
         st.markdown(
-            '<div style="font-family:var(--font-ui);font-size:.58rem;'
+            '<div style="font-family:var(--font-ui);font-size:0.78rem;'
             'color:var(--text-muted);text-transform:uppercase;'
             'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
             'font-weight:600;opacity:.7;">tese / tag</div>',
@@ -1957,7 +1852,7 @@ else:
     # ── Controles auxiliares (editar tags + contador) ────────────────────────
     col_aux1, col_aux2, col_aux3 = st.columns([2, 3, 3])
     with col_aux1:
-        if st.button("🏷️ editar tags", key="btn_editar_tags", use_container_width=True):
+        if st.button("Editar tags", key="btn_editar_tags", use_container_width=True):
             st.session_state['modo_editar_tags'] = not st.session_state.get('modo_editar_tags', False)
     with col_aux3:
         _n_grupos = len(tags_disponiveis) if tags_disponiveis else 1
@@ -1986,7 +1881,7 @@ else:
 
     # Modo de edição de tags
     if st.session_state.get('modo_editar_tags'):
-        with st.expander("🏷️ gerenciar tags dos ativos", expanded=True):
+        with st.expander("Gerenciar tags dos ativos", expanded=True):
             st.markdown(
                 '<div style="font-family:var(--font-data); font-size:0.75rem; color:var(--text-muted); margin-bottom:12px;">'
                 'organize seus ativos por tese de investimento. '
@@ -2001,7 +1896,7 @@ else:
                 'defensivo', 'especulativo',
             ]
             st.markdown(
-                '<div style="font-family:var(--font-data); font-size:0.68rem; color:var(--text-muted); margin-bottom:10px;">'
+                '<div style="font-family:var(--font-data); font-size:0.78rem; color:var(--text-muted); margin-bottom:10px;">'
                 'sugeridas: ' +
                 ' | '.join(f'<code>{_t}</code>' for _t in _tags_sugeridas[:6]) +
                 '</div>',
@@ -2023,7 +1918,7 @@ else:
 
             _cs, _cc = st.columns(2)
             with _cs:
-                if st.button("💾 salvar tags", type="primary", use_container_width=True, key="btn_salvar_tags"):
+                if st.button("Salvar tags", type="primary", use_container_width=True, key="btn_salvar_tags"):
                     for _ticker_t, _tag_t in _changes.items():
                         if _tag_t.strip():
                             atualizar_tag_ativo(watchlist_id_ativo, _ticker_t, _tag_t)
@@ -2031,7 +1926,7 @@ else:
                     st.session_state['modo_editar_tags'] = False
                     st.rerun(scope="fragment")
             with _cc:
-                if st.button("cancelar", type="secondary", use_container_width=True, key="btn_cancel_tags"):
+                if st.button("Cancelar", type="secondary", use_container_width=True, key="btn_cancel_tags"):
                     st.session_state['modo_editar_tags'] = False
                     st.rerun(scope="fragment")
 
@@ -2041,7 +1936,7 @@ else:
     st.markdown(
         '<div style="display:flex;align-items:center;gap:10px;'
         'margin-top:14px;margin-bottom:4px;">'
-        '<span style="font-family:var(--font-ui);font-size:.6rem;'
+        '<span style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wider);font-weight:700;">↕ ordenar por</span>'
         '<span style="flex:1;height:1px;background:var(--border-subtle);'
@@ -2192,6 +2087,10 @@ else:
                     "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
     # Acumula dialogs pendentes — cada @st.dialog só pode ser chamado 1x por render
+    _selection_mode = st.toggle("Selecionar ativos para remoção em lote", key="wl_selection_mode")
+    if not _selection_mode:
+        st.session_state['del_selecionados'] = []
+
     _memorial_pendente = None
     _remover_pendente  = None   # (ticker, watchlist_id) para o dialog de remoção
 
@@ -2234,16 +2133,18 @@ else:
                 lista_alertas = []
                 breakdown     = {}
 
-            # Checkbox + row na mesma linha
-            _chk_key = f"chk_del_{t}"
-            _col_chk, _col_row = st.columns([0.4, 11.6])
-            with _col_chk:
-                _selecionado = st.checkbox("", key=_chk_key, label_visibility="collapsed")
-            _del_list = st.session_state.setdefault('del_selecionados', [])
-            if _selecionado and t not in _del_list:
-                _del_list.append(t)
-            elif not _selecionado and t in _del_list:
-                _del_list.remove(t)
+            # Seleção em lote é ativada explicitamente; leitura fica livre de checkboxes.
+            if st.session_state.get("wl_selection_mode", False):
+                _col_chk, _col_row = st.columns([.5, 11.5])
+                with _col_chk:
+                    _selecionado = st.checkbox(f"Selecionar {t.replace('.SA', '')}", key=f"chk_del_{t}", label_visibility="collapsed")
+                _del_list = st.session_state.setdefault('del_selecionados', [])
+                if _selecionado and t not in _del_list:
+                    _del_list.append(t)
+                elif not _selecionado and t in _del_list:
+                    _del_list.remove(t)
+            else:
+                _col_row = st.container()
 
             with _col_row:
                 watchlist_row(
@@ -2261,11 +2162,11 @@ else:
                 )
 
             # Coleta remoção pendente (dialog chamado fora do loop)
-            if st.session_state.get(f"confirm_del_{t}"):
+            if st.session_state.pop(f"confirm_del_{t}", False):
                 _remover_pendente = (t, watchlist_id_ativo)
 
             # Marca memorial pendente (chamada real acontece fora do loop)
-            if st.session_state.get(f"show_memorial_{t}"):
+            if st.session_state.pop(f"show_memorial_{t}", False):
                 _memorial_pendente = (t, h_info.get('score', 0), breakdown, lista_alertas)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2312,7 +2213,8 @@ else:
 # ==========================================
 # RELATÓRIO SEMANAL
 # ==========================================
-section_title("📧 relatório semanal")
+st.markdown('<div id="ft-home-reports"></div>', unsafe_allow_html=True)
+section_title("Relatório semanal")
 
 ultimo_envio = get_ultimo_envio_relatorio()
 
@@ -2346,7 +2248,7 @@ with col_rel1:
 
 with col_rel2:
     btn_relatorio = st.button(
-        "📧 enviar relatório",
+        "Enviar relatório",
         type="primary",
         use_container_width=True,
         key="btn_enviar_relatorio"
@@ -2404,7 +2306,7 @@ if btn_relatorio:
         except Exception as e:
             st.error(f"erro ao montar relatório: {e}")
 
-with st.expander("📋 histórico de envios", expanded=False):
+with st.expander("Histórico de envios", expanded=False):
     historico = listar_relatorios_enviados(limite=5)
     if historico:
         from datetime import datetime

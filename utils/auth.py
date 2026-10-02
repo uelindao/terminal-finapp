@@ -96,46 +96,30 @@ def _render_tela_login():
     """renderiza a tela de login centralizada."""
     aplicar_tema()
 
-    st.markdown('<br>' * 4, unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 2, 1])
-
+    st.markdown('<div class="ft-login-brand">FIN<span style="color:var(--accent)"> / </span>TERMINAL</div>', unsafe_allow_html=True)
+    intro, gap, col = st.columns([1.2, .15, 1], vertical_alignment="center")
+    with intro:
+        st.markdown('<div class="ft-login-art"><div class="ft-page-eyebrow">Inteligência financeira pessoal</div>'
+                    '<h1>Mais contexto.<br><em>Melhores decisões.</em></h1>'
+                    '<p>Conecte fundamentos, cenário econômico e sua carteira em um único espaço de análise.</p>'
+                    '<div class="ft-login-index"><span>01 / MERCADO</span><span>02 / ANÁLISE</span><span>03 / CARTEIRA</span></div></div>', unsafe_allow_html=True)
     with col:
-        st.markdown('''
-            <div style="text-align:center; margin-bottom:32px;">
-                <div style="font-family:var(--font-title,'Courier New',monospace); font-size:2rem; color:var(--accent); font-weight:bold; letter-spacing:0.15em;">
-                    ⚡ finterminal
-                </div>
-                <div style="font-family:Courier New; font-size:0.78rem; color:#333; text-transform:uppercase; letter-spacing:0.2em; margin-top:4px;">
-                    terminal de análise financeira
-                </div>
-            </div>
-        ''', unsafe_allow_html=True)
-
+        st.markdown('<div class="ft-login-heading">Acesse seu terminal</div><div class="ft-login-caption">Entre com sua conta para continuar suas análises.</div>', unsafe_allow_html=True)
         with st.container():
-            st.markdown('''
-                <div style="background:var(--bg-surface); border:1px solid var(--border-normal); border-top:2px solid var(--accent); border-radius:var(--radius-md); padding:24px 28px; margin-bottom:16px;">
-                    <div style="font-family:Courier New; font-size:0.75rem; color:#555; text-transform:uppercase; letter-spacing:0.1em; margin-bottom:16px;">
-                        🔒 acesso restrito
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
-
             with st.form("form_login"):
                 usuario_input = st.text_input(
-                    "usuário",
-                    placeholder="seu_usuario",
-                    key="login_username",
-                    label_visibility="collapsed"
+                    "Usuário",
+                    placeholder="Seu nome de usuário",
+                    key="login_username"
                 )
                 senha_input = st.text_input(
-                    "senha",
+                    "Senha",
                     type="password",
                     placeholder="••••••••",
-                    key="login_password",
-                    label_visibility="collapsed"
+                    key="login_password"
                 )
 
-                if st.form_submit_button("entrar", type="primary", use_container_width=True):
+                if st.form_submit_button("Entrar no terminal", type="primary", use_container_width=True):
                     if usuario_input and senha_input:
                         usuario = autenticar_usuario(usuario_input, senha_input)
 
@@ -160,30 +144,35 @@ def _render_tela_login():
                     else:
                         st.warning("preencha usuário e senha.")
 
-        st.markdown(
-            '<div style="font-family:Courier New; font-size:0.68rem; color:#2a2a2a; text-align:center; margin-top:20px;">'
-            'finterminal — uso pessoal e restrito</div>',
-            unsafe_allow_html=True
-        )
+        st.markdown('<div class="ft-login-footer">Acesso pessoal · Seus dados ficam vinculados à sua conta.</div>', unsafe_allow_html=True)
+
 
 def render_user_badge():
-    """exibe o badge do utilizador logado na sidebar com o botão de logout."""
+    """Shell compartilhado com navegação nativa e conta em divulgação progressiva."""
     user = get_current_user()
     if not user:
         return
-
+    from html import escape
     with st.sidebar:
-        st.markdown('<div style="height:1px; background:#1e1e1e; margin:8px 0;"></div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="font-family:Courier New; font-size:0.72rem; color:#555; padding:4px 0;">👤 {user["nome"].lower()}</div>',
-            unsafe_allow_html=True
-        )
-        if st.button("sair", key="btn_logout", use_container_width=True):
-            logout()
+        st.markdown('<div class="ft-nav-heading"><div class="ft-login-brand">FIN<span style="color:var(--accent)"> / </span>TERMINAL</div></div>', unsafe_allow_html=True)
+        for path, label, icon in [
+            ("Home.py", "Visão geral", "space_dashboard"),
+            ("pages/3_Macro.py", "Cenário macro", "public"),
+            ("pages/2_Discovery.py", "Oportunidades", "travel_explore"),
+            ("pages/1_Research.py", "Análise de ativos", "query_stats"),
+            ("pages/4_Portfolio.py", "Carteira", "account_balance_wallet"),
+            ("pages/5_Configuracoes.py", "Configurações", "tune"),
+        ]:
+            st.page_link(path, label=label, icon=f":material/{icon}:", use_container_width=True)
+        name = str(user.get("nome") or user.get("username") or "Usuário")
+        role = "Administrador" if user.get("is_admin") else "Conta pessoal"
+        st.markdown(f'<div class="ft-account"><span class="ft-account-avatar">{escape(name[:1].upper())}</span>'
+                    f'<div><div class="ft-account-name">{escape(name)}</div><div class="ft-account-role">{role}</div></div></div>', unsafe_allow_html=True)
+        with st.expander("Minha sessão", expanded=False):
+            st.caption(f"Conectado como {user['username']}.")
+            if st.button("Encerrar sessão", key="btn_logout", use_container_width=True):
+                logout()
 
-# ──────────────────────────────────────────────────────────
-# painel de administração
-# ──────────────────────────────────────────────────────────
 
 def render_painel_admin():
     """renderiza o painel de gestão de utilizadores (apenas para admins)."""

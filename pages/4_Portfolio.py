@@ -22,7 +22,7 @@ from utils.components import (
     page_header, section_title, section_selector, metric_card, status_card, empty_state,
     inject_keyboard_shortcuts, tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url, topbar,
-    portfolio_hero, portfolio_kpis, info_box,
+    portfolio_hero, portfolio_kpis, info_box, confirm_action,
 )
 from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
 from utils.portfolio_importer import importar_planilha, TEMPLATE_CSV
@@ -55,15 +55,11 @@ _user_top_pf = get_current_user() or {}
 topbar(
     breadcrumb_itens=[("⚡ finterminal", "/"), ("portfolio", None)],
     user_name=_user_top_pf.get('username', '') or _user_top_pf.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
 )
-page_header("💼 gestão de portfólio", "visão consolidada da sua carteira, backtesting e diário de decisões.")
-# Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
-try:
-    from utils.macro_state import render_cockpit_macro as _rcm
-    _rcm('BR')
-except Exception:
-    pass
+page_header("Sua carteira", "Acompanhe suas posições, entenda o risco e planeje os próximos movimentos.")
+from utils.components import page_jump_links
+page_jump_links([("Posições", "ft-portfolio-positions"), ("Registrar operação", "ft-portfolio-operation"), ("Análises", "ft-portfolio-analysis")])
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_betas(tickers_tuple: tuple) -> dict:
@@ -1067,13 +1063,21 @@ with st.container():
     col_sel, col_btn = st.columns([4, 1])
     with col_sel:
         portfolio_idx = st.selectbox(
-            "portfólio ativo:",
+            "Carteira ativa",
             range(len(portfolios_lista)),
             format_func=lambda i: f"{portfolios_lista[i]['icone']} {portfolios_lista[i]['nome']} ({portfolios_lista[i]['total_ativos']} ativos)",
             key="sel_portfolio_ativo"
         )
     portfolio_ativo = portfolios_lista[portfolio_idx]
     portfolio_id_ativo = portfolio_ativo['id']
+    _portfolio_overview = st.container()
+    # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
+    try:
+        from utils.macro_state import render_cockpit_macro as _rcm
+        _rcm('BR')
+    except Exception:
+        pass
+
 
     # Detecta troca de portfólio e limpa caches do chat
     _prev_portfolio_id = st.session_state.get('_prev_portfolio_id_chat')
@@ -1090,11 +1094,11 @@ with st.container():
 
     with col_btn:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("⚙️ gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
+        if st.button("Gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
             st.session_state['show_portfolio_manager'] = not st.session_state.get('show_portfolio_manager', False)
 
     if st.session_state.get('show_portfolio_manager', False):
-        with st.expander("⚙️ gerenciar portfólios", expanded=True):
+        with st.expander("Gerenciar portfólios", expanded=True):
             st.markdown("##### criar novo portfólio")
             with st.form("form_novo_portfolio", clear_on_submit=True):
                 fc1, fc2, fc3 = st.columns(3)
@@ -1104,7 +1108,7 @@ with st.container():
                     novo_pf_icone = st.selectbox("ícone:", ["💼", "🇧🇷", "🇺🇸", "🏢", "📈", "₿", "🌍"])
                 with fc3:
                     novo_pf_cor = st.selectbox("cor:", ["#FF9900", "#00C853", "#00B0FF", "#E040FB", "#FF1744"])
-                if st.form_submit_button("criar portfólio", type="primary"):
+                if st.form_submit_button("Criar portfólio", type="primary"):
                     if novo_pf_nome.strip():
                         criar_portfolio(novo_pf_nome.strip(), icone=novo_pf_icone, cor=novo_pf_cor)
                         st.success(f"✅ portfólio '{novo_pf_nome}' criado!")
@@ -1123,8 +1127,8 @@ with st.container():
                         definir_portfolio_padrao(pf['id'])
                         st.rerun()
                 if pc3.button("🗑️ excluir", key=f"pf_del_{pf['id']}", use_container_width=True, disabled=(len(portfolios_lista) <= 1)):
-                    deletar_portfolio(pf['id'])
-                    st.rerun()
+                    confirm_action("Remover carteira?", f"A carteira '{pf['nome']}' e suas posições serão removidas.",
+                                   lambda portfolio_id=pf['id']: deletar_portfolio(portfolio_id), key=f"delete_pf_manager_{pf['id']}")
 
     watchlist = listar_watchlist()
     pesos_atuais = {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}
@@ -1157,7 +1161,7 @@ with st.container():
 
             def _al_seg(lbl, val, cor):
                 return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
-                        f'<span style="font-family:var(--font-ui);font-size:0.58rem;color:var(--text-muted);'
+                        f'<span style="font-family:var(--font-ui);font-size:0.78rem;color:var(--text-muted);'
                         f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
                         f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
                         f'color:{cor};white-space:nowrap;">{val}</span></div>')
@@ -1179,7 +1183,7 @@ with st.container():
                 unsafe_allow_html=True,
             )
 
-            with st.expander("🧭 ver alinhamento por posição", expanded=False):
+            with st.expander("Ver alinhamento por posição", expanded=False):
                 _imp_badge = {"favoravel": ("favorecido", "var(--bull)"),
                               "desfavoravel": ("penalizado", "var(--bear)"),
                               "neutro": ("neutro", "var(--text-muted)"),
@@ -1206,7 +1210,7 @@ with st.container():
 
     tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
     posicoes_ativas = []
-    
+
     for t in tickers_unicos:
         p_atual = pesos_atuais.get(t, {})
         qtd = float(p_atual.get('quantidade') or 0)
@@ -1218,9 +1222,9 @@ with st.container():
                 "preço médio": pm,
                 "valor estimado": qtd * pm
             })
-            
+
     # ══ IMPORTAÇÃO VIA PLANILHA ══════════════════════════════════════════════
-    with st.expander("📥 importar portfólio via planilha", expanded=False):
+    with st.expander("Importar portfólio via planilha", expanded=False):
 
         col_imp1, col_imp2 = st.columns([3, 1])
         with col_imp1:
@@ -1306,7 +1310,7 @@ with st.container():
                 with col_conf3:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button(
-                        "✅ confirmar importação",
+                        "Confirmar importação",
                         type="primary",
                         use_container_width=True,
                         key="btn_confirmar_import",
@@ -1359,129 +1363,131 @@ with st.container():
                     "ticker, quantidade, preco_medio"
                 )
 
+    st.markdown('<div id="ft-portfolio-positions"></div>', unsafe_allow_html=True)
+
     # ══ TABELA DE POSIÇÕES ATIVAS ════════════════════════════════════════════
     if posicoes_ativas:
-        section_title("📋 posições ativas")
-        df_ativas = pd.DataFrame(posicoes_ativas)
-        
-        df_ativas_editado = st.data_editor(
-            df_ativas,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="fixed",
-            column_config={
-                "ticker": st.column_config.TextColumn("ativo", disabled=True),
-                "quantidade": st.column_config.NumberColumn("quantidade", min_value=0.0, step=0.001, format="%.4f"),
-                "preço médio": st.column_config.NumberColumn("preço médio (R$/US$)", min_value=0.0, step=0.01, format="%.4f"),
-                "valor estimado": st.column_config.NumberColumn("valor estimado", disabled=True, format="%.2f")
-            }
-        )
-        
-        patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
-        num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
-        
-        c_txt, c_nav, c_btn = st.columns([3, 2, 1])
-        with c_txt:
-            st.markdown(f"<div style='font-family:var(--font-data,monospace); font-size: 0.85rem; color:var(--text-muted); padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
-        with c_nav:
-            _tickers_port = df_ativas['ticker'].tolist()
-            _sel_nav = st.selectbox(
-                "→ research:",
-                [""] + [t.replace('.SA','') for t in _tickers_port],
-                label_visibility="collapsed",
-                key="port_nav_ticker",
-                placeholder="abrir no research...",
+        with st.expander("Editar quantidades e preços médios", expanded=False):
+            section_title("📋 posições ativas")
+            df_ativas = pd.DataFrame(posicoes_ativas)
+
+            df_ativas_editado = st.data_editor(
+                df_ativas,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="fixed",
+                column_config={
+                    "ticker": st.column_config.TextColumn("ativo", disabled=True),
+                    "quantidade": st.column_config.NumberColumn("quantidade", min_value=0.0, step=0.001, format="%.4f"),
+                    "preço médio": st.column_config.NumberColumn("preço médio (R$/US$)", min_value=0.0, step=0.01, format="%.4f"),
+                    "valor estimado": st.column_config.NumberColumn("valor estimado", disabled=True, format="%.2f")
+                }
             )
-            if _sel_nav:
-                _match = next((t for t in _tickers_port if t.replace('.SA','') == _sel_nav), _sel_nav)
-                st.session_state['research_ticker_externo'] = _match
-                st.switch_page("pages/1_Research.py")
-        with c_btn:
-            btn_salvar = st.button("💾 salvar correções da tabela", type="primary", use_container_width=True)
-            
-        if btn_salvar:
-            df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
-            patrimonio_total = df_ativas_editado['valor total'].sum()
-            
-            for _, row in df_ativas_editado.iterrows():
-                t = row['ticker']
-                qtd = row['quantidade']
-                pm = row['preço médio']
-                v_total = row['valor total']
-                peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
-                import math as _mt
-                def _sn(v):
-                    if v is None: return None
-                    try: return None if _mt.isnan(v) or _mt.isinf(v) else v
-                    except TypeError: return v
-                salvar_peso(t, _sn(peso_real), _sn(pm), _sn(qtd), portfolio_id=portfolio_id_ativo)
-                
-            st.success("✅ posições atualizadas.")
-            st.rerun()
+
+            patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
+            num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
+
+            c_txt, c_nav, c_btn = st.columns([3, 2, 1])
+            with c_txt:
+                st.markdown(f"<div style='font-family:var(--font-data,monospace); font-size: 0.85rem; color:var(--text-muted); padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
+            with c_nav:
+                _tickers_port = df_ativas['ticker'].tolist()
+                _sel_nav = st.selectbox(
+                    "Abrir análise do ativo",
+                    [""] + [t.replace('.SA','') for t in _tickers_port],
+                    label_visibility="collapsed",
+                    key="port_nav_ticker",
+                    placeholder="Selecione um ativo",
+                )
+                if _sel_nav:
+                    _match = next((t for t in _tickers_port if t.replace('.SA','') == _sel_nav), _sel_nav)
+                    st.session_state['research_ticker_externo'] = _match
+                    st.switch_page("pages/1_Research.py")
+            with c_btn:
+                btn_salvar = st.button("Salvar correções da tabela", type="primary", use_container_width=True)
+
+            if btn_salvar:
+                df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
+                patrimonio_total = df_ativas_editado['valor total'].sum()
+
+                for _, row in df_ativas_editado.iterrows():
+                    t = row['ticker']
+                    qtd = row['quantidade']
+                    pm = row['preço médio']
+                    v_total = row['valor total']
+                    peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
+                    # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+                    import math as _mt
+                    def _sn(v):
+                        if v is None: return None
+                        try: return None if _mt.isnan(v) or _mt.isinf(v) else v
+                        except TypeError: return v
+                    salvar_peso(t, _sn(peso_real), _sn(pm), _sn(qtd), portfolio_id=portfolio_id_ativo)
+
+                st.success("✅ posições atualizadas.")
+                st.rerun()
     else:
         empty_state("📋", "nenhuma posição ativa", "adicione sua primeira posição abaixo.")
 
-    st.markdown("<hr style='margin: 1.5rem 0; opacity: 0.2;'>", unsafe_allow_html=True)
-    section_title("➕ lançar operação (compra / venda)")
-    
-    with st.form("form_add_posicao", clear_on_submit=True):
-        col_op, col_f1, col_f2, col_f3 = st.columns([1, 2, 1, 1], gap="small")
-        
-        with col_op:
-            tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
-            
-        with col_f1:
-            opcoes_wl = [w['ticker'] for w in watchlist]
-            ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
-            
-        with col_f2:
-            qtd_form = st.number_input("quantidade operada", min_value=0.0, step=0.001, format="%.4f")
-            
-        with col_f3:
-            pm_form = st.number_input("preço (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
-            
-        ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        btn_add = st.form_submit_button("registrar operação no portfólio", type="primary", use_container_width=True)
-        
-        if btn_add:
-            ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
-            
-            if ticker_final and qtd_form > 0 and pm_form > 0:
-                # Obter dados atuais da posição antes da operação
-                p_atual = pesos_atuais.get(ticker_final, {})
-                qtd_atual = float(p_atual.get('quantidade') or 0)
-                pm_atual = float(p_atual.get('preco_medio') or 0)
-                
-                if "Comprar" in tipo_op:
-                    nova_qtd = qtd_atual + qtd_form
-                    # Cálculo inteligente de Preço Médio
-                    novo_pm = ((qtd_atual * pm_atual) + (qtd_form * pm_form)) / nova_qtd if nova_qtd > 0 else pm_form
-                    
-                    salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
-                    st.success(f"✅ compra de {qtd_form} cotas de {ticker_final} registrada! novo PM: {novo_pm:.2f}")
-                    time.sleep(1.5)
-                    st.rerun()
-                    
-                elif "Vender" in tipo_op:
-                    if qtd_form > qtd_atual:
-                        st.warning(f"⚠️ você está tentando vender {qtd_form} cotas, mas só possui {qtd_atual} de {ticker_final}.")
-                    else:
-                        nova_qtd = qtd_atual - qtd_form
-                        # Em vendas, o Preço Médio das cotas restantes NÃO muda. Se zerar a posição, zera o PM.
-                        novo_pm = pm_atual if nova_qtd > 0 else 0.0
-                        
+    st.markdown('<div id="ft-portfolio-operation"></div>', unsafe_allow_html=True)
+    with st.expander("Registrar compra ou venda", expanded=not bool(posicoes_ativas)):
+        with st.form("form_add_posicao", clear_on_submit=True):
+            col_op, col_f1, col_f2, col_f3 = st.columns([1, 2, 1, 1], gap="small")
+
+            with col_op:
+                tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
+
+            with col_f1:
+                opcoes_wl = [w['ticker'] for w in watchlist]
+                ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
+
+            with col_f2:
+                qtd_form = st.number_input("quantidade operada", min_value=0.0, step=0.001, format="%.4f")
+
+            with col_f3:
+                pm_form = st.number_input("preço (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
+
+            ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            btn_add = st.form_submit_button("Registrar operação no portfólio", type="primary", use_container_width=True)
+
+            if btn_add:
+                ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
+
+                if ticker_final and qtd_form > 0 and pm_form > 0:
+                    # Obter dados atuais da posição antes da operação
+                    p_atual = pesos_atuais.get(ticker_final, {})
+                    qtd_atual = float(p_atual.get('quantidade') or 0)
+                    pm_atual = float(p_atual.get('preco_medio') or 0)
+
+                    if "Comprar" in tipo_op:
+                        nova_qtd = qtd_atual + qtd_form
+                        # Cálculo inteligente de Preço Médio
+                        novo_pm = ((qtd_atual * pm_atual) + (qtd_form * pm_form)) / nova_qtd if nova_qtd > 0 else pm_form
+
                         salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
-                        st.success(f"✅ venda de {qtd_form} cotas de {ticker_final} registrada com sucesso!")
+                        st.success(f"✅ compra de {qtd_form} cotas de {ticker_final} registrada! novo PM: {novo_pm:.2f}")
                         time.sleep(1.5)
                         st.rerun()
-            else:
-                st.warning("preencha ticker, uma quantidade maior que zero e um preço válido.")
+
+                    elif "Vender" in tipo_op:
+                        if qtd_form > qtd_atual:
+                            st.warning(f"⚠️ você está tentando vender {qtd_form} cotas, mas só possui {qtd_atual} de {ticker_final}.")
+                        else:
+                            nova_qtd = qtd_atual - qtd_form
+                            # Em vendas, o Preço Médio das cotas restantes NÃO muda. Se zerar a posição, zera o PM.
+                            novo_pm = pm_atual if nova_qtd > 0 else 0.0
+
+                            salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
+                            st.success(f"✅ venda de {qtd_form} cotas de {ticker_final} registrada com sucesso!")
+                            time.sleep(1.5)
+                            st.rerun()
+                else:
+                    st.warning("preencha ticker, uma quantidade maior que zero e um preço válido.")
 
     ativos_alocados = {t: d for t, d in pesos_atuais.items() if d['peso'] > 0}
-    
+
     if ativos_alocados:
         tickers_com_peso = list(ativos_alocados.keys())
 
@@ -1505,7 +1511,7 @@ with st.container():
         linhas_portfolio = []
         custo_total_carteira = 0.0
         valor_atual_carteira = 0.0
-        
+
         health_raw = get_health_scores()
         health_data = {h['ticker']: h.get('score', 50) for h in health_raw}
 
@@ -1517,10 +1523,10 @@ with st.container():
             valor_posicao = qtd * preco_atual
             pnl_valor = valor_posicao - custo_posicao
             pnl_pct = (pnl_valor / custo_posicao * 100) if custo_posicao > 0 else 0.0
-            
+
             custo_total_carteira += custo_posicao
             valor_atual_carteira += valor_posicao
-            
+
             linhas_portfolio.append({
                 "ativo": t, "qtd": qtd, "preço médio": pm, "preço atual": preco_atual,
                 "custo total": custo_posicao, "valor atual": valor_posicao,
@@ -1546,7 +1552,7 @@ with st.container():
                 "cdi via bcb série 12 (taxa overnight acumulada). "
                 "base 100 = início do período selecionado."
             ),
-            cor="#555",
+            cor="var(--text-muted)",
             tamanho="0.72rem",
         )
 
@@ -1745,7 +1751,7 @@ with st.container():
                         st.markdown(
                             f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
                             f'border-left:3px solid var(--accent); border-radius:6px; padding:12px 16px; margin-bottom:12px;">'
-                            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.65rem; '
+                            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
                             f'color:var(--text-muted); margin-bottom:8px;">'
                             f'⚡ análise via cache supabase '
                             f'— gerada em {str(_db_cache_pf.get("created_at",""))[:16].replace("T"," ")}'
@@ -1761,7 +1767,7 @@ with st.container():
                     pass
 
                 if st.button(
-                    "🧠 ia: analisar performance e sugerir ajustes",
+                    "Ia: analisar performance e sugerir ajustes",
                     key="btn_ia_perf",
                     type="secondary",
                     use_container_width=True,
@@ -1856,50 +1862,6 @@ with st.container():
             'num_posicoes':  len(df_portfolio),
         }
 
-        # ── Banner do portfólio (design system v5) ───────────────────────
-        portfolio_hero(
-            titulo      = "GESTÃO DE PORTFÓLIO",
-            valor_atual = valor_atual_carteira,
-            custo_total = custo_total_carteira,
-            pnl_valor   = pnl_global_valor,
-            pnl_pct     = pnl_global_pct,
-            moeda       = "R$",
-            data_source = "",
-        )
-
-        # ── KPIs auxiliares ──────────────────────────────────────────────
-        _pf_kpis = [
-            {
-                "nome":     "custo alocado",
-                "valor":    custo_total_carteira,
-                "sublabel": "total investido (preço médio × qtd)",
-                "tone":     "info",
-                "icone":    "💰",
-            },
-            {
-                "nome":     "p&l global",
-                "valor":    pnl_global_valor,
-                "sublabel": f"{pnl_global_pct:+.2f}% sobre custo",
-                "tone":     "bull" if pnl_global_valor >= 0 else "bear",
-                "icone":    "📈" if pnl_global_valor >= 0 else "📉",
-            },
-            {
-                "nome":     "posições",
-                "valor":    f"{len(df_portfolio)}",
-                "sublabel": "ativos no portfólio",
-                "tone":     "accent",
-                "icone":    "📊",
-            },
-            {
-                "nome":     "valor médio/posição",
-                "valor":    (valor_atual_carteira / max(len(df_portfolio), 1)),
-                "sublabel": "ticket médio atual",
-                "tone":     "info",
-                "icone":    "🎯",
-            },
-        ]
-        portfolio_kpis(_pf_kpis)
-
         # Tabela de posições HTML — P&L colorido, health bar, link para Research
         def _pf_table_html(df: pd.DataFrame) -> None:
             # Render via html_table (F0-2): barras de health/peso mantidas na célula.
@@ -1928,7 +1890,7 @@ with st.container():
                               f'<div style="width:{_pw_pct:.0f}%;height:100%;background:var(--accent);border-radius:2px;"></div></div>'
                               f'<span style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-data);min-width:30px;">{_peso:.1f}%</span></div>')
                 _rows.append([
-                    f'<a href="/Research?research_ticker={_tk}" target="_blank" '
+                    f'<a href="{ticker_nav_url(_tk)}" target="_self" '
                     f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk.replace(".SA","")}</a>',
                     f"{row['qtd']:.4f}", f"{row['preço médio']:.4f}", f"{row['preço atual']:.2f}",
                     f"{row['custo total']:,.0f}", f"{row['valor atual']:,.0f}",
@@ -1952,7 +1914,7 @@ with st.container():
                 _tk_dec = st.selectbox("registrar decisão de:", _tk_pos_list,
                                        key="qa_dec_ticker", label_visibility="collapsed")
             with _qa2:
-                if st.button("📝 registrar decisão", key="qa_dec_btn",
+                if st.button("Registrar decisão", key="qa_dec_btn",
                              use_container_width=True):
                     st.session_state["diario_ticker_manual"] = _tk_dec
                     st.session_state["_diario_expandir"] = True
@@ -1963,7 +1925,7 @@ with st.container():
         st.markdown("<br>", unsafe_allow_html=True)
         csv = df_portfolio.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 exportar carteira (csv)",
+            label="Exportar carteira em CSV",
             data=csv,
             file_name="portfolio_finapp.csv",
             mime="text/csv",
@@ -2060,6 +2022,54 @@ with st.container():
             pl_total_brl = total_brl_carteira - total_custo_brl
             pl_total_pct = ((total_brl_carteira / total_custo_brl) - 1) * 100 if total_custo_brl > 0 else 0.0
 
+            with _portfolio_overview:
+                # ── Banner do portfólio (design system v5) ───────────────────────
+                portfolio_hero(
+                    titulo      = "Patrimônio em reais",
+                    valor_atual = total_brl_carteira,
+                    custo_total = total_custo_brl,
+                    pnl_valor   = pl_total_brl,
+                    pnl_pct     = pl_total_pct,
+                    moeda       = "R$",
+                    data_source = "",
+                )
+
+                # ── KPIs auxiliares ──────────────────────────────────────────────
+                _pf_kpis = [
+                    {
+                        "nome":     "custo alocado",
+                        "valor":    total_custo_brl,
+                        "sublabel": "total investido (preço médio × qtd)",
+                        "tone":     "info",
+                        "icone":    "💰",
+                    },
+                    {
+                        "nome":     "p&l global",
+                        "valor":    pl_total_brl,
+                        "sublabel": f"{pl_total_pct:+.2f}% sobre custo",
+                        "tone":     "bull" if pl_total_brl >= 0 else "bear",
+                        "icone":    "📈" if pl_total_brl >= 0 else "📉",
+                    },
+                    {
+                        "nome":     "posições",
+                        "valor":    f"{len(df_portfolio)}",
+                        "sublabel": "ativos no portfólio",
+                        "tone":     "accent",
+                        "icone":    "📊",
+                    },
+                    {
+                        "nome":     "valor médio/posição",
+                        "valor":    (total_brl_carteira / max(len(df_portfolio), 1)),
+                        "sublabel": "ticket médio atual",
+                        "tone":     "info",
+                        "icone":    "🎯",
+                    },
+                ]
+                portfolio_kpis(_pf_kpis)
+                if posicoes_usd:
+                    st.caption(f"Posições em USD convertidas a R$ {cambio_atual:.4f}/USD. O custo usa o mesmo câmbio atual.")
+
+
             total_usd  = sum(p['valor_atual'] for p in posicoes_usd)
             custo_usd  = sum(p['valor_custo'] for p in posicoes_usd)
             pl_usd     = total_usd - custo_usd
@@ -2146,7 +2156,7 @@ with st.container():
                     f'<span style="color:var(--text-primary); font-weight:bold;">$ {total_usd:,.2f}</span> | '
                     f'<span style="color:var(--text-muted);">em brl: </span>'
                     f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
-                    f'<br><span style="color:var(--text-muted); font-size:0.65rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
+                    f'<br><span style="color:var(--text-muted); font-size:0.78rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -2160,14 +2170,14 @@ with st.container():
                         f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
                         f'<span style="color:var(--text-muted);">$ {pos["preco_atual"]:,.2f}</span>'
                         f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
-                        f'<span style="color:{cor_p}; font-size:0.68rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
+                        f'<span style="color:{cor_p}; font-size:0.78rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
 
         # ── rebalanceamento inteligente ───────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("⚖️ rebalanceamento inteligente", expanded=False):
+        with st.expander("Rebalanceamento inteligente", expanded=False):
 
             st.markdown(
                 '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); margin-bottom:16px;">'
@@ -2220,7 +2230,7 @@ with st.container():
 
                 col_s1, col_s2 = st.columns([1, 3])
                 with col_s1:
-                    if st.button("💾 salvar alvos", type="primary", use_container_width=True,
+                    if st.button("Salvar alvos", type="primary", use_container_width=True,
                                  key="btn_salvar_alvos"):
                         for t, alvo in novos_alvos.items():
                             salvar_peso_alvo(portfolio_id_ativo, t, alvo)
@@ -2284,7 +2294,7 @@ with st.container():
                             with r1:
                                 st.markdown(
                                     f'<div style="font-family:var(--font-data,monospace); color:var(--accent); font-weight:bold;">{d["ticker"]}</div>'
-                                    f'<div style="font-family:var(--font-data,monospace); font-size:0.7rem; color:var(--text-muted);">{d["peso atual"]} → {d["peso alvo"]}</div>',
+                                    f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; color:var(--text-muted);">{d["peso atual"]} → {d["peso alvo"]}</div>',
                                     unsafe_allow_html=True,
                                 )
                             with r2:
@@ -2360,7 +2370,8 @@ with st.container():
 # SELETOR DE ANÁLISE (P4-1) — renderiza SÓ a seção escolhida abaixo das posições
 # ══════════════════════════════════════════════════════════════════════════
 st.markdown("<br>", unsafe_allow_html=True)
-section_title("📈 análises da carteira")
+st.markdown('<div id="ft-portfolio-analysis"></div>', unsafe_allow_html=True)
+section_title("Análises da carteira")
 
 # F3-1: as 7 análises agrupadas em 4 GRUPOS (grupo → sub-seleção), dando hierarquia
 # e encurtando o seletor. Os branches `if _secao_pf == "<label>"` abaixo continuam
@@ -2781,7 +2792,7 @@ if _secao_pf == "📊 concentração":
                 # Interpretação IA
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button(
-                    "🧠 ia: interpretar diversificação da carteira",
+                    "Ia: interpretar diversificação da carteira",
                     key="btn_ia_corr",
                     type="secondary",
                 ):
@@ -2862,7 +2873,7 @@ if _secao_pf == "📐 risco":
                 h["ticker"]: h.get("score") for h in (get_health_scores() or [])
             }
 
-            with st.expander("🌡️ exposição macro do book (regime + inflação setorial)",
+            with st.expander("Exposição macro do book (regime + inflação setorial)",
                              expanded=True):
                 try:
                     from utils.portfolio_sizing import exposicao_macro_book
@@ -2909,7 +2920,7 @@ if _secao_pf == "📐 risco":
                 else:
                     st.caption("exposição macro indisponível (sem setor/cache).")
 
-            with st.expander("🎯 sizing sugerido — risk parity tiltado por edge e macro",
+            with st.expander("Sizing sugerido — risk parity tiltado por edge e macro",
                              expanded=False):
                 st.markdown(
                     "*peso-alvo = paridade de risco (1/volatilidade) × edge (health score) "
@@ -2958,7 +2969,7 @@ if _secao_pf == "📐 risco":
                     st.caption("dados insuficientes para sizing (precisa de histórico de preços).")
 
             # ── Seção VaR ───────────────────────────────────────────────
-            with st.expander("📉 value-at-risk (VaR e CVaR)", expanded=True):
+            with st.expander("Value-at-risk (VaR e CVaR)", expanded=True):
                 st.markdown(
                     "*VaR responde: 'em um dia ruim típico (1 em 20 ou 1 em 100), "
                     "quanto a carteira pode perder?'. CVaR responde: 'se passar do VaR, "
@@ -3101,8 +3112,7 @@ if _secao_pf == "📐 risco":
                         annotation_position="top left",
                     )
                     _fig.update_layout(
-                        **base_layout(),
-                        height=350,
+                        **base_layout(height=350),
                         xaxis_title="retorno diário (%)",
                         yaxis_title="frequência",
                         showlegend=False,
@@ -3126,7 +3136,7 @@ if _secao_pf == "📐 risco":
                     )
 
             # ── Decomposição Brinson ──────────────────────────────────────
-            with st.expander("📊 decomposição brinson (atribuição por setor)", expanded=False):
+            with st.expander("Decomposição brinson (atribuição por setor)", expanded=False):
                 st.markdown(
                     "*decompõe o retorno excessivo vs benchmark em três efeitos: "
                     "**alocação** (peso setorial diferente do mercado), **seleção** "
@@ -3327,7 +3337,7 @@ if _secao_pf == "📐 risco":
                         )
                     st.info(_veredito)
 
-            with st.expander("🎯 exposição a fatores fama-french", expanded=False):
+            with st.expander("Exposição a fatores fama-french", expanded=False):
                 st.markdown(
                     "*regressão dos retornos da carteira sobre 3 fatores estilo "
                     "Fama-French. **β_MKT** mede sensibilidade ao mercado, **β_SMB** "
@@ -3489,7 +3499,7 @@ if _secao_pf == "📐 risco":
                         f"variância dos retornos da carteira."
                     )
 
-            with st.expander("💰 projeção de dividendos 12m", expanded=False):
+            with st.expander("Projeção de dividendos 12m", expanded=False):
                 st.markdown(
                     "*projeta os próximos 12 pagamentos por ticker replicando o padrão "
                     "histórico × crescimento yoy (cap ±10%). lê do cache dividend_history "
@@ -3672,7 +3682,7 @@ if _secao_pf == "⚡ stress test":
                     choque_sp = st.slider("s&p500 (%):", -60.0, 30.0, -15.0, 5.0, key="stress_sp")
                     choque_selic = st.slider("selic (pp):", -3.0, 5.0, 1.0, 0.5, key="stress_selic")
 
-        btn_stress = st.button("⚡ rodar stress test", type="primary", use_container_width=True)
+        btn_stress = st.button("Rodar stress test", type="primary", use_container_width=True)
 
         if btn_stress:
             with st.spinner("calculando betas e simulando cenários..."):
@@ -3801,7 +3811,7 @@ if _secao_pf == "⚡ stress test":
             st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
             st.caption("impacto estimado de cada cenário de stress histórico sobre o valor da carteira. mostra a vulnerabilidade a choques como crises cambiais, alta de juros ou quedas de bolsa.")
 
-            if st.button("🧠 ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
+            if st.button("Ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
                 with st.spinner("deepseek analisando exposições..."):
                     _prompt_stress = (
                         f"cenário de stress: {resumo['cenario']}\n"
@@ -4057,7 +4067,7 @@ if _secao_pf == "📊 backtesting":
     if _bt_entrada <= _bt_saida:
         st.warning("threshold de entrada deve ser maior que o de saída.")
     else:
-        if st.button("▶ rodar backtesting", type="primary", use_container_width=True, key="btn_rodar_bt"):
+        if st.button("Rodar backtesting", type="primary", use_container_width=True, key="btn_rodar_bt"):
             st.session_state.pop('bt_resultado', None)
             st.session_state.pop('bt_ticker', None)
             with st.spinner(f"simulando estratégia para {_bt_ticker}..."):
@@ -4140,7 +4150,7 @@ if _secao_pf == "📊 backtesting":
                     f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;'
                     f'color:{_f_cor};font-weight:600;">'
                     f'fonte dos dados: {_f_label}</div>'
-                    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.65rem;'
+                    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;'
                     f'color:var(--text-muted);">{_f_desc}</div>'
                     f'</div>'
                     f'</div>',
@@ -4219,14 +4229,14 @@ if _secao_pf == "📊 backtesting":
                     st.markdown(
                         f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
                         f'border-radius:6px;padding:12px 16px;margin-bottom:12px;">'
-                        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.68rem;'
+                        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;'
                         f'color:var(--accent);font-weight:600;margin-bottom:8px;">'
                         f'📊 distribuição do score — {_fonte_ui.replace("_"," ")}</div>'
                         f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
                         f'gap:8px;margin-bottom:10px;">'
                         + ''.join([
                             f'<div style="text-align:center;">'
-                            f'<div style="font-size:0.58rem;color:var(--text-muted);'
+                            f'<div style="font-size:0.78rem;color:var(--text-muted);'
                             f'text-transform:uppercase;margin-bottom:2px;">{lbl}</div>'
                             f'<div style="font-family:var(--font-data,monospace);font-size:0.9rem;'
                             f'color:var(--text-secondary);font-weight:600;">{val:.0f}</div>'
@@ -4255,7 +4265,7 @@ if _secao_pf == "📊 backtesting":
                     _bt1, _bt2, _bt3 = st.columns(3)
                     with _bt1:
                         if st.button(
-                            f"🎯 seletivo: entrada {_p90:.0f} / saída {_p25:.0f}",
+                            f"Seletivo: entrada {_p90:.0f} / saída {_p25:.0f}",
                             key=f"btn_th_seletivo_{st.session_state['_bt_click_gen']}",
                             use_container_width=True,
                             help="entra apenas nos melhores 10% momentos",
@@ -4266,7 +4276,7 @@ if _secao_pf == "📊 backtesting":
                             st.rerun()
                     with _bt2:
                         if st.button(
-                            f"⚖️ moderado: entrada {_p75:.0f} / saída {_p25:.0f}",
+                            f"Moderado: entrada {_p75:.0f} / saída {_p25:.0f}",
                             key=f"btn_th_moderado_{st.session_state['_bt_click_gen']}",
                             use_container_width=True,
                             help="entra nos melhores 25% momentos",
@@ -4277,7 +4287,7 @@ if _secao_pf == "📊 backtesting":
                             st.rerun()
                     with _bt3:
                         if st.button(
-                            f"📈 ativo: entrada {_p50:.0f} / saída {_p10:.0f}",
+                            f"Ativo: entrada {_p50:.0f} / saída {_p10:.0f}",
                             key=f"btn_th_ativo_{st.session_state['_bt_click_gen']}",
                             use_container_width=True,
                             help="entra na maioria dos momentos positivos",
@@ -4286,7 +4296,7 @@ if _secao_pf == "📊 backtesting":
                             st.session_state['_pending_entrada'] = _ajustar_threshold(_p50, 40, 90)
                             st.session_state['_pending_saida']   = _ajustar_threshold(_p10, 20, 70)
                             st.rerun()
-                
+
                 _bt_ticker_label = st.session_state.get('bt_ticker', _bt_ticker).replace('.SA', '')
 
                 # Métricas comparativas
@@ -4654,10 +4664,10 @@ if _secao_pf == "📊 backtesting":
 # tab 3: diário de decisões
 # ==========================================
 if _secao_pf == "📝 diário de decisões":
-    
+
     # F3-3: abre o expander automaticamente quando chega via "registrar decisão"
     # de uma posição (pop é seguro: é st.form, sem reruns até o submit).
-    with st.expander("➕ registrar nova decisão",
+    with st.expander("Registrar nova decisão",
                      expanded=st.session_state.pop("_diario_expandir", False)):
         with st.form("form_decisao", clear_on_submit=True):
             c1, c2, c3 = st.columns([3, 2, 2])
@@ -4673,10 +4683,10 @@ if _secao_pf == "📝 diário de decisões":
             with c3:
                 preco_dec = st.number_input("preço na decisão (r$ / $):", min_value=0.0, format="%.2f")
                 qtd_dec = st.number_input("quantidade:", min_value=0.0, format="%.4f")
-                
+
             tese_dec = st.text_area("tese de investimento (por que comprou/vendeu? o que esperava?):", height=100)
-            btn_salvar = st.form_submit_button("💾 registrar decisão", type="primary")
-            
+            btn_salvar = st.form_submit_button("Registrar decisão", type="primary")
+
             if btn_salvar:
                 ticker_final = ticker_manual if ticker_manual else ticker_from_label(selecao)
                 if not ticker_final or not tese_dec or preco_dec <= 0:
@@ -4695,7 +4705,7 @@ if _secao_pf == "📝 diário de decisões":
             dados_tabela = []
             acertos = erros = neutros = total_avaliados = 0
             retornos_compra = []
-            
+
             for d in decisoes:
                 t = d['ticker']
                 t_base = mapear_ticker_base(t)
@@ -4706,20 +4716,20 @@ if _secao_pf == "📝 diário de decisões":
                         preco_atual = float(yf.Ticker(t_base).history(period="1d")['Close'].iloc[-1])
                     except Exception:
                         preco_atual = 0.0
-                    
+
                 retorno_pct = ((preco_atual / d['preco_decisao']) - 1) * 100 if d['preco_decisao'] and preco_atual else 0.0
                 if d['tipo'] in ['venda', 'redução']: retorno_pct = -retorno_pct
 
                 data_d = datetime.datetime.strptime(d['data_decisao'], "%Y-%m-%d").date()
                 dias_passados = (datetime.date.today() - data_d).days
-                
+
                 res = d['resultado']
                 if res == 'acerto': acertos += 1; total_avaliados += 1
                 elif res == 'erro': erros += 1; total_avaliados += 1
                 elif res == 'neutro': neutros += 1; total_avaliados += 1
-                    
+
                 if d['tipo'] == 'compra': retornos_compra.append(retorno_pct)
-                    
+
                 dados_tabela.append({'id': d['id'], 'ticker': t.lower(), 'tipo': d['tipo'], 'data': d['data_decisao'], 'preço decisão': d['preco_decisao'], 'preço atual': preco_atual, 'retorno %': retorno_pct, 'dias': dias_passados, 'tese': d['tese'][:50] + "..." if len(d['tese']) > 50 else d['tese'], 'resultado': res if res else '⏳ aguardando'})
 
         df_decisoes = pd.DataFrame(dados_tabela)
@@ -4774,20 +4784,20 @@ if _secao_pf == "📝 diário de decisões":
             _ht_dec(_cols, _rows, aligns=_aligns, classes=_classes)
         _decisoes_table_html(df_decisoes)
 
-        with st.expander("⚖️ julgar uma decisão (atualizar status)"):
+        with st.expander("Julgar uma decisão (atualizar status)"):
             c_u1, c_u2, c_u3 = st.columns([2, 2, 2])
             with c_u1: id_selecionado = st.selectbox("selecione o id da decisão:", df_decisoes['id'].tolist())
             with c_u2: novo_status = st.selectbox("veredicto:", ['acerto', 'erro', 'neutro', '⏳ aguardando'])
             with c_u3:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("atualizar resultado", type="primary", use_container_width=True):
+                if st.button("Atualizar resultado", type="primary", use_container_width=True):
                     status_db = None if novo_status == '⏳ aguardando' else novo_status
                     atualizar_resultado(id_selecionado, status_db)
                     st.success("julgamento atualizado!")
                     st.rerun()
 
         st.markdown("---")
-        if st.button("🧠 ia: revisar padrões de decisão", type="primary"):
+        if st.button("Ia: revisar padrões de decisão", type="primary"):
             with st.spinner("deepseek analisando padrões comportamentais..."):
                 try:
                     df_revisao = df_decisoes.head(10).drop(columns=['id'])
@@ -4890,7 +4900,7 @@ if _secao_pf == "🧾 imposto de renda":
             )
 
         calcular_btn = st.form_submit_button(
-            "🧮 calcular IR", type="primary", use_container_width=True,
+            "Calcular IR", type="primary", use_container_width=True,
         )
 
     if calcular_btn:
@@ -4957,7 +4967,7 @@ if _secao_pf == "🧾 imposto de renda":
         # Regra aplicada + observações
         st.markdown(
             f'<div class="card" style="margin-top:12px; padding:14px; border-left:3px solid var(--info);">'
-            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.7rem; color:var(--text-muted); '
+            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); '
             f'text-transform:uppercase; margin-bottom:6px;">regra aplicada</div>'
             f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; color:var(--text-primary);">'
             f'{resultado_ir["regra_aplicada"]}</div>'
@@ -4993,7 +5003,7 @@ if _secao_pf == "🧾 imposto de renda":
 
     # ── guia de referência ────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("📚 guia rápido de alíquotas e regras (2024/2025)", expanded=False):
+    with st.expander("Guia rápido de alíquotas e regras (2024/2025)", expanded=False):
         regras = [
             ("🇧🇷 Ações BR — swing trade",
              "isenção total se vendas no mês ≤ R$ 20.000. "
@@ -5467,7 +5477,7 @@ if _secao_pf == "💬 chat ia":
 
     if st.session_state.get("chat_portfolio_msgs"):
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🗑️ limpar conversa", key="btn_limpar_chat"):
+        if st.button("Limpar conversa", key="btn_limpar_chat"):
             limpar_historico_chat(_user_id_chat, _portfolio_id_chat)
             st.session_state["chat_portfolio_msgs"] = []
             st.session_state.pop(_ctx_key, None)

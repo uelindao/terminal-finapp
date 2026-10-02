@@ -27,6 +27,9 @@ Compat preservada:
 """
 import streamlit as st
 
+st.set_page_config(page_title="FinTerminal", page_icon="📊", layout="wide", initial_sidebar_state="auto")
+st.session_state["_finterm_router"] = True
+
 
 # CSS global + tokens + template Plotly. Precisa rodar ANTES de st.navigation
 # para que cada página herde os estilos. aplicar_tema() é idempotente.

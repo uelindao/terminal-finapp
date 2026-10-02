@@ -72,9 +72,18 @@ _user_top_disc = get_current_user() or {}
 topbar(
     breadcrumb_itens=[("⚡ finterminal", "/"), ("discovery", None)],
     user_name=_user_top_disc.get('username', '') or _user_top_disc.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
 )
-page_header("🎯 discovery — descoberta", "encontre assimetrias de mercado através de filtros quantitativos e inteligência artificial.")
+page_header("Oportunidades", "Comece pelos setores, refine seus filtros e aprofunde a análise dos ativos.")
+
+_SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
+             "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
+# drill-down do scorecard pode pedir troca de seção (F4-1): aplica ANTES do widget
+# ser instanciado — não se pode modificar a key de um widget já instanciado.
+_pending_secao_d = st.session_state.pop("_discovery_secao_pending", None)
+if _pending_secao_d in _SECOES_D:
+    st.session_state["discovery_secao"] = _pending_secao_d
+_secao_d = section_selector(_SECOES_D, key="discovery_secao")
 # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
 try:
     from utils.macro_state import render_cockpit_macro as _rcm
@@ -101,7 +110,7 @@ def modal_salvar_screener(ticker: str, nome: str, mercado: str):
     else:
         nome_nova_wl = st.text_input("nome da nova watchlist:", placeholder="ex: radar de dividendos", key=f"input_nova_{ticker}")
     
-    if st.button("💾 confirmar", type="primary", use_container_width=True, key=f"btn_conf_{ticker}"):
+    if st.button("Confirmar", type="primary", use_container_width=True, key=f"btn_conf_{ticker}"):
         if acao_wl == "criar nova watchlist":
             if nome_nova_wl.strip(): dest_id = criar_watchlist(nome_nova_wl.strip(), icone="🎯", cor="#00C853")
             else: return st.warning("digite um nome para a nova watchlist.")
@@ -452,14 +461,7 @@ def rodar_screener(
 # `with tab_X:` viraram `if _secao_d == ...`. Sem dependência cruzada entre abas.
 # Ordem = funil: a rotação setorial (visão estratégica "onde olhar") vem primeiro
 # e é o default; o screener é o drill-down ("agora me mostre os ativos do setor").
-_SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
-             "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
-# drill-down do scorecard pode pedir troca de seção (F4-1): aplica ANTES do widget
-# ser instanciado — não se pode modificar a key de um widget já instanciado.
-_pending_secao_d = st.session_state.pop("_discovery_secao_pending", None)
-if _pending_secao_d in _SECOES_D:
-    st.session_state["discovery_secao"] = _pending_secao_d
-_secao_d = section_selector(_SECOES_D, key="discovery_secao")
+
 
 # ==========================================
 # tab 1 — momentum (força relativa)
@@ -485,7 +487,7 @@ if _secao_d == "🚀 momentum & radar":
         mom_top_n = st.slider("top N ativos:", 5, 30, 15, 5, key="mom_top_n")
     with mc3:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_momentum = st.button("🚀 calcular momentum", type="primary", use_container_width=True)
+        btn_momentum = st.button("Calcular momentum", type="primary", use_container_width=True)
 
     score_minimo = st.slider("score mínimo de momentum:", 0, 100, 50, 10, key="mom_score_min")
 
@@ -647,7 +649,7 @@ if _secao_d == "🚀 momentum & radar":
                     modal_salvar_screener(row['ticker'], row['nome'], mercado)
 
         with col_a2:
-            if st.button("🧠 ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
+            if st.button("Ia: analisar momentum e identificar líderes setoriais", type="primary", use_container_width=True):
                 with st.spinner("deepseek analisando momentum..."):
                     _dados_mom = df_m[cols_mostrar].head(10).to_csv(index=False)
                     chamar_ia(
@@ -711,20 +713,20 @@ if _secao_d == "🔍 screener quantitativo":
             f'padding:12px 16px;margin-bottom:12px;font-family:var(--font-ui,sans-serif);">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
             f'<div>'
-            f'<span style="color:var(--text-muted);font-size:0.65rem;text-transform:uppercase;">regime macro atual</span><br>'
+            f'<span style="color:var(--text-muted);font-size:0.78rem;text-transform:uppercase;">regime macro atual</span><br>'
             f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
-            f'<span style="color:var(--text-muted);font-size:0.7rem;margin-left:8px;">score {_scr_amb}/100</span>'
+            f'<span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;">score {_scr_amb}/100</span>'
             f'</div>'
-            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">selic real</span><br>'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">selic real</span><br>'
                f'<span style="color:{_cor_selic_r};font-size:0.8rem;">'
                f'{_selic_r_scr:+.1f}%aa</span></div>' if _selic_r_scr else '')
-            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">setores favorecidos</span><br>'
-               f'<span style="color:var(--bull);font-size:0.7rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores favorecidos</span><br>'
+               f'<span style="color:var(--bull);font-size:0.78rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
                if _fav_scr else '')
-            + (f'<div><span style="color:var(--text-muted);font-size:0.65rem;">setores em cautela</span><br>'
-               f'<span style="color:var(--bear);font-size:0.7rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
+            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores em cautela</span><br>'
+               f'<span style="color:var(--bear);font-size:0.78rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
                if _prej_scr else '')
-            + f'<div style="color:var(--text-muted);font-size:0.68rem;max-width:280px;">{_pos_scr}</div>'
+            + f'<div style="color:var(--text-muted);font-size:0.78rem;max-width:280px;">{_pos_scr}</div>'
             f'</div></div>',
             unsafe_allow_html=True,
         )
@@ -765,7 +767,7 @@ if _secao_d == "🔍 screener quantitativo":
         tipo   = "info",
         titulo = "como funciona",
         texto  = (
-            "dados do cache de fundamentos (atualizado pelos botões 🔄 sync no topo). "
+            "Os filtros usam os fundamentos disponíveis na última atualização. "
             "health score integra técnico, fundamentos e macro."
         ),
         icone  = "ⓘ",
@@ -791,23 +793,23 @@ if _secao_d == "🔍 screener quantitativo":
 
     col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1, 1, 1.4, 1.4, 1.2])
     with col_p1:
-        if st.button("💎 valor", key="btn_preset_valor", use_container_width=True,
+        if st.button("Valor", key="btn_preset_valor", use_container_width=True,
                      help="P/L ≤ 15 · ROE ≥ 12 · score ≥ 55"):
             _aplicar_preset(disc_pl_max_w=15.0, disc_roe_w=12.0, disc_score_w=55)
     with col_p2:
-        if st.button("💰 dividendo", key="btn_preset_div", use_container_width=True,
+        if st.button("Dividendo", key="btn_preset_div", use_container_width=True,
                      help="DY ≥ 6 · score ≥ 45"):
             _aplicar_preset(disc_dy_w=6.0, disc_score_w=45)
     with col_p3:
-        if st.button("🏢 FIIs descontados", key="btn_preset_fii", use_container_width=True,
+        if st.button("FIIs descontados", key="btn_preset_fii", use_container_width=True,
                      help="universo FIIs · P/VP ≤ 0,95 · DY ≥ 7 · score ≥ 50"):
             _aplicar_preset(_univ="fii", disc_pvp_w=0.95, disc_dy_w=7.0, disc_score_w=50)
     with col_p4:
-        if st.button("⭐ qualidade barata", key="btn_preset_qb", use_container_width=True,
+        if st.button("Qualidade barata", key="btn_preset_qb", use_container_width=True,
                      help="P/L ≤ 12 · ROE ≥ 15 · score ≥ 55"):
             _aplicar_preset(disc_pl_max_w=12.0, disc_roe_w=15.0, disc_score_w=55)
     with col_p5:
-        if st.button("↺ resetar", key="btn_reset_filtros", use_container_width=True):
+        if st.button("Resetar", key="btn_reset_filtros", use_container_width=True):
             for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w', 'disc_dy_w',
                        'disc_score_w', 'disc_pvp_w', 'disc_mm_w', 'disc_setor_w']:
                 st.session_state.pop(_k, None)
@@ -825,16 +827,16 @@ if _secao_d == "🔍 screener quantitativo":
         pl_col1, pl_col2 = st.columns(2)
         with pl_col1:
             st.number_input(
-                "mín", min_value=0.0, max_value=200.0,
+                "P/L mínimo", min_value=0.0, max_value=200.0,
                 step=1.0, key="disc_pl_min_w",
-                label_visibility="collapsed",
+                label_visibility="visible",
                 value=st.session_state.get('disc_pl_min_w', 0.0),
             )
         with pl_col2:
             st.number_input(
-                "máx", min_value=0.0, max_value=500.0,
+                "P/L máximo", min_value=0.0, max_value=500.0,
                 step=1.0, key="disc_pl_max_w",
-                label_visibility="collapsed",
+                label_visibility="visible",
                 value=st.session_state.get('disc_pl_max_w', 15.0),
             )
         st.caption("0 = sem limite")
@@ -894,8 +896,12 @@ if _secao_d == "🔍 screener quantitativo":
     # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
     # auto-run quando chega via drill-down do scorecard (F4-1); senão, no botão
     _auto_run_scr = st.session_state.pop("screener_auto_run", False)
-    if st.button("🔍 rodar screener", type="primary",
-                 use_container_width=True, key="btn_rodar") or _auto_run_scr:
+    _faixa_invalida = pl_max > 0 and pl_min > pl_max
+    if _faixa_invalida:
+        st.warning("O P/L mínimo deve ser menor ou igual ao máximo.")
+    st.caption("Ajuste os critérios e aplique os filtros para atualizar os resultados.")
+    if (st.button("Aplicar filtros", type="primary", use_container_width=True,
+                  key="btn_rodar", disabled=_faixa_invalida) or _auto_run_scr) and not _faixa_invalida:
         with st.spinner("filtrando universo de ativos..."):
             df_result = rodar_screener(
                 universo        = universo_sel,
@@ -948,7 +954,7 @@ if _secao_d == "🔍 screener quantitativo":
                     errors='ignore',
                 ).to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    "📥 exportar CSV",
+                    "Exportar CSV",
                     data=csv_scr,
                     file_name=f"screener_{univ}.csv",
                     mime="text/csv",
@@ -1033,7 +1039,7 @@ if _secao_d == "🔍 screener quantitativo":
 
             if tickers_sel:
                 if st.button(
-                    f"➕ adicionar {len(tickers_sel)} ativo(s) à watchlist",
+                    f"Adicionar {len(tickers_sel)} ativo(s) à watchlist",
                     type="primary", key="sc_btn_add_wl",
                 ):
                     _cache_scr = get_todos_fundamentos_cache()
@@ -1077,7 +1083,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
 
     # Universo + modo (chip_filter_row compacto, design system v5)
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
         'font-weight:600;opacity:.7;">universo</div>',
@@ -1096,7 +1102,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
     )
 
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
         'font-weight:600;opacity:.7;">foco</div>',
@@ -1115,7 +1121,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
     )
 
     _btn_rodar_ia = st.button(
-        "🧠 analisar oportunidades agora",
+        "Analisar oportunidades agora",
         type="primary",
         use_container_width=True,
         key="btn_ia_disc_rodar",
@@ -1268,14 +1274,14 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                     unsafe_allow_html=True,
                 )
                 if st.button(
-                    "🔄 regenerar análise",
+                    "Regenerar análise",
                     key="btn_regen_ia_disc",
                 ):
                     st.session_state.pop(_cache_key_analise, None)
                     st.rerun()
             else:
                 if st.button(
-                    "🧠 gerar análise qualitativa da ia",
+                    "Gerar análise qualitativa da ia",
                     type="secondary",
                     use_container_width=True,
                     key="btn_gen_analise_ia_disc",
@@ -1371,7 +1377,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 if _resultados_ia:
                     _top1_ia = _resultados_ia[0]
                     if st.button(
-                        f"🔬 analisar {_top1_ia['ticker'].replace('.SA','')} "
+                        f"Analisar {_top1_ia['ticker'].replace('.SA','')} "
                         f"no research",
                         type="primary",
                         use_container_width=True,
@@ -1384,7 +1390,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
 
             with _ac2:
                 if st.button(
-                    f"+ adicionar top {min(5,len(_resultados_ia))} "
+                    f"Adicionar top {min(5,len(_resultados_ia))} "
                     f"à watchlist",
                     type="secondary",
                     use_container_width=True,
@@ -1442,7 +1448,7 @@ if _secao_d == "🗺️ rotação setorial":
         _univ_set = "BR" if _univ_set_raw.startswith("🇧🇷") else "US"
     with _col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 recalcular", key="btn_refresh_setorial",
+        if st.button("Recalcular", key="btn_refresh_setorial",
                      use_container_width=True):
             st.cache_data.clear()
             st.rerun()
@@ -1507,7 +1513,7 @@ if _secao_d == "🗺️ rotação setorial":
                 key="scorecard_setor_dd", label_visibility="collapsed",
             )
         with _dd2:
-            if st.button("🔍 ver ativos", key="btn_drill_setor",
+            if st.button("Ver ativos", key="btn_drill_setor",
                          use_container_width=True):
                 st.session_state["disc_setor_w"] = _setor_dd
                 st.session_state["screener_univ_force"] = "b3" if _univ_set == "BR" else "us"
@@ -1657,10 +1663,10 @@ if _secao_d == "🗺️ rotação setorial":
         _html_parts = [
             f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-left:3px solid {_cor_regime};border-radius:6px;padding:10px 16px;margin-bottom:16px;">',
             f'<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">',
-            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">regime atual</span>',
+            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">regime atual</span>',
             f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>',
             f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;color:var(--text-muted);">{_regime_desc[:60]}</span>',
-            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">score amb.</span>',
+            f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">score amb.</span>',
             f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>',
             '</div>',
         ]
@@ -1673,10 +1679,10 @@ if _secao_d == "🗺️ rotação setorial":
                 _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
                 _score_val = _match[0]['score_medio'] if _match else None
                 _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
-                fav_spans += f'<span style="background:var(--bull-soft,#003300);color:var(--bull);font-family:var(--font-data,monospace);font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+                fav_spans += f'<span style="background:var(--bull-soft,#003300);color:var(--bull);font-family:var(--font-data,monospace);font-size:0.78rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
             _html_parts.append(
                 f'<div style="flex:1;min-width:140px;">'
-                f'<div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos pelo regime</div>'
+                f'<div style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f7e2 favorecidos pelo regime</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{fav_spans}</div>'
                 f'</div>'
             )
@@ -1687,10 +1693,10 @@ if _secao_d == "🗺️ rotação setorial":
                 _match = [d for d in _dados_set if _s.lower() in d["setor"].lower()]
                 _score_val = _match[0]['score_medio'] if _match else None
                 _extra = ' ({:.0f})'.format(_score_val) if _score_val is not None else ''
-                prej_spans += f'<span style="background:var(--bear-soft,#330000);color:var(--bear);font-family:var(--font-data,monospace);font-size:0.6rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
+                prej_spans += f'<span style="background:var(--bear-soft,#330000);color:var(--bear);font-family:var(--font-data,monospace);font-size:0.78rem;padding:2px 6px;border-radius:3px;">{_s}{_extra}</span>'
             _html_parts.append(
                 f'<div style="flex:1;min-width:140px;">'
-                f'<div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados pelo regime</div>'
+                f'<div style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px;">\U0001f534 prejudicados pelo regime</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{prej_spans}</div>'
                 f'</div>'
             )
@@ -1699,7 +1705,7 @@ if _secao_d == "🗺️ rotação setorial":
 
         if _posicionamento:
             _html_parts.append(
-                f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);margin-top:6px;border-top:1px solid var(--border-subtle);padding-top:4px;">{_posicionamento}</div>'
+                f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);margin-top:6px;border-top:1px solid var(--border-subtle);padding-top:4px;">{_posicionamento}</div>'
             )
 
         _html_parts.append('</div>')
@@ -1965,7 +1971,7 @@ if _secao_d == "🚀 momentum & radar":
     )
 
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
         'font-weight:600;opacity:.7;">universo</div>',
@@ -1980,7 +1986,7 @@ if _secao_d == "🚀 momentum & radar":
     _univ_radar = "BR" if _univ_radar_raw.startswith("🇧🇷") else "US"
 
     st.markdown(
-        '<div style="font-family:var(--font-ui);font-size:.58rem;'
+        '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
         'letter-spacing:var(--ls-wide);margin-top:6px;margin-bottom:2px;'
         'font-weight:600;opacity:.7;">modo</div>',
@@ -1999,7 +2005,7 @@ if _secao_d == "🚀 momentum & radar":
     )
 
     _btn_radar = st.button(
-        "▶ rodar scan",
+        "Rodar scan",
         type="primary",
         use_container_width=False,
         key="btn_rodar_radar",
@@ -2072,7 +2078,7 @@ if _secao_d == "🚀 momentum & radar":
             _top1 = _resultado_radar[0]
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button(
-                f"🔬 analisar {_top1['ticker'].replace('.SA','')} "
+                f"Analisar {_top1['ticker'].replace('.SA','')} "
                 f"(score {_top1['score_assim']:.0f}) no research",
                 type="primary",
                 use_container_width=True,
@@ -2084,7 +2090,7 @@ if _secao_d == "🚀 momentum & radar":
                 st.switch_page("pages/1_Research.py")
 
             if st.button(
-                f"+ adicionar top {len(_resultado_radar)} "
+                f"Adicionar top {len(_resultado_radar)} "
                 f"à watchlist para acompanhar",
                 type="secondary",
                 use_container_width=True,

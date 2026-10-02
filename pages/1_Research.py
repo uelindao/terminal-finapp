@@ -115,19 +115,22 @@ with st.sidebar:
         section_title("pesquisar ativo")
         
         # --- NOVA BUSCA GLOBAL (YAHOO FINANCE API) ---
-        termo = st.text_input("buscar qualquer ativo global:", placeholder="nome ou ticker (ex: nubank, aapl)...")
-        if st.button("🔍 buscar ativo", use_container_width=True):
-            if termo:
-                with st.spinner("procurando na rede global..."):
-                    resultados = buscar_ativo_yahoo(termo)
-                    if resultados:
-                        melhor_match = resultados[0].get('symbol')
-                        if melhor_match:
-                            st.session_state['research_ticker'] = melhor_match
-                            st.rerun()
-                    else:
-                        st.warning("ativo não encontrado.")
-        
+        with st.form("research_asset_search", border=False):
+            termo = st.text_input("Ticker ou empresa", placeholder="Ex.: PETR4, AAPL, Nubank")
+            buscar = st.form_submit_button("Buscar ativo", use_container_width=True)
+        if buscar:
+            if not termo.strip():
+                st.warning("Digite um ticker ou nome de empresa.")
+            else:
+                from utils.components import _resolver_ticker_busca
+                with st.spinner("Buscando ativo…"):
+                    encontrado = _resolver_ticker_busca(termo)
+                if encontrado:
+                    st.session_state['research_ticker'] = encontrado
+                    st.rerun()
+                else:
+                    st.warning("Ativo não encontrado. Tente o ticker completo.")
+
         st.markdown("<div style='text-align: center; color: var(--text-muted); padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
         
         # --- LISTA PADRÃO COM PROTEÇÃO PARA ATIVOS EXTERNOS ---
@@ -209,7 +212,7 @@ with st.sidebar:
             f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
             f'border-left:3px solid {_cor_sb}; border-radius:4px; '
             f'padding:10px 12px; margin-bottom:8px;">'
-            f'<div style="font-size:0.62rem; color:var(--text-muted); '
+            f'<div style="font-size:0.78rem; color:var(--text-muted); '
             f'text-transform:uppercase; letter-spacing:.08em; '
             f'margin-bottom:4px;">health score</div>'
             f'<div style="font-family:var(--font-data,monospace); font-size:1.6rem; '
@@ -217,7 +220,7 @@ with st.sidebar:
             f'{_hs_score}<span style="font-size:0.8rem;color:var(--text-muted);">/100</span>'
             f'{_badge_sb}'
             f'</div>'
-            f'<div style="font-family:var(--font-data,monospace); font-size:0.7rem; '
+            f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; '
             f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
             f'</div>',
             unsafe_allow_html=True,
@@ -237,7 +240,7 @@ with st.sidebar:
             key="sb_dest_wl", label_visibility="collapsed",
         )
         if st.button(
-            f"+ adicionar {_tk_sidebar.replace('.SA','')}",
+            f"Adicionar {_tk_sidebar.replace('.SA','')}",
             key="sb_btn_add_wl", use_container_width=True,
         ):
             from database.db import adicionar_ativo
@@ -323,9 +326,9 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
             ("comparativo", None),
         ],
         user_name=_user_top_cmp.get('username', '') or _user_top_cmp.get('nome', '') or 'usuário',
-        sync_label="ao vivo",
+        sync_label="Dados em cache",
     )
-    page_header("⚖️ comparativo de mercado", "análise relativa de múltiplos e performance em base 100.")
+    page_header("Compare antes de decidir", "Múltiplos, qualidade e desempenho dos ativos, lado a lado.")
     
     if not ativos_comp:
         from utils.components import info_box as _info_box_r
@@ -552,7 +555,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                         _label_bk = _kb.replace('_', ' ')[:22]
                         st.markdown(
                             f'<div style="font-family:var(--font-data,monospace); '
-                            f'font-size:0.65rem; color:var(--bull); '
+                            f'font-size:0.78rem; color:var(--bull); '
                             f'padding:1px 0;">✓ {_label_bk}</div>',
                             unsafe_allow_html=True,
                         )
@@ -560,7 +563,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                         _label_bk = _kb.replace('_', ' ')[:22]
                         st.markdown(
                             f'<div style="font-family:var(--font-data,monospace); '
-                            f'font-size:0.65rem; color:var(--bear); '
+                            f'font-size:0.78rem; color:var(--bear); '
                             f'padding:1px 0;">✗ {_label_bk}</div>',
                             unsafe_allow_html=True,
                         )
@@ -582,7 +585,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
     section_title("🧠 veredito — deepseek v4 pro")
 
     if st.button(
-        "🧠 comparar e gerar veredito",
+        "Comparar e gerar veredito",
         type="primary",
         use_container_width=True,
         key="btn_veredito_comp",
@@ -746,7 +749,7 @@ topbar(
         (ticker.replace(".SA", "").lower(), None),
     ],
     user_name=_user_top.get('username', '') or _user_top.get('nome', '') or 'usuário',
-    sync_label="ao vivo",
+    sync_label="Dados em cache",
 )
 
 # ── TICKER HERO (banner premium do ativo) ──────────────────────────────────
@@ -805,6 +808,10 @@ ticker_hero(
     serie_30d   = _serie_30d_th,
 )
 
+_SECOES_R = ["📊 valuation & peers", "📈 técnico (10y)", "💎 fundamentos",
+             "🧠 análise & ia", "🌍 overlay macro"]
+_secao_r = section_selector(_SECOES_R, key="research_secao")
+
 # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: o pano de fundo
 # do regime junto do ativo, sem trocar de página.
 try:
@@ -841,7 +848,7 @@ try:
 
     def _ver_seg(lbl, val, cor="var(--text-primary)"):
         return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
-                f'<span style="font-family:var(--font-ui);font-size:0.58rem;color:var(--text-muted);'
+                f'<span style="font-family:var(--font-ui);font-size:0.78rem;color:var(--text-muted);'
                 f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
                 f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
                 f'color:{cor};white-space:nowrap;">{val}</span></div>')
@@ -1096,14 +1103,14 @@ _icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
 _cor_regime = "var(--bear)" if "stress" in _macro_regime["label"] else ("var(--amber)" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "var(--bull)")
 st.markdown(
     f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;">regime</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;">regime</div>'
     f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">setor</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">setor</div>'
     f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:var(--text-primary);">{setor[:25].lower()}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;">impacto</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">impacto</div>'
     f'<div style="font-family:var(--font-data,monospace);font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
     f'{_icone_impacto[_impacto_setor["impacto"]]} {_impacto_setor["impacto"].upper()}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.68rem;color:var(--text-muted);margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
+    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
     f'</div>',
     unsafe_allow_html=True,
 )
@@ -1230,7 +1237,7 @@ historico = get_historico_score(t_base, dias=180)
 if len(historico) >= 3:
     # F2-2: progressive disclosure — deep-dive do score recolhido num expander
     # (o card-veredito acima da dobra já entrega o número; aqui fica a evidência).
-    with st.expander("🔬 por dentro do score — evolução e breakdown dos pilares", expanded=False):
+    with st.expander("Por dentro do score — evolução e breakdown dos pilares", expanded=False):
         label_com_tooltip(
             "📈 EVOLUÇÃO DO HEALTH SCORE",
             chave="health_score",
@@ -1431,9 +1438,9 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
     if stats is None or valor_atual is None:
         st.markdown(
             f'<div style="background:var(--bg-surface);border-radius:var(--radius-sm,6px);padding:12px 14px;margin-bottom:8px;">'
-            f'<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">{label}</div>'
+            f'<div style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">{label}</div>'
             f'<div style="font-size:1.1rem;color:var(--text-muted);">—</div>'
-            f'<div style="font-size:0.65rem;color:var(--text-muted);margin-top:4px;">sem histórico FMP</div>'
+            f'<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">sem histórico FMP</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1465,15 +1472,15 @@ def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: s
 
     st.markdown(
         f'<div style="background:var(--bg-surface);border-radius:var(--radius-sm,6px);padding:12px 14px;margin-bottom:8px;">'
-        f'<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
+        f'<div style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">{label}</div>'
         f'<div style="font-size:1.25rem;font-weight:600;color:{cor};">{atual:.1f}{sufixo}</div>'
-        f'<div style="font-size:0.65rem;color:var(--text-secondary);margin-top:2px;">'
+        f'<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">'
         f'média 5a: {media:.1f}{sufixo} &nbsp;|&nbsp; {sinal}'
         f'</div>'
         f'<div style="background:var(--border-normal,#333);border-radius:2px;height:4px;margin-top:6px;">'
         f'<div style="background:{bar_color};border-radius:2px;height:4px;{bar_fill}"></div>'
         f'</div>'
-        f'<div style="display:flex;justify-content:space-between;font-size:0.58rem;color:var(--text-muted);margin-top:2px;">'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--text-muted);margin-top:2px;">'
         f'<span>{minv:.1f}</span><span>{maxv:.1f}</span>'
         f'</div>'
         f'</div>',
@@ -1764,9 +1771,7 @@ def montar_prompt_ativo(
 # recalcula FMP, técnico, DRE, IA e overlay de uma vez. Trocado por um seletor que
 # renderiza só a seção ativa (os blocos `with tab_X:` viraram `if _secao_r == ...`).
 # As abas leem apenas variáveis de módulo (calculadas antes) — sem dependência cruzada.
-_SECOES_R = ["📊 valuation & peers", "📈 técnico (10y)", "💎 fundamentos",
-             "🧠 análise & ia", "🌍 overlay macro"]
-_secao_r = section_selector(_SECOES_R, key="research_secao")
+
 
 if _secao_r == "📊 valuation & peers":
     # ── VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
@@ -1784,7 +1789,7 @@ if _secao_r == "📊 valuation & peers":
     else:
         section_title("📊 múltiplos atuais")
         st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.68rem; '
+            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
             'color:var(--text-muted); margin-bottom:12px;">'
             'histórico via FMP não disponível para este ativo. '
             'exibindo múltiplos do cache local.'
@@ -1837,13 +1842,8 @@ if _secao_r == "📊 valuation & peers":
         except: return "—"
 
     if _peers_list:
-        _fonte_tag = (
-            '<span style="font-size:0.6rem;color:var(--text-muted);'
-            'font-family:var(--font-ui,sans-serif);margin-left:6px;">'
-            + ("via fmp" if _peers_fonte == "fmp" else "base local · mesmo setor")
-            + '</span>'
-        )
-        section_title(f"👥 comparação com peers {_fonte_tag}")
+        section_title("Comparação com empresas do mesmo setor")
+        st.caption("Fonte: FMP" if _peers_fonte == "fmp" else "Base local · mesmo setor")
 
         _h1, _h2, _h3, _h4, _h5, _h6 = st.columns([2, 3, 1, 1, 1, 1], gap="small")
         for _hcol, _htxt in zip(
@@ -1851,7 +1851,7 @@ if _secao_r == "📊 valuation & peers":
             ["ticker", "nome", "p/l", "roe%", "dy%", "margem%"],
         ):
             _hcol.markdown(
-                f'<div style="font-size:0.65rem;color:var(--text-muted);'
+                f'<div style="font-size:0.78rem;color:var(--text-muted);'
                 f'text-transform:uppercase;padding-bottom:4px;">{_htxt}</div>',
                 unsafe_allow_html=True,
             )
@@ -1955,7 +1955,7 @@ if _secao_r == "💎 fundamentos":
             _mn_ft = 'var(--font-mono,monospace)'
             _cols_ft = ['período', 'receita', 'mrg bruta', 'mrg líq', 'ebitda', 'lucro', 'cfo', 'dív. líq.']
             _hdr_ft = "".join(
-                f'<th style="padding:6px 9px;text-align:{"left" if i==0 else "right"};font-size:0.62rem;'
+                f'<th style="padding:6px 9px;text-align:{"left" if i==0 else "right"};font-size:0.78rem;'
                 f'color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);'
                 f'white-space:nowrap;">{c}</th>'
                 for i, c in enumerate(_cols_ft)
@@ -1965,7 +1965,7 @@ if _secao_r == "💎 fundamentos":
                 if y is None:
                     return ""
                 _c = "#2ecc71" if y >= 0 else "#e74c3c"
-                return f' <span style="font-size:0.6rem;color:{_c};">{y:+.0f}%</span>'
+                return f' <span style="font-size:0.78rem;color:{_c};">{y:+.0f}%</span>'
 
             def _cell_ft(txt, cor=None):
                 _c = f'color:{cor};' if cor else ''
@@ -2153,7 +2153,7 @@ if _secao_r == "🧠 análise & ia":
             f'border-left:3px solid var(--accent); border-radius:6px; '
             f'padding:12px 16px; margin-bottom:16px;">'
 
-            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.65rem; '
+            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
             f'color:var(--text-muted); margin-bottom:8px;">'
             f'📋 análise salva em {_cache_ia["timestamp"]} '
             f'| health score na época: {_cache_ia["score"]}/100 '
@@ -2189,7 +2189,7 @@ if _secao_r == "🧠 análise & ia":
         )
     with _col_ia3:
         btn_analise_ia = st.button(
-            "🧠 analisar",
+            "Analisar",
             type="primary",
             use_container_width=True,
             key="btn_analise_ia",
@@ -2372,7 +2372,7 @@ if _secao_r == "🧠 análise & ia":
         )
     with _col_pdf2:
         btn_gerar_pdf = st.button(
-            "📄 gerar pdf",
+            "Gerar pdf",
             type             = "secondary",
             use_container_width = True,
             key              = "btn_gerar_pdf",
@@ -2461,7 +2461,7 @@ if _secao_r == "🧠 análise & ia":
     section_title("📋 tese de investimento — deepseek v4 pro")
 
     if st.button(
-        "📝 gerar tese de longo prazo",
+        "Gerar tese de longo prazo",
         use_container_width=True,
         type="secondary",
         key="btn_tese_footer"
@@ -2911,7 +2911,7 @@ if _secao_r == "🧠 análise & ia":
 
         st.markdown("---")
         if st.button(
-            "🧠 ia: interpretar valuation e gerar tese para este fii",
+            "Ia: interpretar valuation e gerar tese para este fii",
             type="primary",
             key="btn_ia_fii_dcf",
         ):
@@ -3074,7 +3074,7 @@ if _secao_r == "🧠 análise & ia":
             st.caption("preço justo estimado para cada combinação de crescimento e wacc. onde a curva cruza o preço atual está o crescimento que o mercado já embute — acima disso o ativo está caro; abaixo, barato.")
             
             st.markdown("---")
-            if st.button("🧠 ia: interpretar o valuation e gerar tese", type="primary"):
+            if st.button("Ia: interpretar o valuation e gerar tese", type="primary"):
                 _prompt_dcf = (
                     f"ativo: {ticker} | setor: {setor}\n\n"
                     f"modelo dcf reverso:\n"

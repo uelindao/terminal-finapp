@@ -7,6 +7,15 @@ e var(--text-*)/--space-*/--ls-*. Cores via var(--bg-*/--text-*/--accent/etc).
 import warnings as _warnings
 import streamlit as st
 import time
+import re as _re
+from html import escape as _escape
+
+
+def _clean_label(label: str) -> str:
+    """Remove decoração inicial, preservando símbolos no conteúdo financeiro."""
+    text = _re.sub(r"^[^\wÀ-ÿ]+", "", str(label)).strip()
+    return _re.sub(r"\bia\b", "IA", text[:1].upper() + text[1:], flags=_re.I)
+
 
 
 def ticker_nav_url(ticker: str) -> str:
@@ -37,86 +46,46 @@ def handle_ticker_nav():
 
 
 def page_header(titulo: str, subtitulo: str = ""):
-    """Header compacto de página."""
+    """Hierarquia editorial, com título sem decoração e descrição útil."""
+    title = _clean_label(titulo)
     st.markdown(
-        f'<div style="margin-bottom: var(--space-4);">'
-        f'<div style="'
-        f'font-family: var(--font-title); '
-        f'font-size: var(--text-lg); '
-        f'font-weight: 700; '
-        f'color: var(--accent); '
-        f'letter-spacing: var(--ls-wide);">'
-        f'{titulo}</div>'
-        + (
-            f'<div style="'
-            f'font-family: var(--font-ui); '
-            f'font-size: var(--text-sm); '
-            f'color: var(--text-muted); '
-            f'margin-top: 2px; '
-            f'letter-spacing: var(--ls-wide);">'
-            f'{subtitulo}</div>'
-            if subtitulo else ''
-        ) +
-        f'</div>',
+        '<header class="ft-page-header">'
+        '<div class="ft-page-eyebrow">Seu espaço de análise</div>'
+        f'<h1>{_escape(title)}</h1>'
+        + (f'<p>{_escape(subtitulo)}</p>' if subtitulo else '') + '</header>',
         unsafe_allow_html=True,
     )
 
 
 def section_title(titulo: str):
-    """Título de seção com barra do acento à esquerda."""
-    st.markdown(
-        f'<div style="'
-        f'font-family: var(--font-ui); '
-        f'font-size: var(--text-xs); '
-        f'color: var(--accent); '
-        f'text-transform: uppercase; '
-        f'letter-spacing: var(--ls-wider); '
-        f'font-weight: 600; '
-        f'border-left: 2px solid var(--accent); '
-        f'padding-left: var(--space-2); '
-        f'margin: var(--space-4) 0 var(--space-2) 0;">'
-        f'{titulo}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    """Uma hierarquia de seção legível, sem ruído de ícones coloridos."""
+    st.markdown(f'<h2 class="ft-section-title">{_escape(_clean_label(titulo))}</h2>', unsafe_allow_html=True)
 
 
-def section_selector(secoes: list[str], key: str, *,
-                     label: str = "seção", default: str | None = None) -> str:
-    """
-    Seletor de seção unificado (PLANO_FRONT F0-1).
-
-    Encapsula o padrão que estava duplicado inline em 5 páginas (Home/Research/
-    Discovery/Macro/Portfolio/Config): st.segmented_control quando disponível, com
-    fallback para st.radio nas versões antigas do Streamlit. Preserva a MESMA key
-    de session_state usada antes, para não resetar a seção de sessões já abertas.
-
-    secoes  : rótulos das seções (o 1º é o default se `default` não vier).
-    key     : chave de session_state (ex.: "research_secao").
-    label   : rótulo do widget (fica oculto via label_visibility).
-    default : seção inicial; se ausente ou inválida, usa secoes[0].
-
-    Retorna o rótulo da seção selecionada.
-    """
+def section_selector(secoes: list[str], key: str, *, label: str = "Seção",
+                     default: str | None = None) -> str:
+    """Uma seção sempre selecionada; rótulos visuais sem alterar as chaves antigas."""
     if not secoes:
         return ""
-    _def = default if default in secoes else secoes[0]
+    preferred = default if default in secoes else secoes[0]
+    current = st.session_state.get(key)
+    if current not in secoes:
+        st.session_state[key] = preferred
+    previous_key = f"_section_previous_{key}"
+    st.session_state[previous_key] = st.session_state[key]
+    def changed():
+        selected = st.session_state.get(key)
+        if selected not in secoes:
+            st.session_state[key] = st.session_state.get(previous_key, preferred)
+        else:
+            st.session_state[previous_key] = selected
     if hasattr(st, "segmented_control"):
-        # segmented_control pode retornar None (nada selecionado) → cai no último
-        # valor guardado em session_state, e por fim no default. Mesma semântica
-        # dos blocos inline originais.
-        return (
-            st.segmented_control(
-                label, secoes, default=_def,
-                key=key, label_visibility="collapsed",
-            )
-            or st.session_state.get(key)
-            or _def
-        )
-    return st.radio(
-        label, secoes, index=secoes.index(_def), horizontal=True,
-        key=key, label_visibility="collapsed",
-    )
+        return st.segmented_control(
+            label, secoes, key=key, format_func=_clean_label,
+            label_visibility="collapsed", on_change=changed,
+        ) or st.session_state.get(key) or preferred
+    return st.radio(label, secoes, key=key, horizontal=True,
+                    format_func=_clean_label, label_visibility="collapsed")
 
 
 def _fonte_badge(fonte: str = "") -> str:
@@ -124,100 +93,21 @@ def _fonte_badge(fonte: str = "") -> str:
         return ""
     icone = "📦" if fonte == "cache" else "📡"
     cor = "var(--bull)" if fonte == "cache" else "var(--accent)"
-    return f'<span style="font-size:0.55rem; color:{cor}; margin-left:5px; font-weight:400; opacity:0.7;">{icone} {fonte}</span>'
+    return f'<span style="font-size:0.78rem; color:{cor}; margin-left:5px; font-weight:400; opacity:0.7;">{icone} {fonte}</span>'
 
 
-def metric_card(
-    label:      str,
-    valor:      str,
-    sublabel:   str  = "",
-    cor_delta:  str  = "muted",
-    icone:      str  = "",
-    destaque:   bool = False,
-    data_source: str = "",
-):
-    """
-    Renderiza card de métrica com 4 níveis visuais.
-
-    cor_delta:
-      "bull"  → borda e valor verde  (#00C853)
-      "bear"  → borda e valor vermelho (#FF1744)
-      "amber" → borda e valor laranja (#FF9900)
-      "muted" → borda cinza sutil (padrão)
-      "info"  → borda azul (#00B0FF)
-
-    destaque: True → card com background mais escuro e tamanho de
-              valor maior — para KPIs principais
-    data_source: "cache" | "api" → mostra badge de origem
-    """
-    _cores = {
-        "bull":  {"borda": "var(--bull)",  "valor": "var(--bull)",
-                  "bg": "var(--bull-soft)", "bg_dest": "var(--bull-soft)",
-                  "sublabel": "var(--bull)"},
-        "bear":  {"borda": "var(--bear)",  "valor": "var(--bear)",
-                  "bg": "var(--bear-soft)", "bg_dest": "var(--bear-soft)",
-                  "sublabel": "var(--bear)"},
-        "amber": {"borda": "var(--amber)", "valor": "var(--amber)",
-                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
-                  "sublabel": "var(--amber)"},
-        "info":  {"borda": "var(--info)",  "valor": "var(--info)",
-                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
-                  "sublabel": "var(--info)"},
-        "muted": {"borda": "var(--border-subtle)", "valor": "var(--text-secondary)",
-                  "bg": "var(--bg-surface)", "bg_dest": "var(--bg-elevated)",
-                  "sublabel": "var(--text-muted)"},
-    }
-    _c = _cores.get(cor_delta, _cores["muted"])
-
-    _sz_label  = "0.65rem"
-    _sz_valor  = "1.3rem" if destaque else "1.05rem"
-    _sz_sub    = "0.68rem"
-    _pad       = "16px 18px" if destaque else "12px 14px"
-    _bg        = _c["bg_dest"] if destaque else _c["bg"]
-
-    _icone_html = (
-        f'<span style="font-size:1.1rem;margin-right:6px;">{icone}</span>'
-    ) if icone else ''
-
+def metric_card(label: str, valor: str, sublabel: str = "", cor_delta: str = "muted",
+                icone: str = "", destaque: bool = False, data_source: str = ""):
+    """Número primeiro, contexto abaixo; cor semântica no contexto da métrica."""
+    tone = cor_delta if cor_delta in ("bull", "bear", "amber", "info") else "muted"
+    source = f'<span class="ft-source">{_escape(data_source)}</span>' if data_source else ''
+    emphasis = ' ft-metric-highlight' if destaque else ''
     st.markdown(
-        f'<div style="'
-        f'background:{_bg}; '
-        f'border:1px solid var(--border-subtle); '
-        f'border-left:3px solid {_c["borda"]}; '
-        f'border-radius:var(--radius-sm); '
-        f'padding:{_pad}; '
-        f'margin-bottom:4px; '
-        f'transition:border-color .2s;">'
-
-        f'<div style="'
-        f'font-family:var(--font-ui); '
-        f'font-size:{_sz_label}; '
-        f'color:var(--text-muted); '
-        f'text-transform:uppercase; '
-        f'letter-spacing:.08em; '
-        f'margin-bottom:4px;">'
-        f'{label}{_fonte_badge(data_source)}</div>'
-
-        f'<div style="'
-        f'font-family:var(--font-data); '
-        f'font-size:{_sz_valor}; '
-        f'font-weight:700; '
-        f'color:{_c["valor"]}; '
-        f'line-height:1.2; '
-        f'margin-bottom:2px;">'
-        f'{_icone_html}{valor}</div>'
-
-        + (
-            f'<div style="'
-            f'font-family:var(--font-data); '
-            f'font-size:{_sz_sub}; '
-            f'color:{_c["sublabel"]};">'
-            f'{sublabel}</div>'
-            if sublabel else ''
-        ) +
-
-        f'</div>',
-        unsafe_allow_html=True,
+        f'<div class="metric-card ft-metric{emphasis}">'
+        f'<div class="ft-metric-label">{_escape(_clean_label(label))}{source}</div>'
+        f'<div class="ft-metric-value">{_escape(str(valor))}</div>'
+        + (f'<div class="ft-metric-sub color-{tone}">{_escape(sublabel)}</div>' if sublabel else '')
+        + '</div>', unsafe_allow_html=True,
     )
 
 
@@ -279,210 +169,59 @@ def status_card(
 
 
 def watchlist_header_row():
-    """Header da lista densa — labels das colunas."""
-    cols = st.columns([1.2, 3.0, 1.5, 0.9, 0.9, 1.1, 1.4, 0.6])
-    labels = ["ativo", "nome / sinal", "preço", "1d", "1m", "30d", "health", ""]
-    for col, label in zip(cols, labels):
-        with col:
-            st.markdown(
-                f'<div style="font-family:var(--font-ui);'
-                f' font-size:0.62rem; font-weight:600;'
-                f' color:var(--text-muted);'
-                f' text-transform:uppercase;'
-                f' letter-spacing:0.10em;'
-                f' padding-bottom:6px;'
-                f' border-bottom:1px solid var(--border-normal);">'
-                f'{label}</div>',
-                unsafe_allow_html=True,
-            )
+    """Cabeçalho da lista; cada célula também tem rótulo próprio no celular."""
+    st.markdown('<div class="ft-watchlist-header"><span>Ativo</span><span>Preço</span>'
+                '<span>Hoje</span><span>1 mês</span><span>30 dias</span><span>Qualidade</span></div>', unsafe_allow_html=True)
 
 
-def watchlist_row(
-    ticker:        str,
-    nome:          str,
-    preco:         float,
-    var_1d:        float,
-    var_1m:        float = 0.0,
-    moeda:         str   = "R$",
-    health_score:  float = None,
-    alertas:       list  = None,
-    earnings_info: dict  = None,
-    data_source:   str   = "",
-    serie_30d:     list  = None,  # série pra sparkline 30d
-    on_delete:     str   = None,   # aceito mas ignorado — chave = ticker
-    on_memorial:   str   = None,   # aceito mas ignorado — chave = ticker
-):
-    """Linha densa de watchlist — ~52px por ativo."""
-    cor_1d    = "var(--bull)" if var_1d >= 0 else "var(--bear)"
-    cor_1m    = "var(--bull)" if var_1m >= 0 else "var(--bear)"
-    seta_1d   = "▲" if var_1d >= 0 else "▼"
-    seta_1m   = "▲" if var_1m >= 0 else "▼"
-    tem_alert = bool(alertas)
-
-    # ── Health score ─────────────────────────────────────────
-    hs_html = ""
+def watchlist_row(ticker: str, nome: str, preco: float, var_1d: float,
+                  var_1m: float = 0.0, moeda: str = "R$", health_score: float | None = None,
+                  alertas: list | None = None, earnings_info: dict | None = None,
+                  data_source: str = "", serie_30d: list | None = None):
+    """Lista adaptável: dados escaneáveis e ações nativas em um menu por ativo."""
+    from utils.formatters import fmt_preco
+    has_price = preco is not None and preco > 0
+    price = fmt_preco(preco, moeda) if has_price else "—"
+    def delta(value):
+        if not has_price or value is None:
+            return '<span class="color-muted">—</span>'
+        tone = "bull" if value >= 0 else "bear"
+        arrow = "▲" if value >= 0 else "▼"
+        return f'<span class="color-{tone}">{arrow} {abs(value):.2f}%</span>'
     if health_score is not None:
-        hs     = int(health_score)
-        cor_hs = (
-            "var(--bull)"  if hs >= 65 else
-            "var(--amber)" if hs >= 40 else
-            "var(--bear)"
-        )
-        hs_html = (
-            f'<div style="display:flex; align-items:center;'
-            f' gap:8px;">'
-            f'<div style="flex:1; background:var(--bg-overlay);'
-            f' height:4px; border-radius:2px; overflow:hidden;">'
-            f'<div style="width:{hs}%; height:100%;'
-            f' background:{cor_hs}; border-radius:2px;'
-            f' transition:width 0.3s ease;"></div></div>'
-            f'<span style="font-family:var(--font-data);'
-            f' font-size:0.75rem; font-weight:bold;'
-            f' color:{cor_hs}; min-width:22px;">{hs}</span>'
-            f'</div>'
-        )
-
-    # ── Sinal de alerta (dot + texto, até 2 linhas) ──────────
-    sinal_html = ""
-    if tem_alert and alertas:
-        sinal_html = (
-            f'<div style="display:flex; align-items:flex-start;'
-            f' gap:5px; margin-top:4px;">'
-            f'<span style="width:6px; height:6px;'
-            f' border-radius:50%; background:var(--amber);'
-            f' flex-shrink:0; margin-top:3px;'
-            f' display:inline-block;"></span>'
-            f'<span style="font-family:var(--font-ui);'
-            f' font-size:0.68rem; color:var(--text-secondary);'
-            f' line-height:1.4; overflow:hidden;'
-            f' display:-webkit-box; -webkit-line-clamp:2;'
-            f' -webkit-box-orient:vertical;">'
-            f'{alertas[0][:80]}'
-            f'</span></div>'
-        )
-
-    # ── Badge earnings ────────────────────────────────────────
-    earn_html = ""
+        score = float(health_score)
+        tone = "bull" if score >= 65 else "amber" if score >= 40 else "bear"
+        health = f'<span class="color-{tone}">{int(score)}<span class="ft-watchlist-max"> / 100</span></span>'
+    else:
+        health = '<span class="color-muted">—</span>'
+    spark = inline_sparkline(serie_30d, tone="bull" if var_1m >= 0 else "bear", largura=110, altura=28) if serie_30d and len(serie_30d) >= 2 else '<span class="color-muted">—</span>'
+    notice = ''
+    if alertas:
+        notice = f'<span class="ft-watchlist-alert" title="{_escape(str(alertas[0]), quote=True)}">Atenção</span>'
     if earnings_info and 0 <= earnings_info.get("dias", 99) <= 14:
-        dias_e = earnings_info["dias"]
-        cor_e  = (
-            "var(--bear)"  if dias_e <= 3 else
-            "var(--amber)" if dias_e <= 7 else
-            "var(--text-muted)"
-        )
-        earn_html = (
-            f'<span style="font-family:var(--font-ui);'
-            f' font-size:0.58rem; font-weight:600;'
-            f' color:{cor_e}; background:var(--accent-soft);'
-            f' border:1px solid {cor_e}; padding:1px 5px;'
-            f' border-radius:4px; margin-left:6px;'
-            f' vertical-align:middle;">'
-            f'res·{dias_e}d</span>'
-        )
-
-    # ── Sparkline 30d ────────────────────────────────────────
-    spark_html = ""
-    if serie_30d and len(serie_30d) >= 2:
-        _spark_tone = "bull" if serie_30d[-1] >= serie_30d[0] else "bear"
-        spark_html = inline_sparkline(
-            serie_30d, tone=_spark_tone, largura=72, altura=22,
-        )
-
-    # ── Layout 8 colunas (adicionou sparkline 30d) ───────────
-    col_tk, col_nm, col_pr, col_1d, col_1m, col_sp, col_hs, col_ac = st.columns(
-        [1.2, 3.0, 1.5, 0.9, 0.9, 1.1, 1.4, 0.6]
-    )
-
-    with col_tk:
-        _ticker_label = ticker.replace(".SA", "")
+        notice += f'<span class="ft-watchlist-event">Resultado em {earnings_info["dias"]}d</span>'
+    main, actions = st.columns([10, 1.4], vertical_alignment="center")
+    with main:
         st.markdown(
-            f'<div style="padding:11px 0 3px;">'
-            f'<a href="{_ticker_nav_url(ticker)}" class="ticker-nav" '
-            f'title="abrir research: {_ticker_label}">'
-            f'{_ticker_label}</a>{earn_html}</div>',
+            '<div class="ft-watchlist-row">'
+            f'<div class="ft-watchlist-asset"><a href="{_escape(ticker_nav_url(ticker), quote=True)}" target="_self" class="ticker-nav">{_escape(ticker.replace(".SA", ""))}</a>'
+            f'<span class="ft-watchlist-name">{_escape(nome)}</span><div class="ft-watchlist-notices">{notice}</div></div>'
+            f'<div class="ft-watchlist-cell"><span class="ft-watchlist-mobile-label">Preço</span>{_escape(price)}</div>'
+            f'<div class="ft-watchlist-cell"><span class="ft-watchlist-mobile-label">Hoje</span>{delta(var_1d)}</div>'
+            f'<div class="ft-watchlist-cell"><span class="ft-watchlist-mobile-label">1 mês</span>{delta(var_1m)}</div>'
+            f'<div class="ft-watchlist-spark">{spark}</div>'
+            f'<div class="ft-watchlist-cell"><span class="ft-watchlist-mobile-label">Qualidade</span>{health}</div></div>',
             unsafe_allow_html=True,
         )
-
-    with col_nm:
-        st.markdown(
-            f'<div style="font-family:var(--font-ui);'
-            f' color:var(--text-secondary); font-size:0.78rem;'
-            f' padding:11px 0 2px; font-weight:400;'
-            f' overflow:hidden; text-overflow:ellipsis;'
-            f' white-space:nowrap;">'
-            f'{nome[:30]}</div>'
-            f'{sinal_html}'
-            f'<div style="height:4px;"></div>',
-            unsafe_allow_html=True,
-        )
-
-    with col_pr:
-        st.markdown(
-            f'<div style="font-family:var(--font-data);'
-            f' font-weight:600; color:var(--text-primary);'
-            f' font-size:0.88rem; padding:11px 0 3px;">'
-            f'{moeda} {preco:,.2f}{_fonte_badge(data_source)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with col_1d:
-        st.markdown(
-            f'<div style="font-family:var(--font-data);'
-            f' color:{cor_1d}; font-size:0.80rem;'
-            f' padding:11px 0 3px; font-weight:600;">'
-            f'{seta_1d} {abs(var_1d):.2f}%</div>',
-            unsafe_allow_html=True,
-        )
-
-    with col_1m:
-        st.markdown(
-            f'<div style="font-family:var(--font-data);'
-            f' color:{cor_1m}; font-size:0.75rem;'
-            f' padding:12px 0 3px; opacity:0.75;">'
-            f'{seta_1m} {abs(var_1m):.2f}%</div>',
-            unsafe_allow_html=True,
-        )
-
-    with col_sp:
-        if spark_html:
-            st.markdown(
-                f'<div style="padding:11px 0 3px;">{spark_html}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<div style="padding:13px 0 3px; color:var(--text-muted); '
-                'opacity:.35; font-size:0.7rem;">—</div>',
-                unsafe_allow_html=True,
-            )
-
-    with col_hs:
-        if hs_html:
-            st.markdown(
-                f'<div style="padding:13px 0 3px;">{hs_html}</div>',
-                unsafe_allow_html=True,
-            )
-
-    with col_ac:
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("🗑", key=f"del_{ticker}", help="remover"):
-                st.session_state[f"confirm_del_{ticker}"] = True
-        with b2:
-            if st.button("📊", key=f"mem_{ticker}", help="memorial"):
+    with actions:
+        with st.popover("Opções", use_container_width=True):
+            st.caption(f"Ações para {ticker.replace('.SA', '')}")
+            if st.button("Ver análise do score", key=f"mem_{ticker}", icon=":material/insights:", use_container_width=True):
                 st.session_state[f"show_memorial_{ticker}"] = True
-
-    # Separador
-    st.markdown(
-        '<div style="height:1px; background:var(--border-subtle);'
-        ' margin:0;"></div>',
-        unsafe_allow_html=True,
-    )
+            if st.button("Remover da watchlist", key=f"del_{ticker}", icon=":material/delete_outline:", use_container_width=True):
+                st.session_state[f"confirm_del_{ticker}"] = True
 
 
-# DEPRECATED — preferir watchlist_row() para layouts de lista densa.
-# Emite DeprecationWarning quando chamado. Será removido após migração das
-# páginas que ainda importam (busca: grep -rn "watchlist_card" pages/).
 def watchlist_card(ticker: str, nome: str, preco: float,
                    var_1d: float, moeda: str = "R$",
                    health_score: float = None,
@@ -515,9 +254,9 @@ def watchlist_card(ticker: str, nome: str, preco: float,
             f'<div style="display:flex; justify-content:space-between;'
             f' margin-bottom:3px;">'
             f'<span style="font-family:var(--font-ui);'
-            f' font-size:0.60rem; color:var(--text-muted);">health</span>'
+            f' font-size:0.78rem; color:var(--text-muted);">health</span>'
             f'<span style="font-family:var(--font-data);'
-            f' font-size:0.65rem; color:{cor_hs};'
+            f' font-size:0.78rem; color:{cor_hs};'
             f' font-weight:bold;">{hs}</span></div>'
             f'<div style="background:var(--bg-overlay); height:3px;'
             f' border-radius:2px;">'
@@ -531,7 +270,7 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         txt = alertas[0][:55] + "…" if len(alertas[0]) > 55 else alertas[0]
         alerta_html = (
             f'<div style="font-family:var(--font-ui);'
-            f' font-size:0.65rem; color:var(--text-muted);'
+            f' font-size:0.78rem; color:var(--text-muted);'
             f' margin-top:5px; line-height:1.4;">{txt}</div>'
         )
 
@@ -545,14 +284,14 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         )
         earn_html = (
             f'<span style="font-family:var(--font-ui);'
-            f' font-size:0.58rem; color:{cor_e};'
+            f' font-size:0.78rem; color:{cor_e};'
             f' border:1px solid {cor_e}; padding:1px 4px;'
             f' border-radius:4px; margin-left:5px;'
             f' vertical-align:middle;">res·{dias_e}d</span>'
         )
 
     _alert_badge = (
-        '<span style="font-family:var(--font-ui); font-size:0.55rem;'
+        '<span style="font-family:var(--font-ui); font-size:0.78rem;'
         ' color:var(--bear); border:1px solid var(--bear);'
         ' padding:0 3px; border-radius:3px; margin-left:5px;">⚠</span>'
         if tem_alert else ""
@@ -570,7 +309,7 @@ def watchlist_card(ticker: str, nome: str, preco: float,
         f'{_alert_badge}'
         f'</div>'
         f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.70rem; color:var(--text-muted);'
+        f' font-size:0.78rem; color:var(--text-muted);'
         f' margin-bottom:6px; overflow:hidden;'
         f' text-overflow:ellipsis; white-space:nowrap;">'
         f'{nome[:28]}</div>'
@@ -593,21 +332,11 @@ def watchlist_card(ticker: str, nome: str, preco: float,
 
 
 def empty_state(icone: str, titulo: str, descricao: str):
-    """Estado vazio."""
+    """Estado vazio com título e orientação legíveis em qualquer tema."""
     st.markdown(
-        f'<div style="text-align:center; padding:48px 24px;">'
-        f'<div style="font-size:2.2rem; margin-bottom:12px;'
-        f' opacity:0.3;">{icone}</div>'
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.85rem; font-weight:600;'
-        f' color:var(--text-muted); margin-bottom:6px;">'
-        f'{titulo}</div>'
-        f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.75rem; color:var(--text-muted);'
-        f' max-width:280px; margin:0 auto;'
-        f' line-height:1.6; opacity:0.6;">'
-        f'{descricao}</div>'
-        f'</div>',
+        '<div class="ft-empty">'
+        f'<div class="ft-empty-icon" aria-hidden="true">{_escape(icone)}</div>'
+        f'<h3>{_escape(_clean_label(titulo))}</h3><p>{_escape(descricao)}</p></div>',
         unsafe_allow_html=True,
     )
 
@@ -617,7 +346,7 @@ def progress_steps(steps: list[str], current: int):
     items = "".join([
         f'<div style="display:flex; align-items:center;'
         f' gap:5px; font-family:var(--font-ui);'
-        f' font-size:0.68rem; font-weight:500;'
+        f' font-size:0.78rem; font-weight:500;'
         f' color:{"var(--bull)" if i < current else ("var(--accent)" if i == current else "var(--text-muted)")};">'
         f'<span>{"✓" if i < current else ("●" if i == current else "○")}</span>'
         f'<span>{s}</span>'
@@ -652,7 +381,7 @@ def kpi_row(itens: list[dict]):
             st.markdown(
                 f'<div style="padding:4px 12px; {borda}">'
                 f'<div style="font-family:var(--font-ui);'
-                f' font-size:0.62rem; font-weight:600;'
+                f' font-size:0.78rem; font-weight:600;'
                 f' color:var(--text-muted); text-transform:uppercase;'
                 f' letter-spacing:0.08em; margin-bottom:3px;">'
                 f'{item["label"]}</div>'
@@ -668,7 +397,7 @@ def auto_refresh_indicator(minutos_cache: int = 5):
     """Indicador de sync."""
     st.markdown(
         f'<div style="font-family:var(--font-ui);'
-        f' font-size:0.62rem; color:var(--text-muted);'
+        f' font-size:0.78rem; color:var(--text-muted);'
         f' text-align:right; margin-bottom:6px; opacity:0.7;">'
         f'↻ {time.strftime("%H:%M")} · cache {minutos_cache}m'
         f'</div>',
@@ -688,7 +417,7 @@ def inject_ui_enhancements():
         Alt+1 → Home           Alt+2 → Research
         Alt+3 → Discovery      Alt+4 → Macro
         Alt+5 → Portfolio      Alt+6 → Configurações
-        Enter → clica botão primário (comportamento legado)
+        Enter → confirma apenas dentro do formulário ativo
     """
     import json
     from utils.tickers import SCREENER_B3, SCREENER_US, FII_TODOS
@@ -700,11 +429,11 @@ def inject_ui_enhancements():
     tickers_json = json.dumps(tickers_b3 + tickers_fii + tickers_us)
 
     pages_json = json.dumps([
-        {"label": "Home",          "icon": "⚡", "nav": "Home",          "key": "1"},
-        {"label": "Research",      "icon": "🔬", "nav": "Research",      "key": "2"},
-        {"label": "Discovery",     "icon": "🔍", "nav": "Discovery",     "key": "3"},
+        {"label": "Visão geral",          "icon": "⚡", "nav": "Home",          "key": "1"},
+        {"label": "Análise de ativos",      "icon": "🔬", "nav": "Research",      "key": "2"},
+        {"label": "Oportunidades",     "icon": "🔍", "nav": "Discovery",     "key": "3"},
         {"label": "Macro",         "icon": "🌐", "nav": "Macro",         "key": "4"},
-        {"label": "Portfolio",     "icon": "💼", "nav": "Portfolio",     "key": "5"},
+        {"label": "Carteira",     "icon": "💼", "nav": "Portfolio",     "key": "5"},
         {"label": "Configurações", "icon": "⚙",  "nav": "Configuracoes", "key": "6"},
     ])
 
@@ -745,11 +474,11 @@ def inject_ui_enhancements():
             display:flex;gap:14px;align-items:center;}}
         .ft-k{{background:var(--bg-elevated);border:1px solid var(--border-normal);border-radius:var(--radius-sm);
             padding:1px 5px;font-family:var(--font-data);
-            font-size:.6rem;color:var(--text-secondary);margin-right:2px;}}
+            font-size:0.78rem;color:var(--text-secondary);margin-right:2px;}}
         #finterm-results{{max-height:340px;overflow-y:auto;padding:6px;}}
         #finterm-results::-webkit-scrollbar{{width:4px;}}
         #finterm-results::-webkit-scrollbar-thumb{{background:var(--border-normal);border-radius:2px;}}
-        .ft-section{{font-size:.58rem;color:var(--text-muted);padding:6px 14px 2px;
+        .ft-section{{font-size:0.78rem;color:var(--text-muted);padding:6px 14px 2px;
             text-transform:uppercase;letter-spacing:var(--ls-wide);
             font-family:var(--font-ui);}}
         .ft-item{{display:flex;align-items:center;gap:var(--space-3);padding:10px 14px;
@@ -760,8 +489,8 @@ def inject_ui_enhancements():
         .ft-main{{flex:1;min-width:0;}}
         .ft-ticker{{font-family:var(--font-data);font-size:var(--text-sm);
             font-weight:600;color:var(--text-primary);}}
-        .ft-desc{{font-size:.68rem;color:var(--text-muted);margin-top:1px;}}
-        .ft-badge{{font-size:.6rem;padding:2px 7px;border-radius:var(--radius-sm);
+        .ft-desc{{font-size:0.78rem;color:var(--text-muted);margin-top:1px;}}
+        .ft-badge{{font-size:0.78rem;padding:2px 7px;border-radius:var(--radius-sm);
             background:var(--border-subtle);color:var(--text-secondary);flex-shrink:0;
             font-family:var(--font-data);}}
         .ft-badge.page{{background:var(--pill-accent-bg);color:var(--accent);}}
@@ -798,7 +527,7 @@ def inject_ui_enhancements():
         .ft-toast.accent{{--toast-tone:var(--accent);}}
         .ft-hint-badge{{position:fixed;bottom:76px;right:20px;z-index:9998;
             background:var(--bg-surface);border:1px solid var(--border-normal);border-radius:var(--radius-sm);
-            padding:var(--space-2) var(--space-3);font-size:.65rem;color:var(--text-secondary);
+            padding:var(--space-2) var(--space-3);font-size:0.78rem;color:var(--text-secondary);
             font-family:var(--font-ui);pointer-events:none;
             box-shadow:var(--shadow-md);
             animation:ft-badge-show 4s ease 1.5s both;}}
@@ -822,8 +551,8 @@ def inject_ui_enhancements():
         var ov = doc.createElement('div');
         ov.id  = 'finterm-overlay';
         ov.innerHTML =
-            '<div id="finterm-palette">' +
-            '  <input id="finterm-input" type="text"' +
+            '<div id="finterm-palette" role="dialog" aria-modal="true" aria-label="Buscar ativo ou página">' +
+            '  <input id="finterm-input" type="text" aria-label="Buscar ativo ou página"' +
             '   placeholder="🔍  buscar ticker ou página..." autocomplete="off"/>' +
             '  <div id="finterm-hint">' +
             '    <span><span class="ft-k">↑↓</span> navegar</span>' +
@@ -858,21 +587,22 @@ def inject_ui_enhancements():
 
     /* ── NAVIGATION ── */
     function navPage(navLabel) {{
-        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"]');
+        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"], [data-testid="stPageLink-NavLink"]');
         for (var i = 0; i < links.length; i++) {{
-            if (links[i].textContent.trim().indexOf(navLabel) !== -1) {{
+            var path = new URL(links[i].href).pathname.replace(/\\/$/, '');
+            if ((navLabel === 'Home' && !path) || path.endsWith('/' + navLabel)) {{
                 links[i].click(); return;
             }}
         }}
         window.parent.location.href =
-            window.parent.location.origin + '/' + navLabel;
+            window.parent.location.origin + (navLabel === 'Home' ? '/' : '/' + navLabel) + window.parent.location.search;
     }}
 
     function navTicker(ticker) {{
-        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"]');
+        var links = doc.querySelectorAll('[data-testid="stSidebarNavLink"], [data-testid="stPageLink-NavLink"]');
         var researchHref = '';
         for (var i = 0; i < links.length; i++) {{
-            if (links[i].textContent.trim().indexOf('Research') !== -1) {{
+            if (new URL(links[i].href).pathname.endsWith('/Research')) {{
                 researchHref = links[i].href || ''; break;
             }}
         }}
@@ -881,7 +611,8 @@ def inject_ui_enhancements():
         // Strip query params from base before adding ours
         base = base.split('?')[0];
         window.parent.location.href =
-            base + '?research_ticker=' + encodeURIComponent(ticker);
+            base + '?research_ticker=' + encodeURIComponent(ticker) +
+            (new URLSearchParams(window.parent.location.search).get('s') ? '&s=' + encodeURIComponent(new URLSearchParams(window.parent.location.search).get('s')) : '');
     }}
 
     /* ── FUZZY MATCH ── */
@@ -957,7 +688,7 @@ def inject_ui_enhancements():
             }}
             if (!pageHits.length && !tickerHits.length) {{
                 html = '<div style="padding:24px;text-align:center;color:var(--text-muted);' +
-                    'font-size:var(--text-sm);font-family:var(--font-ui);">nenhum resultado para \\"' + q + '\\"</div>';
+                    'font-size:var(--text-sm);font-family:var(--font-ui);">nenhum resultado para \\"' + q.replace(/[<>]/g, '') + '\\"</div>';
             }}
         }}
 
@@ -993,7 +724,9 @@ def inject_ui_enhancements():
         if (item.type === 'ticker') navTicker(item.ticker);
     }}
 
+    var previousFocus = null;
     function openPalette() {{
+        previousFocus = doc.activeElement;
         ov.classList.add('active');
         inp.value = ''; renderResults('');
         setTimeout(function() {{ inp.focus(); }}, 60);
@@ -1001,6 +734,7 @@ def inject_ui_enhancements():
     function closePalette() {{
         ov.classList.remove('active');
         selIdx = -1;
+        if (previousFocus && previousFocus.isConnected) previousFocus.focus();
     }}
 
     inp.addEventListener('input', function() {{ renderResults(inp.value); }});
@@ -1045,6 +779,7 @@ def inject_ui_enhancements():
         }}
 
         if (open) {{
+            if (e.key === 'Tab') {{ e.preventDefault(); inp.focus(); return; }}
             if (e.key === 'Escape')    {{ e.preventDefault(); closePalette(); return; }}
             if (e.key === 'ArrowDown') {{
                 e.preventDefault();
@@ -1074,16 +809,6 @@ def inject_ui_enhancements():
             }}
         }}
 
-        // Enter → primary button (legado)
-        if (e.key === 'Enter' && !e.ctrlKey && !e.altKey) {{
-            var focused = doc.activeElement;
-            var isInput = focused && (focused.tagName==='INPUT' ||
-                focused.tagName==='TEXTAREA' || focused.tagName==='SELECT');
-            if (!isInput) {{
-                var btns = doc.querySelectorAll('[data-testid="stBaseButton-primary"]');
-                if (btns.length > 0) btns[0].click();
-            }}
-        }}
     }});
 }})();
 </script>
@@ -1422,41 +1147,15 @@ def tooltip(chave: str = "", texto_custom: str = "") -> None:
     )
 
 
-def label_com_tooltip(
-    texto: str,
-    chave: str = "",
-    texto_custom: str = "",
-    cor: str | None = None,
-    tamanho: str = "0.72rem",
-) -> None:
-    """
-    cor: None (padrão) usa var(--text-secondary). Passe um CSS color custom
-    apenas se precisar destacar o label (ex: 'var(--accent)').
-    """
-    _cor = cor if cor else "var(--text-secondary)"
-    _texto_tt = TOOLTIPS.get(chave, texto_custom)
-    _tt_esc = (
-        _texto_tt
-        .replace('"', '&quot;')
-        .replace("'", "&#39;")
-    ) if _texto_tt else ""
-
-    _tt_html = (
-        f' <span title="{_tt_esc}" style="'
-        f'cursor:help;color:var(--text-muted);font-size:0.6rem;'
-        f'border:1px solid var(--border-normal);border-radius:50%;'
-        f'padding:0 4px;margin-left:2px;'
-        f'font-family:var(--font-data);user-select:none;">?</span>'
-    ) if _tt_esc else ""
-
-    st.markdown(
-        f'<div style="font-family:var(--font-ui);'
-        f'font-size:{tamanho};color:{_cor};'
-        f'margin-bottom:4px;">'
-        f'{texto}{_tt_html}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+def label_com_tooltip(texto: str, chave: str = "", texto_custom: str = "",
+                      cor: str | None = None, tamanho: str = ".85rem") -> None:
+    """Rótulo legível com ajuda que também pode receber foco do teclado."""
+    description = TOOLTIPS.get(chave, texto_custom)
+    help_html = (f'<abbr tabindex="0" title="{_escape(description, quote=True)}" '
+                 f'aria-label="{_escape(description, quote=True)}">?</abbr>') if description else ''
+    color = cor or "var(--text-secondary)"
+    st.markdown(f'<div class="ft-inline-heading" style="color:{color};font-size:max(.82rem,{tamanho});">'
+                f'{_escape(_clean_label(texto))} {help_html}</div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1481,14 +1180,14 @@ def metric_card_compact(
     delta_html = ""
     if delta is not None:
         delta_html = (
-            f'<span style="font-size:.68rem;font-family:var(--font-data);'
+            f'<span style="font-size:0.78rem;font-family:var(--font-data);'
             f'color:{cor_val};margin-left:6px;">{delta}</span>'
         )
     st.markdown(
         f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
         f'border-radius:var(--radius-md);padding:10px 14px;min-height:64px;'
         f'display:flex;flex-direction:column;justify-content:center;">'
-        f'<div style="font-size:.65rem;font-family:var(--font-ui);color:var(--text-muted);'
+        f'<div style="font-size:0.78rem;font-family:var(--font-ui);color:var(--text-muted);'
         f'text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">{label}</div>'
         f'<div style="font-size:1.05rem;font-weight:600;font-family:var(--font-data);'
         f'color:var(--text-primary);font-variant-numeric:tabular-nums;'
@@ -1537,13 +1236,13 @@ def market_pulse_bar(
             preco_fmt   = f"{preco:+.2f}pp"
             status_line = "normal" if preco >= 0 else "invertida"
             var_html = (
-                f'<span style="font-size:.6rem;font-family:var(--font-data);'
+                f'<span style="font-size:0.78rem;font-family:var(--font-data);'
                 f'color:{cor};">{status_line}</span>'
             )
         else:
             preco_fmt = f"{preco:,.0f}" if preco >= 1_000 else f"{preco:.2f}"
             var_html  = (
-                f'<span style="font-size:.68rem;font-family:var(--font-data);'
+                f'<span style="font-size:0.78rem;font-family:var(--font-data);'
                 f'color:{cor};">{sinal} {abs(var):.2f}%</span>'
             )
         items.append(
@@ -1551,7 +1250,7 @@ def market_pulse_bar(
             f'justify-content:center;text-align:center;'
             f'flex:1;padding:6px 8px;'
             f'border-right:1px solid var(--border-subtle);gap:2px;">'
-            f'<span style="font-size:.58rem;color:var(--text-muted);'
+            f'<span style="font-size:0.78rem;color:var(--text-muted);'
             f'font-family:var(--font-ui);text-transform:uppercase;'
             f'letter-spacing:.05em;white-space:nowrap;">{nome}</span>'
             f'<span style="font-size:.8rem;font-family:var(--font-data);'
@@ -1927,59 +1626,9 @@ def kpi_grid(items: list[dict], cols: int = 4) -> None:
 # ── 7. Tabs pill ──────────────────────────────────────────────────────────────
 
 def tabs_pill(labels: list[str], key: str, default: str | None = None) -> str:
-    """
-    Tabs em pill (ref 2 Virtus). Retorna o label selecionado. Persiste em
-    session_state[key]. Use no topo de seções com múltiplas visões.
+    """Abas nativas: conteúdo sob demanda, sem colunas vazias ou rerun adicional."""
+    return section_selector(labels, key, default=default)
 
-    Ex: aba = tabs_pill(["Visão", "Posições", "Risco"], key="pf_tabs")
-        if aba == "Posições": ...
-    """
-    if not labels:
-        return ""
-    current = st.session_state.get(key) or default or labels[0]
-    if current not in labels:
-        current = labels[0]
-
-    _inject_once(
-        "_tabspill_css_v5",
-        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button{'
-        '  background:transparent !important;'
-        '  border:1px solid transparent !important;'
-        '  border-radius:999px !important;'
-        '  color:var(--text-secondary) !important;'
-        '  padding:6px 14px !important;'
-        '  font-family:var(--font-ui) !important;'
-        '  font-size:var(--text-sm) !important;'
-        '  font-weight:500 !important;'
-        '  width:100% !important;'
-        '  box-shadow:none !important;'
-        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
-        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button:hover{'
-        '  background:var(--bg-overlay) !important;'
-        '  color:var(--text-primary) !important;}'
-        'div[data-ftpill="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
-        '  background:var(--accent-gradient) !important;'
-        '  color:#fff !important;font-weight:600 !important;'
-        '  border-color:transparent !important;'
-        '  box-shadow:var(--shadow-sm) !important;}'
-    )
-
-    st.markdown('<div data-ftpill="1"></div>', unsafe_allow_html=True)
-    cols = st.columns(len(labels), gap="small")
-    for i, lab in enumerate(labels):
-        with cols[i]:
-            if st.button(
-                lab,
-                key=f"{key}__t{i}",
-                type=("primary" if lab == current else "secondary"),
-                use_container_width=True,
-            ):
-                st.session_state[key] = lab
-                st.rerun()
-    return current
-
-
-# ── 8. Period selector ────────────────────────────────────────────────────────
 
 def period_selector(
     opcoes: list[str],
@@ -2109,144 +1758,35 @@ def empty_state_v2(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def topbar(
-    breadcrumb_itens: list[tuple[str, str | None]] | None = None,
-    *,
-    show_search: bool = True,
-    show_user: bool = True,
-    show_sync: bool = True,
-    user_name: str = "",
-    sync_label: str = "",
-) -> None:
-    """
-    Barra superior fina sticky (ref 5 DWISLN).
-
-    Slots:
-      - esquerda: breadcrumb (lista de (label, href|None))
-      - centro:   atalho de busca Ctrl+K (visual — abre o command_palette via JS)
-      - direita:  indicador sync + user badge + toggle tema (compacto)
-
-    Use no topo de cada página (após aplicar_tema), antes do page_header.
-    """
-    _inject_once(
-        "_topbar_css_v5",
-        '.ft-topbar{position:sticky;top:0;z-index:998;'
-        '  display:flex;align-items:center;gap:var(--space-4);'
-        '  padding:var(--space-2) var(--space-4);'
-        '  background:var(--surface-glass);backdrop-filter:var(--glass-blur);'
-        '  -webkit-backdrop-filter:var(--glass-blur);'
-        '  border-bottom:1px solid var(--border-subtle);'
-        '  margin:calc(-1 * var(--space-4)) calc(-1 * var(--space-4)) var(--space-4);'
-        '  font-family:var(--font-ui);font-size:var(--text-sm);}'
-        '.ft-topbar-left{flex:1;display:flex;align-items:center;'
-        '  gap:var(--space-2);min-width:0;overflow:hidden;}'
-        '.ft-topbar-center{flex:0 0 auto;display:flex;align-items:center;}'
-        '.ft-topbar-right{flex:1;display:flex;align-items:center;'
-        '  justify-content:flex-end;gap:var(--space-3);}'
-        '.ft-topbar-search-btn{display:inline-flex;align-items:center;gap:6px;'
-        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
-        '  border-radius:999px;padding:5px 12px;color:var(--text-muted);'
-        '  font-size:var(--text-xs);cursor:pointer;'
-        '  transition:all var(--motion-fast) var(--ease-out);}'
-        '.ft-topbar-search-btn:hover{border-color:var(--accent-border);'
-        '  color:var(--text-secondary);}'
-        '.ft-topbar-search-btn kbd{font-family:var(--font-data);'
-        '  background:var(--bg-base);border:1px solid var(--border-normal);'
-        '  border-radius:var(--radius-sm);padding:1px 5px;font-size:.6rem;'
-        '  color:var(--text-secondary);margin-left:4px;}'
-        '.ft-topbar-pill{display:inline-flex;align-items:center;gap:6px;'
-        '  background:var(--pill-muted-bg);border:1px solid var(--border-subtle);'
-        '  border-radius:999px;padding:4px 10px;font-size:var(--text-xs);'
-        '  color:var(--text-secondary);}'
-        '.ft-topbar-pill .dot{width:6px;height:6px;border-radius:50%;'
-        '  background:var(--bull);box-shadow:0 0 6px var(--bull);}'
-        '.ft-topbar-pill.warn .dot{background:var(--amber);box-shadow:0 0 6px var(--amber);}'
-        '.ft-topbar-user{display:inline-flex;align-items:center;gap:6px;'
-        '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
-        '  border-radius:999px;padding:3px 4px 3px 10px;font-size:var(--text-xs);'
-        '  color:var(--text-secondary);}'
-        '.ft-topbar-user .avatar{display:inline-flex;align-items:center;'
-        '  justify-content:center;width:22px;height:22px;border-radius:50%;'
-        '  background:var(--accent-gradient);color:#fff;'
-        '  font-weight:700;font-size:.7rem;}'
-        '@media (max-width:900px){.ft-topbar-center{display:none;}}'
-    )
-
-    # ── Slot esquerda: breadcrumb ────────────────────────────────────────────
-    left_html = ""
-    if breadcrumb_itens:
-        partes = []
-        for i, (label, href) in enumerate(breadcrumb_itens):
-            is_last = (i == len(breadcrumb_itens) - 1)
-            if is_last:
-                partes.append(
-                    f'<span style="color:var(--text-primary);font-weight:600;'
-                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
-                    f'{label}</span>'
-                )
-            elif href:
-                partes.append(
-                    f'<a href="{href}" style="color:var(--text-secondary);'
-                    f'text-decoration:none;">{label}</a>'
-                )
-            else:
-                partes.append(
-                    f'<span style="color:var(--text-secondary);">{label}</span>'
-                )
-        sep = (
-            '<span style="color:var(--text-muted);"'
-            ' aria-hidden="true">/</span>'
-        )
-        left_html = sep.join(partes)
-    else:
-        left_html = (
-            '<span style="color:var(--text-muted);font-size:var(--text-xs);'
-            'text-transform:uppercase;letter-spacing:var(--ls-wide);">'
-            '⚡ finterminal</span>'
-        )
-
-    # ── Slot centro: busca / Ctrl+K ──────────────────────────────────────────
-    center_html = ""
+def topbar(breadcrumb_itens: list[tuple[str, str | None]] | None = None, *,
+           show_search: bool = True, show_user: bool = True, show_sync: bool = True,
+           user_name: str = "", sync_label: str = "") -> None:
+    """Contexto e busca nativa: funciona por mouse, toque e teclado."""
+    names = {"finterminal": "FinTerminal", "home": "Visão geral", "research": "Análise de ativos",
+             "discovery": "Oportunidades", "macro": "Cenário macro", "portfolio": "Carteira"}
+    parts = [_escape(names.get(_clean_label(label).lower(), _clean_label(label)))
+             for label, _ in (breadcrumb_itens or [("FinTerminal", None)])]
+    left = ' <span aria-hidden="true">/</span> '.join(parts)
+    status = '<span class="ft-topbar-pill">Atualizações periódicas</span>' if show_sync else ''
+    user = f'<span class="ft-topbar-user">{_escape(user_name)}</span>' if show_user and user_name else ''
+    context, search = st.columns([5, 1.4], vertical_alignment="center")
+    with context:
+        st.markdown(f'<div class="ft-topbar"><div class="ft-topbar-left">{left}</div>'
+                    f'<div class="ft-topbar-right">{status}{user}</div></div>', unsafe_allow_html=True)
     if show_search:
-        center_html = (
-            '<div class="ft-topbar-search-btn" '
-            'style="display:inline-flex;align-items:center;gap:6px;" '
-            'onclick="window.parent.postMessage({type:\'finterm-open-palette\'},\'*\');" '
-            'title="abrir command palette (Ctrl+K)">'
-            '<span>🔍 buscar</span>'
-            '<kbd style="margin-left:4px;">Ctrl+K</kbd></div>'
-        )
-
-    # ── Slot direita: sync + user ────────────────────────────────────────────
-    right_parts = []
-    if show_sync:
-        _sl = sync_label or "ativo"
-        right_parts.append(
-            f'<span class="ft-topbar-pill" '
-            f'style="display:inline-flex;align-items:center;gap:6px;" '
-            f'title="status de sincronização">'
-            f'<span class="dot"></span>{_sl}</span>'
-        )
-    if show_user:
-        nm = user_name or "usuário"
-        ini = (nm.strip()[:1] or "U").upper()
-        right_parts.append(
-            f'<span class="ft-topbar-user" '
-            f'style="display:inline-flex;align-items:center;gap:6px;" '
-            f'title="conectado como {nm}">'
-            f'<span>{nm[:14]}</span><span class="avatar">{ini}</span></span>'
-        )
-
-    right_html = "".join(right_parts)
-
-    st.markdown(
-        f'<div class="ft-topbar" style="display:flex;align-items:center;gap:var(--space-4);">'
-        f'<div class="ft-topbar-left" style="flex:1;display:flex;align-items:center;gap:var(--space-2);">{left_html}</div>'
-        f'<div class="ft-topbar-center">{center_html}</div>'
-        f'<div class="ft-topbar-right" style="flex:1;display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);">{right_html}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+        with search:
+            with st.popover("Buscar ativo", icon=":material/search:", use_container_width=True):
+                st.caption("Digite um ticker ou nome. Ex.: PETR4, AAPL, Nubank.")
+                with st.form("_topbar_search_form"):
+                    term = st.text_input("Ativo", key="_topbar_search_term", placeholder="Ticker ou empresa")
+                    submit = st.form_submit_button("Abrir análise", type="primary", use_container_width=True)
+                if submit:
+                    ticker = _resolver_ticker_busca(term)
+                    if ticker:
+                        st.session_state["research_ticker_externo"] = ticker
+                        st.switch_page("pages/1_Research.py")
+                    else:
+                        st.warning("Informe um ticker ou nome válido para encontrar o ativo.")
 
 
 def sidebar_nav_item(
@@ -2584,7 +2124,7 @@ def hero_macro(
         '  box-shadow:0 0 6px currentColor;}'
         '.ft-hero-sinal .name{font-family:var(--font-ui);'
         '  color:var(--text-secondary);text-transform:uppercase;'
-        '  letter-spacing:var(--ls-wide);font-size:.66rem;'
+        '  letter-spacing:var(--ls-wide);font-size:0.78rem;'
         '  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
         '.ft-hero-sinal .val{font-family:var(--font-data);'
         '  color:var(--text-primary);font-weight:600;'
@@ -2592,7 +2132,7 @@ def hero_macro(
         '.ft-hero-fontes{grid-column:1 / -1;display:flex;flex-wrap:wrap;'
         '  gap:6px 12px;padding-top:8px;border-top:1px solid var(--border-subtle);'
         '  margin-top:4px;}'
-        '.ft-hero-fontes span{font-family:var(--font-ui);font-size:.6rem;'
+        '.ft-hero-fontes span{font-family:var(--font-ui);font-size:0.78rem;'
         '  color:var(--text-muted);}'
         '@media (max-width:900px){.ft-hero-macro{grid-template-columns:1fr;}'
         '  .ft-hero-right{grid-template-columns:1fr;}}'
@@ -2683,11 +2223,11 @@ def kpi_index_row(
         '.ft-kpi-card::after{content:"";position:absolute;left:0;top:0;'
         '  width:100%;height:2px;background:var(--kpi-tone);'
         '  box-shadow:0 0 10px var(--kpi-tone);opacity:.85;}'
-        '.ft-kpi-name{font-family:var(--font-ui);font-size:.66rem;'
+        '.ft-kpi-name{font-family:var(--font-ui);font-size:0.78rem;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
         '  color:var(--text-muted);margin-bottom:6px;'
         '  display:flex;justify-content:space-between;align-items:center;}'
-        '.ft-kpi-name .tk{font-size:.58rem;color:var(--text-muted);opacity:.7;}'
+        '.ft-kpi-name .tk{font-size:0.78rem;color:var(--text-muted);opacity:.7;}'
         '.ft-kpi-value{font-family:var(--font-data);font-size:var(--text-2xl);'
         '  font-weight:700;color:var(--text-primary);'
         '  line-height:1.1;letter-spacing:var(--ls-tight);}'
@@ -2791,10 +2331,10 @@ def highlights_strip(
         '.ft-hs-head{display:flex;align-items:center;'
         '  justify-content:space-between;margin-bottom:8px;}'
         '.ft-hs-head .ic{display:inline-flex;align-items:center;gap:6px;'
-        '  font-family:var(--font-ui);font-size:.66rem;'
+        '  font-family:var(--font-ui);font-size:0.78rem;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
         '  color:var(--hs-tone);font-weight:600;}'
-        '.ft-hs-head .qt{font-family:var(--font-data);font-size:.7rem;'
+        '.ft-hs-head .qt{font-family:var(--font-data);font-size:0.78rem;'
         '  color:var(--text-muted);background:var(--bg-elevated);'
         '  border-radius:999px;padding:2px 8px;}'
         '.ft-hs-list{display:flex;flex-direction:column;gap:4px;}'
@@ -2886,7 +2426,7 @@ def mercado_group_header(
         '  display:inline-flex;align-items:center;gap:6px;}'
         '.ft-mkt-group .dot{width:6px;height:6px;border-radius:50%;'
         '  background:var(--mkt-tone);box-shadow:0 0 6px var(--mkt-tone);}'
-        '.ft-mkt-group .ct{font-family:var(--font-data);font-size:.68rem;'
+        '.ft-mkt-group .ct{font-family:var(--font-data);font-size:0.78rem;'
         '  color:var(--text-muted);background:var(--bg-elevated);'
         '  border:1px solid var(--border-subtle);'
         '  border-radius:999px;padding:1px 8px;}'
@@ -2965,7 +2505,7 @@ def portfolio_hero(
         '  box-shadow:0 0 16px var(--pfh-tone);}'
         '.ft-pf-left{position:relative;display:flex;flex-direction:column;'
         '  justify-content:center;gap:6px;}'
-        '.ft-pf-eyebrow{font-family:var(--font-ui);font-size:.66rem;'
+        '.ft-pf-eyebrow{font-family:var(--font-ui);font-size:0.78rem;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
         '  color:var(--text-muted);font-weight:600;'
         '  display:inline-flex;align-items:center;gap:6px;}'
@@ -3015,7 +2555,7 @@ def portfolio_hero(
     if data_source:
         ic = "📦" if data_source == "cache" else "📡"
         src_html = (
-            f' <span style="font-size:.6rem;color:var(--text-muted);'
+            f' <span style="font-size:0.78rem;color:var(--text-muted);'
             f'opacity:.6;margin-left:8px;">{ic} {data_source}</span>'
         )
 
@@ -3069,12 +2609,12 @@ def portfolio_kpis(items: list[dict]) -> None:
         '  box-shadow:0 0 10px var(--pfk-tone);opacity:.85;}'
         '.ft-pfk-head{display:flex;justify-content:space-between;'
         '  align-items:center;margin-bottom:6px;}'
-        '.ft-pfk-name{font-family:var(--font-ui);font-size:.66rem;'
+        '.ft-pfk-name{font-family:var(--font-ui);font-size:0.78rem;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
         '  color:var(--text-muted);font-weight:600;}'
         '.ft-pfk-icon{font-size:.95rem;opacity:.75;}'
         '.ft-pfk-ticker{display:inline-block;font-family:var(--font-data);'
-        '  font-size:.62rem;font-weight:700;color:var(--pfk-tone);'
+        '  font-size:0.78rem;font-weight:700;color:var(--pfk-tone);'
         '  background:var(--bg-elevated);border:1px solid var(--pfk-tone);'
         '  border-radius:var(--radius-sm);padding:1px 6px;'
         '  letter-spacing:var(--ls-wide);margin-bottom:4px;}'
@@ -3208,11 +2748,11 @@ def events_strip(eventos: list[dict]) -> None:
         '  box-shadow:0 0 10px var(--evt-tone);}'
         '.ft-evt-head{display:flex;justify-content:space-between;'
         '  align-items:center;margin-bottom:8px;}'
-        '.ft-evt-cat{font-family:var(--font-ui);font-size:.6rem;'
+        '.ft-evt-cat{font-family:var(--font-ui);font-size:0.78rem;'
         '  font-weight:700;text-transform:uppercase;'
         '  letter-spacing:var(--ls-wider);color:var(--evt-tone);'
         '  display:inline-flex;align-items:center;gap:5px;}'
-        '.ft-evt-imp{font-family:var(--font-ui);font-size:.58rem;'
+        '.ft-evt-imp{font-family:var(--font-ui);font-size:0.78rem;'
         '  font-weight:700;color:var(--evt-imp-c);'
         '  background:var(--bg-elevated);'
         '  border:1px solid var(--evt-imp-c);border-radius:var(--radius-sm);'
@@ -3226,7 +2766,7 @@ def events_strip(eventos: list[dict]) -> None:
         '  padding-top:8px;border-top:1px solid var(--border-subtle);}'
         '.ft-evt-data{font-family:var(--font-data);font-size:.72rem;'
         '  color:var(--text-secondary);font-weight:600;}'
-        '.ft-evt-count{font-family:var(--font-data);font-size:.7rem;'
+        '.ft-evt-count{font-family:var(--font-data);font-size:0.78rem;'
         '  color:var(--evt-cd-c);font-weight:700;'
         '  display:inline-flex;align-items:baseline;gap:3px;}'
         '.ft-evt-count .n{font-size:1.15rem;}'
@@ -3294,60 +2834,9 @@ def events_strip(eventos: list[dict]) -> None:
     )
 
 
-def pill_select(
-    labels: list[str],
-    key:    str,
-    default: str | None = None,
-) -> str:
-    """
-    Seletor estilo pill mais compacto que tabs_pill (para usar em ordenacao).
-    Retorna o label selecionado. Persiste em session_state[key].
-
-    Diferenca pra tabs_pill: visual menor, sem fundo gradient (so border ativo).
-    """
-    if not labels:
-        return ""
-    current = st.session_state.get(key) or default or labels[0]
-    if current not in labels:
-        current = labels[0]
-
-    _inject_once(
-        "_pillselect_css_v1",
-        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button{'
-        '  background:transparent !important;'
-        '  border:1px solid var(--border-subtle) !important;'
-        '  border-radius:var(--radius-sm) !important;'
-        '  color:var(--text-secondary) !important;'
-        '  padding:4px 10px !important;'
-        '  font-family:var(--font-ui) !important;'
-        '  font-size:var(--text-xs) !important;'
-        '  font-weight:500 !important;'
-        '  width:100% !important;'
-        '  box-shadow:none !important;'
-        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
-        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button:hover{'
-        '  border-color:var(--border-normal) !important;'
-        '  color:var(--text-primary) !important;}'
-        'div[data-fpsel="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
-        '  background:var(--bg-elevated) !important;'
-        '  color:var(--accent) !important;'
-        '  border-color:var(--accent) !important;'
-        '  font-weight:600 !important;}'
-    )
-
-    st.markdown('<div data-fpsel="1"></div>', unsafe_allow_html=True)
-    cols = st.columns(len(labels), gap="small")
-    for i, lab in enumerate(labels):
-        with cols[i]:
-            if st.button(
-                lab,
-                key=f"{key}__{i}",
-                type="primary" if lab == current else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state[key] = lab
-                st.rerun()
-    return current
+def pill_select(labels: list[str], key: str, default: str | None = None) -> str:
+    """Seletor compacto com dimensões naturais para os rótulos."""
+    return section_selector(labels, key, default=default)
 
 
 def watchlist_selector_header(
@@ -3376,7 +2865,7 @@ def watchlist_selector_header(
             'sem watchlists. crie a primeira pra começar.</div>',
             unsafe_allow_html=True,
         )
-        if st.button("➕ criar primeira watchlist", type="primary",
+        if st.button("Criar primeira watchlist", type="primary",
                      use_container_width=True, key=f"{key_prefix}_primeira"):
             return (None, "criar")
         return (None, None)
@@ -3387,11 +2876,11 @@ def watchlist_selector_header(
         '  justify-content:space-between;'
         '  margin-bottom:8px;padding-bottom:8px;'
         '  border-bottom:1px solid var(--border-subtle);}'
-        '.ft-wl-title{font-family:var(--font-ui);font-size:.7rem;'
+        '.ft-wl-title{font-family:var(--font-ui);font-size:0.78rem;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wider);'
         '  color:var(--text-muted);font-weight:600;'
         '  display:inline-flex;align-items:center;gap:6px;}'
-        '.ft-wl-counts{font-family:var(--font-data);font-size:.7rem;'
+        '.ft-wl-counts{font-family:var(--font-data);font-size:0.78rem;'
         '  color:var(--text-secondary);}'
     )
 
@@ -3420,11 +2909,11 @@ def watchlist_selector_header(
         sub1, sub2 = st.columns(2)
         acao = None
         with sub1:
-            if st.button("➕ nova", key=f"{key_prefix}_btn_nova",
+            if st.button("Nova", key=f"{key_prefix}_btn_nova",
                          use_container_width=True):
                 acao = "criar"
         with sub2:
-            if st.button("⚙ config", key=f"{key_prefix}_btn_cfg",
+            if st.button("Config", key=f"{key_prefix}_btn_cfg",
                          use_container_width=True):
                 acao = "config"
 
@@ -3457,7 +2946,7 @@ def opportunity_card(
     Use dentro de uma st.column do Streamlit:
         with col:
             st.markdown(opportunity_card(...), unsafe_allow_html=True)
-            if st.button(f"analisar {ticker}", key=...): ...
+            if st.button(f"Analisar {ticker}", key=...): ...
 
     Renderiza:
       - ticker grande em accent + medal badge à direita
@@ -3489,7 +2978,7 @@ def opportunity_card(
         '  color:var(--text-secondary);line-height:1.35;'
         '  overflow:hidden;text-overflow:ellipsis;'
         '  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}'
-        '.ft-opp-setor{font-family:var(--font-ui);font-size:.6rem;'
+        '.ft-opp-setor{font-family:var(--font-ui);font-size:0.78rem;'
         '  color:var(--text-muted);text-transform:uppercase;'
         '  letter-spacing:var(--ls-wide);margin-top:2px;'
         '  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
@@ -3497,8 +2986,8 @@ def opportunity_card(
         '.ft-opp-bd-row{display:flex;justify-content:space-between;'
         '  align-items:center;margin-bottom:3px;}'
         '.ft-opp-bd-row .lb{font-family:var(--font-ui);'
-        '  font-size:.6rem;color:var(--text-muted);}'
-        '.ft-opp-bd-row .vl{font-family:var(--font-data);font-size:.66rem;'
+        '  font-size:0.78rem;color:var(--text-muted);}'
+        '.ft-opp-bd-row .vl{font-family:var(--font-data);font-size:0.78rem;'
         '  font-weight:600;color:var(--bd-tone);}'
         '.ft-opp-bd-bar{background:var(--bg-overlay);border-radius:2px;'
         '  height:3px;margin-bottom:8px;overflow:hidden;}'
@@ -3509,14 +2998,14 @@ def opportunity_card(
         '  gap:6px;margin-top:8px;padding-top:8px;'
         '  border-top:1px solid var(--border-subtle);}'
         '.ft-opp-stat{text-align:center;}'
-        '.ft-opp-stat .l{font-family:var(--font-ui);font-size:.55rem;'
+        '.ft-opp-stat .l{font-family:var(--font-ui);font-size:0.78rem;'
         '  color:var(--text-muted);text-transform:uppercase;'
         '  letter-spacing:var(--ls-wide);}'
-        '.ft-opp-stat .v{font-family:var(--font-data);font-size:.7rem;'
+        '.ft-opp-stat .v{font-family:var(--font-data);font-size:0.78rem;'
         '  font-weight:600;margin-top:1px;}'
     )
 
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    medals = ["01", "02", "03", "04", "05"]
     medal = medals[rank] if 0 <= rank < len(medals) else ""
 
     # Breakdown bars
@@ -3558,7 +3047,7 @@ def opportunity_card(
         f'<span class="ft-opp-tk">{ticker.replace(".SA","")}</span>'
         f'<span class="ft-opp-medal">{medal}</span>'
         f'</div>'
-        f'<div class="ft-opp-name">{nome.lower()[:60]}</div>'
+        f'<div class="ft-opp-name">{_escape(nome[:60])}</div>'
         f'{setor_html}'
         f'<div class="ft-opp-bds">{bds_html}</div>'
         f'<div class="ft-opp-stats">'
@@ -3584,81 +3073,10 @@ def opportunity_card(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def chip_filter_row(
-    labels: list[str],
-    key:    str,
-    default: str | None = None,
-    *,
-    max_chip_cols: int = 8,
-) -> str:
-    """
-    Linha de chips compactos para filtros — alternativa ao tabs_pill quando
-    os botões estavam ocupando largura cheia.
-
-    Comportamento:
-      - Usa st.columns(max_chip_cols) — fixa o nº de slots = max_chip_cols
-      - Distribui labels nos primeiros slots; resto fica vazio (espaço em branco)
-      - Botões ficam compactos (largura ~ tamanho do label)
-      - Para 3 labels com max=8 cols: cada chip ocupa 1/8 da linha, sobra 5/8
-
-    Use quando:
-      - Você tem poucos itens (2-5) e o tabs_pill ficaria com botões largos
-      - Quer um look mais natural de "chips"
-
-    tabs_pill continua melhor para tabs reais com 4-6 opções que devem
-    preencher uma barra horizontal cheia.
-    """
-    if not labels:
-        return ""
-    current = st.session_state.get(key) or default or labels[0]
-    if current not in labels:
-        current = labels[0]
-
-    _inject_once(
-        "_chipfilter_css_v1",
-        # Mesmo estilo do pill_select, mas mais compacto
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button{'
-        '  background:transparent !important;'
-        '  border:1px solid var(--border-subtle) !important;'
-        '  border-radius:999px !important;'
-        '  color:var(--text-secondary) !important;'
-        '  padding:3px 12px !important;'
-        '  font-family:var(--font-ui) !important;'
-        '  font-size:var(--text-xs) !important;'
-        '  font-weight:500 !important;'
-        '  width:100% !important;'
-        '  min-height:28px !important;'
-        '  box-shadow:none !important;'
-        '  white-space:nowrap !important;'
-        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button:hover{'
-        '  background:var(--bg-overlay) !important;'
-        '  border-color:var(--border-normal) !important;'
-        '  color:var(--text-primary) !important;}'
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
-        '  background:var(--accent-gradient) !important;'
-        '  color:#fff !important;font-weight:600 !important;'
-        '  border-color:transparent !important;'
-        '  box-shadow:var(--shadow-sm) !important;}'
-    )
-
-    st.markdown('<div data-fchip="1"></div>', unsafe_allow_html=True)
-
-    # Slots fixos — labels nos primeiros, vazios no fim
-    n_labels = len(labels)
-    n_slots = max(max_chip_cols, n_labels)
-    cols = st.columns(n_slots, gap="small")
-    for i, lab in enumerate(labels):
-        with cols[i]:
-            if st.button(
-                lab,
-                key=f"{key}__{i}",
-                type="primary" if lab == current else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state[key] = lab
-                st.rerun()
-    return current
+def chip_filter_row(labels: list[str], key: str, default: str | None = None,
+                    max_chip_cols: int = 8) -> str:
+    """Filtros com largura natural; max_chip_cols mantido por compatibilidade."""
+    return section_selector(labels, key, default=default)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3721,7 +3139,7 @@ def ticker_hero(
         '.ft-tk-mkt{display:inline-flex;align-items:center;gap:4px;'
         '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
         '  border-radius:var(--radius-sm);padding:2px 8px;'
-        '  font-family:var(--font-ui);font-size:.62rem;font-weight:700;'
+        '  font-family:var(--font-ui);font-size:0.78rem;font-weight:700;'
         '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
         '  color:var(--text-secondary);}'
         '.ft-tk-name{font-family:var(--font-title);font-size:var(--text-3xl);'
@@ -3740,7 +3158,7 @@ def ticker_hero(
         '  margin-top:var(--space-2);}'
         '.ft-tk-delta{display:inline-flex;flex-direction:column;'
         '  font-family:var(--font-data);}'
-        '.ft-tk-delta .l{font-size:.6rem;color:var(--text-muted);'
+        '.ft-tk-delta .l{font-size:0.78rem;color:var(--text-muted);'
         '  text-transform:uppercase;letter-spacing:var(--ls-wide);'
         '  font-family:var(--font-ui);margin-bottom:2px;}'
         '.ft-tk-delta .v{font-size:var(--text-sm);font-weight:700;}'
@@ -3806,7 +3224,7 @@ def ticker_hero(
         f'<div class="ft-tk-left">'
         f'<div class="ft-tk-meta">{mkt_html}</div>'
         f'<h1 class="ft-tk-name">{ticker.replace(".SA","")}</h1>'
-        f'<div class="ft-tk-sub">{nome.lower()[:80]} · {setor.lower()[:40]}</div>'
+        f'<div class="ft-tk-sub">{_escape(nome[:80])} · {_escape(setor[:40])}</div>'
         f'<div class="ft-tk-price"><span class="cur">{moeda}</span>{_fmt(preco_atual)}</div>'
         f'<div class="ft-tk-deltas">{deltas_html}</div>'
         f'</div>'
@@ -4093,50 +3511,16 @@ def url_state_chip_filter_row(
     if current not in labels:
         current = labels[0]
 
-    _inject_once(
-        "_chipfilter_css_v1",
-        # Mesmo estilo do chip_filter_row — sincronizado
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button{'
-        '  background:transparent !important;'
-        '  border:1px solid var(--border-subtle) !important;'
-        '  border-radius:999px !important;'
-        '  color:var(--text-secondary) !important;'
-        '  padding:3px 12px !important;'
-        '  font-family:var(--font-ui) !important;'
-        '  font-size:var(--text-xs) !important;'
-        '  font-weight:500 !important;'
-        '  width:100% !important;'
-        '  min-height:28px !important;'
-        '  box-shadow:none !important;'
-        '  white-space:nowrap !important;'
-        '  transition:all var(--motion-fast) var(--ease-out) !important;}'
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button:hover{'
-        '  background:var(--bg-overlay) !important;'
-        '  border-color:var(--border-normal) !important;'
-        '  color:var(--text-primary) !important;}'
-        'div[data-fchip="1"]+div [data-testid="column"] .stButton button[kind="primary"]{'
-        '  background:var(--accent-gradient) !important;'
-        '  color:#fff !important;font-weight:600 !important;'
-        '  border-color:transparent !important;'
-        '  box-shadow:var(--shadow-sm) !important;}'
-    )
-
-    st.markdown('<div data-fchip="1"></div>', unsafe_allow_html=True)
-
-    n_slots = max(max_chip_cols, len(labels))
-    cols = st.columns(n_slots, gap="small")
-    for i, lab in enumerate(labels):
-        with cols[i]:
-            if st.button(
-                lab,
-                key=f"{qp_key}__url__{i}",
-                type="primary" if lab == current else "secondary",
-                use_container_width=True,
-            ):
-                # Persiste no URL
-                st.query_params[qp_key] = label_to_slug[lab]
-                st.rerun()
-    return current
+    state_key = f"_url_filter_{qp_key}"
+    previous_slug_key = f"_url_filter_slug_{qp_key}"
+    if st.session_state.get(previous_slug_key) != current_slug:
+        st.session_state[state_key] = current
+    selected = section_selector(labels, state_key, default=current)
+    selected_slug = label_to_slug[selected]
+    if selected != current:
+        st.query_params[qp_key] = selected_slug
+    st.session_state[previous_slug_key] = selected_slug
+    return selected
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4191,7 +3575,7 @@ def lazy_chart(
         '.ft-lazy-titulo .ic{font-size:1rem;opacity:.85;}'
         '.ft-lazy-desc{font-family:var(--font-ui);font-size:var(--text-xs);'
         '  color:var(--text-muted);margin-top:4px;}'
-        '.ft-lazy-status{font-family:var(--font-ui);font-size:.62rem;'
+        '.ft-lazy-status{font-family:var(--font-ui);font-size:0.78rem;'
         '  color:var(--text-muted);text-transform:uppercase;'
         '  letter-spacing:var(--ls-wide);'
         '  background:var(--bg-elevated);border:1px solid var(--border-subtle);'
@@ -4224,7 +3608,7 @@ def lazy_chart(
         c1, c2, c3 = st.columns([2, 1, 2])
         with c2:
             if st.button(
-                "▶ carregar gráfico",
+                "Carregar gráfico",
                 key=f"__lazy_btn_{key}",
                 use_container_width=True,
             ):
@@ -4272,50 +3656,67 @@ def lazy_chart(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _resolver_ticker_busca(termo: str) -> str | None:
-    """Resolve o termo (ticker ou nome) para um símbolo. BR: 4 letras + dígito → .SA;
-    US: como está; nome → busca no Yahoo (fachada market_data)."""
-    import re
-    t = (termo or "").strip().upper()
-    if not t:
+    """Resolve símbolos conhecidos diretamente; nomes e outros termos pelo provedor."""
+    from utils.tickers import BRASIL_TODOS, SCREENER_US, BR_INDICES, XSTOCKS_TODOS
+    query = (termo or "").strip()
+    symbol = query.upper()
+    if not symbol:
         return None
-    if re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", t):          # PETR4, HGLG11 → .SA
-        return t + ".SA"
-    if re.fullmatch(r"[A-Z]{1,6}(\.SA)?[0-9]{0,2}", t):  # AAPL, PETR4.SA
-        return t
+    if _re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", symbol):
+        return symbol + ".SA"
+    if _re.fullmatch(r"[A-Z]{4}[0-9]{1,2}\.SA", symbol):
+        return symbol
+    known = {str(ticker).upper(): str(ticker)
+             for ticker in [*BRASIL_TODOS, *SCREENER_US, *BR_INDICES, *XSTOCKS_TODOS]}
+    if symbol in known:
+        return known[symbol]
     try:
         from utils.market_data import buscar_ativo_yahoo
-        res = buscar_ativo_yahoo(termo)
-        if res:
-            return res[0].get("symbol")
+        for result in buscar_ativo_yahoo(query) or []:
+            if result.get("symbol"):
+                return result["symbol"]
     except Exception:
         pass
     return None
 
 
 def busca_global_sidebar(research_page: str = "pages/1_Research.py") -> None:
-    """Campo de busca de ativo na sidebar. Resolve ticker/nome e salta para o
-    Research setando `research_ticker_externo`. Chamar 1× por página (após auth)."""
+    """Busca enviada pelo botão ou Enter, sem rerun a cada campo editado."""
     with st.sidebar:
-        st.markdown(
-            '<div style="font-size:0.62rem;color:var(--text-muted);'
-            'text-transform:uppercase;letter-spacing:.08em;margin:4px 0 2px;">'
-            '🔍 busca global de ativo</div>',
-            unsafe_allow_html=True,
-        )
-        _termo = st.text_input(
-            "busca global", key="_busca_global_termo",
-            placeholder="ticker ou nome (ex: petr4, nubank)",
-            label_visibility="collapsed",
-        )
-        if st.button("abrir no research →", key="_busca_global_btn",
-                     use_container_width=True) and _termo and _termo.strip():
-            _tk = _resolver_ticker_busca(_termo)
-            if _tk:
-                st.session_state["research_ticker_externo"] = _tk
-                try:
-                    st.switch_page(research_page)
-                except Exception:
-                    st.session_state["research_ticker"] = _tk
-                    st.rerun()
+        with st.form("_busca_global_form", border=False):
+            termo = st.text_input("Buscar ativo", key="_busca_global_termo",
+                                  placeholder="Ticker ou empresa", help="Ex.: PETR4, HGLG11, AAPL ou Nubank.")
+            submitted = st.form_submit_button("Abrir análise →", use_container_width=True)
+        if submitted:
+            if not termo.strip():
+                st.warning("Digite um ticker ou nome de empresa.")
+                return
+            with st.spinner("Buscando ativo…"):
+                ticker = _resolver_ticker_busca(termo)
+            if ticker:
+                st.session_state["research_ticker_externo"] = ticker
+                st.switch_page(research_page)
             else:
-                st.warning("ativo não encontrado.")
+                st.warning("Ativo não encontrado. Tente o ticker completo.")
+
+
+
+
+def page_jump_links(items: list[tuple[str, str]]) -> None:
+    """Atalhos para seções de páginas extensas, mantendo o contexto atual."""
+    links = ''.join(f'<a href="#{_escape(anchor, quote=True)}" target="_self">{_escape(label)}</a>' for label, anchor in items)
+    st.markdown(f'<nav class="ft-jump-links" aria-label="Nesta página">{links}</nav>', unsafe_allow_html=True)
+
+
+def confirm_action(titulo: str, descricao: str, action, *, key: str) -> None:
+    """Confirma remoções dentro do produto; executar apenas no botão de confirmação."""
+    @st.dialog(titulo)
+    def dialog():
+        st.write(descricao)
+        cancel, confirm = st.columns(2)
+        if cancel.button("Cancelar", key=f"{key}_cancel", use_container_width=True):
+            st.rerun()
+        if confirm.button("Confirmar remoção", key=f"{key}_confirm", type="primary", use_container_width=True, on_click=action):
+            st.toast("Remoção concluída.")
+            st.rerun()
+    dialog()
