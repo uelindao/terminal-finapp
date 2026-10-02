@@ -19,7 +19,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 # importações do ecossistema finapp
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
-from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS
+from utils.tickers import get_opcoes_selectbox, ticker_from_label, mapear_ticker_base, FII_TODOS, BRASIL_TODOS, XSTOCKS_TODOS, SCREENER_US
 from database.db import listar_watchlists, listar_watchlist, get_todos_fundamentos_cache, salvar_fundamento_cache, init_db, get_historico_score, get_health_scores, get_user_settings
 from utils.scrapers import buscar_dados_b3, buscar_dados_us
 from utils.fmp_client import get_multiplos_medios, get_peers, get_multiplos_historicos
@@ -32,12 +32,36 @@ from utils.components import (
     tooltip, label_com_tooltip, TOOLTIPS,
     data_quality_badge,
     # Fase 6 — shell visual
-    topbar,
+    topbar, ticker_nav_url,
 )
 from utils.macro_context import garantir_macro_context
 from utils.macro_regime import classificar_regime  # apenas o label do regime
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero, safe_float
 from utils.charts import base_layout, CORES_SERIES, base100, linha, chart_type_toggle, barras_verticais, _cores as _chart_cores
+
+def _recorte_temporal(dados, janela):
+    """Recorta pela última observação disponível, mantendo a série original."""
+    if dados.empty or janela == "10 anos":
+        return dados.copy()
+    meses = {"3 meses": 3, "6 meses": 6, "1 ano": 12, "3 anos": 36, "5 anos": 60}
+    limite = pd.Timestamp(dados.index.max()) - pd.DateOffset(months=meses[janela])
+    return dados.loc[dados.index >= limite].copy()
+
+
+def _comparativo_normalizado(dados, modo):
+    """Cada série parte de sua primeira cotação válida no recorte."""
+    resultado = pd.DataFrame(index=dados.index)
+    for coluna in dados.columns:
+        serie = pd.to_numeric(dados[coluna], errors="coerce").dropna()
+        if serie.empty or serie.iloc[0] <= 0:
+            continue
+        if modo == "Drawdown (%)":
+            resultado[coluna] = (serie / serie.cummax() - 1) * 100
+        else:
+            normalizada = serie / serie.iloc[0]
+            resultado[coluna] = normalizada * 100 if modo == "Base 100" else (normalizada - 1) * 100
+    return resultado
+
 
 # 1. barreira de segurança multi-usuário
 if not require_auth():
@@ -52,9 +76,7 @@ try:
     render_theme_switcher_sidebar()
 except Exception:
     pass
-# Busca global de ativo — navegação de qualquer página para o deep dive (UX).
-from utils.components import busca_global_sidebar
-busca_global_sidebar()
+# Pesquisa de ativos fica no próprio escopo da análise; a busca global permanece na barra superior.
 garantir_macro_context()
 if not init_db():
     st.error("🔌 serviço de dados indisponível (banco fora do ar ou cota do Supabase "
@@ -84,15 +106,18 @@ from utils.market_data import buscar_ativo_yahoo, yf_info
 # ==========================================
 # GESTÃO DE ESTADO E SIDEBAR
 # ==========================================
-if 'research_ticker' not in st.session_state:
-    # Suporta abertura em nova aba via ?research_ticker=TICKER
-    _qt = st.query_params.get("research_ticker")
-    st.session_state['research_ticker'] = _qt if _qt else "PETR4.SA"
-    if _qt:
-        st.query_params.clear()
+# Abrir um ativo sempre entra no escopo individual, inclusive após comparar.
+_qt = st.query_params.get("research_ticker")
+if _qt:
+    st.session_state['research_ticker'] = _qt
+    st.session_state['research_modo_widget'] = "Deep Dive (Individual)"
+    del st.query_params["research_ticker"]
+elif 'research_ticker' not in st.session_state:
+    st.session_state['research_ticker'] = "PETR4.SA"
 
 if 'research_ticker_externo' in st.session_state:
     st.session_state['research_ticker'] = st.session_state.pop('research_ticker_externo')
+    st.session_state['research_modo_widget'] = "Deep Dive (Individual)"
 
 # Lê modo e ativos pré-selecionados vindos da Home
 if 'research_modo' in st.session_state:
@@ -105,15 +130,20 @@ if 'comp_ativos_presel' in st.session_state:
 else:
     _ativos_presel = None
 
+if _modo_presel in ("Deep Dive (Individual)", "Comparativo (Múltiplos)"):
+    st.session_state["research_modo_widget"] = _modo_presel
+elif "research_modo_widget" not in st.session_state:
+    st.session_state["research_modo_widget"] = "Deep Dive (Individual)"
+
 with st.sidebar:
     section_title("🔬 modo de análise")
-    modo_pesquisa = st.radio("selecione o escopo:", ["Deep Dive (Individual)", "Comparativo (Múltiplos)"], index=1 if _modo_presel == 'Comparativo (Múltiplos)' else 0, label_visibility="collapsed")
-    
+    modo_pesquisa = st.radio("Escopo da análise", ["Deep Dive (Individual)", "Comparativo (Múltiplos)"], key="research_modo_widget", format_func=lambda modo: "Ativo individual" if modo == "Deep Dive (Individual)" else "Comparar ativos", label_visibility="collapsed")
+
     st.markdown("---")
-    
+
     if modo_pesquisa == "Deep Dive (Individual)":
         section_title("pesquisar ativo")
-        
+
         # --- NOVA BUSCA GLOBAL (YAHOO FINANCE API) ---
         with st.form("research_asset_search", border=False):
             termo = st.text_input("Ticker ou empresa", placeholder="Ex.: PETR4, AAPL, Nubank")
@@ -132,16 +162,16 @@ with st.sidebar:
                     st.warning("Ativo não encontrado. Tente o ticker completo.")
 
         st.markdown("<div style='text-align: center; color: var(--text-muted); padding: 10px 0;'>ou selecione da base:</div>", unsafe_allow_html=True)
-        
+
         # --- LISTA PADRÃO COM PROTEÇÃO PARA ATIVOS EXTERNOS ---
         opcoes = get_opcoes_selectbox()
         ticker_atual = st.session_state['research_ticker']
-        
+
         # Verifica se o ticker pesquisado está na lista padrão, se não, adiciona ele no topo
         ticker_presente = any(ticker_atual in opt for opt in opcoes)
         if not ticker_presente:
             opcoes.insert(0, f"{ticker_atual} — Ativo Externo")
-        
+
         idx_default = 0
         for i, opt in enumerate(opcoes):
             if ticker_atual in opt:
@@ -149,18 +179,18 @@ with st.sidebar:
                 break
 
         escolha = st.selectbox("lista de ativos:", opcoes, index=idx_default, label_visibility="collapsed")
-        
+
         # Extrair ticker com segurança
         if " — " in escolha:
             ticker_limpo = escolha.split(" — ")[0].strip()
         else:
             ticker_limpo = ticker_from_label(escolha)
-            
+
         # Atualiza a página caso o usuário escolha outro item da lista dropdown
         if ticker_limpo and ticker_limpo != st.session_state['research_ticker']:
             st.session_state['research_ticker'] = ticker_limpo
             st.rerun()
-            
+
     else:
         section_title("comparar ativos")
         _default_comp = (
@@ -168,120 +198,123 @@ with st.sidebar:
             if _ativos_presel
             else ["PETR4.SA", "VALE3.SA", "ITUB4.SA"]
         )
-        ativos_comp = st.multiselect("selecione os ativos:",
-                                     options=BRASIL_TODOS + XSTOCKS_TODOS,
-                                     default=[
-                                         t for t in _default_comp
-                                         if t in BRASIL_TODOS + XSTOCKS_TODOS
-                                     ])
-    
+        _opcoes_comp = list(dict.fromkeys(BRASIL_TODOS + XSTOCKS_TODOS + SCREENER_US + st.session_state.get("research_historico", [])))
+        if _ativos_presel:
+            st.session_state["research_compare_ativos"] = [t for t in _ativos_presel if t in _opcoes_comp]
+        elif "research_compare_ativos" in st.session_state:
+            st.session_state["research_compare_ativos"] = [t for t in st.session_state["research_compare_ativos"] if t in _opcoes_comp]
+        else:
+            st.session_state["research_compare_ativos"] = [t for t in _default_comp if t in _opcoes_comp]
+        ativos_comp = st.multiselect("Ativos comparados", options=_opcoes_comp, key="research_compare_ativos")
+
     st.markdown("---")
 
-    # ── HEALTH SCORE DO ATIVO ATUAL (sidebar) ──────────────────────────────
-    st.markdown(
-        '<div style="height:1px;background:var(--border-subtle);margin:12px 0;"></div>',
-        unsafe_allow_html=True,
-    )
-    _tk_sidebar = st.session_state.get('research_ticker', '')
-    _tk_base_sb = mapear_ticker_base(_tk_sidebar) if _tk_sidebar else ''
-    if _tk_sidebar:
-        _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
-        _hs_score = _hs_all_sb.get(_tk_base_sb) or _hs_all_sb.get(_tk_sidebar) or 50
-        _cor_sb = (
-            "var(--bull)" if _hs_score >= 65
-            else "var(--amber)" if _hs_score >= 40
-            else "var(--bear)"
-        )
-        _label_sb = (
-            "acumulação" if _hs_score >= 65
-            else "manutenção" if _hs_score >= 40
-            else "reduzir"
-        )
-        # Badge de qualidade do dado — prefere a coluna nova (ETL), com fallback ao campo legado dos scrapers
-        _cache_sb = CACHE_FUNDAMENTOS.get(_tk_base_sb, {})
-        _qual_sb = (
-            _cache_sb.get('data_quality_pct') if _cache_sb else None
-        ) or (
-            _cache_sb.get('qualidade_dados') if _cache_sb else None
-        )
-        _fonte_sb = _cache_sb.get('data_source', '') if _cache_sb else ''
-        _hs_row_sb = {r['ticker']: r for r in (get_health_scores() or [])}.get(_tk_base_sb, {})
-        _atualizado_sb = _hs_row_sb.get('updated_at', '') if _hs_row_sb else ''
-        _badge_sb = data_quality_badge(_qual_sb, _fonte_sb, _atualizado_sb)
+    if modo_pesquisa == "Deep Dive (Individual)":
+        # ── HEALTH SCORE DO ATIVO ATUAL (sidebar) ──────────────────────────────
         st.markdown(
-            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
-            f'border-left:3px solid {_cor_sb}; border-radius:4px; '
-            f'padding:10px 12px; margin-bottom:8px;">'
-            f'<div style="font-size:0.78rem; color:var(--text-muted); '
-            f'text-transform:uppercase; letter-spacing:.08em; '
-            f'margin-bottom:4px;">health score</div>'
-            f'<div style="font-family:var(--font-data,monospace); font-size:1.6rem; '
-            f'font-weight:700; color:{_cor_sb}; line-height:1;">'
-            f'{_hs_score}<span style="font-size:0.8rem;color:var(--text-muted);">/100</span>'
-            f'{_badge_sb}'
-            f'</div>'
-            f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; '
-            f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
-            f'</div>',
+            '<div style="height:1px;background:var(--border-subtle);margin:12px 0;"></div>',
             unsafe_allow_html=True,
         )
-
-    # ── ADICIONAR À WATCHLIST ─────────────────────────────────────────────
-    st.markdown(
-        '<div style="height:1px;background:var(--border-subtle);margin:8px 0;"></div>',
-        unsafe_allow_html=True,
-    )
-    section_title("+ watchlist")
-    _watchlists_sb = listar_watchlists()
-    if _watchlists_sb:
-        _opcoes_wl_sb = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in _watchlists_sb}
-        _dest_wl_sb = st.selectbox(
-            "destino:", list(_opcoes_wl_sb.keys()),
-            key="sb_dest_wl", label_visibility="collapsed",
-        )
-        if st.button(
-            f"Adicionar {_tk_sidebar.replace('.SA','')}",
-            key="sb_btn_add_wl", use_container_width=True,
-        ):
-            from database.db import adicionar_ativo
-            _wl_id_sb = _opcoes_wl_sb[_dest_wl_sb]
-            _merc_sb  = "Brasil (B3)" if _tk_sidebar.endswith('.SA') else "EUA"
-            _nome_sb  = CACHE_FUNDAMENTOS.get(_tk_base_sb, {}).get('nome') or _tk_sidebar
-            adicionar_ativo(
-                ticker=_tk_sidebar, nome=_nome_sb,
-                mercado=_merc_sb, watchlist_id=_wl_id_sb,
+        _tk_sidebar = st.session_state.get('research_ticker', '')
+        _tk_base_sb = mapear_ticker_base(_tk_sidebar) if _tk_sidebar else ''
+        if _tk_sidebar:
+            _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
+            _hs_score = _hs_all_sb.get(_tk_base_sb) or _hs_all_sb.get(_tk_sidebar) or 50
+            _cor_sb = (
+                "var(--bull)" if _hs_score >= 65
+                else "var(--amber)" if _hs_score >= 40
+                else "var(--bear)"
             )
-            st.success(f"✅ {_tk_sidebar.replace('.SA','')} adicionado!")
+            _label_sb = (
+                "acumulação" if _hs_score >= 65
+                else "manutenção" if _hs_score >= 40
+                else "reduzir"
+            )
+            # Badge de qualidade do dado — prefere a coluna nova (ETL), com fallback ao campo legado dos scrapers
+            _cache_sb = CACHE_FUNDAMENTOS.get(_tk_base_sb, {})
+            _qual_sb = (
+                _cache_sb.get('data_quality_pct') if _cache_sb else None
+            ) or (
+                _cache_sb.get('qualidade_dados') if _cache_sb else None
+            )
+            _fonte_sb = _cache_sb.get('data_source', '') if _cache_sb else ''
+            _hs_row_sb = {r['ticker']: r for r in (get_health_scores() or [])}.get(_tk_base_sb, {})
+            _atualizado_sb = _hs_row_sb.get('updated_at', '') if _hs_row_sb else ''
+            _badge_sb = data_quality_badge(_qual_sb, _fonte_sb, _atualizado_sb)
+            st.markdown(
+                f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
+                f'border-left:3px solid {_cor_sb}; border-radius:4px; '
+                f'padding:10px 12px; margin-bottom:8px;">'
+                f'<div style="font-size:0.78rem; color:var(--text-muted); '
+                f'text-transform:uppercase; letter-spacing:.08em; '
+                f'margin-bottom:4px;">health score</div>'
+                f'<div style="font-family:var(--font-data,monospace); font-size:1.6rem; '
+                f'font-weight:700; color:{_cor_sb}; line-height:1;">'
+                f'{_hs_score}<span style="font-size:0.8rem;color:var(--text-muted);">/100</span>'
+                f'{_badge_sb}'
+                f'</div>'
+                f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; '
+                f'color:{_cor_sb}; margin-top:2px;">{_label_sb}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    # ── ÚLTIMOS 5 ATIVOS VISITADOS ────────────────────────────────────────
-    _hist_sb = st.session_state.get('research_historico', [])
-    _hist_exibir = [t for t in _hist_sb if t != _tk_sidebar][:4]
-    if _hist_exibir:
+        # ── ADICIONAR À WATCHLIST ─────────────────────────────────────────────
         st.markdown(
             '<div style="height:1px;background:var(--border-subtle);margin:8px 0;"></div>',
             unsafe_allow_html=True,
         )
-        section_title("visitados recentemente")
-        _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
-        for _ht in _hist_exibir:
-            _hs_ht  = _hs_all_sb.get(_ht, 50)
-            _cor_ht = (
-                "var(--bull)" if _hs_ht >= 65 else "var(--amber)" if _hs_ht >= 40 else "var(--bear)"
+        section_title("+ watchlist")
+        _watchlists_sb = listar_watchlists()
+        if _watchlists_sb:
+            _opcoes_wl_sb = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in _watchlists_sb}
+            _dest_wl_sb = st.selectbox(
+                "destino:", list(_opcoes_wl_sb.keys()),
+                key="sb_dest_wl", label_visibility="collapsed",
             )
-            _col_ht1, _col_ht2 = st.columns([3, 1])
-            with _col_ht1:
-                if st.button(
-                    _ht.replace('.SA', '').lower(),
-                    key=f"hist_btn_{_ht}", use_container_width=True,
-                ):
-                    st.session_state['research_ticker'] = _ht
-                    st.rerun()
-            with _col_ht2:
-                st.markdown(
-                    f'<div style="font-family:var(--font-data,monospace); font-size:0.75rem; '
-                    f'color:{_cor_ht}; text-align:right; padding-top:6px;">{_hs_ht}</div>',
-                    unsafe_allow_html=True,
+            if st.button(
+                f"Adicionar {_tk_sidebar.replace('.SA','')}",
+                key="sb_btn_add_wl", use_container_width=True,
+            ):
+                from database.db import adicionar_ativo
+                _wl_id_sb = _opcoes_wl_sb[_dest_wl_sb]
+                _merc_sb  = "Brasil (B3)" if _tk_sidebar.endswith('.SA') else "EUA"
+                _nome_sb  = CACHE_FUNDAMENTOS.get(_tk_base_sb, {}).get('nome') or _tk_sidebar
+                adicionar_ativo(
+                    ticker=_tk_sidebar, nome=_nome_sb,
+                    mercado=_merc_sb, watchlist_id=_wl_id_sb,
                 )
+                st.success(f"✅ {_tk_sidebar.replace('.SA','')} adicionado!")
+
+        # ── ÚLTIMOS 5 ATIVOS VISITADOS ────────────────────────────────────────
+        _hist_sb = st.session_state.get('research_historico', [])
+        _hist_exibir = [t for t in _hist_sb if t != _tk_sidebar][:4]
+        if _hist_exibir:
+            st.markdown(
+                '<div style="height:1px;background:var(--border-subtle);margin:8px 0;"></div>',
+                unsafe_allow_html=True,
+            )
+            section_title("visitados recentemente")
+            _hs_all_sb = {h['ticker']: h.get('score', 50) for h in (get_health_scores() or [])}
+            for _ht in _hist_exibir:
+                _hs_ht  = _hs_all_sb.get(_ht, 50)
+                _cor_ht = (
+                    "var(--bull)" if _hs_ht >= 65 else "var(--amber)" if _hs_ht >= 40 else "var(--bear)"
+                )
+                _col_ht1, _col_ht2 = st.columns([3, 1])
+                with _col_ht1:
+                    if st.button(
+                        _ht.replace('.SA', '').lower(),
+                        key=f"hist_btn_{_ht}", use_container_width=True,
+                    ):
+                        st.session_state['research_ticker'] = _ht
+                        st.rerun()
+                with _col_ht2:
+                    st.markdown(
+                        f'<div style="font-family:var(--font-data,monospace); font-size:0.75rem; '
+                        f'color:{_cor_ht}; text-align:right; padding-top:6px;">{_hs_ht}</div>',
+                        unsafe_allow_html=True,
+                    )
 
 # Trava de segurança para números
 # safe_float consolidado em utils/formatters (importado acima).
@@ -292,13 +325,13 @@ def calcular_crescimento_implicito(preco, eps, wacc, g_terminal, n_anos):
             return None
         if wacc <= g_terminal:
             return None
-            
+
         def valor_dcf(g):
             soma_fc = sum((eps * (1 + g)**t) / ((1 + wacc)**t) for t in range(1, n_anos + 1))
             valor_term = (eps * (1 + g)**n_anos * (1 + g_terminal)) / (wacc - g_terminal)
             valor_term_descontado = valor_term / ((1 + wacc)**n_anos)
             return soma_fc + valor_term_descontado
-            
+
         lo = -0.5
         hi = 3.0
         for _ in range(200):
@@ -328,9 +361,10 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
         user_name=_user_top_cmp.get('username', '') or _user_top_cmp.get('nome', '') or 'usuário',
         sync_label="Dados em cache",
     )
-    page_header("Compare antes de decidir", "Múltiplos, qualidade e desempenho dos ativos, lado a lado.")
-    
-    if not ativos_comp:
+    page_header("Comparação de ativos", "Matriz de fundamentos, retorno relativo e decomposição dos scores.")
+    _secao_comp = section_selector(["Matriz & retorno", "Scores", "Síntese IA"], key="research_comp_secao")
+
+    if len(ativos_comp) < 2:
         from utils.components import info_box as _info_box_r
         _info_box_r(
             tipo   = "info",
@@ -350,7 +384,7 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                 if isinstance(hist_all, pd.Series): hist_all = hist_all.to_frame(name=ativos_comp[0])
                 hist_all = hist_all.ffill().dropna(how='all')
             except: hist_all = pd.DataFrame()
-            
+
             for t in ativos_comp:
                 t_base = mapear_ticker_base(t)
                 try:
@@ -415,222 +449,241 @@ if modo_pesquisa == "Comparativo (Múltiplos)":
                            'roe%', 'dy%', 'mrg_liq%', 'ev/ebitda']
             df_comp = df_comp[[c for c in _cols_order if c in df_comp.columns]]
 
-            c1, c2 = st.columns([6, 4])
-            with c1:
-                st.markdown("**matriz de múltiplos quantitativos**")
-                if not df_comp.empty:
-                    # Matriz de peers via html_table (F0-2): realce do melhor valor
-                    # pela classe .hl; ticker (link) e health (cor) como HTML/classe.
-                    from utils.components import html_table as _html_table_pe
-                    _cols_pe = [c for c in ['ticker','nome','health','p/l','p/vp','roe%','dy%','mrg_liq%','ev/ebitda'] if c in df_comp.columns]
-                    _best_max = {c: df_comp[c].max() for c in ['roe%','dy%','mrg_liq%','health'] if c in df_comp.columns and df_comp[c].notna().any()}
-                    _best_min = {c: df_comp[c].min() for c in ['p/l','p/vp','ev/ebitda'] if c in df_comp.columns and df_comp[c].notna().any()}
-                    _aligns_pe = ["left" if c in ('ticker','nome') else "right" for c in _cols_pe]
-                    _rows_pe, _classes_pe = [], []
-                    for _, _row_pe in df_comp.iterrows():
-                        _cells_pe, _cls_pe = [], []
-                        for col in _cols_pe:
-                            _v = _row_pe[col]
-                            _hl = ((col in _best_max and pd.notna(_v) and _v == _best_max[col]) or
-                                   (col in _best_min and pd.notna(_v) and _v == _best_min[col]))
-                            _c = ["hl"] if _hl else []
-                            if col == 'ticker':
-                                _cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
-                                         f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
-                                         f'{str(_v).replace(".SA","")}</a>')
-                                _c.append("mono")
-                            elif col == 'nome':
-                                _cell = str(_v)[:20] if pd.notna(_v) else "—"
-                                _c.append("muted")
-                            elif col == 'health':
-                                try:
-                                    _hi = int(_v)
-                                    _c += ["mono", "strong",
-                                           "bull" if _hi >= 65 else ("amber" if _hi >= 40 else "bear")]
-                                    _cell = str(_hi)
-                                except (TypeError, ValueError):
-                                    _cell = "—"; _c.append("muted")
-                            elif col in ('roe%','dy%','mrg_liq%'):
-                                _cell = f'{_v:.1f}%' if pd.notna(_v) else "—"; _c.append("mono")
-                            else:
-                                _cell = f'{_v:.1f}' if pd.notna(_v) else "—"; _c.append("mono")
-                            _cells_pe.append(_cell)
-                            _cls_pe.append(" ".join(_c))
-                        _rows_pe.append(_cells_pe)
-                        _classes_pe.append(_cls_pe)
-                    _html_table_pe(_cols_pe, _rows_pe, aligns=_aligns_pe, classes=_classes_pe)
-            with c2:
-                st.markdown("**performance relativa (base 100 — 10 anos)**")
-                if not hist_all.empty:
-                    df_b100 = (hist_all / hist_all.iloc[0]) * 100
-                    fig_b100 = base100(df_b100, height=350)
-                    st.plotly_chart(fig_b100, use_container_width=True, config={'responsive': True})
-                    st.caption("cada ativo parte de 100 no início do período — mostra quem valorizou mais em termos relativos, ignorando o preço absoluto.")
+            if _secao_comp == "Matriz & retorno":
+                c1, c2 = st.columns([6, 4])
+                with c1:
+                    st.markdown("**matriz de múltiplos quantitativos**")
+                    if not df_comp.empty:
+                        # Matriz de peers via html_table (F0-2): realce do melhor valor
+                        # pela classe .hl; ticker (link) e health (cor) como HTML/classe.
+                        from utils.components import html_table as _html_table_pe
+                        _cols_pe = [c for c in ['ticker','nome','health','p/l','p/vp','roe%','dy%','mrg_liq%','ev/ebitda'] if c in df_comp.columns]
+                        _best_max = {c: df_comp[c].max() for c in ['roe%','dy%','mrg_liq%','health'] if c in df_comp.columns and df_comp[c].notna().any()}
+                        _best_min = {c: df_comp[c].min() for c in ['p/l','p/vp','ev/ebitda'] if c in df_comp.columns and df_comp[c].notna().any()}
+                        _aligns_pe = ["left" if c in ('ticker','nome') else "right" for c in _cols_pe]
+                        _rows_pe, _classes_pe = [], []
+                        for _, _row_pe in df_comp.iterrows():
+                            _cells_pe, _cls_pe = [], []
+                            for col in _cols_pe:
+                                _v = _row_pe[col]
+                                _hl = ((col in _best_max and pd.notna(_v) and _v == _best_max[col]) or
+                                       (col in _best_min and pd.notna(_v) and _v == _best_min[col]))
+                                _c = ["hl"] if _hl else []
+                                if col == 'ticker':
+                                    _cell = (f'<a href="{ticker_nav_url(_v)}" '
+                                             f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                                             f'{str(_v).replace(".SA","")}</a>')
+                                    _c.append("mono")
+                                elif col == 'nome':
+                                    _cell = str(_v)[:20] if pd.notna(_v) else "—"
+                                    _c.append("muted")
+                                elif col == 'health':
+                                    try:
+                                        _hi = int(_v)
+                                        _c += ["mono", "strong",
+                                               "bull" if _hi >= 65 else ("amber" if _hi >= 40 else "bear")]
+                                        _cell = str(_hi)
+                                    except (TypeError, ValueError):
+                                        _cell = "—"; _c.append("muted")
+                                elif col in ('roe%','dy%','mrg_liq%'):
+                                    _cell = f'{_v:.1f}%' if pd.notna(_v) else "—"; _c.append("mono")
+                                else:
+                                    _cell = f'{_v:.1f}' if pd.notna(_v) else "—"; _c.append("mono")
+                                _cells_pe.append(_cell)
+                                _cls_pe.append(" ".join(_c))
+                            _rows_pe.append(_cells_pe)
+                            _classes_pe.append(_cls_pe)
+                        _html_table_pe(_cols_pe, _rows_pe, aligns=_aligns_pe, classes=_classes_pe)
+                with c2:
+                    st.markdown("**Histórico relativo**")
+                    _pc1, _pc2 = st.columns(2)
+                    _periodo_comp = _pc1.selectbox("Período", ["3 meses", "6 meses", "1 ano", "3 anos", "5 anos", "10 anos"], index=2, key="research_comp_periodo")
+                    _modo_comp = _pc2.selectbox("Medida", ["Base 100", "Retorno (%)", "Drawdown (%)"], key="research_comp_medida")
+                    if not hist_all.empty:
+                        _hist_comp = _recorte_temporal(hist_all, _periodo_comp)
+                        df_b100 = _comparativo_normalizado(_hist_comp, _modo_comp)
+                        from utils.themes import get_chart_palette
+                        _pal_comp = get_chart_palette()
+                        fig_b100 = go.Figure()
+                        for _i_comp, _tk_comp in enumerate(df_b100.columns):
+                            fig_b100.add_trace(go.Scatter(x=df_b100.index, y=df_b100[_tk_comp], name=_tk_comp.replace('.SA', ''),
+                                                         line=dict(color=_pal_comp[_i_comp % len(_pal_comp)], width=2),
+                                                         hovertemplate="%{x}<br>" + _modo_comp + ": %{y:.2f}<extra>%{fullData.name}</extra>"))
+                        fig_b100.add_hline(y=100 if _modo_comp == "Base 100" else 0, line_color=_chart_cores()['border'], line_dash='dot', line_width=1)
+                        _layout_comp = base_layout(height=380)
+                        _layout_comp.update(yaxis_title=_modo_comp, hovermode="x unified")
+                        fig_b100.update_layout(**_layout_comp)
+                        st.plotly_chart(fig_b100, use_container_width=True, config={'responsive': True, 'scrollZoom': True})
+                        st.caption("Base e retorno partem da primeira cotação válida de cada ativo no recorte. Drawdown mede a queda desde o maior preço observado nesse recorte. Duplo clique restaura o zoom.")
+                        if df_b100.notna().any().any():
+                            st.caption(f"Dados: {_hist_comp.index.min():%d/%m/%Y} a {_hist_comp.index.max():%d/%m/%Y}. Os retornos são na moeda de cada ativo.")
+                    else:
+                        st.info("Sem histórico de preços para os ativos selecionados.")
 
     # ── HEALTH SCORES LADO A LADO ─────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("⚡ health scores comparados")
-
     _hs_comp_all = {
         h['ticker']: h
         for h in (get_health_scores() or [])
     }
 
-    _cols_hs = st.columns(len(ativos_comp))
-    for _ci_hs, (_col_hs, _tk_hs) in enumerate(zip(_cols_hs, ativos_comp)):
-        _tb_hs   = mapear_ticker_base(_tk_hs)
-        _row_hs  = (
-            _hs_comp_all.get(_tb_hs)
-            or _hs_comp_all.get(_tk_hs)
-            or {}
-        )
-        # score=None no banco = indisponível; nesse caso tratamos como sem dado para o card
-        _score_hs = _row_hs.get('score') if _row_hs else None
-
-        _break_hs = {}
-        if _row_hs:
-            try:
-                import json as _json_hs
-                _raw_hs = _row_hs.get('alertas_venda', '{}')
-                _p_hs   = (
-                    _json_hs.loads(_raw_hs)
-                    if isinstance(_raw_hs, str)
-                    else (_raw_hs or {})
-                )
-                _break_hs = _p_hs.get('breakdown', {})
-            except Exception:
-                pass
-
-        with _col_hs:
-            if _score_hs is not None:
-                _cor_hs_c = (
-                    "var(--bull)" if _score_hs >= 65
-                    else "var(--amber)" if _score_hs >= 40
-                    else "var(--bear)"
-                )
-                _label_hs_c = (
-                    "acumulação" if _score_hs >= 65
-                    else "manutenção" if _score_hs >= 40
-                    else "reduzir"
-                )
-                st.markdown(
-                    f'<div style="background:var(--bg-surface); '
-                    f'border:1px solid var(--border-subtle); '
-                    f'border-top:3px solid {_cor_hs_c}; '
-                    f'border-radius:6px; padding:16px; '
-                    f'text-align:center;">'
-
-                    f'<div style="font-family:var(--font-data,monospace); '
-                    f'font-size:0.82rem; color:var(--accent); '
-                    f'font-weight:700; margin-bottom:8px;">'
-                    f'{_tk_hs.replace(".SA","")}</div>'
-
-                    f'<div style="font-family:var(--font-data,monospace); '
-                    f'font-size:2.2rem; font-weight:700; '
-                    f'color:{_cor_hs_c}; line-height:1;">'
-                    f'{_score_hs}'
-                    f'<span style="font-size:1rem;color:var(--text-muted);">/100</span>'
-                    f'</div>'
-
-                    f'<div style="font-family:var(--font-data,monospace); '
-                    f'font-size:0.72rem; color:{_cor_hs_c}; '
-                    f'margin-top:4px;">{_label_hs_c}</div>'
-
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-                if _break_hs:
-                    _items_bk = []
-                    for _k_bk, _v_bk in _break_hs.items():
-                        try:
-                            _items_bk.append((_k_bk, float(_v_bk)))
-                        except (TypeError, ValueError):
-                            pass
-                    _items_bk.sort(key=lambda x: x[1], reverse=True)
-                    _top_pos = _items_bk[:3]
-                    _top_neg = [i for i in _items_bk if i[1] < 0][-2:]
-
-                    for _kb, _vb in _top_pos:
-                        _label_bk = _kb.replace('_', ' ')[:22]
-                        st.markdown(
-                            f'<div style="font-family:var(--font-data,monospace); '
-                            f'font-size:0.78rem; color:var(--bull); '
-                            f'padding:1px 0;">✓ {_label_bk}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    for _kb, _vb in _top_neg:
-                        _label_bk = _kb.replace('_', ' ')[:22]
-                        st.markdown(
-                            f'<div style="font-family:var(--font-data,monospace); '
-                            f'font-size:0.78rem; color:var(--bear); '
-                            f'padding:1px 0;">✗ {_label_bk}</div>',
-                            unsafe_allow_html=True,
-                        )
-            else:
-                st.markdown(
-                    f'<div style="background:var(--bg-surface); '
-                    f'border:1px solid var(--border-subtle); border-radius:6px; '
-                    f'padding:16px; text-align:center;">'
-                    f'<div style="color:var(--accent); font-weight:700;">'
-                    f'{_tk_hs.replace(".SA","")}</div>'
-                    f'<div style="color:var(--text-muted); font-size:0.75rem; '
-                    f'margin-top:8px;">score não calculado</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── VEREDITO DA IA ─────────────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("🧠 veredito — deepseek v4 pro")
-
-    if st.button(
-        "Comparar e gerar veredito",
-        type="primary",
-        use_container_width=True,
-        key="btn_veredito_comp",
-    ):
-        _linhas_comp_ia = []
-        for _row_c in dados_comp:
-            _tk_c    = _row_c.get('ticker', '')
-            _hs_c    = (
-                _hs_comp_all.get(mapear_ticker_base(_tk_c), {})
-                .get('score', '—')
+    if _secao_comp == "Scores":
+        section_title("Health scores e pilares")
+        _cols_hs = st.columns(min(len(ativos_comp), 4))
+        for _ci_hs, (_col_hs, _tk_hs) in enumerate((_cols_hs[i % len(_cols_hs)], tk) for i, tk in enumerate(ativos_comp)):
+            _tb_hs   = mapear_ticker_base(_tk_hs)
+            _row_hs  = (
+                _hs_comp_all.get(_tb_hs)
+                or _hs_comp_all.get(_tk_hs)
+                or {}
             )
-            _linhas_comp_ia.append(
-                f"{_tk_c}: "
-                f"p/l={_row_c.get('p/l') or '—'} | "
-                f"p/vp={_row_c.get('p/vp') or '—'} | "
-                f"roe={_row_c.get('roe%') or '—'}% | "
-                f"dy={_row_c.get('dy%') or '—'}% | "
-                f"margem={_row_c.get('mrg_liq%') or '—'}% | "
-                f"health={_hs_c}/100"
+            # score=None no banco = indisponível; nesse caso tratamos como sem dado para o card
+            _score_hs = _row_hs.get('score') if _row_hs else None
+
+            _break_hs = {}
+            if _row_hs:
+                try:
+                    import json as _json_hs
+                    _raw_hs = _row_hs.get('alertas_venda', '{}')
+                    _p_hs   = (
+                        _json_hs.loads(_raw_hs)
+                        if isinstance(_raw_hs, str)
+                        else (_raw_hs or {})
+                    )
+                    _break_hs = _p_hs.get('breakdown', {})
+                except Exception:
+                    pass
+
+            with _col_hs:
+                if _score_hs is not None:
+                    _cor_hs_c = (
+                        "var(--bull)" if _score_hs >= 65
+                        else "var(--amber)" if _score_hs >= 40
+                        else "var(--bear)"
+                    )
+                    _label_hs_c = (
+                        "acumulação" if _score_hs >= 65
+                        else "manutenção" if _score_hs >= 40
+                        else "reduzir"
+                    )
+                    st.markdown(
+                        f'<div style="background:var(--bg-surface); '
+                        f'border:1px solid var(--border-subtle); '
+                        f'border-top:3px solid {_cor_hs_c}; '
+                        f'border-radius:6px; padding:16px; '
+                        f'text-align:center;">'
+
+                        f'<div style="font-family:var(--font-data,monospace); '
+                        f'font-size:0.82rem; color:var(--accent); '
+                        f'font-weight:700; margin-bottom:8px;">'
+                        f'{_tk_hs.replace(".SA","")}</div>'
+
+                        f'<div style="font-family:var(--font-data,monospace); '
+                        f'font-size:2.2rem; font-weight:700; '
+                        f'color:{_cor_hs_c}; line-height:1;">'
+                        f'{_score_hs}'
+                        f'<span style="font-size:1rem;color:var(--text-muted);">/100</span>'
+                        f'</div>'
+
+                        f'<div style="font-family:var(--font-data,monospace); '
+                        f'font-size:0.72rem; color:{_cor_hs_c}; '
+                        f'margin-top:4px;">{_label_hs_c}</div>'
+
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    if _break_hs:
+                        _items_bk = []
+                        for _k_bk, _v_bk in _break_hs.items():
+                            try:
+                                _items_bk.append((_k_bk, float(_v_bk)))
+                            except (TypeError, ValueError):
+                                pass
+                        _items_bk.sort(key=lambda x: x[1], reverse=True)
+                        _top_pos = _items_bk[:3]
+                        _top_neg = [i for i in _items_bk if i[1] < 0][-2:]
+
+                        for _kb, _vb in _top_pos:
+                            _label_bk = _kb.replace('_', ' ')[:22]
+                            st.markdown(
+                                f'<div style="font-family:var(--font-data,monospace); '
+                                f'font-size:0.78rem; color:var(--bull); '
+                                f'padding:1px 0;">✓ {_label_bk}</div>',
+                                unsafe_allow_html=True,
+                            )
+                        for _kb, _vb in _top_neg:
+                            _label_bk = _kb.replace('_', ' ')[:22]
+                            st.markdown(
+                                f'<div style="font-family:var(--font-data,monospace); '
+                                f'font-size:0.78rem; color:var(--bear); '
+                                f'padding:1px 0;">✗ {_label_bk}</div>',
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.markdown(
+                        f'<div style="background:var(--bg-surface); '
+                        f'border:1px solid var(--border-subtle); border-radius:6px; '
+                        f'padding:16px; text-align:center;">'
+                        f'<div style="color:var(--accent); font-weight:700;">'
+                        f'{_tk_hs.replace(".SA","")}</div>'
+                        f'<div style="color:var(--text-muted); font-size:0.75rem; '
+                        f'margin-top:8px;">score não calculado</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+    if _secao_comp == "Síntese IA":
+        # ── VEREDITO DA IA ─────────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("Síntese comparativa com IA")
+
+        if st.button(
+            "Comparar e gerar veredito",
+            type="primary",
+            use_container_width=True,
+            key="btn_veredito_comp",
+        ):
+            _linhas_comp_ia = []
+            for _row_c in dados_comp:
+                _tk_c    = _row_c.get('ticker', '')
+                _hs_c    = (
+                    _hs_comp_all.get(mapear_ticker_base(_tk_c), {})
+                    .get('score', '—')
+                )
+                _linhas_comp_ia.append(
+                    f"{_tk_c}: "
+                    f"p/l={_row_c.get('p/l') or '—'} | "
+                    f"p/vp={_row_c.get('p/vp') or '—'} | "
+                    f"roe={_row_c.get('roe%') or '—'}% | "
+                    f"dy={_row_c.get('dy%') or '—'}% | "
+                    f"margem={_row_c.get('mrg_liq%') or '—'}% | "
+                    f"health={_hs_c}/100"
+                )
+
+            _macro_comp = st.session_state.get("macro_context", {})
+            _prompt_comp_ia = (
+                f"comparativo entre {len(ativos_comp)} ativos:\n\n"
+                + "\n".join(_linhas_comp_ia)
+                + f"\n\ncontexto macro: {_macro_comp.get('label','—')} | "
+                f"selic {_macro_comp.get('selic',10.75):.2f}% | "
+                f"vix {_macro_comp.get('vix',15.0):.1f}\n\n"
+                "responda em 4 tópicos curtos (letra minúscula):\n"
+                "1. qual tem melhor relação risco/retorno considerando "
+                "fundamentos e health score?\n"
+                "2. qual está mais barato pelo valuation atual?\n"
+                "3. qual tem maior risco no ambiente macro atual?\n"
+                "4. veredito final: se fosse escolher apenas um, qual "
+                "seria e por quê? seja direto."
             )
 
-        _macro_comp = st.session_state.get("macro_context", {})
-        _prompt_comp_ia = (
-            f"comparativo entre {len(ativos_comp)} ativos:\n\n"
-            + "\n".join(_linhas_comp_ia)
-            + f"\n\ncontexto macro: {_macro_comp.get('label','—')} | "
-            f"selic {_macro_comp.get('selic',10.75):.2f}% | "
-            f"vix {_macro_comp.get('vix',15.0):.1f}\n\n"
-            "responda em 4 tópicos curtos (letra minúscula):\n"
-            "1. qual tem melhor relação risco/retorno considerando "
-            "fundamentos e health score?\n"
-            "2. qual está mais barato pelo valuation atual?\n"
-            "3. qual tem maior risco no ambiente macro atual?\n"
-            "4. veredito final: se fosse escolher apenas um, qual "
-            "seria e por quê? seja direto."
-        )
-
-        chamar_ia(
-            prompt_usuario = _prompt_comp_ia,
-            system         = SYSTEM_ANALISTA,
-            max_tokens     = 600,
-            temperatura    = 0.3,
-            stream         = True,
-            user_settings  = _user_settings,
-        )
+            chamar_ia(
+                prompt_usuario = _prompt_comp_ia,
+                system         = SYSTEM_ANALISTA,
+                max_tokens     = 600,
+                temperatura    = 0.3,
+                stream         = True,
+                user_settings  = _user_settings,
+            )
 
     st.stop()
 
@@ -812,14 +865,6 @@ _SECOES_R = ["📊 valuation & peers", "📈 técnico (10y)", "💎 fundamentos"
              "🧠 análise & ia", "🌍 overlay macro"]
 _secao_r = section_selector(_SECOES_R, key="research_secao")
 
-# Barra de contexto macro sempre-on (regime/juro real/vix) — UX: o pano de fundo
-# do regime junto do ativo, sem trocar de página.
-try:
-    from utils.macro_state import render_cockpit_macro as _rcm
-    _rcm("BR")
-except Exception:
-    pass
-
 # ==========================================
 # CARD-VEREDITO (PLANO_FRONT F2-1) — a decisão acima da dobra
 # ==========================================
@@ -924,513 +969,523 @@ try:
 except Exception:
     pass
 
-# ── KPIs PRINCIPAIS (premium via portfolio_kpis) ───────────────────────────
-if is_fii:
-    pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
-    _dy_raw_fii = safe_float(info_dict.get('dividendYield', 0))
-    # yfinance retorna decimal. Sempre ×100.
-    _dy_info_fii = (_dy_raw_fii * 100 if _dy_raw_fii and _dy_raw_fii <= 0.50 else 0)
-    dy = safe_float(cache_d.get('dy%')) or _dy_info_fii
-    mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
-    assets = safe_float(info_dict.get('totalAssets'))
+with st.expander("Resumo de fundamentos, consenso e score", expanded=False):
+    # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: o pano de fundo
+    # do regime junto do ativo, sem trocar de página.
+    try:
+        from utils.macro_state import render_cockpit_macro as _rcm
+        _rcm("BR")
+    except Exception:
+        pass
 
-    _pvp_tone = "bull" if (pvp and pvp < 1) else ("bear" if (pvp and pvp > 1.1) else "amber")
-    _dy_tone  = "bull" if (dy and dy > 8) else "muted"
+    # ── KPIs PRINCIPAIS (premium via portfolio_kpis) ───────────────────────────
+    if is_fii:
+        pvp = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+        _dy_raw_fii = safe_float(info_dict.get('dividendYield', 0))
+        # yfinance retorna decimal. Sempre ×100.
+        _dy_info_fii = (_dy_raw_fii * 100 if _dy_raw_fii and _dy_raw_fii <= 0.50 else 0)
+        dy = safe_float(cache_d.get('dy%')) or _dy_info_fii
+        mcap = safe_float(info_dict.get('marketCap')) or safe_float(cache_d.get('market_cap', 0))
+        assets = safe_float(info_dict.get('totalAssets'))
 
-    _portfolio_kpis_v5([
-        {
-            "nome":     "preço / vp",
-            "valor":    f"{pvp:.2f}" if pvp is not None else "n/d",
-            "sublabel": "desconto" if pvp and pvp < 1 else ("ágio" if pvp else "—"),
-            "tone":     _pvp_tone,
-            "icone":    "🏷",
-        },
-        {
-            "nome":     "dividend yield",
-            "valor":    fmt_pct(dy),
-            "sublabel": "últimos 12 meses",
-            "tone":     _dy_tone,
-            "icone":    "💵",
-        },
-        {
-            "nome":     "mkt cap",
-            "valor":    fmt_numero(mcap, moeda),
-            "sublabel": "capitalização",
-            "tone":     "info",
-            "icone":    "📊",
-        },
-        {
-            "nome":     "patrimônio líq.",
-            "valor":    fmt_numero(assets, moeda),
-            "sublabel": "ativos totais",
-            "tone":     "info",
-            "icone":    "🏛",
-        },
-    ])
+        _pvp_tone = "bull" if (pvp and pvp < 1) else ("bear" if (pvp and pvp > 1.1) else "amber")
+        _dy_tone  = "bull" if (dy and dy > 8) else "muted"
 
-    # Segmento e spread NTN-B para FIIs
-    from utils.health_engine import _detectar_segmento_fii, _buscar_yield_ntnb
-    _segmento_fii = _detectar_segmento_fii(t_base, cache_d)
-    _ntnb_yield   = _buscar_yield_ntnb()
+        _portfolio_kpis_v5([
+            {
+                "nome":     "preço / vp",
+                "valor":    f"{pvp:.2f}" if pvp is not None else "n/d",
+                "sublabel": "desconto" if pvp and pvp < 1 else ("ágio" if pvp else "—"),
+                "tone":     _pvp_tone,
+                "icone":    "🏷",
+            },
+            {
+                "nome":     "dividend yield",
+                "valor":    fmt_pct(dy),
+                "sublabel": "últimos 12 meses",
+                "tone":     _dy_tone,
+                "icone":    "💵",
+            },
+            {
+                "nome":     "mkt cap",
+                "valor":    fmt_numero(mcap, moeda),
+                "sublabel": "capitalização",
+                "tone":     "info",
+                "icone":    "📊",
+            },
+            {
+                "nome":     "patrimônio líq.",
+                "valor":    fmt_numero(assets, moeda),
+                "sublabel": "ativos totais",
+                "tone":     "info",
+                "icone":    "🏛",
+            },
+        ])
 
-    _dy_fii   = safe_float(cache_d.get('dy%')) or 0.0
-    _ipca_fii = st.session_state.get("macro_context", {}).get("ipca", 4.5)
-    _dy_real  = ((1 + _dy_fii/100) / (1 + _ipca_fii/100) - 1) * 100
-    _spread   = _dy_real - _ntnb_yield
+        # Segmento e spread NTN-B para FIIs
+        from utils.health_engine import _detectar_segmento_fii, _buscar_yield_ntnb
+        _segmento_fii = _detectar_segmento_fii(t_base, cache_d)
+        _ntnb_yield   = _buscar_yield_ntnb()
 
-    _cor_spread = (
-        "var(--bull)" if _spread >= 2.5
-        else "var(--amber)" if _spread >= 0
-        else "var(--bear)"
+        _dy_fii   = safe_float(cache_d.get('dy%')) or 0.0
+        _ipca_fii = st.session_state.get("macro_context", {}).get("ipca", 4.5)
+        _dy_real  = ((1 + _dy_fii/100) / (1 + _ipca_fii/100) - 1) * 100
+        _spread   = _dy_real - _ntnb_yield
+
+        _cor_spread = (
+            "var(--bull)" if _spread >= 2.5
+            else "var(--amber)" if _spread >= 0
+            else "var(--bear)"
+        )
+
+        # ── Bloco de spread NTN-B (premium via portfolio_kpis) ─────────────
+        from utils.components import portfolio_kpis as _pf_kpis_fii
+        _spread_tone = (
+            "bull"  if _spread >= 2.5
+            else "amber" if _spread >= 0
+            else "bear"
+        )
+        _pf_kpis_fii([
+            {
+                "nome":     "segmento",
+                "valor":    _segmento_fii,
+                "sublabel": "categoria do FII",
+                "tone":     "accent",
+                "icone":    "🏢",
+            },
+            {
+                "nome":     "yield real",
+                "valor":    f"{_dy_real:.2f}%",
+                "sublabel": "dy − inflação",
+                "tone":     "info",
+                "icone":    "📊",
+            },
+            {
+                "nome":     "ntn-b benchmark",
+                "valor":    f"{_ntnb_yield:.2f}%",
+                "sublabel": "IPCA + (taxa real)",
+                "tone":     "info",
+                "icone":    "🏛",
+            },
+            {
+                "nome":        "spread vs ntn-b",
+                "valor":       f"{_spread:+.2f}pp",
+                "sublabel":    "prêmio sobre tesouro",
+                "tone":        _spread_tone,
+                "icone":       "✨" if _spread >= 2.5 else ("⚠" if _spread < 0 else "📈"),
+            },
+        ])
+        tooltip("ntnb_spread")
+
+    else:
+        pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE')) or safe_float(info_dict.get('forwardPE'))
+        roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
+        mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
+        _dy_raw_us = safe_float(info_dict.get('dividendYield', 0))
+        # yfinance retorna decimal. Sempre ×100.
+        _dy_info_us = (_dy_raw_us * 100 if _dy_raw_us and _dy_raw_us <= 0.50 else 0)
+        dy = safe_float(cache_d.get('dy%')) or _dy_info_us
+
+        _pl_tone  = "bull" if (pl and 5 < pl < 18) else ("bear" if (pl and pl > 30) else "amber")
+        _roe_tone = "bull" if (roe and roe > 15) else ("amber" if (roe and roe > 8) else "muted")
+        _mrg_tone = "bull" if (mrg and mrg > 10) else ("amber" if (mrg and mrg > 5) else "bear")
+        _dy_tone  = "bull" if (dy and dy > 4) else "muted"
+
+        _portfolio_kpis_v5([
+            {
+                "nome":     "preço / lucro",
+                "valor":    f"{pl:.1f}x" if pl is not None else "n/d",
+                "sublabel": "valuation",
+                "tone":     _pl_tone,
+                "icone":    "🏷",
+            },
+            {
+                "nome":     "r.o.e",
+                "valor":    fmt_pct(roe),
+                "sublabel": "retorno sobre PL",
+                "tone":     _roe_tone,
+                "icone":    "📈",
+            },
+            {
+                "nome":     "margem líq.",
+                "valor":    fmt_pct(mrg),
+                "sublabel": "eficiência operacional",
+                "tone":     _mrg_tone,
+                "icone":    "💰",
+            },
+            {
+                "nome":     "div yield",
+                "valor":    fmt_pct(dy),
+                "sublabel": "últimos 12 meses",
+                "tone":     _dy_tone,
+                "icone":    "💵",
+            },
+        ])
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── CARD DE IMPACTO MACRO DO SETOR ────────────────────────────────────
+    # Impacto setorial via pilar_macro_setorial — o MESMO motor do health score
+    # (tilt de regime canônico + transmissão de inflação). Antes usava
+    # macro_regime.get_impacto_setor (matching de substring, vocabulário livre),
+    # que podia CONTRADIZER o breakdown do próprio score na mesma tela.
+    _macro_regime = classificar_regime()   # apenas o label do regime (canônico)
+    _market_rs = "US" if not ticker.endswith(".SA") else "BR"
+    try:
+        from utils.inflation_sectoral import pilar_macro_setorial
+        _pilar_rs = pilar_macro_setorial(
+            setor, _market_rs, st.session_state.get("macro_context", {})
+        )
+    except Exception:
+        _pilar_rs = {"impacto": "neutro", "pontos": 0, "alertas": [], "breakdown": {}}
+    _pts_rs = int(_pilar_rs.get("pontos", 0) or 0)
+    _imp_rs = _pilar_rs.get("impacto", "neutro")
+    _motivos_rs = "; ".join(
+        _pilar_rs.get("alertas", []) or [str(v) for v in _pilar_rs.get("breakdown", {}).values()]
     )
-
-    # ── Bloco de spread NTN-B (premium via portfolio_kpis) ─────────────
-    from utils.components import portfolio_kpis as _pf_kpis_fii
-    _spread_tone = (
-        "bull"  if _spread >= 2.5
-        else "amber" if _spread >= 0
-        else "bear"
-    )
-    _pf_kpis_fii([
-        {
-            "nome":     "segmento",
-            "valor":    _segmento_fii,
-            "sublabel": "categoria do FII",
-            "tone":     "accent",
-            "icone":    "🏢",
-        },
-        {
-            "nome":     "yield real",
-            "valor":    f"{_dy_real:.2f}%",
-            "sublabel": "dy − inflação",
-            "tone":     "info",
-            "icone":    "📊",
-        },
-        {
-            "nome":     "ntn-b benchmark",
-            "valor":    f"{_ntnb_yield:.2f}%",
-            "sublabel": "IPCA + (taxa real)",
-            "tone":     "info",
-            "icone":    "🏛",
-        },
-        {
-            "nome":        "spread vs ntn-b",
-            "valor":       f"{_spread:+.2f}pp",
-            "sublabel":    "prêmio sobre tesouro",
-            "tone":        _spread_tone,
-            "icone":       "✨" if _spread >= 2.5 else ("⚠" if _spread < 0 else "📈"),
-        },
-    ])
-    tooltip("ntnb_spread")
-
-else:
-    pl = safe_float(cache_d.get('p/l')) or safe_float(info_dict.get('trailingPE')) or safe_float(info_dict.get('forwardPE'))
-    roe = safe_float(cache_d.get('roe%')) or (safe_float(info_dict.get('returnOnEquity', 0)) * 100)
-    mrg = safe_float(cache_d.get('margem%')) or (safe_float(info_dict.get('profitMargins', 0)) * 100)
-    _dy_raw_us = safe_float(info_dict.get('dividendYield', 0))
-    # yfinance retorna decimal. Sempre ×100.
-    _dy_info_us = (_dy_raw_us * 100 if _dy_raw_us and _dy_raw_us <= 0.50 else 0)
-    dy = safe_float(cache_d.get('dy%')) or _dy_info_us
-
-    _pl_tone  = "bull" if (pl and 5 < pl < 18) else ("bear" if (pl and pl > 30) else "amber")
-    _roe_tone = "bull" if (roe and roe > 15) else ("amber" if (roe and roe > 8) else "muted")
-    _mrg_tone = "bull" if (mrg and mrg > 10) else ("amber" if (mrg and mrg > 5) else "bear")
-    _dy_tone  = "bull" if (dy and dy > 4) else "muted"
-
-    _portfolio_kpis_v5([
-        {
-            "nome":     "preço / lucro",
-            "valor":    f"{pl:.1f}x" if pl is not None else "n/d",
-            "sublabel": "valuation",
-            "tone":     _pl_tone,
-            "icone":    "🏷",
-        },
-        {
-            "nome":     "r.o.e",
-            "valor":    fmt_pct(roe),
-            "sublabel": "retorno sobre PL",
-            "tone":     _roe_tone,
-            "icone":    "📈",
-        },
-        {
-            "nome":     "margem líq.",
-            "valor":    fmt_pct(mrg),
-            "sublabel": "eficiência operacional",
-            "tone":     _mrg_tone,
-            "icone":    "💰",
-        },
-        {
-            "nome":     "div yield",
-            "valor":    fmt_pct(dy),
-            "sublabel": "últimos 12 meses",
-            "tone":     _dy_tone,
-            "icone":    "💵",
-        },
-    ])
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ── CARD DE IMPACTO MACRO DO SETOR ────────────────────────────────────
-# Impacto setorial via pilar_macro_setorial — o MESMO motor do health score
-# (tilt de regime canônico + transmissão de inflação). Antes usava
-# macro_regime.get_impacto_setor (matching de substring, vocabulário livre),
-# que podia CONTRADIZER o breakdown do próprio score na mesma tela.
-_macro_regime = classificar_regime()   # apenas o label do regime (canônico)
-_market_rs = "US" if not ticker.endswith(".SA") else "BR"
-try:
-    from utils.inflation_sectoral import pilar_macro_setorial
-    _pilar_rs = pilar_macro_setorial(
-        setor, _market_rs, st.session_state.get("macro_context", {})
-    )
-except Exception:
-    _pilar_rs = {"impacto": "neutro", "pontos": 0, "alertas": [], "breakdown": {}}
-_pts_rs = int(_pilar_rs.get("pontos", 0) or 0)
-_imp_rs = _pilar_rs.get("impacto", "neutro")
-_motivos_rs = "; ".join(
-    _pilar_rs.get("alertas", []) or [str(v) for v in _pilar_rs.get("breakdown", {}).values()]
-)
-_impacto_setor = {
-    "impacto": _imp_rs,
-    "pontos": _pts_rs,
-    "cor": {"favoravel": "var(--bull)", "desfavoravel": "var(--bear)",
-            "neutro": "var(--amber)"}.get(_imp_rs, "var(--amber)"),
-    "justificativa": _motivos_rs or (
-        f"vento macro-setorial {'a favor' if _pts_rs > 0 else 'contra' if _pts_rs < 0 else 'neutro'} "
-        f"({_pts_rs:+d} pts)"
-    ),
-}
-_icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
-_cor_regime = "var(--bear)" if "stress" in _macro_regime["label"] else ("var(--amber)" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "var(--bull)")
-st.markdown(
-    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;">regime</div>'
-    f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">setor</div>'
-    f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:var(--text-primary);">{setor[:25].lower()}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">impacto</div>'
-    f'<div style="font-family:var(--font-data,monospace);font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
-    f'{_icone_impacto[_impacto_setor["impacto"]]} {_impacto_setor["impacto"].upper()}</div>'
-    f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
-# Persiste impacto_setor para uso no prompt da IA
-st.session_state['impacto_setor_ativo'] = _impacto_setor
-tooltip(
-    "",
-    texto_custom=(
-        "indica como o regime macro atual afeta o setor deste ativo. "
-        "baseado no framework de rotação setorial "
-        "(fama-french 1989, msci sector rotation). "
-        "favorecido: regime beneficia historicamente este setor. "
-        "penalizado: regime desfavorece. neutro: sem impacto claro."
-    )
-)
-
-# ── FORWARD-LOOKING (consenso de analistas + próximo resultado) ──────────
-# Preenche a lacuna "só passado" do deep dive: forward P/E, EPS projetado,
-# preço-alvo de consenso e próximo earnings — tudo de yfinance.info (BR e US).
-if not is_fii:
-    _fpe   = safe_float(info_dict.get('forwardPE'))
-    _tpe   = safe_float(info_dict.get('trailingPE'))
-    _feps  = safe_float(info_dict.get('forwardEps'))
-    _teps  = safe_float(info_dict.get('trailingEps'))
-    _tgt   = safe_float(info_dict.get('targetMeanPrice'))
-    _tgtlo = safe_float(info_dict.get('targetLowPrice'))
-    _tgthi = safe_float(info_dict.get('targetHighPrice'))
-    _nan   = info_dict.get('numberOfAnalystOpinions')
-    _reck  = str(info_dict.get('recommendationKey') or '').lower()
-    _preco_fw = _preco_atual_th or (safe_float(info_dict.get('currentPrice')) or 0)
-
-    if any(v is not None for v in (_fpe, _tgt, _feps)):
-        section_title("🔮 forward-looking — consenso de analistas")
-
-        # próximo earnings via acao_obj.calendar (objeto já cacheado; yfinance
-        # guarda o calendar no ticker após a 1ª leitura).
-        _earn_str, _earn_dias = None, None
-        try:
-            import datetime as _dt_e
-            _cal = acao_obj.calendar
-            _ed = _cal.get('Earnings Date') if isinstance(_cal, dict) else None
-            _d0 = _ed[0] if isinstance(_ed, (list, tuple)) and _ed else (_ed or None)
-            if _d0 is not None and hasattr(_d0, 'strftime'):
-                _earn_str = _d0.strftime('%d/%m/%Y')
-                try:
-                    _earn_dias = (_d0 - _dt_e.date.today()).days
-                except Exception:
-                    _earn_dias = None
-        except Exception:
-            pass
-
-        _fw1, _fw2, _fw3, _fw4 = st.columns(4)
-        with _fw1:
-            if _earn_str:
-                _sub_e = f"em {_earn_dias} dias" if (_earn_dias is not None and _earn_dias >= 0) else "estimado"
-                metric_card("próximo resultado", _earn_str, _sub_e,
-                            "amber" if (_earn_dias is not None and 0 <= _earn_dias <= 14) else "info")
-            else:
-                metric_card("próximo resultado", "n/d", "sem data de earnings")
-        with _fw2:
-            if _fpe is not None and _fpe > 0:
-                if _tpe and _fpe < _tpe:
-                    _dir_pe, _tone_pe = "lucro esperado ↑", "bull"
-                elif _tpe and _fpe > _tpe:
-                    _dir_pe, _tone_pe = "lucro esperado ↓", "bear"
-                else:
-                    _dir_pe, _tone_pe = "estável", "muted"
-                metric_card("forward p/l", f"{_fpe:.1f}x",
-                            (f"trailing {_tpe:.1f}x · {_dir_pe}" if _tpe else _dir_pe), _tone_pe)
-            else:
-                metric_card("forward p/l", "n/d", "sem estimativa")
-        with _fw3:
-            if _tgt is not None and _preco_fw > 0:
-                _upside = (_tgt / _preco_fw - 1) * 100
-                _rng = f"faixa {moeda.upper()} {_tgtlo:.0f}–{_tgthi:.0f}" if (_tgtlo and _tgthi) else ""
-                metric_card("preço-alvo (consenso)", f"{moeda.upper()} {_tgt:.2f}",
-                            f"{_upside:+.0f}% vs atual · {_rng}".strip(" ·"),
-                            "bull" if _upside > 10 else "bear" if _upside < -10 else "amber")
-            else:
-                metric_card("preço-alvo", "n/d", "sem cobertura de analistas")
-        with _fw4:
-            _rec_map = {'strong_buy': 'compra forte', 'buy': 'compra', 'hold': 'manter',
-                        'underperform': 'reduzir', 'sell': 'venda'}
-            _rec_txt = _rec_map.get(_reck, _reck or 'n/d')
-            _rec_tone = "bull" if _reck in ('strong_buy', 'buy') else ("bear" if _reck in ('sell', 'underperform') else "muted")
-            try:
-                _nan_txt = f"{int(_nan)} analistas" if _nan else "consenso"
-            except (TypeError, ValueError):
-                _nan_txt = "consenso"
-            metric_card("recomendação", _rec_txt, _nan_txt, _rec_tone)
-
-        if _feps is not None and _teps not in (None, 0):
-            _eps_g = (_feps / abs(_teps) - 1) * 100
-            st.caption(
-                f"eps projetado {moeda.upper()} {_feps:.2f} vs {moeda.upper()} {_teps:.2f} atual "
-                f"→ o mercado embute crescimento de lucro de {_eps_g:+.0f}% no próximo exercício. "
-                "compare com o crescimento realizado na tabela de fundamentos: projeção muito acima do "
-                "histórico = preço otimista (risco de decepção); abaixo = expectativa conservadora."
-            )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-# ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
-_hs_all = get_health_scores()
-_hs_map = {r['ticker']: r for r in (_hs_all or [])}
-_hs_row = _hs_map.get(t_base, {})
-if _hs_row:
-    _raw = _hs_row.get('alertas_venda', '{}')
-    _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
-    # score=None no banco sinaliza dado indisponível (caminho de erro do engine);
-    # exibimos 50 neutro na UI mas a tag de indisponibilidade fica no status/alertas.
-    _score_db = _hs_row.get('score')
-    health_result = {
-        'score':     _score_db if _score_db is not None else 50,
-        'score_indisponivel': _score_db is None,
-        'status':    (_p.get('alertas') or ['—'])[0],
-        'alertas':   _p.get('alertas', []),
-        'breakdown': _p.get('breakdown', {}),
+    _impacto_setor = {
+        "impacto": _imp_rs,
+        "pontos": _pts_rs,
+        "cor": {"favoravel": "var(--bull)", "desfavoravel": "var(--bear)",
+                "neutro": "var(--amber)"}.get(_imp_rs, "var(--amber)"),
+        "justificativa": _motivos_rs or (
+            f"vento macro-setorial {'a favor' if _pts_rs > 0 else 'contra' if _pts_rs < 0 else 'neutro'} "
+            f"({_pts_rs:+d} pts)"
+        ),
     }
-else:
-    health_result = {'score': 50, 'score_indisponivel': True, 'status': '—', 'alertas': [], 'breakdown': {}}
-
-# --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
-historico = get_historico_score(t_base, dias=180)
-if len(historico) >= 3:
-    # F2-2: progressive disclosure — deep-dive do score recolhido num expander
-    # (o card-veredito acima da dobra já entrega o número; aqui fica a evidência).
-    with st.expander("Por dentro do score — evolução e breakdown dos pilares", expanded=False):
-        label_com_tooltip(
-            "📈 EVOLUÇÃO DO HEALTH SCORE",
-            chave="health_score",
-            cor="var(--accent)",
-            tamanho="0.72rem",
+    _icone_impacto = {"favoravel": "🟢", "desfavoravel": "🔴", "neutro": "🟡"}
+    _cor_regime = "var(--bear)" if "stress" in _macro_regime["label"] else ("var(--amber)" if "altos" in _macro_regime["label"] or "muito" in _macro_regime["label"] else "var(--bull)")
+    st.markdown(
+        f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">'
+        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;">regime</div>'
+        f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:{_cor_regime};">{_macro_regime["label"]}</div>'
+        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">setor</div>'
+        f'<div style="font-family:var(--font-data,monospace);font-size:0.82rem;color:var(--text-primary);">{setor[:25].lower()}</div>'
+        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">impacto</div>'
+        f'<div style="font-family:var(--font-data,monospace);font-size:0.85rem;font-weight:600;color:{_impacto_setor["cor"]};">'
+        f'{_icone_impacto[_impacto_setor["impacto"]]} {_impacto_setor["impacto"].upper()}</div>'
+        f'<div style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);margin-left:auto;">{_impacto_setor["justificativa"][:50]}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    # Persiste impacto_setor para uso no prompt da IA
+    st.session_state['impacto_setor_ativo'] = _impacto_setor
+    tooltip(
+        "",
+        texto_custom=(
+            "indica como o regime macro atual afeta o setor deste ativo. "
+            "baseado no framework de rotação setorial "
+            "(fama-french 1989, msci sector rotation). "
+            "favorecido: regime beneficia historicamente este setor. "
+            "penalizado: regime desfavorece. neutro: sem impacto claro."
         )
-        df_hist_score = pd.DataFrame(historico)
-        df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'], format="ISO8601", utc=True)
-        df_hist_score = df_hist_score.set_index('calculado_em')
-        _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
-        _cc_hs    = _chart_cores()
-        from utils.charts import linha_ou_barras as _linha_ou_barras
-        fig_score = _linha_ou_barras(
-            df_hist_score, x_col=None, y_col='score',
-            tipo=_hs_tipo,
-            titulo=f"health score — {ticker} (180 dias)",
-            cor=_cc_hs["accent"], cor_negativo=_cc_hs["bear"], height=220,
-        )
-        fig_score.add_hline(y=65, line_color=_cc_hs["bull"], line_dash="dash",
-                            line_width=1, annotation_text="acumulação")
-        fig_score.add_hline(y=40, line_color=_cc_hs["bear"], line_dash="dash",
-                            line_width=1, annotation_text="reduzir")
-        fig_score.update_yaxes(range=[0, 100])
-        st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
-        st.caption("evolução do health score (0-100) nos últimos 180 dias. acima de 65 = zona de acumulação; abaixo de 40 = reduzir. quedas abruptas sinalizam deterioração de fundamentos ou técnico.")
+    )
 
-        # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
-        _breakdown_vis = health_result.get('breakdown', {})
-        if _breakdown_vis:
+    # ── FORWARD-LOOKING (consenso de analistas + próximo resultado) ──────────
+    # Preenche a lacuna "só passado" do deep dive: forward P/E, EPS projetado,
+    # preço-alvo de consenso e próximo earnings — tudo de yfinance.info (BR e US).
+    if not is_fii:
+        _fpe   = safe_float(info_dict.get('forwardPE'))
+        _tpe   = safe_float(info_dict.get('trailingPE'))
+        _feps  = safe_float(info_dict.get('forwardEps'))
+        _teps  = safe_float(info_dict.get('trailingEps'))
+        _tgt   = safe_float(info_dict.get('targetMeanPrice'))
+        _tgtlo = safe_float(info_dict.get('targetLowPrice'))
+        _tgthi = safe_float(info_dict.get('targetHighPrice'))
+        _nan   = info_dict.get('numberOfAnalystOpinions')
+        _reck  = str(info_dict.get('recommendationKey') or '').lower()
+        _preco_fw = _preco_atual_th or (safe_float(info_dict.get('currentPrice')) or 0)
+
+        if any(v is not None for v in (_fpe, _tgt, _feps)):
+            section_title("🔮 forward-looking — consenso de analistas")
+
+            # próximo earnings via acao_obj.calendar (objeto já cacheado; yfinance
+            # guarda o calendar no ticker após a 1ª leitura).
+            _earn_str, _earn_dias = None, None
+            try:
+                import datetime as _dt_e
+                _cal = acao_obj.calendar
+                _ed = _cal.get('Earnings Date') if isinstance(_cal, dict) else None
+                _d0 = _ed[0] if isinstance(_ed, (list, tuple)) and _ed else (_ed or None)
+                if _d0 is not None and hasattr(_d0, 'strftime'):
+                    _earn_str = _d0.strftime('%d/%m/%Y')
+                    try:
+                        _earn_dias = (_d0 - _dt_e.date.today()).days
+                    except Exception:
+                        _earn_dias = None
+            except Exception:
+                pass
+
+            _fw1, _fw2, _fw3, _fw4 = st.columns(4)
+            with _fw1:
+                if _earn_str:
+                    _sub_e = f"em {_earn_dias} dias" if (_earn_dias is not None and _earn_dias >= 0) else "estimado"
+                    metric_card("próximo resultado", _earn_str, _sub_e,
+                                "amber" if (_earn_dias is not None and 0 <= _earn_dias <= 14) else "info")
+                else:
+                    metric_card("próximo resultado", "n/d", "sem data de earnings")
+            with _fw2:
+                if _fpe is not None and _fpe > 0:
+                    if _tpe and _fpe < _tpe:
+                        _dir_pe, _tone_pe = "lucro esperado ↑", "bull"
+                    elif _tpe and _fpe > _tpe:
+                        _dir_pe, _tone_pe = "lucro esperado ↓", "bear"
+                    else:
+                        _dir_pe, _tone_pe = "estável", "muted"
+                    metric_card("forward p/l", f"{_fpe:.1f}x",
+                                (f"trailing {_tpe:.1f}x · {_dir_pe}" if _tpe else _dir_pe), _tone_pe)
+                else:
+                    metric_card("forward p/l", "n/d", "sem estimativa")
+            with _fw3:
+                if _tgt is not None and _preco_fw > 0:
+                    _upside = (_tgt / _preco_fw - 1) * 100
+                    _rng = f"faixa {moeda.upper()} {_tgtlo:.0f}–{_tgthi:.0f}" if (_tgtlo and _tgthi) else ""
+                    metric_card("preço-alvo (consenso)", f"{moeda.upper()} {_tgt:.2f}",
+                                f"{_upside:+.0f}% vs atual · {_rng}".strip(" ·"),
+                                "bull" if _upside > 10 else "bear" if _upside < -10 else "amber")
+                else:
+                    metric_card("preço-alvo", "n/d", "sem cobertura de analistas")
+            with _fw4:
+                _rec_map = {'strong_buy': 'compra forte', 'buy': 'compra', 'hold': 'manter',
+                            'underperform': 'reduzir', 'sell': 'venda'}
+                _rec_txt = _rec_map.get(_reck, _reck or 'n/d')
+                _rec_tone = "bull" if _reck in ('strong_buy', 'buy') else ("bear" if _reck in ('sell', 'underperform') else "muted")
+                try:
+                    _nan_txt = f"{int(_nan)} analistas" if _nan else "consenso"
+                except (TypeError, ValueError):
+                    _nan_txt = "consenso"
+                metric_card("recomendação", _rec_txt, _nan_txt, _rec_tone)
+
+            if _feps is not None and _teps not in (None, 0):
+                _eps_g = (_feps / abs(_teps) - 1) * 100
+                st.caption(
+                    f"eps projetado {moeda.upper()} {_feps:.2f} vs {moeda.upper()} {_teps:.2f} atual "
+                    f"→ o mercado embute crescimento de lucro de {_eps_g:+.0f}% no próximo exercício. "
+                    "compare com o crescimento realizado na tabela de fundamentos: projeção muito acima do "
+                    "histórico = preço otimista (risco de decepção); abaixo = expectativa conservadora."
+                )
+            st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── HEALTH RESULT DO BANCO (para o prompt de IA e breakdown) ─────────────
+    _hs_all = get_health_scores()
+    _hs_map = {r['ticker']: r for r in (_hs_all or [])}
+    _hs_row = _hs_map.get(t_base, {})
+    if _hs_row:
+        _raw = _hs_row.get('alertas_venda', '{}')
+        _p   = _json.loads(_raw) if isinstance(_raw, str) else (_raw or {})
+        # score=None no banco sinaliza dado indisponível (caminho de erro do engine);
+        # exibimos 50 neutro na UI mas a tag de indisponibilidade fica no status/alertas.
+        _score_db = _hs_row.get('score')
+        health_result = {
+            'score':     _score_db if _score_db is not None else 50,
+            'score_indisponivel': _score_db is None,
+            'status':    (_p.get('alertas') or ['—'])[0],
+            'alertas':   _p.get('alertas', []),
+            'breakdown': _p.get('breakdown', {}),
+        }
+    else:
+        health_result = {'score': 50, 'score_indisponivel': True, 'status': '—', 'alertas': [], 'breakdown': {}}
+
+    # --- EVOLUÇÃO DO HEALTH SCORE (últimos 180 dias) ---
+    historico = get_historico_score(t_base, dias=180)
+    if len(historico) >= 3:
+        # F2-2: progressive disclosure — deep-dive do score recolhido num expander
+        # (o card-veredito acima da dobra já entrega o número; aqui fica a evidência).
+        with st.container():
+            section_title("Evolução e decomposição do score")
             label_com_tooltip(
-                "🔬 BREAKDOWN DO HEALTH SCORE",
-                texto_custom=(
-                    "decomposição do health score em seus pilares. "
-                    "barras verdes = pontos positivos. "
-                    "barras vermelhas = penalidades. "
-                    "pilares: piotroski, roic vs wacc, valuation, "
-                    "solvência, crescimento, momentum e dados macro."
-                ),
+                "📈 EVOLUÇÃO DO HEALTH SCORE",
+                chave="health_score",
                 cor="var(--accent)",
                 tamanho="0.72rem",
             )
+            df_hist_score = pd.DataFrame(historico)
+            df_hist_score['calculado_em'] = pd.to_datetime(df_hist_score['calculado_em'], format="ISO8601", utc=True)
+            df_hist_score = df_hist_score.set_index('calculado_em')
+            _hs_tipo  = chart_type_toggle(key=f"hs_{t_base}", default="linha")
+            _cc_hs    = _chart_cores()
+            from utils.charts import linha_ou_barras as _linha_ou_barras
+            fig_score = _linha_ou_barras(
+                df_hist_score, x_col=None, y_col='score',
+                tipo=_hs_tipo,
+                titulo=f"health score — {ticker} (180 dias)",
+                cor=_cc_hs["accent"], cor_negativo=_cc_hs["bear"], height=220,
+            )
+            fig_score.add_hline(y=65, line_color=_cc_hs["bull"], line_dash="dash",
+                                line_width=1, annotation_text="acumulação")
+            fig_score.add_hline(y=40, line_color=_cc_hs["bear"], line_dash="dash",
+                                line_width=1, annotation_text="reduzir")
+            fig_score.update_yaxes(range=[0, 100])
+            st.plotly_chart(fig_score, use_container_width=True, config={'responsive': True})
+            st.caption("evolução do health score (0-100) nos últimos 180 dias. acima de 65 = zona de acumulação; abaixo de 40 = reduzir. quedas abruptas sinalizam deterioração de fundamentos ou técnico.")
 
-            # Mapeamento de nomes internos para labels amigáveis
-            _label_map = {
-                # Piotroski
-                'roa_positivo':          'ROA positivo (Piotroski)',
-                'fcf_positivo':          'FCF positivo (Piotroski)',
-                'roa_crescendo':         'ROA crescendo (Piotroski)',
-                'accrual_ok':            'Qualidade do lucro (Piotroski)',
-                'alavancagem_ok':        'Alavancagem saudável (Piotroski)',
-                'liquidez_ok':           'Liquidez corrente (Piotroski)',
-                'sem_diluicao':          'Sem diluição de ações (Piotroski)',
-                'margem_crescendo':      'Margem bruta crescendo (Piotroski)',
-                'giro_crescendo':        'Giro do ativo crescendo (Piotroski)',
-                # ROIC/WACC
-                'roic_vs_wacc':          'ROIC vs WACC (geração de valor)',
-                'roic_acima_wacc':       'ROIC acima do custo de capital',
-                # Valuation
-                'pl_atrativo':           'P/L atrativo',
-                'pvp_atrativo':          'P/VP atrativo',
-                'dy_atrativo':           'Dividend yield atrativo',
-                'ev_ebitda_ok':          'EV/EBITDA razoável',
-                # Qualidade
-                'roe_alto':              'ROE elevado',
-                'margem_liquida_ok':     'Margem líquida saudável',
-                'divida_controlada':     'Dívida controlada',
-                # Momentum
-                'momentum_12_1':         'Momentum 12-1 meses',
-                'acima_mm200':           'Preço acima da MM200',
-                'tendencia_alta':        'Tendência de alta',
-                # FII específicos
-                'pvp_fii_ok':            'P/VP atrativo (FII)',
-                'yield_vs_selic':        'Yield vs Selic (FII)',
-                'yield_atrativo':        'Dividend yield atrativo (FII)',
-            }
+            # ── BREAKDOWN VISUAL DO HEALTH SCORE ─────────────────────────────────
+            _breakdown_vis = health_result.get('breakdown', {})
+            if _breakdown_vis:
+                label_com_tooltip(
+                    "🔬 BREAKDOWN DO HEALTH SCORE",
+                    texto_custom=(
+                        "decomposição do health score em seus pilares. "
+                        "barras verdes = pontos positivos. "
+                        "barras vermelhas = penalidades. "
+                        "pilares: piotroski, roic vs wacc, valuation, "
+                        "solvência, crescimento, momentum e dados macro."
+                    ),
+                    cor="var(--accent)",
+                    tamanho="0.72rem",
+                )
 
-            # Separa pilares com pontuação numérica de sub-rows informacionais
-            # (ex.: "↳ ROIC = 3.0%", "↳ Momentum 12-1m = +51.6%" — strings que não
-            # contribuem com pontos, mas detalham os pilares). Sub-rows entram em
-            # uma lista expansível abaixo do gráfico, em vez de virar barra zerada.
-            _itens_bd = []
-            _itens_info = []  # [(label_curto, valor_str)]
-            for k, v in _breakdown_vis.items():
-                label = _label_map.get(k, k.replace('_', ' '))
-                # 1) numérico direto?
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
-                    continue
-                if isinstance(v, bool):
-                    _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
-                    continue
-                # 2) string "X/Y" → pontuação fracionada (Piotroski legacy)
-                if isinstance(v, str) and '/' in v and v.count('/') == 1:
-                    try:
-                        _itens_bd.append({'label': label, 'pontos': float(v.split('/')[0]),
-                                          'chave': k})
+                # Mapeamento de nomes internos para labels amigáveis
+                _label_map = {
+                    # Piotroski
+                    'roa_positivo':          'ROA positivo (Piotroski)',
+                    'fcf_positivo':          'FCF positivo (Piotroski)',
+                    'roa_crescendo':         'ROA crescendo (Piotroski)',
+                    'accrual_ok':            'Qualidade do lucro (Piotroski)',
+                    'alavancagem_ok':        'Alavancagem saudável (Piotroski)',
+                    'liquidez_ok':           'Liquidez corrente (Piotroski)',
+                    'sem_diluicao':          'Sem diluição de ações (Piotroski)',
+                    'margem_crescendo':      'Margem bruta crescendo (Piotroski)',
+                    'giro_crescendo':        'Giro do ativo crescendo (Piotroski)',
+                    # ROIC/WACC
+                    'roic_vs_wacc':          'ROIC vs WACC (geração de valor)',
+                    'roic_acima_wacc':       'ROIC acima do custo de capital',
+                    # Valuation
+                    'pl_atrativo':           'P/L atrativo',
+                    'pvp_atrativo':          'P/VP atrativo',
+                    'dy_atrativo':           'Dividend yield atrativo',
+                    'ev_ebitda_ok':          'EV/EBITDA razoável',
+                    # Qualidade
+                    'roe_alto':              'ROE elevado',
+                    'margem_liquida_ok':     'Margem líquida saudável',
+                    'divida_controlada':     'Dívida controlada',
+                    # Momentum
+                    'momentum_12_1':         'Momentum 12-1 meses',
+                    'acima_mm200':           'Preço acima da MM200',
+                    'tendencia_alta':        'Tendência de alta',
+                    # FII específicos
+                    'pvp_fii_ok':            'P/VP atrativo (FII)',
+                    'yield_vs_selic':        'Yield vs Selic (FII)',
+                    'yield_atrativo':        'Dividend yield atrativo (FII)',
+                }
+
+                # Separa pilares com pontuação numérica de sub-rows informacionais
+                # (ex.: "↳ ROIC = 3.0%", "↳ Momentum 12-1m = +51.6%" — strings que não
+                # contribuem com pontos, mas detalham os pilares). Sub-rows entram em
+                # uma lista expansível abaixo do gráfico, em vez de virar barra zerada.
+                _itens_bd = []
+                _itens_info = []  # [(label_curto, valor_str)]
+                for k, v in _breakdown_vis.items():
+                    label = _label_map.get(k, k.replace('_', ' '))
+                    # 1) numérico direto?
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
                         continue
-                    except Exception:
-                        pass
-                # 3) string "sim"/"yes"/"✅"
-                if isinstance(v, str) and v.lower() in ('sim', 'yes', 'true', '✅'):
-                    _itens_bd.append({'label': label, 'pontos': 1.0, 'chave': k})
-                    continue
-                # 4) qualquer outra string = item informacional (não vai pro gráfico)
-                if v is not None and v != '':
-                    _itens_info.append((label.lstrip('↳ ').strip(), str(v)))
+                    if isinstance(v, bool):
+                        _itens_bd.append({'label': label, 'pontos': float(v), 'chave': k})
+                        continue
+                    # 2) string "X/Y" → pontuação fracionada (Piotroski legacy)
+                    if isinstance(v, str) and '/' in v and v.count('/') == 1:
+                        try:
+                            _itens_bd.append({'label': label, 'pontos': float(v.split('/')[0]),
+                                              'chave': k})
+                            continue
+                        except Exception:
+                            pass
+                    # 3) string "sim"/"yes"/"✅"
+                    if isinstance(v, str) and v.lower() in ('sim', 'yes', 'true', '✅'):
+                        _itens_bd.append({'label': label, 'pontos': 1.0, 'chave': k})
+                        continue
+                    # 4) qualquer outra string = item informacional (não vai pro gráfico)
+                    if v is not None and v != '':
+                        _itens_info.append((label.lstrip('↳ ').strip(), str(v)))
 
-            if _itens_bd:
-                # Ordena: maiores pontos primeiro
-                _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
+                if _itens_bd:
+                    # Ordena: maiores pontos primeiro
+                    _itens_bd.sort(key=lambda x: x['pontos'], reverse=True)
 
-                _labels_bd = [i['label'] for i in _itens_bd]
-                _valores_bd = [i['pontos'] for i in _itens_bd]
-                _cc_bd = _chart_cores()
-                _cores_bd = [
-                    _cc_bd["bull"] if v > 0 else _cc_bd["bear"]
-                    for v in _valores_bd
-                ]
+                    _labels_bd = [i['label'] for i in _itens_bd]
+                    _valores_bd = [i['pontos'] for i in _itens_bd]
+                    _cc_bd = _chart_cores()
+                    _cores_bd = [
+                        _cc_bd["bull"] if v > 0 else _cc_bd["bear"]
+                        for v in _valores_bd
+                    ]
 
-                _fig_bd = go.Figure(go.Bar(
-                    x=_valores_bd,
-                    y=_labels_bd,
-                    orientation='h',
-                    marker_color=_cores_bd,
-                    hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
-                    text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
-                    textposition='outside',
-                    textfont=dict(size=10, color=_cc_bd["muted"]),
-                ))
-                _lay_bd = base_layout(
-                    height=max(200, len(_itens_bd) * 28),
-                    title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
-                )
-                _lay_bd.update(
-                    xaxis={**{'showgrid': True, 'gridcolor': _cc_bd["border"],
-                              'zeroline': True, 'zerolinecolor': _cc_bd["border"],
-                              'title': 'pontos contribuídos'},
-                           'range': [min(0, min(_valores_bd)) - 1,
-                                     max(_valores_bd) + 2]},
-                    yaxis={'showgrid': False, 'title': ''},
-                    margin=dict(l=220, r=60, t=40, b=20),
-                )
-                _fig_bd.update_layout(**_lay_bd)
-                st.plotly_chart(_fig_bd, use_container_width=True, config={'responsive': True})
+                    _fig_bd = go.Figure(go.Bar(
+                        x=_valores_bd,
+                        y=_labels_bd,
+                        orientation='h',
+                        marker_color=_cores_bd,
+                        hovertemplate="%{y}<br>pontos: %{x}<extra></extra>",
+                        text=[f"+{v:.0f}" if v > 0 else f"{v:.0f}" for v in _valores_bd],
+                        textposition='outside',
+                        textfont=dict(size=10, color=_cc_bd["muted"]),
+                    ))
+                    _lay_bd = base_layout(
+                        height=max(200, len(_itens_bd) * 28),
+                        title=f"pilares do score — {ticker.lower()} | total: {health_result.get('score', 0)}/100"
+                    )
+                    _lay_bd.update(
+                        xaxis={**{'showgrid': True, 'gridcolor': _cc_bd["border"],
+                                  'zeroline': True, 'zerolinecolor': _cc_bd["border"],
+                                  'title': 'pontos contribuídos'},
+                               'range': [min(0, min(_valores_bd)) - 1,
+                                         max(_valores_bd) + 2]},
+                        yaxis={'showgrid': False, 'title': ''},
+                        margin=dict(l=220, r=60, t=40, b=20),
+                    )
+                    _fig_bd.update_layout(**_lay_bd)
+                    st.plotly_chart(_fig_bd, use_container_width=True, config={'responsive': True})
 
-                # Linha de resumo abaixo do gráfico
-                _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
-                _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
-                _qual_main = (
-                    cache_d.get('data_quality_pct') if cache_d else None
-                ) or (
-                    cache_d.get('qualidade_dados') if cache_d else None
-                )
-                _fonte_main = cache_d.get('data_source', '') if cache_d else ''
-                _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
-                _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)
-                st.markdown(
-                    f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
-                    f'color:var(--text-muted); margin-top:-8px;">'
-                    f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
-                    f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
-                    f'score total: {health_result.get("score", 0)}/100'
-                    f'{_badge_main}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-                # ── Detalhes informacionais (valores absolutos dos sub-rows) ──
-                # ROIC%, momentum%, retorno último mês — não somam pontos, só explicam
-                if _itens_info:
-                    # sub-linhas informacionais — NÃO usa expander: já estamos dentro
-                    # do expander "por dentro do score" e o Streamlit proíbe nesting.
+                    # Linha de resumo abaixo do gráfico
+                    _positivos = sum(1 for i in _itens_bd if i['pontos'] > 0)
+                    _negativos = sum(1 for i in _itens_bd if i['pontos'] <= 0)
+                    _qual_main = (
+                        cache_d.get('data_quality_pct') if cache_d else None
+                    ) or (
+                        cache_d.get('qualidade_dados') if cache_d else None
+                    )
+                    _fonte_main = cache_d.get('data_source', '') if cache_d else ''
+                    _atualizado_main = _hs_row.get('updated_at', '') if _hs_row else ''
+                    _badge_main = data_quality_badge(_qual_main, _fonte_main, _atualizado_main)
                     st.markdown(
-                        "<div style='font-size:0.72rem;color:var(--text-muted);"
-                        "text-transform:uppercase;letter-spacing:.05em;margin-top:8px;'>"
-                        "📊 detalhes informacionais dos pilares</div>",
+                        f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
+                        f'color:var(--text-muted); margin-top:-8px;">'
+                        f'✅ {_positivos} pilares positivos &nbsp;|&nbsp; '
+                        f'❌ {_negativos} pilares neutros ou negativos &nbsp;|&nbsp; '
+                        f'score total: {health_result.get("score", 0)}/100'
+                        f'{_badge_main}'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
-                    _linhas_info = "".join(
-                        f'<div style="display:flex; justify-content:space-between; '
-                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle);">'
-                        f'<span style="color:var(--text-muted); font-size:0.78rem;">{_html_safe}</span>'
-                        f'<span style="color:var(--text); font-family:var(--font-mono); font-size:0.78rem;">{_val_safe}</span>'
-                        f'</div>'
-                        for _html_safe, _val_safe in (
-                            (str(lbl).replace('<', '&lt;'), str(val).replace('<', '&lt;'))
-                            for lbl, val in _itens_info
+
+                    # ── Detalhes informacionais (valores absolutos dos sub-rows) ──
+                    # ROIC%, momentum%, retorno último mês — não somam pontos, só explicam
+                    if _itens_info:
+                        # sub-linhas informacionais — NÃO usa expander: já estamos dentro
+                        # do expander "por dentro do score" e o Streamlit proíbe nesting.
+                        st.markdown(
+                            "<div style='font-size:0.72rem;color:var(--text-muted);"
+                            "text-transform:uppercase;letter-spacing:.05em;margin-top:8px;'>"
+                            "📊 detalhes informacionais dos pilares</div>",
+                            unsafe_allow_html=True,
                         )
-                    )
-                    st.markdown(
-                        f'<div style="font-family:var(--font-ui,sans-serif);">{_linhas_info}</div>',
-                        unsafe_allow_html=True,
-                    )
+                        _linhas_info = "".join(
+                            f'<div style="display:flex; justify-content:space-between; '
+                            f'padding:4px 0; border-bottom:1px solid var(--border-subtle);">'
+                            f'<span style="color:var(--text-muted); font-size:0.78rem;">{_html_safe}</span>'
+                            f'<span style="color:var(--text); font-family:var(--font-mono); font-size:0.78rem;">{_val_safe}</span>'
+                            f'</div>'
+                            for _html_safe, _val_safe in (
+                                (str(lbl).replace('<', '&lt;'), str(val).replace('<', '&lt;'))
+                                for lbl, val in _itens_info
+                            )
+                        )
+                        st.markdown(
+                            f'<div style="font-family:var(--font-ui,sans-serif);">{_linhas_info}</div>',
+                            unsafe_allow_html=True,
+                        )
 
 # ── SEÇÃO: VALUATION EM CONTEXTO HISTÓRICO (FMP) ────────────────────────
 def _render_multiplo_card(label: str, valor_atual, stats: dict | None, sufixo: str = "×"):
@@ -1628,9 +1683,6 @@ def _render_historico_proventos(divs_raw, modo, ticker, moeda):
 
 
 # (FMP valuation movido para tab_val)
-
-section_title("🧠 análise ia — deepseek v4 pro")
-
 
 def montar_prompt_ativo(
     ticker, nome, setor, tipo_mercado,
@@ -1903,16 +1955,44 @@ if _secao_r == "📊 valuation & peers":
         )
 
 if _secao_r == "📈 técnico (10y)":
+    section_title("Preço e tendência")
+    _tc1, _tc2, _tc3 = st.columns([2, 2, 1.5])
+    _periodo_tec = _tc1.selectbox("Período", ["3 meses", "6 meses", "1 ano", "3 anos", "5 anos", "10 anos"], index=2, key="research_tec_periodo")
+    _tipo_tec = _tc2.selectbox("Visualização", ["Candles", "Linha"], key="research_tec_tipo")
+    _escala_tec = _tc3.selectbox("Escala", ["Linear", "Logarítmica"], key="research_tec_escala")
+    _tc4, _tc5 = st.columns(2)
+    _mostrar_mms = _tc4.toggle("Médias móveis de 50 e 200 dias", value=True, key="research_tec_mms")
+    _mostrar_volume = _tc5.toggle("Volume", value=False, key="research_tec_volume")
     try:
-        fig_tec = go.Figure()
-        fig_tec.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="price"))
-        if len(df_hist) >= 50: fig_tec.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'].rolling(50).mean(), name="mm50", line=dict(color=CORES_SERIES[1], width=1)))
-        if len(df_hist) >= 200: fig_tec.add_trace(go.Scatter(x=df_hist.index, y=df_hist['Close'].rolling(200).mean(), name="mm200", line=dict(color=CORES_SERIES[3], width=1.5)))
-        fig_tec.update_layout(**base_layout(height=500, title=f"price action histórico (10 anos): {ticker.lower()}"))
-        fig_tec.update_layout(xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True})
-        st.caption("candlestick de 10 anos com médias de 50 e 200 dias. preço acima da mm200 = tendência de alta estrutural; mm50 cruzando abaixo da mm200 (cruz da morte) é sinal técnico de baixa.")
-    except Exception as e: st.error(f"Erro gráfico técnico: {e}")
+        _hist_tec = _recorte_temporal(df_hist, _periodo_tec)
+        _cc_tec = _chart_cores()
+        _tem_volume = _mostrar_volume and 'Volume' in _hist_tec and _hist_tec['Volume'].notna().any()
+        fig_tec = make_subplots(rows=2 if _tem_volume else 1, cols=1, shared_xaxes=True,
+                                vertical_spacing=0.04, row_heights=[0.78, 0.22] if _tem_volume else [1])
+        if _tipo_tec == "Candles":
+            fig_tec.add_trace(go.Candlestick(x=_hist_tec.index, open=_hist_tec['Open'], high=_hist_tec['High'], low=_hist_tec['Low'], close=_hist_tec['Close'], name=ticker,
+                                            increasing_line_color=_cc_tec['bull'], decreasing_line_color=_cc_tec['bear']), row=1, col=1)
+        else:
+            fig_tec.add_trace(go.Scatter(x=_hist_tec.index, y=_hist_tec['Close'], name=ticker, mode="lines",
+                                        line=dict(color=_cc_tec['accent'], width=2)), row=1, col=1)
+        if _mostrar_mms:
+            for _dias_mm, _cor_mm in [(50, _cc_tec['info']), (200, _cc_tec['amber'])]:
+                if len(df_hist) >= _dias_mm:
+                    _mm = df_hist['Close'].rolling(_dias_mm).mean().reindex(_hist_tec.index)
+                    fig_tec.add_trace(go.Scatter(x=_hist_tec.index, y=_mm, name=f"MM{_dias_mm}",
+                                                line=dict(color=_cor_mm, width=1.4)), row=1, col=1)
+        if _tem_volume:
+            _cores_vol = [_cc_tec['bull'] if c >= o else _cc_tec['bear'] for c, o in zip(_hist_tec['Close'], _hist_tec['Open'])]
+            fig_tec.add_trace(go.Bar(x=_hist_tec.index, y=_hist_tec['Volume'], name="Volume", marker_color=_cores_vol, opacity=0.45), row=2, col=1)
+        fig_tec.update_layout(**base_layout(height=560 if _tem_volume else 460, title=f"{ticker} · {_periodo_tec.lower()}"))
+        fig_tec.update_layout(xaxis_rangeslider_visible=False, hovermode="x unified")
+        fig_tec.update_yaxes(type="log" if _escala_tec == "Logarítmica" else "linear", title_text=moeda.upper(), row=1, col=1)
+        st.plotly_chart(fig_tec, use_container_width=True, config={'responsive': True, 'scrollZoom': True})
+        if not _hist_tec.empty:
+            _ret_recorte = (_hist_tec['Close'].iloc[-1] / _hist_tec['Close'].iloc[0] - 1) * 100
+            st.caption(f"{_hist_tec.index.min():%d/%m/%Y} a {_hist_tec.index.max():%d/%m/%Y} · {_ret_recorte:+.2f}% no recorte · {len(_hist_tec)} pregões. Médias usam o histórico anterior ao recorte. Arraste para explorar; duplo clique restaura o zoom.")
+    except Exception as e:
+        st.error(f"Não foi possível desenhar o gráfico técnico: {e}")
 
 if _secao_r == "💎 fundamentos":
     section_title("📊 demonstrações financeiras (dre)")
@@ -1922,7 +2002,16 @@ if _secao_r == "💎 fundamentos":
         # chamadas de rede. Cai para o gráfico yfinance ao vivo se ausente.
         _hist_tri = cache_d.get('historico_trimestral') if cache_d else None
         if isinstance(_hist_tri, list) and len(_hist_tri) >= 2:
-            _rows_ft = _hist_tri[:12]  # mais recente primeiro
+            _max_periodos_ft = min(len(_hist_tri), 12)
+            if "research_fund_periodos" in st.session_state and not 2 <= st.session_state["research_fund_periodos"] <= _max_periodos_ft:
+                st.session_state["research_fund_periodos"] = min(8, _max_periodos_ft)
+            if _max_periodos_ft == 2:
+                _n_periodos_ft = 2
+                st.caption("2 trimestres disponíveis no histórico.")
+            else:
+                _n_periodos_ft = st.slider("Trimestres no recorte", min_value=2, max_value=_max_periodos_ft,
+                                           value=min(8, _max_periodos_ft), key="research_fund_periodos")
+            _rows_ft = _hist_tri[:_n_periodos_ft]  # mais recente primeiro
 
             def _gt(d, k):
                 v = d.get(k) if d else None
@@ -1985,11 +2074,11 @@ if _secao_r == "💎 fundamentos":
                 _body_ft += (
                     f'<tr style="border-bottom:1px solid var(--border-subtle);">'
                     f'<td style="padding:6px 9px;font-family:{_mn_ft};font-size:0.72rem;color:var(--text-muted);">{_per}</td>'
-                    + _cell_ft(_fmt_val(_rec) + _yoy_span(_yoy(_rows_ft, i, 'receita')))
+                    + _cell_ft(_fmt_val(_rec) + _yoy_span(_yoy(_hist_tri, i, 'receita')))
                     + _cell_ft(f"{_mb:.1f}%" if _mb is not None else "—")
                     + _cell_ft(f"{_ml:.1f}%" if _ml is not None else "—", _mlc)
                     + _cell_ft(_fmt_val(_ebitda))
-                    + _cell_ft(_fmt_val(_luc) + _yoy_span(_yoy(_rows_ft, i, 'lucro')))
+                    + _cell_ft(_fmt_val(_luc) + _yoy_span(_yoy(_hist_tri, i, 'lucro')))
                     + _cell_ft(_fmt_val(_cfo))
                     + _cell_ft(_fmt_val(_ndiv), _ndc)
                     + '</tr>'
@@ -2109,1049 +2198,1058 @@ if _secao_r == "💎 fundamentos":
                 st.error(f"erro ao carregar demonstrações: {e}")
 
 if _secao_r == "🧠 análise & ia":
-    section_title("🧠 análise ia — deepseek v4 pro")
+    section_title("Síntese do ativo com IA")
 
-    # ── Tenta cache do Supabase (compartilhado entre sessões) ────────────
-    _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
-    if not _cache_ia:
-        try:
-            from database.db import get_ai_analysis as _get_ai
-            _score_atual_ia = health_result.get('score') if isinstance(health_result, dict) else None
-            _db_cache = _get_ai(
-                tipo="research",
-                ticker=t_base,
-                user_id=None,                       # research é global
-                modo=None,
-                health_score_atual=_score_atual_ia,
-                health_threshold=10,
-            )
-            if _db_cache:
-                import datetime as _dtc
-                try:
-                    _dtt = _dtc.datetime.fromisoformat(str(_db_cache['created_at']).replace('Z','+00:00'))
-                    _ts_fmt = _dtt.strftime('%d/%m/%Y %H:%M')
-                except Exception:
-                    _ts_fmt = str(_db_cache['created_at'])[:16]
-                _cache_ia = {
-                    'texto':     _db_cache['conteudo'],
-                    'timestamp': _ts_fmt,
-                    'score':     _db_cache.get('health_score_snapshot') or '—',
-                    'macro':     'cache supabase',
-                    'fonte':     'db',
-                }
-                st.session_state[f"ia_cache_{t_base}"] = _cache_ia
-        except Exception as _e_cache_ia:
-            logging.getLogger(__name__).warning(f"[research] cache ai lookup: {_e_cache_ia}")
+    _foco_ia = section_selector(["Síntese & tese", "Indicadores & proventos", "Valuation implícito", "Notícias"], key="research_ia_foco")
 
-    if _cache_ia:
-        _fonte_tag = (
-            ' <span style="color:var(--accent);">⚡ cache</span>'
-            if _cache_ia.get('fonte') == 'db' else ''
-        )
-        st.markdown(
-            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
-            f'border-left:3px solid var(--accent); border-radius:6px; '
-            f'padding:12px 16px; margin-bottom:16px;">'
-
-            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
-            f'color:var(--text-muted); margin-bottom:8px;">'
-            f'📋 análise salva em {_cache_ia["timestamp"]} '
-            f'| health score na época: {_cache_ia["score"]}/100 '
-            f'| regime: {_cache_ia["macro"]}{_fonte_tag}'
-            f'</div>'
-
-            f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
-            f'color:var(--text-primary); line-height:1.8; white-space:pre-wrap;">'
-            f'{_cache_ia["texto"]}'
-            f'</div>'
-
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption("análise instantânea via cache. clique em 'analisar' para forçar nova geração.")
-    else:
-        st.caption("nenhuma análise gerada ainda para este ativo.")
-
-    _col_ia1, _col_ia2, _col_ia3 = st.columns([3, 1, 1], gap="small")
-    with _col_ia1:
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); line-height:1.5;">'
-            'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
-            'não é recomendação.</div>',
-            unsafe_allow_html=True,
-        )
-    with _col_ia2:
-        usar_thinking = st.checkbox(
-            "modo reasoning",
-            value=False,
-            key="ia_thinking",
-            help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
-        )
-    with _col_ia3:
-        btn_analise_ia = st.button(
-            "Analisar",
-            type="primary",
-            use_container_width=True,
-            key="btn_analise_ia",
-        )
-
-    if btn_analise_ia:
-        macro_ctx = st.session_state.get("macro_context", {
-            "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
-        })
-
-        preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
-        var_ia   = 0.0
-        if len(df_hist) >= 2:
-            _p_hoje = float(df_hist['Close'].iloc[-1])
-            _p_ant  = float(df_hist['Close'].iloc[-2])
-            if _p_ant > 0:
-                var_ia = (_p_hoje - _p_ant) / _p_ant * 100
-
-        _impacto_setor_call = st.session_state.get("impacto_setor_ativo")
-
-        # ── Calcula indicadores técnicos e performance a partir de df_hist ────
-        _tec_data = {}
-        try:
-            if not df_hist.empty and len(df_hist) >= 20:
-                _close = df_hist['Close']
-                from utils.indicators import rsi_last as _rsi_last
-                _tec_data['rsi'] = _rsi_last(_close, 14, default=None)
-
-                _hi52 = float(_close.tail(252).max()) if len(_close) >= 50 else float(_close.max())
-                _tec_data['dist_topo_52w'] = ((_close.iloc[-1] / _hi52) - 1) * 100 if _hi52 > 0 else None
-
-                if len(_close) >= 50:
-                    _tec_data['acima_mm50'] = bool(_close.iloc[-1] > _close.tail(50).mean())
-                if len(_close) >= 200:
-                    _tec_data['acima_mm200'] = bool(_close.iloc[-1] > _close.tail(200).mean())
-
-                def _ret_periodo(dias):
-                    if len(_close) <= dias:
-                        return None
-                    p0 = float(_close.iloc[-dias-1])
-                    p1 = float(_close.iloc[-1])
-                    return ((p1 / p0) - 1) * 100 if p0 > 0 else None
-
-                _tec_data['ret_1m'] = _ret_periodo(21)
-                _tec_data['ret_3m'] = _ret_periodo(63)
-                _tec_data['ret_6m'] = _ret_periodo(126)
-                _tec_data['ret_1y'] = _ret_periodo(252)
-
-                # Vol anualizada (últimos 252 dias)
-                _rets = _close.pct_change().dropna().tail(252)
-                if len(_rets) > 20:
-                    _tec_data['vol_anual'] = float(_rets.std() * (252 ** 0.5) * 100)
-        except Exception:
-            pass
-
-        # ── Monta peer data a partir de df_comp (peers já carregados) ─────────
-        _peer_payload = None
-        try:
-            if 'df_comp' in dir() and not df_comp.empty:
-                _peer_payload = df_comp.head(6).to_dict(orient='records')
-        except Exception:
-            _peer_payload = None
-
-        # Análise ANTERIOR (tracking): busca a última salva no Supabase SEM
-        # invalidar por threshold/hash — é justamente quando os números mudam que a
-        # comparação importa. Alimenta o prompt p/ a IA rastrear a evolução.
-        _analise_ant = None
-        try:
-            from database.db import get_ai_analysis as _get_ai_prev
-            _prev_ia = _get_ai_prev(tipo="research", ticker=t_base,
-                                    user_id=None, modo=None)
-            if _prev_ia and _prev_ia.get("conteudo"):
-                _dt_prev = str(_prev_ia.get("created_at", ""))[:16].replace("T", " ")
-                _analise_ant = {"texto": _prev_ia["conteudo"], "data": _dt_prev}
-        except Exception as _e_prev_ia:
-            logging.getLogger(__name__).warning(f"[research] busca analise anterior: {_e_prev_ia}")
-
-        # Divergência macro × setor do ativo (PLANO_MACRO M5-1) — só BR; enriquece
-        # com a estatística histórica do backtest. Best-effort, cache-first.
-        _div_setor = None
-        if t_base.endswith(".SA"):
+    if _foco_ia == "Síntese & tese":
+        # ── Tenta cache do Supabase (compartilhado entre sessões) ────────────
+        _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
+        if not _cache_ia:
             try:
-                from utils.divergencia_live import (
-                    divergencias_atuais_br, estatistica_divergencias_br, stat_para_quadrante)
-                from utils.setores import normalizar_setor as _ns_div
-                _canon_div = _ns_div(setor)
-                _mtz = divergencias_atuais_br(macro_ctx)
-                _hit = next((x for x in _mtz if x.get("setor") == _canon_div), None)
-                if _hit:
-                    _st_div = stat_para_quadrante(estatistica_divergencias_br(), _hit["quadrante"], 13)
-                    _div_setor = {
-                        "quadrante": _hit["quadrante"], "tilt": _hit["tilt"], "rs": _hit["rs"],
-                        "hist_media": (_st_div or {}).get("media"),
-                        "hist_hit": (_st_div or {}).get("hit_rate"),
-                        "hist_n": (_st_div or {}).get("n"),
-                    }
-            except Exception as _e_div:
-                logging.getLogger(__name__).warning(f"[research] divergencia setor: {_e_div}")
-
-        from utils.ai_prompts import build_research_prompt
-        _prompt_ia = build_research_prompt(
-            ticker        = t_base,
-            nome          = cache_d.get("nome", nome_exibicao),
-            setor         = setor,
-            mercado       = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
-            fundamentos   = cache_d,
-            health_result = health_result,
-            macro_context = macro_ctx,
-            preco_atual   = preco_ia,
-            var_1d        = var_ia,
-            multiplos_historicos = _medios,
-            impacto_setor = _impacto_setor_call,
-            peer_data     = _peer_payload,
-            tecnico       = _tec_data,
-            dividendos    = None,
-            analise_anterior = _analise_ant,
-            divergencia_setor = _div_setor,
-        )
-
-        _resposta_ia = chamar_ia(
-            prompt_usuario = _prompt_ia,
-            # 7 seções (tese, positivos, riscos, valuation, macro, veredito, métrica)
-            # não cabem em 1800 tokens — vinha truncando no meio. 3500 dá folga.
-            max_tokens     = 3500,
-            system         = SYSTEM_ANALISTA,
-            temperatura    = 0.3,
-            stream         = True,
-            thinking       = usar_thinking,
-            user_settings  = _user_settings,
-        )
-
-        if _resposta_ia:
-            import datetime as _dt
-            st.session_state[f"ia_cache_{t_base}"] = {
-                'texto':     _resposta_ia,
-                'timestamp': _dt.datetime.now().strftime('%d/%m/%Y %H:%M'),
-                'score':     health_result.get('score', 50),
-                'macro':     macro_ctx.get('label', '—'),
-            }
-            # ── Persiste no Supabase (compartilhado, TTL 7 dias) ─────────
-            try:
-                from database.db import save_ai_analysis, _hash_contexto
-                _hash_ctx = _hash_contexto(
-                    t_base, cache_d.get('p/l'), cache_d.get('roe%'),
-                    cache_d.get('dy%'), cache_d.get('ev/ebitda'),
-                    health_result.get('score'),
-                )
-                save_ai_analysis(
+                from database.db import get_ai_analysis as _get_ai
+                _score_atual_ia = health_result.get('score') if isinstance(health_result, dict) else None
+                _db_cache = _get_ai(
                     tipo="research",
                     ticker=t_base,
-                    user_id=None,                    # global
-                    conteudo=_resposta_ia,
-                    modelo="auto",
-                    contexto_hash=_hash_ctx,
-                    health_score_snapshot=int(health_result.get('score', 50)),
-                    # 30 dias: mantém a análise viva p/ o TRACKING mesmo com cadência
-                    # mensal. O cache de EXIBIÇÃO invalida antes por delta de score /
-                    # contexto_hash, então não fica stale.
-                    ttl_horas=720,
+                    user_id=None,                       # research é global
+                    modo=None,
+                    health_score_atual=_score_atual_ia,
+                    health_threshold=10,
                 )
-            except Exception as _e_save_ia:
-                logging.getLogger(__name__).warning(f"[research] save ai cache: {_e_save_ia}")
-
-        st.session_state[f"ia_analise_{t_base}"] = True
-
-    elif st.session_state.get(f"ia_analise_{t_base}"):
-        st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
-
-    st.markdown("---")
-    section_title("📄 exportar tese em pdf")
-
-    _col_pdf1, _col_pdf2 = st.columns([3, 1])
-    with _col_pdf1:
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted);">'
-            'gera um relatório profissional com fundamentos, análise ia e '
-            'health score em formato pdf. o deepseek redige a tese completa '
-            'antes da renderização — pode levar alguns segundos.</div>',
-            unsafe_allow_html=True,
-        )
-    with _col_pdf2:
-        btn_gerar_pdf = st.button(
-            "Gerar pdf",
-            type             = "secondary",
-            use_container_width = True,
-            key              = "btn_gerar_pdf",
-        )
-
-    if btn_gerar_pdf:
-        _fund_pdf  = cache_d
-        _alertas   = health_result.get("alertas", [])
-        _breakdown = health_result.get("breakdown", {})
-        _macro_ctx = st.session_state.get("macro_context", {
-            "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
-        })
-        _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
-
-        with st.spinner("deepseek v4 pro redigindo tese..."):
-            _prompt_pdf = (
-                f"ativo: {t_base.upper()}\n"
-                f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
-                f"setor: {setor}\n"
-                f"tipo: {'fii' if '11.SA' in t_base else 'acao br' if '.SA' in t_base else 'acao us'}\n\n"
-                f"fundamentos:\n"
-                f"p/l: {_fund_pdf.get('p/l', 'n/d')}\n"
-                f"p/vp: {_fund_pdf.get('p/vp', 'n/d')}\n"
-                f"roe: {_fund_pdf.get('roe%', 'n/d')}%\n"
-                f"dy: {_fund_pdf.get('dy%', 'n/d')}%\n"
-                f"margem: {_fund_pdf.get('margem%', 'n/d')}%\n\n"
-                f"health score: {health_result.get('score', 50)}/100\n"
-                f"status: {health_result.get('status', 'n/d')}\n\n"
-                f"alertas:\n"
-                + "\n".join([f"- {a}" for a in _alertas[:6]])
-                + f"\n\ncontexto macro:\n"
-                f"selic: {_macro_ctx.get('selic', 10.75):.2f}%\n"
-                f"vix: {_macro_ctx.get('vix', 15.0):.1f}\n"
-                f"ambiente: {_macro_ctx.get('label', 'neutro')}\n\n"
-                f"cotacao atual: r$ {_preco_pdf:,.2f}\n\n"
-                "redija uma tese de investimento completa com: "
-                "1. contexto do negocio, "
-                "2. drivers de valor, "
-                "3. riscos principais, "
-                "4. valuation e veredicto. "
-                "texto direto, sem asteriscos, letra minuscula."
-            )
-            _analise_pdf = chamar_ia(
-                prompt_usuario = _prompt_pdf,
-                system         = SYSTEM_TESE,
-                max_tokens     = 1200,
-                temperatura    = 0.3,
-                stream         = False,
-                thinking       = False,
-                user_settings  = _user_settings,
-            )
-
-        with st.spinner("montando pdf..."):
-            try:
-                from utils.pdf_generator import gerar_tese_pdf
-                _pdf_bytes = gerar_tese_pdf(
-                    ticker        = t_base,
-                    nome          = _fund_pdf.get("nome", nome_exibicao),
-                    setor         = setor,
-                    health_score  = health_result.get("score", 50),
-                    preco_atual   = _preco_pdf,
-                    fundamentos   = _fund_pdf,
-                    analise_ia    = _analise_pdf or "análise indisponível.",
-                    alertas       = _alertas,
-                    breakdown     = _breakdown,
-                    macro_context = _macro_ctx,
-                )
-                _nome_arquivo = (
-                    f"tese_{t_base.replace('.SA', '').lower()}_"
-                    f"{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-                )
-                st.download_button(
-                    label               = "⬇️ baixar tese em pdf",
-                    data                = _pdf_bytes,
-                    file_name           = _nome_arquivo,
-                    mime                = "application/pdf",
-                    type                = "primary",
-                    use_container_width = True,
-                    key                 = "btn_download_pdf",
-                )
-                st.success(f"✅ tese gerada: {_nome_arquivo}")
-            except Exception as _e_pdf:
-                st.error(f"erro ao gerar pdf: {_e_pdf}")
-
-    st.markdown("---")
-    section_title("📋 tese de investimento — deepseek v4 pro")
-
-    if st.button(
-        "Gerar tese de longo prazo",
-        use_container_width=True,
-        type="secondary",
-        key="btn_tese_footer"
-    ):
-        try:
-            from utils.health_engine import safe_int as _si
-        except ImportError:
-            def _si(v, d=0):
-                try: return int(float(v)) if v is not None else d
-                except Exception: return d
-        val_pl   = _si(cache_d.get('p/l'))
-        val_pvp  = _si(cache_d.get('p/vp'))
-        val_roe  = _si(cache_d.get('roe%'))
-        val_dy   = _si(cache_d.get('dy%'))
-        val_divida = _si(cache_d.get('divida_liquida'))
-        val_ativo  = _si(cache_d.get('ativos'))
-        ltv_f = (val_divida / val_ativo * 100) if val_ativo and val_ativo > 0 else 0
-
-        _prompt_tese = (
-            f"ativo: {ticker.upper()}\n"
-            f"setor: {setor}\n"
-            f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
-            f"fundamentos:\n"
-            f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
-            f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
-            f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
-            f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
-            f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
-            f"health score: {health_result.get('score', 50)}/100\n\n"
-            "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
-            "avalie se a alavancagem é adequada para o setor. "
-            "conclua com uma visão de risco/retorno. letra minúscula."
-        )
-        with st.spinner("deepseek elaborando tese..."):
-            chamar_ia(
-                prompt_usuario = _prompt_tese,
-                system         = SYSTEM_TESE,
-                max_tokens     = 1000,
-                temperatura    = 0.3,
-                stream         = True,
-                user_settings  = _user_settings,
-            )
-
-    # ── FUNDAMENTOS ──────────────────────────────────────────────────────────
-    section_title("💎 fundamentos & indicadores")
-    # Busca dados complementares ausentes no cache/info_dict
-    _beta_tab = None
-    _de_tab = None
-    _descr_tab = cache_d.get('descricao') or cache_d.get('description')
-    try:
-        from utils.fmp_client import get_profile
-        _profile_fmp = get_profile(t_base)
-        if _profile_fmp:
-            _beta_tab = _profile_fmp.get('beta')
-            _descr_tab = _descr_tab or _profile_fmp.get('descricao', '')
-    except Exception:
-        pass
-    if _beta_tab is None and df_hist is not None and len(df_hist) >= 60:
-        try:
-            _bench_t = "^BVSP" if t_base.endswith('.SA') else "^GSPC"
-            from utils.price_history import obter_ohlcv_ativo
-            _h_bench = obter_ohlcv_ativo(_bench_t, periodo="1y")
-            if not _h_bench.empty:
-                _r_a = df_hist['Close'].pct_change().dropna()
-                _r_b = _h_bench['Close'].pct_change().dropna()
-                _df_b = pd.concat([_r_a, _r_b], axis=1).dropna()
-                if len(_df_b) >= 30:
-                    from utils.indicators import beta as _beta_fn
-                    _b = _beta_fn(_r_a, _r_b)
-                    _beta_tab = round(_b, 2) if _b is not None else None
-        except Exception:
-            pass
-    if _de_tab is None:
-        try:
-            _de_raw = yf_info(t_base).get('debtToEquity')
-            if _de_raw is not None:
-                _de_tab = round(float(_de_raw), 2)
-        except Exception:
-            pass
-
-    c_f1, c_f2 = st.columns(2)
-    with c_f1:
-        st.markdown("**múltiplos e risco**")
-        vol = fmt_pct(df_hist['Close'].pct_change().std() * np.sqrt(252) * 100) if len(df_hist) > 10 else "N/D"
-        if is_fii:
-            debt = safe_float(info_dict.get('totalDebt', 0))
-            assets_t = safe_float(info_dict.get('totalAssets', 1))
-            ltv = (debt / assets_t * 100) if assets_t > 0 else 0
-            f_d = {"métrica": ["P/VP", "Yield (12m)", "Volatilidade Anual", "Alavancagem (Dívida/Ativos)", "Setor/Segmento"], 
-                   "valor": [f"{pvp:.2f}" if pvp is not None else "N/D", fmt_pct(dy), vol, f"{ltv:.1f}%" if ltv > 0 else "baixa/nula", setor]}
-        else:
-            ev_e = safe_float(cache_d.get('ev/ebitda')) or safe_float(info_dict.get('enterpriseToEbitda'))
-            pvp_val = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
-            beta_val = _beta_tab or safe_float(info_dict.get('beta'))
-            debt_val = _de_tab or safe_float(info_dict.get('debtToEquity'))
-            
-            f_d = {
-                "métrica": ["EV/EBITDA", "P/VP", "Volatilidade Anual", "Beta", "Dívida/Patrimônio"], 
-                "valor": [
-                    f"{ev_e:.2f}" if ev_e is not None else "N/D", 
-                    f"{pvp_val:.2f}" if pvp_val is not None else "N/D", 
-                    vol, 
-                    f"{beta_val:,.2f}" if beta_val is not None else "N/D", 
-                    f"{debt_val:,.1f}%" if debt_val is not None else "N/D"
-                ]
-            }
-        st.table(pd.DataFrame(f_d))
-
-        # ── HISTÓRICO DE PROVENTOS (FII mensal 24m / ação anual 5a) ───────
-        st.markdown("<br>", unsafe_allow_html=True)
-        section_title(f"💰 histórico de proventos (últimos {'24 meses' if is_fii else '5 anos'})")
-        try:
-            _render_historico_proventos(
-                acao_obj.dividends if acao_obj is not None else None,
-                'fii' if is_fii else 'acao',
-                ticker, moeda,
-            )
-        except Exception as _e_div:
-            st.warning(f"não foi possível carregar o histórico de proventos: {_e_div}")
-
-    with c_f2:
-        st.markdown("**descrição**")
-        _descricao_texto = _descr_tab or info_dict.get('longBusinessSummary', '')
-        st.markdown(
-            _descricao_texto[:800] + "..."
-            if _descricao_texto and len(str(_descricao_texto)) > 10
-            else '_descrição não disponível para este ativo._'
-        )
-
-    # ── EVOLUÇÃO HISTÓRICA DE FUNDAMENTOS (FMP) ──────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("📈 evolução de fundamentos (histórico — fmp / yfinance)")
-    st.caption(
-        "trajetória de 10 anos dos principais indicadores. p/l e ev/ebitda mostram se o "
-        "valuation está esticado ou comprimido vs. a própria história; roe e margem líquida "
-        "revelam se a rentabilidade é consistente ou volátil ao longo do ciclo."
-    )
-
-    with st.spinner("carregando histórico de fundamentos..."):
-        _hist_fund = get_multiplos_historicos(t_base, anos=10)
-
-    if _hist_fund:
-        _df_hf = (
-            pd.DataFrame(_hist_fund)
-              .dropna(subset=["data"])
-              .sort_values("data")
-              .reset_index(drop=True)
-        )
-
-        _cc_hf = _chart_cores()
-
-        _metricas_evo = [
-            ("P/L — price to earnings",      "pe",        _cc_hf["accent"]),
-            ("ROE % — retorno s/ patrimônio", "roe",       _cc_hf["bull"]),
-            ("Margem Líquida %",              "margem",    _cc_hf["info"]),
-            ("EV/EBITDA",                     "ev_ebitda", _cc_hf["amber"]),
-        ]
-
-        _evcol1, _evcol2 = st.columns(2)
-        _evcol3, _evcol4 = st.columns(2)
-        _ev_cols = [_evcol1, _evcol2, _evcol3, _evcol4]
-
-        for _evcol, (_evlbl, _evcampo, _evcor) in zip(_ev_cols, _metricas_evo):
-            with _evcol:
-                _df_ev = _df_hf[["data", _evcampo]].dropna()
-                if _df_ev.empty:
-                    st.markdown(
-                        f'<div style="font-size:0.75rem;color:var(--text-muted);'
-                        f'padding:8px 0;">{_evlbl} — sem dados</div>',
-                        unsafe_allow_html=True,
-                    )
-                    continue
-
-                _fig_ev = go.Figure()
-                # Converte hex → rgba para fillcolor (Plotly não aceita hex de 8 dígitos)
-                try:
-                    _h = _evcor.lstrip("#")
-                    _r, _g, _b = int(_h[0:2],16), int(_h[2:4],16), int(_h[4:6],16)
-                    _fill_ev = f"rgba({_r},{_g},{_b},0.09)"
-                except Exception:
-                    _fill_ev = "rgba(100,100,200,0.09)"
-                _fig_ev.add_trace(go.Scatter(
-                    x=_df_ev["data"].tolist(),
-                    y=_df_ev[_evcampo].tolist(),
-                    mode="lines+markers",
-                    line=dict(color=_evcor, width=2),
-                    marker=dict(size=4, color=_evcor),
-                    fill="tozeroy",
-                    fillcolor=_fill_ev,
-                    hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
-                    name=_evlbl,
-                ))
-                _lay_ev = base_layout(height=220, title=_evlbl)
-                _lay_ev.update(
-                    xaxis=dict(
-                        showgrid=False,
-                        tickangle=-30,
-                        tickfont=dict(size=8, color=_cc_hf["muted"]),
-                        linecolor=_cc_hf["border"],
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridcolor=_cc_hf["border"],
-                        tickfont=dict(size=9, color=_cc_hf["muted"]),
-                        zeroline=False,
-                    ),
-                    margin=dict(l=44, r=8, t=36, b=44),
-                )
-                _fig_ev.update_layout(**_lay_ev)
-                st.plotly_chart(_fig_ev, use_container_width=True, config={"responsive": True})
-    else:
-        st.markdown(
-            '<div style="font-size:0.75rem;color:var(--text-muted);padding:12px 0;">'
-            'histórico de fundamentos não disponível (FMP sem dados e yfinance sem demonstrações para este ativo).'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-    # ── DCF REVERSO ──────────────────────────────────────────────────────────
-    section_title("🧮 dcf reverso & valuation implícito")
-    if is_fii:
-        section_title("🏢 modelo de valuation — p/vp justo (fii)")
-
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; '
-            'color:var(--text-muted); margin-bottom:16px; line-height:1.7;">'
-            'para fiis o modelo correto não é dcf, mas sim a comparação entre '
-            '<b>cap rate implícito</b> (yield real do fii) e o '
-            '<b>custo de oportunidade</b> (ntn-b + spread de risco do segmento). '
-            'o p/vp justo é derivado dessa relação: quando o yield real supera '
-            'o custo de oportunidade, o fii merece negociar acima de 1.0x p/vp.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-        from utils.health_engine import _buscar_yield_ntnb, _detectar_segmento_fii
-
-        _ntnb_dcf    = _buscar_yield_ntnb()
-        _seg_dcf     = _detectar_segmento_fii(t_base, cache_d)
-        _dy_dcf      = safe_float(cache_d.get('dy%')) or 0.0
-        _pvp_dcf     = safe_float(cache_d.get('p/vp')) or 1.0
-        _ipca_dcf    = st.session_state.get("macro_context", {}).get("ipca", 4.5)
-        _dy_real_dcf = ((1 + _dy_dcf/100) / (1 + _ipca_dcf/100) - 1) * 100
-
-        section_title("⚙️ parâmetros do modelo")
-
-        _spreads_default = {
-            'papel':       1.5,
-            'logistica':   2.5,
-            'lajes':       3.0,
-            'shopping':    3.0,
-            'fof':         2.0,
-            'residencial': 2.5,
-            'hibrido':     2.5,
-            'desconhecido':2.5,
-        }
-        _spread_default = _spreads_default.get(_seg_dcf, 2.5)
-
-        _fv1, _fv2, _fv3, _fv4 = st.columns(4)
-
-        with _fv1:
-            _ntnb_input = st.number_input(
-                "yield ntn-b real (% a.a.)",
-                value=float(max(2.0, min(12.0, _ntnb_dcf or 6.5))),
-                min_value=2.0,
-                max_value=12.0,
-                step=0.1,
-                format="%.2f",
-            )
-        with _fv2:
-            _spread_input = st.slider(
-                "spread de risco do segmento (pp)",
-                min_value=0.5,
-                max_value=6.0,
-                value=float(_spread_default),
-                step=0.25,
-                format="%.2f",
-            )
-        with _fv3:
-            _dy_input = st.number_input(
-                "dividend yield atual (%)",
-                value=float(_dy_dcf) if _dy_dcf > 0 else 8.0,
-                min_value=0.1,
-                max_value=30.0,
-                step=0.1,
-                format="%.2f",
-            )
-        with _fv4:
-            _ipca_input = st.number_input(
-                "ipca esperado (%)",
-                value=float(max(1.0, min(12.0, _ipca_dcf or 4.5))),
-                min_value=1.0,
-                max_value=12.0,
-                step=0.1,
-                format="%.1f",
-            )
-
-        st.markdown("---")
-
-        _custo_op     = _ntnb_input + _spread_input
-        _dy_real_calc = ((1 + _dy_input/100) / (1 + _ipca_input/100) - 1) * 100
-        _pvp_justo    = _dy_real_calc / _custo_op if _custo_op > 0 else 1.0
-        _pvp_justo    = round(_pvp_justo, 3)
-        _pvp_atual    = _pvp_dcf
-        _upside_pvp   = (_pvp_justo / _pvp_atual - 1) * 100 if _pvp_atual > 0 else 0
-        _spread_efetivo = _dy_real_calc - _custo_op
-
-        _rc1, _rc2, _rc3, _rc4 = st.columns(4)
-
-        _cor_pvpj = "var(--bull)" if _pvp_justo > _pvp_atual else "var(--bear)"
-        _cor_spread_ef = "var(--bull)" if _spread_efetivo >= 0 else "var(--bear)"
-        _cor_upside = "var(--bull)" if _upside_pvp > 0 else "var(--bear)"
-
-        with _rc1:
-            metric_card(
-                "p/vp justo calculado",
-                f"{_pvp_justo:.3f}×",
-                f"p/vp mercado: {_pvp_atual:.3f}×",
-                "bull" if _pvp_justo > _pvp_atual else "bear",
-            )
-        with _rc2:
-            metric_card(
-                "upside / downside",
-                f"{_upside_pvp:+.1f}%",
-                "vs p/vp atual de mercado",
-                "bull" if _upside_pvp > 0 else "bear",
-            )
-        with _rc3:
-            metric_card(
-                "spread efetivo",
-                f"{_spread_efetivo:+.2f}pp",
-                f"yield real {_dy_real_calc:.1f}% − custo {_custo_op:.1f}%",
-                "bull" if _spread_efetivo >= 0 else "bear",
-            )
-        with _rc4:
-            metric_card(
-                "segmento detectado",
-                _seg_dcf,
-                f"spread padrão: {_spread_default:.1f}pp",
-            )
-
-        if _pvp_justo > _pvp_atual * 1.10:
-            _interp = (
-                f"fii potencialmente subavaliado: p/vp justo de {_pvp_justo:.3f}× "
-                f"supera o preço de mercado de {_pvp_atual:.3f}× em "
-                f"{_upside_pvp:.1f}%. o yield real compensa o custo de "
-                f"oportunidade com folga de {_spread_efetivo:.2f}pp."
-            )
-            _tipo_interp = "bull"
-        elif _pvp_justo > _pvp_atual:
-            _interp = (
-                f"fii levemente subavaliado: p/vp justo ({_pvp_justo:.3f}×) "
-                f"acima do mercado ({_pvp_atual:.3f}×). spread efetivo de "
-                f"{_spread_efetivo:.2f}pp — margem estreita, monitorar dividendos."
-            )
-            _tipo_interp = "amber"
-        elif _pvp_justo > _pvp_atual * 0.90:
-            _interp = (
-                f"fii próximo do valor justo: p/vp calculado de {_pvp_justo:.3f}× "
-                f"vs mercado {_pvp_atual:.3f}×. spread negativo de "
-                f"{_spread_efetivo:.2f}pp — yield real insuficiente vs "
-                f"ntn-b + spread de risco."
-            )
-            _tipo_interp = "amber"
-        else:
-            _interp = (
-                f"fii potencialmente sobreavaliado: p/vp justo de {_pvp_justo:.3f}× "
-                f"abaixo do mercado de {_pvp_atual:.3f}×. o yield real "
-                f"({_dy_real_calc:.1f}%) não remunera adequadamente o risco "
-                f"vs ntn-b ({_ntnb_input:.1f}%) + spread ({_spread_input:.1f}pp)."
-            )
-            _tipo_interp = "bear"
-
-        status_card("interpretação do modelo", _interp, _tipo_interp)
-
-        section_title("🗺️ sensibilidade — p/vp justo por yield real e spread")
-
-        import numpy as np
-        import plotly.graph_objects as go
-
-        _dy_reais_range   = [round(x, 1) for x in list(np.arange(4.0, 14.1, 0.5))]
-        _spreads_cenarios = [
-            round(_spread_input - 1.0, 2),
-            round(_spread_input, 2),
-            round(_spread_input + 1.0, 2),
-        ]
-        _spreads_cenarios = [max(0.5, s) for s in _spreads_cenarios]
-
-        _fig_fii_sens = go.Figure()
-
-        for _i_sp, _sp in enumerate(_spreads_cenarios):
-            _custo_c = _ntnb_input + _sp
-            _pvps_c  = [
-                round(dy_r / _custo_c, 3) if _custo_c > 0 else 1.0
-                for dy_r in _dy_reais_range
-            ]
-            from utils.charts import CORES_SERIES
-            _fig_fii_sens.add_trace(go.Scatter(
-                x=_dy_reais_range,
-                y=_pvps_c,
-                name=f"spread {_sp:.1f}pp",
-                line=dict(
-                    color=CORES_SERIES[_i_sp % len(CORES_SERIES)],
-                    width=1.8,
-                ),
-            ))
-
-        _fig_fii_sens.add_scatter(
-            x=[_dy_real_calc],
-            y=[_pvp_justo],
-            mode="markers",
-            marker=dict(color=_chart_cores()["accent"], size=12, symbol="diamond"),
-            name="posição atual",
-        )
-
-        _fig_fii_sens.add_hline(
-            y=_pvp_atual,
-            line_color=_chart_cores()["muted"],
-            line_dash="dash",
-            line_width=1,
-            annotation_text=f"p/vp mercado ({_pvp_atual:.2f}×)",
-            annotation_font_color=_chart_cores()["muted"],
-            annotation_font_size=9,
-        )
-        _fig_fii_sens.add_hline(
-            y=1.0,
-            line_color=_chart_cores()["muted"],
-            line_dash="dot",
-            line_width=1,
-        )
-
-        _lay_fii = base_layout(
-            height=380,
-            title="p/vp justo por yield real e spread de risco (ntn-b fixo)",
-        )
-        _lay_fii.update(
-            xaxis=dict(title="yield real do fii (% a.a.)", showgrid=True, gridcolor=_chart_cores()["border"]),
-            yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor=_chart_cores()["border"]),
-        )
-        _fig_fii_sens.update_layout(**_lay_fii)
-        st.plotly_chart(_fig_fii_sens, use_container_width=True, config={'responsive': True})
-
-        st.caption(
-            f"ntn-b fixo em {_ntnb_input:.2f}% | ipca {_ipca_input:.1f}% | "
-            f"segmento: {_seg_dcf} | diamante laranja = posição atual"
-        )
-
-        st.markdown("---")
-        if st.button(
-            "Ia: interpretar valuation e gerar tese para este fii",
-            type="primary",
-            key="btn_ia_fii_dcf",
-        ):
-            _prompt_fii_val = (
-                f"fii: {ticker.upper()} | segmento: {_seg_dcf}\n\n"
-                f"modelo de valuation (p/vp justo):\n"
-                f"yield nominal: {_dy_input:.2f}%\n"
-                f"yield real: {_dy_real_calc:.2f}%\n"
-                f"ntn-b benchmark: {_ntnb_input:.2f}% (ipca+)\n"
-                f"spread de risco do segmento: {_spread_input:.2f}pp\n"
-                f"custo de oportunidade total: {_custo_op:.2f}%\n"
-                f"spread efetivo: {_spread_efetivo:+.2f}pp\n"
-                f"p/vp justo calculado: {_pvp_justo:.3f}×\n"
-                f"p/vp de mercado atual: {_pvp_atual:.3f}×\n"
-                f"upside/downside implícito: {_upside_pvp:+.1f}%\n\n"
-                f"health score: {health_result.get('score', 50)}/100\n"
-                f"contexto macro: selic {st.session_state.get('macro_context',{}).get('selic',10.75):.2f}%"
-                f" | ipca {_ipca_input:.1f}%\n\n"
-                "em 4 tópicos curtos (letra minúscula):\n"
-                "1. o yield real remunera adequadamente o risco vs título público?\n"
-                "2. o p/vp atual está justo, barato ou caro para o segmento?\n"
-                "3. cenário bull e bear para os proventos nos próximos 12 meses.\n"
-                "4. recomendação: acumular / manter / reduzir — com justificativa."
-            )
-            chamar_ia(
-                prompt_usuario = _prompt_fii_val,
-                system         = SYSTEM_TESE,
-                max_tokens     = 800,
-                temperatura    = 0.3,
-                stream         = True,
-                user_settings  = _user_settings,
-            )
-    else:
-        eps_base = safe_float(info_dict.get('trailingEps')) or safe_float(info_dict.get('forwardEps'))
-        preco_base = safe_float(df_hist['Close'].iloc[-1]) if not df_hist.empty else None
-        is_us = not ticker.endswith('.SA')
-        
-        section_title("⚙️ parâmetros do modelo")
-        
-        c_dcf1, c_dcf2, c_dcf3, c_dcf4 = st.columns(4)
-        with c_dcf1:
-            eps_input = st.number_input("eps (lucro/ação)", value=float(eps_base) if eps_base and eps_base > 0 else 5.0, min_value=-100.0, step=0.01, format="%.2f")
-        with c_dcf2:
-            preco_input = st.number_input("preço atual", value=float(preco_base) if preco_base else 100.0, min_value=0.01, step=0.01, format="%.2f")
-        with c_dcf3:
-            wacc_pct = st.slider("wacc (custo capital %)", min_value=4.0, max_value=20.0, value=9.0 if is_us else 12.0, step=0.5, format="%.1f%%")
-        with c_dcf4:
-            g_term_pct = st.slider("crescimento terminal %", min_value=1.0, max_value=5.0, value=3.0, step=0.5, format="%.1f%%")
-            
-        c_dcf5, c_dcf6 = st.columns(2)
-        with c_dcf5:
-            n_anos = st.slider("horizonte de projeção (anos)", min_value=5, max_value=15, value=10, step=1)
-        with c_dcf6:
-            margem_seg_pct = st.slider("margem de segurança (%)", min_value=0, max_value=40, value=15, step=5)
-            
-        wacc = wacc_pct / 100
-        g_terminal = g_term_pct / 100
-        
-        st.markdown("---")
-        
-        g_implicito = calcular_crescimento_implicito(preco_input, eps_input, wacc, g_terminal, n_anos)
-        
-        section_title("📊 crescimento implícito no preço atual")
-        
-        if g_implicito is None:
-            st.warning("não foi possível calcular. verifique se o eps é positivo e o wacc é maior que o crescimento terminal.")
-        else:
-            g_implicito_pct = g_implicito * 100
-            preco_com_ms = preco_input * (1 - (margem_seg_pct / 100))
-            
-            c_res1, c_res2, c_res3, c_res4 = st.columns(4)
-            with c_res1:
-                metric_card("crescimento implícito (a.a.)", fmt_pct(g_implicito_pct), cor_delta="bull" if g_implicito_pct < 15 else "bear")
-            with c_res2:
-                metric_card("p/l implícito", f"{preco_input/eps_input:.1f}x" if eps_input > 0 else "n/d")
-            with c_res3:
-                metric_card("preço com margem segurança", f"{moeda.upper()} {preco_com_ms:.2f}")
-            with c_res4:
-                metric_card("horizonte analisado", f"{n_anos} anos")
-                
-            if g_implicito_pct < 8:
-                interpretacao = "crescimento baixo precificado — assimetria favorável se a empresa crescer acima disso."
-                cor_int = "bull"
-            elif g_implicito_pct <= 20:
-                interpretacao = "crescimento moderado a alto precificado — valuation justo se tese de crescimento se confirmar."
-                cor_int = "amber"
-            else:
-                interpretacao = "crescimento muito alto precificado — risco elevado de decepção. exige execução perfeita."
-                cor_int = "bear"
-                
-            status_card("interpretação do valuation", interpretacao, cor_int)
-            
-            section_title("🗺️ mapa de sensibilidade — preço justo estimado por cenário")
-            
-            cenarios_g = [-5, 0, 5, 8, 10, 12, 15, 20, 25]
-            cenarios_wacc = [round(wacc_pct - 2, 1), wacc_pct, round(wacc_pct + 2, 1)]
-            
-            dados_sens = []
-            for wacc_c in cenarios_wacc:
-                linha = {}
-                w_c_dec = wacc_c / 100
-                for g_c in cenarios_g:
-                    g_c_dec = g_c / 100
+                if _db_cache:
+                    import datetime as _dtc
                     try:
-                        if w_c_dec <= g_terminal:
-                            linha[f"g={g_c}%"] = "—"
-                        else:
-                            vp_soma = sum(eps_input * (1 + g_c_dec)**t / (1 + w_c_dec)**t for t in range(1, n_anos + 1))
-                            vp_term = (eps_input * (1 + g_c_dec)**n_anos * (1 + g_terminal)) / (w_c_dec - g_terminal) / ((1 + w_c_dec)**n_anos)
-                            linha[f"g={g_c}%"] = round(vp_soma + vp_term, 2)
+                        _dtt = _dtc.datetime.fromisoformat(str(_db_cache['created_at']).replace('Z','+00:00'))
+                        _ts_fmt = _dtt.strftime('%d/%m/%Y %H:%M')
                     except Exception:
-                        linha[f"g={g_c}%"] = "—"
-                dados_sens.append(linha)
-                
-            df_sens = pd.DataFrame(dados_sens, index=[f"wacc {w}%" for w in cenarios_wacc])
+                        _ts_fmt = str(_db_cache['created_at'])[:16]
+                    _cache_ia = {
+                        'texto':     _db_cache['conteudo'],
+                        'timestamp': _ts_fmt,
+                        'score':     _db_cache.get('health_score_snapshot') or '—',
+                        'macro':     'cache supabase',
+                        'fonte':     'db',
+                    }
+                    st.session_state[f"ia_cache_{t_base}"] = _cache_ia
+            except Exception as _e_cache_ia:
+                logging.getLogger(__name__).warning(f"[research] cache ai lookup: {_e_cache_ia}")
 
-            _mn_s = 'var(--font-mono,monospace)'
-            _g_cols = [f"g={g}%" for g in cenarios_g]
-            _hdrs_s = '<th style="padding:7px 10px;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">wacc \\ g</th>'
-            _hdrs_s += "".join(
-                f'<th style="padding:7px 10px;text-align:right;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
-                for c in _g_cols
+        if _cache_ia:
+            _fonte_tag = (
+                ' <span style="color:var(--accent);">⚡ cache</span>'
+                if _cache_ia.get('fonte') == 'db' else ''
             )
-            _rows_s = ""
-            for idx_row, w_label in enumerate(df_sens.index):
-                _is_main = (w_label == f"wacc {wacc_pct}%")
-                _row_style = "background:rgba(99,179,237,0.08);" if _is_main else ""
-                _cells_s = f'<td style="padding:7px 10px;font-family:{_mn_s};font-size:0.78rem;font-weight:{"700" if _is_main else "400"};color:var(--text-muted);white-space:nowrap;">{w_label}</td>'
-                for gc in _g_cols:
-                    _v = df_sens.loc[w_label, gc]
-                    if _v == "—" or not isinstance(_v, (int, float)):
-                        _cells_s += f'<td style="padding:7px 10px;text-align:right;color:var(--text-muted);font-size:0.8rem;">—</td>'
-                    else:
-                        _is_cheap = _v > preco_input
-                        _bg = "background:rgba(46,204,113,0.15);" if _is_cheap else ""
-                        _cv = "#2ecc71" if _is_cheap else "var(--text-primary)"
-                        _cells_s += (f'<td style="padding:7px 10px;text-align:right;font-family:{_mn_s};font-size:0.8rem;color:{_cv};{_bg}">'
-                                     f'{moeda.upper()} {_v:,.2f}</td>')
-                _rows_s += f'<tr style="border-bottom:1px solid var(--border-subtle);{_row_style}">{_cells_s}</tr>'
             st.markdown(
-                f'<div style="overflow-x:auto;">'
-                f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
-                f'<thead><tr>{_hdrs_s}</tr></thead><tbody>{_rows_s}</tbody></table></div>',
+                f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
+                f'border-left:3px solid var(--accent); border-radius:6px; '
+                f'padding:12px 16px; margin-bottom:16px;">'
+
+                f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
+                f'color:var(--text-muted); margin-bottom:8px;">'
+                f'📋 análise salva em {_cache_ia["timestamp"]} '
+                f'| health score na época: {_cache_ia["score"]}/100 '
+                f'| regime: {_cache_ia["macro"]}{_fonte_tag}'
+                f'</div>'
+
+                f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
+                f'color:var(--text-primary); line-height:1.8; white-space:pre-wrap;">'
+                f'{_cache_ia["texto"]}'
+                f'</div>'
+
+                f'</div>',
                 unsafe_allow_html=True,
             )
-            st.caption(f"valores em {moeda.upper()} | célula verde = subvalorizado vs preço atual de {preco_input} | linha destacada = wacc configurado acima.")
-            
-            fig = go.Figure()
-            for i, wacc_c in enumerate(cenarios_wacc):
-                y_vals = []
-                for g_c in cenarios_g:
-                    val = df_sens.loc[f"wacc {wacc_c}%", f"g={g_c}%"]
-                    y_vals.append(val if val != "—" else None)
-                    
-                fig.add_trace(go.Scatter(x=cenarios_g, y=y_vals, name=f"wacc {wacc_c}%", line=dict(color=CORES_SERIES[i % len(CORES_SERIES)])))
-                
-            fig.add_hline(y=preco_input, line_color=_chart_cores()["accent"], line_dash="dash", annotation_text="preço atual")
-            fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
-            st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
-            st.caption("preço justo estimado para cada combinação de crescimento e wacc. onde a curva cruza o preço atual está o crescimento que o mercado já embute — acima disso o ativo está caro; abaixo, barato.")
-            
-            st.markdown("---")
-            if st.button("Ia: interpretar o valuation e gerar tese", type="primary"):
-                _prompt_dcf = (
-                    f"ativo: {ticker} | setor: {setor}\n\n"
-                    f"modelo dcf reverso:\n"
-                    f"eps: {eps_input:.2f} | wacc: {wacc_pct}% | g terminal: {g_term_pct}% | horizonte: {n_anos} anos\n\n"
-                    f"resultado:\n"
-                    f"crescimento implícito no preço: {g_implicito_pct:.1f}%\n"
-                    f"preço atual: {moeda.upper()} {preco_input:.2f}\n\n"
-                    "responda em 4 tópicos curtos, letra minúscula:\n"
-                    "1. o crescimento implícito é realista para o setor?\n"
-                    "2. comparação com pares do setor se souber.\n"
-                    "3. cenário bull e bear para o preço em 3 anos.\n"
-                    "4. recomendação (comprar / aguardar / evitar) com justificativa."
-                )
-                with st.spinner("deepseek analisando o valuation..."):
-                    chamar_ia(
-                        prompt_usuario = _prompt_dcf,
-                        system         = SYSTEM_TESE,
-                        max_tokens     = 800,
-                        temperatura    = 0.3,
-                        stream         = True,
-                        user_settings  = _user_settings,
-                    )
-
-    # ── NOTÍCIAS & SENTIMENTO ────────────────────────────────────────────────
-    section_title("📰 notícias & sentimento")
-    st.subheader("sentimento via notícias")
-    try:
-        news = acao_obj.news
-        if news:
-            # yfinance recente aninha os campos em item['content']; versões antigas
-            # os traziam no topo. Trata os dois formatos (igual a 3_Macro).
-            _n_render = 0
-            for item in news:
-                if _n_render >= 5:
-                    break
-                dados_n  = item.get('content', item)
-                titulo_n = dados_n.get('title', dados_n.get('headline', ''))
-                if not titulo_n:
-                    continue
-                _pub = dados_n.get('provider', dados_n.get('publisher', 'agência'))
-                if isinstance(_pub, dict):
-                    _pub = _pub.get('displayName', 'agência')
-                _uid = item.get('id') or item.get('uuid') or f"news_{_n_render}"
-                with st.container():
-                    cn1, cn2 = st.columns([4, 1])
-                    cn1.markdown(f"**{titulo_n}**")
-                    cn1.caption(str(_pub or 'agência').lower())
-                    if cn2.button("ia: analisar", key=f"news_ia_{_uid}"):
-                        with st.spinner("ia..."):
-                            _res_news = chamar_ia(
-                                prompt_usuario=(
-                                    f"ativo: {ticker}\n\n"
-                                    f"manchete: {titulo_n}\n\n"
-                                    "em 1 frase curta com letra minúscula, diga se esta notícia é "
-                                    "positiva, negativa ou neutra para o ativo e por quê."
-                                ),
-                                system      = SYSTEM_ANALISTA,
-                                max_tokens  = 120,
-                                temperatura = 0.2,
-                                stream      = False,
-                                user_settings  = _user_settings,
-                            )
-                            if _res_news:
-                                st.info(_res_news)
-                    st.markdown("---")
-                _n_render += 1
-            if _n_render == 0:
-                st.info("sem notícias no formato esperado.")
+            st.caption("análise instantânea via cache. clique em 'analisar' para forçar nova geração.")
         else:
-            st.info("sem notícias disponíveis.")
-    except Exception as _e_news:
-        logging.getLogger(__name__).warning(f"[research] notícias: {_e_news}")
-        st.info("sem notícias.")
+            st.caption("nenhuma análise gerada ainda para este ativo.")
+
+        _col_ia1, _col_ia2, _col_ia3 = st.columns([3, 1, 1], gap="small")
+        with _col_ia1:
+            st.markdown(
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); line-height:1.5;">'
+                'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
+                'não é recomendação.</div>',
+                unsafe_allow_html=True,
+            )
+        with _col_ia2:
+            usar_thinking = st.checkbox(
+                "modo reasoning",
+                value=False,
+                key="ia_thinking",
+                help="ativa raciocínio profundo — mais lento e caro, use para decisões importantes",
+            )
+        with _col_ia3:
+            btn_analise_ia = st.button(
+                "Analisar",
+                type="primary",
+                use_container_width=True,
+                key="btn_analise_ia",
+            )
+
+        if btn_analise_ia:
+            macro_ctx = st.session_state.get("macro_context", {
+                "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+            })
+
+            preco_ia = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+            var_ia   = 0.0
+            if len(df_hist) >= 2:
+                _p_hoje = float(df_hist['Close'].iloc[-1])
+                _p_ant  = float(df_hist['Close'].iloc[-2])
+                if _p_ant > 0:
+                    var_ia = (_p_hoje - _p_ant) / _p_ant * 100
+
+            _impacto_setor_call = st.session_state.get("impacto_setor_ativo")
+
+            # ── Calcula indicadores técnicos e performance a partir de df_hist ────
+            _tec_data = {}
+            try:
+                if not df_hist.empty and len(df_hist) >= 20:
+                    _close = df_hist['Close']
+                    from utils.indicators import rsi_last as _rsi_last
+                    _tec_data['rsi'] = _rsi_last(_close, 14, default=None)
+
+                    _hi52 = float(_close.tail(252).max()) if len(_close) >= 50 else float(_close.max())
+                    _tec_data['dist_topo_52w'] = ((_close.iloc[-1] / _hi52) - 1) * 100 if _hi52 > 0 else None
+
+                    if len(_close) >= 50:
+                        _tec_data['acima_mm50'] = bool(_close.iloc[-1] > _close.tail(50).mean())
+                    if len(_close) >= 200:
+                        _tec_data['acima_mm200'] = bool(_close.iloc[-1] > _close.tail(200).mean())
+
+                    def _ret_periodo(dias):
+                        if len(_close) <= dias:
+                            return None
+                        p0 = float(_close.iloc[-dias-1])
+                        p1 = float(_close.iloc[-1])
+                        return ((p1 / p0) - 1) * 100 if p0 > 0 else None
+
+                    _tec_data['ret_1m'] = _ret_periodo(21)
+                    _tec_data['ret_3m'] = _ret_periodo(63)
+                    _tec_data['ret_6m'] = _ret_periodo(126)
+                    _tec_data['ret_1y'] = _ret_periodo(252)
+
+                    # Vol anualizada (últimos 252 dias)
+                    _rets = _close.pct_change().dropna().tail(252)
+                    if len(_rets) > 20:
+                        _tec_data['vol_anual'] = float(_rets.std() * (252 ** 0.5) * 100)
+            except Exception:
+                pass
+
+            # ── Monta peer data a partir de df_comp (peers já carregados) ─────────
+            _peer_payload = None
+            try:
+                if 'df_comp' in dir() and not df_comp.empty:
+                    _peer_payload = df_comp.head(6).to_dict(orient='records')
+            except Exception:
+                _peer_payload = None
+
+            # Análise ANTERIOR (tracking): busca a última salva no Supabase SEM
+            # invalidar por threshold/hash — é justamente quando os números mudam que a
+            # comparação importa. Alimenta o prompt p/ a IA rastrear a evolução.
+            _analise_ant = None
+            try:
+                from database.db import get_ai_analysis as _get_ai_prev
+                _prev_ia = _get_ai_prev(tipo="research", ticker=t_base,
+                                        user_id=None, modo=None)
+                if _prev_ia and _prev_ia.get("conteudo"):
+                    _dt_prev = str(_prev_ia.get("created_at", ""))[:16].replace("T", " ")
+                    _analise_ant = {"texto": _prev_ia["conteudo"], "data": _dt_prev}
+            except Exception as _e_prev_ia:
+                logging.getLogger(__name__).warning(f"[research] busca analise anterior: {_e_prev_ia}")
+
+            # Divergência macro × setor do ativo (PLANO_MACRO M5-1) — só BR; enriquece
+            # com a estatística histórica do backtest. Best-effort, cache-first.
+            _div_setor = None
+            if t_base.endswith(".SA"):
+                try:
+                    from utils.divergencia_live import (
+                        divergencias_atuais_br, estatistica_divergencias_br, stat_para_quadrante)
+                    from utils.setores import normalizar_setor as _ns_div
+                    _canon_div = _ns_div(setor)
+                    _mtz = divergencias_atuais_br(macro_ctx)
+                    _hit = next((x for x in _mtz if x.get("setor") == _canon_div), None)
+                    if _hit:
+                        _st_div = stat_para_quadrante(estatistica_divergencias_br(), _hit["quadrante"], 13)
+                        _div_setor = {
+                            "quadrante": _hit["quadrante"], "tilt": _hit["tilt"], "rs": _hit["rs"],
+                            "hist_media": (_st_div or {}).get("media"),
+                            "hist_hit": (_st_div or {}).get("hit_rate"),
+                            "hist_n": (_st_div or {}).get("n"),
+                        }
+                except Exception as _e_div:
+                    logging.getLogger(__name__).warning(f"[research] divergencia setor: {_e_div}")
+
+            from utils.ai_prompts import build_research_prompt
+            _prompt_ia = build_research_prompt(
+                ticker        = t_base,
+                nome          = cache_d.get("nome", nome_exibicao),
+                setor         = setor,
+                mercado       = ("brasil (b3)" if t_base.endswith(".SA") else "eua"),
+                fundamentos   = cache_d,
+                health_result = health_result,
+                macro_context = macro_ctx,
+                preco_atual   = preco_ia,
+                var_1d        = var_ia,
+                multiplos_historicos = _medios,
+                impacto_setor = _impacto_setor_call,
+                peer_data     = _peer_payload,
+                tecnico       = _tec_data,
+                dividendos    = None,
+                analise_anterior = _analise_ant,
+                divergencia_setor = _div_setor,
+            )
+
+            _resposta_ia = chamar_ia(
+                prompt_usuario = _prompt_ia,
+                # 7 seções (tese, positivos, riscos, valuation, macro, veredito, métrica)
+                # não cabem em 1800 tokens — vinha truncando no meio. 3500 dá folga.
+                max_tokens     = 3500,
+                system         = SYSTEM_ANALISTA,
+                temperatura    = 0.3,
+                stream         = True,
+                thinking       = usar_thinking,
+                user_settings  = _user_settings,
+            )
+
+            if _resposta_ia:
+                import datetime as _dt
+                st.session_state[f"ia_cache_{t_base}"] = {
+                    'texto':     _resposta_ia,
+                    'timestamp': _dt.datetime.now().strftime('%d/%m/%Y %H:%M'),
+                    'score':     health_result.get('score', 50),
+                    'macro':     macro_ctx.get('label', '—'),
+                }
+                # ── Persiste no Supabase (compartilhado, TTL 7 dias) ─────────
+                try:
+                    from database.db import save_ai_analysis, _hash_contexto
+                    _hash_ctx = _hash_contexto(
+                        t_base, cache_d.get('p/l'), cache_d.get('roe%'),
+                        cache_d.get('dy%'), cache_d.get('ev/ebitda'),
+                        health_result.get('score'),
+                    )
+                    save_ai_analysis(
+                        tipo="research",
+                        ticker=t_base,
+                        user_id=None,                    # global
+                        conteudo=_resposta_ia,
+                        modelo="auto",
+                        contexto_hash=_hash_ctx,
+                        health_score_snapshot=int(health_result.get('score', 50)),
+                        # 30 dias: mantém a análise viva p/ o TRACKING mesmo com cadência
+                        # mensal. O cache de EXIBIÇÃO invalida antes por delta de score /
+                        # contexto_hash, então não fica stale.
+                        ttl_horas=720,
+                    )
+                except Exception as _e_save_ia:
+                    logging.getLogger(__name__).warning(f"[research] save ai cache: {_e_save_ia}")
+
+            st.session_state[f"ia_analise_{t_base}"] = True
+
+        elif st.session_state.get(f"ia_analise_{t_base}"):
+            st.caption("análise já gerada nesta sessão. clique novamente para atualizar.")
+
+        st.markdown("---")
+        section_title("📄 exportar tese em pdf")
+
+        _col_pdf1, _col_pdf2 = st.columns([3, 1])
+        with _col_pdf1:
+            st.markdown(
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted);">'
+                'reúne fundamentos, análise IA e '
+                'health score em um registro PDF. A IA redige a tese '
+                'antes da renderização — pode levar alguns segundos.</div>',
+                unsafe_allow_html=True,
+            )
+        with _col_pdf2:
+            btn_gerar_pdf = st.button(
+                "Gerar pdf",
+                type             = "secondary",
+                use_container_width = True,
+                key              = "btn_gerar_pdf",
+            )
+
+        if btn_gerar_pdf:
+            _fund_pdf  = cache_d
+            _alertas   = health_result.get("alertas", [])
+            _breakdown = health_result.get("breakdown", {})
+            _macro_ctx = st.session_state.get("macro_context", {
+                "selic": 10.75, "vix": 15.0, "ipca": 4.5, "label": "neutro"
+            })
+            _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
+
+            with st.spinner("deepseek v4 pro redigindo tese..."):
+                _prompt_pdf = (
+                    f"ativo: {t_base.upper()}\n"
+                    f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
+                    f"setor: {setor}\n"
+                    f"tipo: {'fii' if '11.SA' in t_base else 'acao br' if '.SA' in t_base else 'acao us'}\n\n"
+                    f"fundamentos:\n"
+                    f"p/l: {_fund_pdf.get('p/l', 'n/d')}\n"
+                    f"p/vp: {_fund_pdf.get('p/vp', 'n/d')}\n"
+                    f"roe: {_fund_pdf.get('roe%', 'n/d')}%\n"
+                    f"dy: {_fund_pdf.get('dy%', 'n/d')}%\n"
+                    f"margem: {_fund_pdf.get('margem%', 'n/d')}%\n\n"
+                    f"health score: {health_result.get('score', 50)}/100\n"
+                    f"status: {health_result.get('status', 'n/d')}\n\n"
+                    f"alertas:\n"
+                    + "\n".join([f"- {a}" for a in _alertas[:6]])
+                    + f"\n\ncontexto macro:\n"
+                    f"selic: {_macro_ctx.get('selic', 10.75):.2f}%\n"
+                    f"vix: {_macro_ctx.get('vix', 15.0):.1f}\n"
+                    f"ambiente: {_macro_ctx.get('label', 'neutro')}\n\n"
+                    f"cotacao atual: r$ {_preco_pdf:,.2f}\n\n"
+                    "redija uma tese de investimento completa com: "
+                    "1. contexto do negocio, "
+                    "2. drivers de valor, "
+                    "3. riscos principais, "
+                    "4. valuation e veredicto. "
+                    "texto direto, sem asteriscos, letra minuscula."
+                )
+                _analise_pdf = chamar_ia(
+                    prompt_usuario = _prompt_pdf,
+                    system         = SYSTEM_TESE,
+                    max_tokens     = 1200,
+                    temperatura    = 0.3,
+                    stream         = False,
+                    thinking       = False,
+                    user_settings  = _user_settings,
+                )
+
+            with st.spinner("montando pdf..."):
+                try:
+                    from utils.pdf_generator import gerar_tese_pdf
+                    _pdf_bytes = gerar_tese_pdf(
+                        ticker        = t_base,
+                        nome          = _fund_pdf.get("nome", nome_exibicao),
+                        setor         = setor,
+                        health_score  = health_result.get("score", 50),
+                        preco_atual   = _preco_pdf,
+                        fundamentos   = _fund_pdf,
+                        analise_ia    = _analise_pdf or "análise indisponível.",
+                        alertas       = _alertas,
+                        breakdown     = _breakdown,
+                        macro_context = _macro_ctx,
+                    )
+                    _nome_arquivo = (
+                        f"tese_{t_base.replace('.SA', '').lower()}_"
+                        f"{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
+                    )
+                    st.download_button(
+                        label               = "⬇️ baixar tese em pdf",
+                        data                = _pdf_bytes,
+                        file_name           = _nome_arquivo,
+                        mime                = "application/pdf",
+                        type                = "primary",
+                        use_container_width = True,
+                        key                 = "btn_download_pdf",
+                    )
+                    st.success(f"✅ tese gerada: {_nome_arquivo}")
+                except Exception as _e_pdf:
+                    st.error(f"erro ao gerar pdf: {_e_pdf}")
+
+        st.markdown("---")
+        section_title("📋 tese de investimento — deepseek v4 pro")
+
+        if st.button(
+            "Gerar tese de longo prazo",
+            use_container_width=True,
+            type="secondary",
+            key="btn_tese_footer"
+        ):
+            try:
+                from utils.health_engine import safe_int as _si
+            except ImportError:
+                def _si(v, d=0):
+                    try: return int(float(v)) if v is not None else d
+                    except Exception: return d
+            val_pl   = _si(cache_d.get('p/l'))
+            val_pvp  = _si(cache_d.get('p/vp'))
+            val_roe  = _si(cache_d.get('roe%'))
+            val_dy   = _si(cache_d.get('dy%'))
+            val_divida = _si(cache_d.get('divida_liquida'))
+            val_ativo  = _si(cache_d.get('ativos'))
+            ltv_f = (val_divida / val_ativo * 100) if val_ativo and val_ativo > 0 else 0
+
+            _prompt_tese = (
+                f"ativo: {ticker.upper()}\n"
+                f"setor: {setor}\n"
+                f"tipo: {'fii' if is_fii else 'acao br' if ticker.endswith('.SA') else 'acao us'}\n\n"
+                f"fundamentos:\n"
+                f"p/l: {f'{val_pl:.2f}' if val_pl else 'n/d'}\n"
+                f"p/vp: {f'{val_pvp:.2f}' if val_pvp else 'n/d'}\n"
+                f"roe: {f'{val_roe:.1f}%' if val_roe else 'n/d'}\n"
+                f"dividend yield: {f'{val_dy:.1f}%' if val_dy else 'n/d'}\n"
+                f"alavancagem (dívida/ativos): {ltv_f:.1f}%\n"
+                f"health score: {health_result.get('score', 50)}/100\n\n"
+                "escreva uma tese de investimento de longo prazo em 4 parágrafos curtos. "
+                "avalie se a alavancagem é adequada para o setor. "
+                "conclua com uma visão de risco/retorno. letra minúscula."
+            )
+            with st.spinner("deepseek elaborando tese..."):
+                chamar_ia(
+                    prompt_usuario = _prompt_tese,
+                    system         = SYSTEM_TESE,
+                    max_tokens     = 1000,
+                    temperatura    = 0.3,
+                    stream         = True,
+                    user_settings  = _user_settings,
+                )
+
+    if _foco_ia == "Indicadores & proventos":
+        # ── FUNDAMENTOS ──────────────────────────────────────────────────────────
+        section_title("💎 fundamentos & indicadores")
+        # Busca dados complementares ausentes no cache/info_dict
+        _beta_tab = None
+        _de_tab = None
+        _descr_tab = cache_d.get('descricao') or cache_d.get('description')
+        try:
+            from utils.fmp_client import get_profile
+            _profile_fmp = get_profile(t_base)
+            if _profile_fmp:
+                _beta_tab = _profile_fmp.get('beta')
+                _descr_tab = _descr_tab or _profile_fmp.get('descricao', '')
+        except Exception:
+            pass
+        if _beta_tab is None and df_hist is not None and len(df_hist) >= 60:
+            try:
+                _bench_t = "^BVSP" if t_base.endswith('.SA') else "^GSPC"
+                from utils.price_history import obter_ohlcv_ativo
+                _h_bench = obter_ohlcv_ativo(_bench_t, periodo="1y")
+                if not _h_bench.empty:
+                    _r_a = df_hist['Close'].pct_change().dropna()
+                    _r_b = _h_bench['Close'].pct_change().dropna()
+                    _df_b = pd.concat([_r_a, _r_b], axis=1).dropna()
+                    if len(_df_b) >= 30:
+                        from utils.indicators import beta as _beta_fn
+                        _b = _beta_fn(_r_a, _r_b)
+                        _beta_tab = round(_b, 2) if _b is not None else None
+            except Exception:
+                pass
+        if _de_tab is None:
+            try:
+                _de_raw = yf_info(t_base).get('debtToEquity')
+                if _de_raw is not None:
+                    _de_tab = round(float(_de_raw), 2)
+            except Exception:
+                pass
+
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            st.markdown("**múltiplos e risco**")
+            vol = fmt_pct(df_hist['Close'].pct_change().std() * np.sqrt(252) * 100) if len(df_hist) > 10 else "N/D"
+            if is_fii:
+                debt = safe_float(info_dict.get('totalDebt', 0))
+                assets_t = safe_float(info_dict.get('totalAssets', 1))
+                ltv = (debt / assets_t * 100) if assets_t > 0 else 0
+                f_d = {"métrica": ["P/VP", "Yield (12m)", "Volatilidade Anual", "Alavancagem (Dívida/Ativos)", "Setor/Segmento"],
+                       "valor": [f"{pvp:.2f}" if pvp is not None else "N/D", fmt_pct(dy), vol, f"{ltv:.1f}%" if ltv > 0 else "baixa/nula", setor]}
+            else:
+                ev_e = safe_float(cache_d.get('ev/ebitda')) or safe_float(info_dict.get('enterpriseToEbitda'))
+                pvp_val = safe_float(cache_d.get('p/vp')) or safe_float(info_dict.get('priceToBook'))
+                beta_val = _beta_tab or safe_float(info_dict.get('beta'))
+                debt_val = _de_tab or safe_float(info_dict.get('debtToEquity'))
+
+                f_d = {
+                    "métrica": ["EV/EBITDA", "P/VP", "Volatilidade Anual", "Beta", "Dívida/Patrimônio"],
+                    "valor": [
+                        f"{ev_e:.2f}" if ev_e is not None else "N/D",
+                        f"{pvp_val:.2f}" if pvp_val is not None else "N/D",
+                        vol,
+                        f"{beta_val:,.2f}" if beta_val is not None else "N/D",
+                        f"{debt_val:,.1f}%" if debt_val is not None else "N/D"
+                    ]
+                }
+            st.table(pd.DataFrame(f_d))
+
+            # ── HISTÓRICO DE PROVENTOS (FII mensal 24m / ação anual 5a) ───────
+            st.markdown("<br>", unsafe_allow_html=True)
+            section_title(f"💰 histórico de proventos (últimos {'24 meses' if is_fii else '5 anos'})")
+            try:
+                _render_historico_proventos(
+                    acao_obj.dividends if acao_obj is not None else None,
+                    'fii' if is_fii else 'acao',
+                    ticker, moeda,
+                )
+            except Exception as _e_div:
+                st.warning(f"não foi possível carregar o histórico de proventos: {_e_div}")
+
+        with c_f2:
+            st.markdown("**descrição**")
+            _descricao_texto = _descr_tab or info_dict.get('longBusinessSummary', '')
+            st.markdown(
+                _descricao_texto[:800] + "..."
+                if _descricao_texto and len(str(_descricao_texto)) > 10
+                else '_descrição não disponível para este ativo._'
+            )
+
+        # ── EVOLUÇÃO HISTÓRICA DE FUNDAMENTOS (FMP) ──────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("📈 evolução de fundamentos (histórico — fmp / yfinance)")
+        st.caption(
+            "trajetória de 10 anos dos principais indicadores. p/l e ev/ebitda mostram se o "
+            "valuation está esticado ou comprimido vs. a própria história; roe e margem líquida "
+            "revelam se a rentabilidade é consistente ou volátil ao longo do ciclo."
+        )
+
+        with st.spinner("carregando histórico de fundamentos..."):
+            _hist_fund = get_multiplos_historicos(t_base, anos=10)
+
+        if _hist_fund:
+            _df_hf = (
+                pd.DataFrame(_hist_fund)
+                  .dropna(subset=["data"])
+                  .sort_values("data")
+                  .reset_index(drop=True)
+            )
+
+            _cc_hf = _chart_cores()
+
+            _metricas_evo = [
+                ("P/L — price to earnings",      "pe",        _cc_hf["accent"]),
+                ("ROE % — retorno s/ patrimônio", "roe",       _cc_hf["bull"]),
+                ("Margem Líquida %",              "margem",    _cc_hf["info"]),
+                ("EV/EBITDA",                     "ev_ebitda", _cc_hf["amber"]),
+            ]
+
+            _evcol1, _evcol2 = st.columns(2)
+            _evcol3, _evcol4 = st.columns(2)
+            _ev_cols = [_evcol1, _evcol2, _evcol3, _evcol4]
+
+            for _evcol, (_evlbl, _evcampo, _evcor) in zip(_ev_cols, _metricas_evo):
+                with _evcol:
+                    _df_ev = _df_hf[["data", _evcampo]].dropna()
+                    if _df_ev.empty:
+                        st.markdown(
+                            f'<div style="font-size:0.75rem;color:var(--text-muted);'
+                            f'padding:8px 0;">{_evlbl} — sem dados</div>',
+                            unsafe_allow_html=True,
+                        )
+                        continue
+
+                    _fig_ev = go.Figure()
+                    # Converte hex → rgba para fillcolor (Plotly não aceita hex de 8 dígitos)
+                    try:
+                        _h = _evcor.lstrip("#")
+                        _r, _g, _b = int(_h[0:2],16), int(_h[2:4],16), int(_h[4:6],16)
+                        _fill_ev = f"rgba({_r},{_g},{_b},0.09)"
+                    except Exception:
+                        _fill_ev = "rgba(100,100,200,0.09)"
+                    _fig_ev.add_trace(go.Scatter(
+                        x=_df_ev["data"].tolist(),
+                        y=_df_ev[_evcampo].tolist(),
+                        mode="lines+markers",
+                        line=dict(color=_evcor, width=2),
+                        marker=dict(size=4, color=_evcor),
+                        fill="tozeroy",
+                        fillcolor=_fill_ev,
+                        hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
+                        name=_evlbl,
+                    ))
+                    _lay_ev = base_layout(height=220, title=_evlbl)
+                    _lay_ev.update(
+                        xaxis=dict(
+                            showgrid=False,
+                            tickangle=-30,
+                            tickfont=dict(size=8, color=_cc_hf["muted"]),
+                            linecolor=_cc_hf["border"],
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor=_cc_hf["border"],
+                            tickfont=dict(size=9, color=_cc_hf["muted"]),
+                            zeroline=False,
+                        ),
+                        margin=dict(l=44, r=8, t=36, b=44),
+                    )
+                    _fig_ev.update_layout(**_lay_ev)
+                    st.plotly_chart(_fig_ev, use_container_width=True, config={"responsive": True})
+        else:
+            st.markdown(
+                '<div style="font-size:0.75rem;color:var(--text-muted);padding:12px 0;">'
+                'histórico de fundamentos não disponível (FMP sem dados e yfinance sem demonstrações para este ativo).'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── DCF REVERSO ──────────────────────────────────────────────────────────
+    if _foco_ia == "Valuation implícito":
+        section_title("🧮 dcf reverso & valuation implícito")
+        if is_fii:
+            section_title("🏢 modelo de valuation — p/vp justo (fii)")
+
+            st.markdown(
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.75rem; '
+                'color:var(--text-muted); margin-bottom:16px; line-height:1.7;">'
+                'para fiis o modelo correto não é dcf, mas sim a comparação entre '
+                '<b>cap rate implícito</b> (yield real do fii) e o '
+                '<b>custo de oportunidade</b> (ntn-b + spread de risco do segmento). '
+                'o p/vp justo é derivado dessa relação: quando o yield real supera '
+                'o custo de oportunidade, o fii merece negociar acima de 1.0x p/vp.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            from utils.health_engine import _buscar_yield_ntnb, _detectar_segmento_fii
+
+            _ntnb_dcf    = _buscar_yield_ntnb()
+            _seg_dcf     = _detectar_segmento_fii(t_base, cache_d)
+            _dy_dcf      = safe_float(cache_d.get('dy%')) or 0.0
+            _pvp_dcf     = safe_float(cache_d.get('p/vp')) or 1.0
+            _ipca_dcf    = st.session_state.get("macro_context", {}).get("ipca", 4.5)
+            _dy_real_dcf = ((1 + _dy_dcf/100) / (1 + _ipca_dcf/100) - 1) * 100
+
+            section_title("⚙️ parâmetros do modelo")
+
+            _spreads_default = {
+                'papel':       1.5,
+                'logistica':   2.5,
+                'lajes':       3.0,
+                'shopping':    3.0,
+                'fof':         2.0,
+                'residencial': 2.5,
+                'hibrido':     2.5,
+                'desconhecido':2.5,
+            }
+            _spread_default = _spreads_default.get(_seg_dcf, 2.5)
+
+            _fv1, _fv2, _fv3, _fv4 = st.columns(4)
+
+            with _fv1:
+                _ntnb_input = st.number_input(
+                    "yield ntn-b real (% a.a.)",
+                    value=float(max(2.0, min(12.0, _ntnb_dcf or 6.5))),
+                    min_value=2.0,
+                    max_value=12.0,
+                    step=0.1,
+                    format="%.2f",
+                )
+            with _fv2:
+                _spread_input = st.slider(
+                    "spread de risco do segmento (pp)",
+                    min_value=0.5,
+                    max_value=6.0,
+                    value=float(_spread_default),
+                    step=0.25,
+                    format="%.2f",
+                )
+            with _fv3:
+                _dy_input = st.number_input(
+                    "dividend yield atual (%)",
+                    value=float(_dy_dcf) if _dy_dcf > 0 else 8.0,
+                    min_value=0.1,
+                    max_value=30.0,
+                    step=0.1,
+                    format="%.2f",
+                )
+            with _fv4:
+                _ipca_input = st.number_input(
+                    "ipca esperado (%)",
+                    value=float(max(1.0, min(12.0, _ipca_dcf or 4.5))),
+                    min_value=1.0,
+                    max_value=12.0,
+                    step=0.1,
+                    format="%.1f",
+                )
+
+            st.markdown("---")
+
+            _custo_op     = _ntnb_input + _spread_input
+            _dy_real_calc = ((1 + _dy_input/100) / (1 + _ipca_input/100) - 1) * 100
+            _pvp_justo    = _dy_real_calc / _custo_op if _custo_op > 0 else 1.0
+            _pvp_justo    = round(_pvp_justo, 3)
+            _pvp_atual    = _pvp_dcf
+            _upside_pvp   = (_pvp_justo / _pvp_atual - 1) * 100 if _pvp_atual > 0 else 0
+            _spread_efetivo = _dy_real_calc - _custo_op
+
+            _rc1, _rc2, _rc3, _rc4 = st.columns(4)
+
+            _cor_pvpj = "var(--bull)" if _pvp_justo > _pvp_atual else "var(--bear)"
+            _cor_spread_ef = "var(--bull)" if _spread_efetivo >= 0 else "var(--bear)"
+            _cor_upside = "var(--bull)" if _upside_pvp > 0 else "var(--bear)"
+
+            with _rc1:
+                metric_card(
+                    "p/vp justo calculado",
+                    f"{_pvp_justo:.3f}×",
+                    f"p/vp mercado: {_pvp_atual:.3f}×",
+                    "bull" if _pvp_justo > _pvp_atual else "bear",
+                )
+            with _rc2:
+                metric_card(
+                    "upside / downside",
+                    f"{_upside_pvp:+.1f}%",
+                    "vs p/vp atual de mercado",
+                    "bull" if _upside_pvp > 0 else "bear",
+                )
+            with _rc3:
+                metric_card(
+                    "spread efetivo",
+                    f"{_spread_efetivo:+.2f}pp",
+                    f"yield real {_dy_real_calc:.1f}% − custo {_custo_op:.1f}%",
+                    "bull" if _spread_efetivo >= 0 else "bear",
+                )
+            with _rc4:
+                metric_card(
+                    "segmento detectado",
+                    _seg_dcf,
+                    f"spread padrão: {_spread_default:.1f}pp",
+                )
+
+            if _pvp_justo > _pvp_atual * 1.10:
+                _interp = (
+                    f"fii potencialmente subavaliado: p/vp justo de {_pvp_justo:.3f}× "
+                    f"supera o preço de mercado de {_pvp_atual:.3f}× em "
+                    f"{_upside_pvp:.1f}%. o yield real compensa o custo de "
+                    f"oportunidade com folga de {_spread_efetivo:.2f}pp."
+                )
+                _tipo_interp = "bull"
+            elif _pvp_justo > _pvp_atual:
+                _interp = (
+                    f"fii levemente subavaliado: p/vp justo ({_pvp_justo:.3f}×) "
+                    f"acima do mercado ({_pvp_atual:.3f}×). spread efetivo de "
+                    f"{_spread_efetivo:.2f}pp — margem estreita, monitorar dividendos."
+                )
+                _tipo_interp = "amber"
+            elif _pvp_justo > _pvp_atual * 0.90:
+                _interp = (
+                    f"fii próximo do valor justo: p/vp calculado de {_pvp_justo:.3f}× "
+                    f"vs mercado {_pvp_atual:.3f}×. spread negativo de "
+                    f"{_spread_efetivo:.2f}pp — yield real insuficiente vs "
+                    f"ntn-b + spread de risco."
+                )
+                _tipo_interp = "amber"
+            else:
+                _interp = (
+                    f"fii potencialmente sobreavaliado: p/vp justo de {_pvp_justo:.3f}× "
+                    f"abaixo do mercado de {_pvp_atual:.3f}×. o yield real "
+                    f"({_dy_real_calc:.1f}%) não remunera adequadamente o risco "
+                    f"vs ntn-b ({_ntnb_input:.1f}%) + spread ({_spread_input:.1f}pp)."
+                )
+                _tipo_interp = "bear"
+
+            status_card("interpretação do modelo", _interp, _tipo_interp)
+
+            section_title("🗺️ sensibilidade — p/vp justo por yield real e spread")
+
+            import numpy as np
+            import plotly.graph_objects as go
+
+            _dy_reais_range   = [round(x, 1) for x in list(np.arange(4.0, 14.1, 0.5))]
+            _spreads_cenarios = [
+                round(_spread_input - 1.0, 2),
+                round(_spread_input, 2),
+                round(_spread_input + 1.0, 2),
+            ]
+            _spreads_cenarios = [max(0.5, s) for s in _spreads_cenarios]
+
+            _fig_fii_sens = go.Figure()
+
+            for _i_sp, _sp in enumerate(_spreads_cenarios):
+                _custo_c = _ntnb_input + _sp
+                _pvps_c  = [
+                    round(dy_r / _custo_c, 3) if _custo_c > 0 else 1.0
+                    for dy_r in _dy_reais_range
+                ]
+                from utils.charts import CORES_SERIES
+                _fig_fii_sens.add_trace(go.Scatter(
+                    x=_dy_reais_range,
+                    y=_pvps_c,
+                    name=f"spread {_sp:.1f}pp",
+                    line=dict(
+                        color=CORES_SERIES[_i_sp % len(CORES_SERIES)],
+                        width=1.8,
+                    ),
+                ))
+
+            _fig_fii_sens.add_scatter(
+                x=[_dy_real_calc],
+                y=[_pvp_justo],
+                mode="markers",
+                marker=dict(color=_chart_cores()["accent"], size=12, symbol="diamond"),
+                name="posição atual",
+            )
+
+            _fig_fii_sens.add_hline(
+                y=_pvp_atual,
+                line_color=_chart_cores()["muted"],
+                line_dash="dash",
+                line_width=1,
+                annotation_text=f"p/vp mercado ({_pvp_atual:.2f}×)",
+                annotation_font_color=_chart_cores()["muted"],
+                annotation_font_size=9,
+            )
+            _fig_fii_sens.add_hline(
+                y=1.0,
+                line_color=_chart_cores()["muted"],
+                line_dash="dot",
+                line_width=1,
+            )
+
+            _lay_fii = base_layout(
+                height=380,
+                title="p/vp justo por yield real e spread de risco (ntn-b fixo)",
+            )
+            _lay_fii.update(
+                xaxis=dict(title="yield real do fii (% a.a.)", showgrid=True, gridcolor=_chart_cores()["border"]),
+                yaxis=dict(title="p/vp justo calculado", showgrid=True, gridcolor=_chart_cores()["border"]),
+            )
+            _fig_fii_sens.update_layout(**_lay_fii)
+            st.plotly_chart(_fig_fii_sens, use_container_width=True, config={'responsive': True})
+
+            st.caption(
+                f"ntn-b fixo em {_ntnb_input:.2f}% | ipca {_ipca_input:.1f}% | "
+                f"segmento: {_seg_dcf} | diamante laranja = posição atual"
+            )
+
+            st.markdown("---")
+            if st.button(
+                "Ia: interpretar valuation e gerar tese para este fii",
+                type="primary",
+                key="btn_ia_fii_dcf",
+            ):
+                _prompt_fii_val = (
+                    f"fii: {ticker.upper()} | segmento: {_seg_dcf}\n\n"
+                    f"modelo de valuation (p/vp justo):\n"
+                    f"yield nominal: {_dy_input:.2f}%\n"
+                    f"yield real: {_dy_real_calc:.2f}%\n"
+                    f"ntn-b benchmark: {_ntnb_input:.2f}% (ipca+)\n"
+                    f"spread de risco do segmento: {_spread_input:.2f}pp\n"
+                    f"custo de oportunidade total: {_custo_op:.2f}%\n"
+                    f"spread efetivo: {_spread_efetivo:+.2f}pp\n"
+                    f"p/vp justo calculado: {_pvp_justo:.3f}×\n"
+                    f"p/vp de mercado atual: {_pvp_atual:.3f}×\n"
+                    f"upside/downside implícito: {_upside_pvp:+.1f}%\n\n"
+                    f"health score: {health_result.get('score', 50)}/100\n"
+                    f"contexto macro: selic {st.session_state.get('macro_context',{}).get('selic',10.75):.2f}%"
+                    f" | ipca {_ipca_input:.1f}%\n\n"
+                    "em 4 tópicos curtos (letra minúscula):\n"
+                    "1. o yield real remunera adequadamente o risco vs título público?\n"
+                    "2. o p/vp atual está justo, barato ou caro para o segmento?\n"
+                    "3. cenário bull e bear para os proventos nos próximos 12 meses.\n"
+                    "4. recomendação: acumular / manter / reduzir — com justificativa."
+                )
+                chamar_ia(
+                    prompt_usuario = _prompt_fii_val,
+                    system         = SYSTEM_TESE,
+                    max_tokens     = 800,
+                    temperatura    = 0.3,
+                    stream         = True,
+                    user_settings  = _user_settings,
+                )
+        else:
+            eps_base = safe_float(info_dict.get('trailingEps')) or safe_float(info_dict.get('forwardEps'))
+            preco_base = safe_float(df_hist['Close'].iloc[-1]) if not df_hist.empty else None
+            is_us = not ticker.endswith('.SA')
+
+            section_title("⚙️ parâmetros do modelo")
+
+            c_dcf1, c_dcf2, c_dcf3, c_dcf4 = st.columns(4)
+            with c_dcf1:
+                eps_input = st.number_input("eps (lucro/ação)", value=float(eps_base) if eps_base and eps_base > 0 else 5.0, min_value=-100.0, step=0.01, format="%.2f")
+            with c_dcf2:
+                preco_input = st.number_input("preço atual", value=float(preco_base) if preco_base else 100.0, min_value=0.01, step=0.01, format="%.2f")
+            with c_dcf3:
+                wacc_pct = st.slider("wacc (custo capital %)", min_value=4.0, max_value=20.0, value=9.0 if is_us else 12.0, step=0.5, format="%.1f%%")
+            with c_dcf4:
+                g_term_pct = st.slider("crescimento terminal %", min_value=1.0, max_value=5.0, value=3.0, step=0.5, format="%.1f%%")
+
+            c_dcf5, c_dcf6 = st.columns(2)
+            with c_dcf5:
+                n_anos = st.slider("horizonte de projeção (anos)", min_value=5, max_value=15, value=10, step=1)
+            with c_dcf6:
+                margem_seg_pct = st.slider("margem de segurança (%)", min_value=0, max_value=40, value=15, step=5)
+
+            wacc = wacc_pct / 100
+            g_terminal = g_term_pct / 100
+
+            st.markdown("---")
+
+            g_implicito = calcular_crescimento_implicito(preco_input, eps_input, wacc, g_terminal, n_anos)
+
+            section_title("📊 crescimento implícito no preço atual")
+
+            if g_implicito is None:
+                st.warning("não foi possível calcular. verifique se o eps é positivo e o wacc é maior que o crescimento terminal.")
+            else:
+                g_implicito_pct = g_implicito * 100
+                preco_com_ms = preco_input * (1 - (margem_seg_pct / 100))
+
+                c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+                with c_res1:
+                    metric_card("crescimento implícito (a.a.)", fmt_pct(g_implicito_pct), cor_delta="bull" if g_implicito_pct < 15 else "bear")
+                with c_res2:
+                    metric_card("p/l implícito", f"{preco_input/eps_input:.1f}x" if eps_input > 0 else "n/d")
+                with c_res3:
+                    metric_card("preço com margem segurança", f"{moeda.upper()} {preco_com_ms:.2f}")
+                with c_res4:
+                    metric_card("horizonte analisado", f"{n_anos} anos")
+
+                if g_implicito_pct < 8:
+                    interpretacao = "crescimento baixo precificado — assimetria favorável se a empresa crescer acima disso."
+                    cor_int = "bull"
+                elif g_implicito_pct <= 20:
+                    interpretacao = "crescimento moderado a alto precificado — valuation justo se tese de crescimento se confirmar."
+                    cor_int = "amber"
+                else:
+                    interpretacao = "crescimento muito alto precificado — risco elevado de decepção. exige execução perfeita."
+                    cor_int = "bear"
+
+                status_card("interpretação do valuation", interpretacao, cor_int)
+
+                section_title("🗺️ mapa de sensibilidade — preço justo estimado por cenário")
+
+                cenarios_g = [-5, 0, 5, 8, 10, 12, 15, 20, 25]
+                cenarios_wacc = [round(wacc_pct - 2, 1), wacc_pct, round(wacc_pct + 2, 1)]
+
+                dados_sens = []
+                for wacc_c in cenarios_wacc:
+                    linha = {}
+                    w_c_dec = wacc_c / 100
+                    for g_c in cenarios_g:
+                        g_c_dec = g_c / 100
+                        try:
+                            if w_c_dec <= g_terminal:
+                                linha[f"g={g_c}%"] = "—"
+                            else:
+                                vp_soma = sum(eps_input * (1 + g_c_dec)**t / (1 + w_c_dec)**t for t in range(1, n_anos + 1))
+                                vp_term = (eps_input * (1 + g_c_dec)**n_anos * (1 + g_terminal)) / (w_c_dec - g_terminal) / ((1 + w_c_dec)**n_anos)
+                                linha[f"g={g_c}%"] = round(vp_soma + vp_term, 2)
+                        except Exception:
+                            linha[f"g={g_c}%"] = "—"
+                    dados_sens.append(linha)
+
+                df_sens = pd.DataFrame(dados_sens, index=[f"wacc {w}%" for w in cenarios_wacc])
+
+                _mn_s = 'var(--font-mono,monospace)'
+                _g_cols = [f"g={g}%" for g in cenarios_g]
+                _hdrs_s = '<th style="padding:7px 10px;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);">wacc \\ g</th>'
+                _hdrs_s += "".join(
+                    f'<th style="padding:7px 10px;text-align:right;font-size:0.67rem;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border-subtle);white-space:nowrap;">{c}</th>'
+                    for c in _g_cols
+                )
+                _rows_s = ""
+                for idx_row, w_label in enumerate(df_sens.index):
+                    _is_main = (w_label == f"wacc {wacc_pct}%")
+                    _row_style = "background:rgba(99,179,237,0.08);" if _is_main else ""
+                    _cells_s = f'<td style="padding:7px 10px;font-family:{_mn_s};font-size:0.78rem;font-weight:{"700" if _is_main else "400"};color:var(--text-muted);white-space:nowrap;">{w_label}</td>'
+                    for gc in _g_cols:
+                        _v = df_sens.loc[w_label, gc]
+                        if _v == "—" or not isinstance(_v, (int, float)):
+                            _cells_s += f'<td style="padding:7px 10px;text-align:right;color:var(--text-muted);font-size:0.8rem;">—</td>'
+                        else:
+                            _is_cheap = _v > preco_input
+                            _bg = "background:rgba(46,204,113,0.15);" if _is_cheap else ""
+                            _cv = "#2ecc71" if _is_cheap else "var(--text-primary)"
+                            _cells_s += (f'<td style="padding:7px 10px;text-align:right;font-family:{_mn_s};font-size:0.8rem;color:{_cv};{_bg}">'
+                                         f'{moeda.upper()} {_v:,.2f}</td>')
+                    _rows_s += f'<tr style="border-bottom:1px solid var(--border-subtle);{_row_style}">{_cells_s}</tr>'
+                st.markdown(
+                    f'<div style="overflow-x:auto;">'
+                    f'<table style="width:100%;border-collapse:collapse;font-family:var(--font-ui,sans-serif);background:var(--bg-surface);">'
+                    f'<thead><tr>{_hdrs_s}</tr></thead><tbody>{_rows_s}</tbody></table></div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"valores em {moeda.upper()} | célula verde = subvalorizado vs preço atual de {preco_input} | linha destacada = wacc configurado acima.")
+
+                fig = go.Figure()
+                for i, wacc_c in enumerate(cenarios_wacc):
+                    y_vals = []
+                    for g_c in cenarios_g:
+                        val = df_sens.loc[f"wacc {wacc_c}%", f"g={g_c}%"]
+                        y_vals.append(val if val != "—" else None)
+
+                    fig.add_trace(go.Scatter(x=cenarios_g, y=y_vals, name=f"wacc {wacc_c}%", line=dict(color=CORES_SERIES[i % len(CORES_SERIES)])))
+
+                fig.add_hline(y=preco_input, line_color=_chart_cores()["accent"], line_dash="dash", annotation_text="preço atual")
+                fig.update_layout(**base_layout(height=380, title="preço justo estimado por taxa de crescimento e wacc"))
+                st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
+                st.caption("preço justo estimado para cada combinação de crescimento e wacc. onde a curva cruza o preço atual está o crescimento que o mercado já embute — acima disso o ativo está caro; abaixo, barato.")
+
+                st.markdown("---")
+                if st.button("Ia: interpretar o valuation e gerar tese", type="primary"):
+                    _prompt_dcf = (
+                        f"ativo: {ticker} | setor: {setor}\n\n"
+                        f"modelo dcf reverso:\n"
+                        f"eps: {eps_input:.2f} | wacc: {wacc_pct}% | g terminal: {g_term_pct}% | horizonte: {n_anos} anos\n\n"
+                        f"resultado:\n"
+                        f"crescimento implícito no preço: {g_implicito_pct:.1f}%\n"
+                        f"preço atual: {moeda.upper()} {preco_input:.2f}\n\n"
+                        "responda em 4 tópicos curtos, letra minúscula:\n"
+                        "1. o crescimento implícito é realista para o setor?\n"
+                        "2. comparação com pares do setor se souber.\n"
+                        "3. cenário bull e bear para o preço em 3 anos.\n"
+                        "4. recomendação (comprar / aguardar / evitar) com justificativa."
+                    )
+                    with st.spinner("deepseek analisando o valuation..."):
+                        chamar_ia(
+                            prompt_usuario = _prompt_dcf,
+                            system         = SYSTEM_TESE,
+                            max_tokens     = 800,
+                            temperatura    = 0.3,
+                            stream         = True,
+                            user_settings  = _user_settings,
+                        )
+
+        # ── NOTÍCIAS & SENTIMENTO ────────────────────────────────────────────────
+    if _foco_ia == "Notícias":
+        section_title("📰 notícias & sentimento")
+        st.subheader("sentimento via notícias")
+        try:
+            news = acao_obj.news
+            if news:
+                # yfinance recente aninha os campos em item['content']; versões antigas
+                # os traziam no topo. Trata os dois formatos (igual a 3_Macro).
+                _n_render = 0
+                for item in news:
+                    if _n_render >= 5:
+                        break
+                    dados_n  = item.get('content', item)
+                    titulo_n = dados_n.get('title', dados_n.get('headline', ''))
+                    if not titulo_n:
+                        continue
+                    _pub = dados_n.get('provider', dados_n.get('publisher', 'agência'))
+                    if isinstance(_pub, dict):
+                        _pub = _pub.get('displayName', 'agência')
+                    _uid = item.get('id') or item.get('uuid') or f"news_{_n_render}"
+                    with st.container():
+                        cn1, cn2 = st.columns([4, 1])
+                        cn1.markdown(f"**{titulo_n}**")
+                        cn1.caption(str(_pub or 'agência').lower())
+                        if cn2.button("ia: analisar", key=f"news_ia_{_uid}"):
+                            with st.spinner("ia..."):
+                                _res_news = chamar_ia(
+                                    prompt_usuario=(
+                                        f"ativo: {ticker}\n\n"
+                                        f"manchete: {titulo_n}\n\n"
+                                        "em 1 frase curta com letra minúscula, diga se esta notícia é "
+                                        "positiva, negativa ou neutra para o ativo e por quê."
+                                    ),
+                                    system      = SYSTEM_ANALISTA,
+                                    max_tokens  = 120,
+                                    temperatura = 0.2,
+                                    stream      = False,
+                                    user_settings  = _user_settings,
+                                )
+                                if _res_news:
+                                    st.info(_res_news)
+                        st.markdown("---")
+                    _n_render += 1
+                if _n_render == 0:
+                    st.info("sem notícias no formato esperado.")
+            else:
+                st.info("sem notícias disponíveis.")
+        except Exception as _e_news:
+            logging.getLogger(__name__).warning(f"[research] notícias: {_e_news}")
+            st.info("sem notícias.")
 
 if _secao_r == "🌍 overlay macro":
-    st.subheader("estudo de correlação estrutural (10 anos)")
-    ind_macro = st.selectbox("comparar com:", ["Taxa Selic (Brasil)", "IPCA (Inflação BR)", "Dólar Comercial (BRL=X)", "VIX (Volatilidade Global)"])
+    section_title("Preço × fator macro")
+    _mc1, _mc2, _mc3 = st.columns([2.5, 1.5, 1.5])
+    ind_macro = _mc1.selectbox("Fator macro", ["Taxa Selic (Brasil)", "IPCA (Inflação BR)", "Dólar Comercial (BRL=X)", "VIX (Volatilidade Global)"])
+    _periodo_overlay = _mc2.selectbox("Período", ["3 meses", "6 meses", "1 ano", "3 anos", "5 anos", "10 anos"], index=2, key="research_macro_periodo")
+    _escala_overlay = _mc3.selectbox("Preço do ativo", ["Original", "Base 100"], key="research_macro_escala")
     inicio_macro = (datetime.datetime.now() - datetime.timedelta(days=365*10)).strftime('%Y-%m-%d')
     try:
         m_data = None
@@ -3163,17 +3261,24 @@ if _secao_r == "🌍 overlay macro":
             m_name = "usd/brl"
         elif "VIX" in ind_macro and "FRED_API_KEY" in st.secrets:
             m_data, m_name = Fred(api_key=st.secrets["FRED_API_KEY"]).get_series('VIXCLS', observation_start=inicio_macro), "vix index"
-            
+
         if m_data is not None and not m_data.empty:
             m_data.index = pd.to_datetime(m_data.index).tz_localize(None)
             stk_p = df_hist['Close'].copy()
             stk_p.index = pd.to_datetime(stk_p.index).tz_localize(None)
+            stk_p = _recorte_temporal(stk_p, _periodo_overlay)
+            m_data = m_data.loc[m_data.index >= stk_p.index.min()]
+            if _escala_overlay == "Base 100" and not stk_p.empty and stk_p.iloc[0] > 0:
+                stk_p = stk_p / stk_p.iloc[0] * 100
             fig_macro = make_subplots(specs=[[{"secondary_y": True}]])
             fig_macro.add_trace(go.Scatter(x=stk_p.index, y=stk_p, name=ticker.lower(), line=dict(color=_chart_cores()["accent"])), secondary_y=False)
-            fig_macro.add_trace(go.Scatter(x=m_data.index, y=m_data, name=m_name, line=dict(color="#00B0FF", dash="dot")), secondary_y=True)
+            fig_macro.add_trace(go.Scatter(x=m_data.index, y=m_data, name=m_name, line=dict(color=_chart_cores()["info"], dash="dot")), secondary_y=True)
             fig_macro.update_layout(**base_layout(height=450, title=f"{ticker.lower()} vs {ind_macro.lower()}"))
             st.plotly_chart(fig_macro, use_container_width=True, config={'responsive': True})
-            st.caption("sobrepõe o preço do ativo (eixo esq.) à série macro (eixo dir.). movimentos espelhados ou opostos revelam a sensibilidade do ativo àquele fator (juros, câmbio, inflação).")
-    except: st.warning("Erro overlay.")
+            st.caption("Preço/base 100 no eixo esquerdo e fator macro no eixo direito. Passe o cursor para alinhar as leituras. As escalas são independentes; esta visualização não calcula correlação estatística.")
+        else:
+            st.info("Série macro indisponível para o fator escolhido. Experimente outro fator.")
+    except Exception:
+        st.warning("Não foi possível carregar o overlay. Experimente outro fator macro.")
 
 # Fim da página

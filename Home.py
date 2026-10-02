@@ -32,7 +32,7 @@ from utils.earnings_scraper import buscar_resultados
 from utils.tickers import mapear_ticker_base, normalizar_mercado
 
 from utils.components import (
-    page_header, section_title, metric_card,
+    page_header, section_title, section_selector, metric_card,
     watchlist_card, watchlist_row, watchlist_header_row,
     empty_state, progress_steps,
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
@@ -1673,7 +1673,8 @@ else:
                     live_data[t] = {
                         'preco': float(pc.get('preco', 0) or 0),
                         'var_1d': float(pc.get('var_1d', 0) or 0),
-                        'var_1m': float(pc.get('var_1m', 0) or 0),
+                        'var_1m': float(pc['var_1m']) if pc.get('var_1m') is not None else None,
+                        'serie_30d': pc.get('serie_30d'),
                     }
                     fonte_wl[t] = "cache"
         except Exception:
@@ -1696,28 +1697,28 @@ else:
                         hist = data.get('Close', data)
                 else:
                     hist = pd.DataFrame()
-                    if isinstance(hist, pd.Series):
-                        hist = hist.to_frame(name=tickers_base[0])
-                    hist = hist.ffill()
+                if isinstance(hist, pd.Series):
+                    hist = hist.to_frame(name=tickers_base[0])
+                hist = hist.ffill()
 
-                    for t in missing:
-                        t_base = mapear_ticker_base(t)
-                        try:
-                            if t_base in hist.columns:
-                                s = hist[t_base].dropna()
-                                if len(s) >= 2:
-                                    p_atual = float(s.iloc[-1])
-                                    p_ontem = float(s.iloc[-2])
-                                    p_1m = float(s.iloc[0])
-                                    live_data[t] = {
-                                        'preco':  p_atual,
-                                        'var_1d': ((p_atual/p_ontem)-1)*100,
-                                        'var_1m': ((p_atual/p_1m)-1)*100,
-                                        'serie_30d': [float(x) for x in s.tail(30).tolist()],
-                                    }
-                                    fonte_wl[t] = "api"
-                        except Exception:
-                            pass
+                for t in missing:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        if t_base in hist.columns:
+                            s = hist[t_base].dropna()
+                            if len(s) >= 2:
+                                p_atual = float(s.iloc[-1])
+                                p_ontem = float(s.iloc[-2])
+                                p_1m = float(s.iloc[0])
+                                live_data[t] = {
+                                    'preco':  p_atual,
+                                    'var_1d': ((p_atual/p_ontem)-1)*100,
+                                    'var_1m': ((p_atual/p_1m)-1)*100,
+                                    'serie_30d': [float(x) for x in s.tail(30).tolist()],
+                                }
+                                fonte_wl[t] = "api"
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -2076,139 +2077,144 @@ else:
         },
     ])
 
-    # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
-    mercados_dict = {}
-    for item in watchlist_filtrada:
-        m = normalizar_mercado(item.get('mercado'))
-        mercados_dict.setdefault(m, []).append(item)
+    _wl_view = section_selector(["Lista", "Mapa", "Comparar"], key="wl_analysis_view", label="Visualização da watchlist")
+    if _wl_view != "Lista":
+        from utils.market_explorer import render_market_explorer
+        render_market_explorer(watchlist_filtrada, live_data, health_data, _wl_view, watchlist_id_ativo)
+    else:
+        # ── LISTA DENSA (usa watchlist_filtrada) ─────────────────────────────────
+        mercados_dict = {}
+        for item in watchlist_filtrada:
+            m = normalizar_mercado(item.get('mercado'))
+            mercados_dict.setdefault(m, []).append(item)
 
-    if not mercados_dict:
-        empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
-                    "nenhum ativo encontrado para este filtro. edite as tags acima.")
+        if not mercados_dict:
+            empty_state("🔍", f"sem ativos com tag '{tag_filtro}'",
+                        "nenhum ativo encontrado para este filtro. edite as tags acima.")
 
-    # Acumula dialogs pendentes — cada @st.dialog só pode ser chamado 1x por render
-    _selection_mode = st.toggle("Selecionar ativos para remoção em lote", key="wl_selection_mode")
-    if not _selection_mode:
-        st.session_state['del_selecionados'] = []
+        # Acumula dialogs pendentes — cada @st.dialog só pode ser chamado 1x por render
+        _selection_mode = st.toggle("Selecionar ativos para remoção em lote", key="wl_selection_mode")
+        if not _selection_mode:
+            st.session_state['del_selecionados'] = []
 
-    _memorial_pendente = None
-    _remover_pendente  = None   # (ticker, watchlist_id) para o dialog de remoção
+        _memorial_pendente = None
+        _remover_pendente  = None   # (ticker, watchlist_id) para o dialog de remoção
 
-    for mercado, ativos in mercados_dict.items():
-        # Header bonito do grupo de mercado (Zona 2)
-        _mkt_label = {
-            "brasil":       "🇧🇷 brasil",
-            "eua":          "🇺🇸 estados unidos",
-            "criptomoedas": "₿ criptomoedas",
-        }.get(mercado, mercado)
-        _mkt_tone = {
-            "brasil":       "bull",
-            "eua":          "info",
-            "criptomoedas": "accent",
-        }.get(mercado, "muted")
-        mercado_group_header(_mkt_label, len(ativos), tone=_mkt_tone)
+        for mercado, ativos in mercados_dict.items():
+            # Header bonito do grupo de mercado (Zona 2)
+            _mkt_label = {
+                "brasil":       "🇧🇷 brasil",
+                "eua":          "🇺🇸 estados unidos",
+                "criptomoedas": "₿ criptomoedas",
+            }.get(mercado, mercado)
+            _mkt_tone = {
+                "brasil":       "bull",
+                "eua":          "info",
+                "criptomoedas": "accent",
+            }.get(mercado, "muted")
+            mercado_group_header(_mkt_label, len(ativos), tone=_mkt_tone)
 
-        # Header das colunas (uma vez por grupo)
-        watchlist_header_row()
+            # Header das colunas (uma vez por grupo)
+            watchlist_header_row()
 
-        for item in ativos:
-            t      = item['ticker']
-            t_base = mapear_ticker_base(t)
-            d      = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
-            h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas":[],"breakdown":{}}'})
+            for item in ativos:
+                t      = item['ticker']
+                t_base = mapear_ticker_base(t)
+                d      = live_data.get(t, {'preco': 0.0, 'var_1d': 0.0, 'var_1m': 0.0})
+                h_info = health_data.get(t_base, {'score': 50, 'alertas_venda': '{"alertas":[],"breakdown":{}}'})
 
-            # Decodificação robusta
-            try:
-                raw_data    = h_info['alertas_venda']
-                parsed_data = json.loads(raw_data)
-                if isinstance(parsed_data, str):
-                    parsed_data = json.loads(parsed_data)
-                if isinstance(parsed_data, dict):
-                    lista_alertas = parsed_data.get('alertas', [])
-                    breakdown     = parsed_data.get('breakdown', {})
-                else:
-                    lista_alertas = parsed_data if isinstance(parsed_data, list) else []
+                # Decodificação robusta
+                try:
+                    raw_data    = h_info['alertas_venda']
+                    parsed_data = json.loads(raw_data)
+                    if isinstance(parsed_data, str):
+                        parsed_data = json.loads(parsed_data)
+                    if isinstance(parsed_data, dict):
+                        lista_alertas = parsed_data.get('alertas', [])
+                        breakdown     = parsed_data.get('breakdown', {})
+                    else:
+                        lista_alertas = parsed_data if isinstance(parsed_data, list) else []
+                        breakdown     = {}
+                except Exception:
+                    lista_alertas = []
                     breakdown     = {}
-            except Exception:
-                lista_alertas = []
-                breakdown     = {}
 
-            # Seleção em lote é ativada explicitamente; leitura fica livre de checkboxes.
-            if st.session_state.get("wl_selection_mode", False):
-                _col_chk, _col_row = st.columns([.5, 11.5])
-                with _col_chk:
-                    _selecionado = st.checkbox(f"Selecionar {t.replace('.SA', '')}", key=f"chk_del_{t}", label_visibility="collapsed")
-                _del_list = st.session_state.setdefault('del_selecionados', [])
-                if _selecionado and t not in _del_list:
-                    _del_list.append(t)
-                elif not _selecionado and t in _del_list:
-                    _del_list.remove(t)
-            else:
-                _col_row = st.container()
+                # Seleção em lote é ativada explicitamente; leitura fica livre de checkboxes.
+                if st.session_state.get("wl_selection_mode", False):
+                    _col_chk, _col_row = st.columns([.5, 11.5])
+                    with _col_chk:
+                        _selecionado = st.checkbox(f"Selecionar {t.replace('.SA', '')}", key=f"chk_del_{t}", label_visibility="collapsed")
+                    _del_list = st.session_state.setdefault('del_selecionados', [])
+                    if _selecionado and t not in _del_list:
+                        _del_list.append(t)
+                    elif not _selecionado and t in _del_list:
+                        _del_list.remove(t)
+                else:
+                    _col_row = st.container()
 
-            with _col_row:
-                watchlist_row(
-                    ticker        = t,
-                    nome          = item.get('nome', t),
-                    preco         = d.get('preco', 0.0),
-                    var_1d        = d.get('var_1d', 0.0),
-                    var_1m        = d.get('var_1m', 0.0),
-                    moeda         = "R$" if t_base.endswith(".SA") else "$",
-                    health_score  = h_info.get('score'),
-                    alertas       = lista_alertas,
-                    earnings_info = _earnings_info_map.get(t_base),
-                    data_source   = fonte_wl.get(t, ''),
-                    serie_30d     = d.get('serie_30d'),
+                with _col_row:
+                    watchlist_row(
+                        ticker        = t,
+                        nome          = item.get('nome', t),
+                        preco         = d.get('preco', 0.0),
+                        var_1d        = d.get('var_1d', 0.0),
+                        var_1m        = d.get('var_1m', 0.0),
+                        moeda         = "R$" if t_base.endswith(".SA") else "$",
+                        health_score  = h_info.get('score'),
+                        alertas       = lista_alertas,
+                        earnings_info = _earnings_info_map.get(t_base),
+                        data_source   = fonte_wl.get(t, ''),
+                        serie_30d     = d.get('serie_30d'),
+                    )
+
+                # Coleta remoção pendente (dialog chamado fora do loop)
+                if st.session_state.pop(f"confirm_del_{t}", False):
+                    _remover_pendente = (t, watchlist_id_ativo)
+
+                # Marca memorial pendente (chamada real acontece fora do loop)
+                if st.session_state.pop(f"show_memorial_{t}", False):
+                    _memorial_pendente = (t, h_info.get('score', 0), breakdown, lista_alertas)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+        # Dialogs chamados uma única vez fora do loop (evita DuplicateElementId)
+        if _remover_pendente:
+            _dialog_remover_ativo(*_remover_pendente)
+        if _memorial_pendente:
+            exibir_memorial(*_memorial_pendente)
+
+        # ── Barra de deleção múltipla (design system) ──────────────────────────
+        _del_selecionados = st.session_state.get('del_selecionados', [])
+        if _del_selecionados:
+            _n_del = len(_del_selecionados)
+            _labels = ', '.join(t.replace('.SA', '') for t in _del_selecionados[:5])
+            if _n_del > 5:
+                _labels += f' +{_n_del - 5}'
+
+            _cb1, _cb2 = st.columns([3, 1])
+            with _cb1:
+                info_box(
+                    tipo   = "bear",
+                    titulo = f"{_n_del} ativo{'s' if _n_del != 1 else ''} selecionado{'s' if _n_del != 1 else ''}",
+                    texto  = _labels,
+                    icone  = "🗑",
                 )
-
-            # Coleta remoção pendente (dialog chamado fora do loop)
-            if st.session_state.pop(f"confirm_del_{t}", False):
-                _remover_pendente = (t, watchlist_id_ativo)
-
-            # Marca memorial pendente (chamada real acontece fora do loop)
-            if st.session_state.pop(f"show_memorial_{t}", False):
-                _memorial_pendente = (t, h_info.get('score', 0), breakdown, lista_alertas)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-    # Dialogs chamados uma única vez fora do loop (evita DuplicateElementId)
-    if _remover_pendente:
-        _dialog_remover_ativo(*_remover_pendente)
-    if _memorial_pendente:
-        exibir_memorial(*_memorial_pendente)
-
-    # ── Barra de deleção múltipla (design system) ──────────────────────────
-    _del_selecionados = st.session_state.get('del_selecionados', [])
-    if _del_selecionados:
-        _n_del = len(_del_selecionados)
-        _labels = ', '.join(t.replace('.SA', '') for t in _del_selecionados[:5])
-        if _n_del > 5:
-            _labels += f' +{_n_del - 5}'
-
-        _cb1, _cb2 = st.columns([3, 1])
-        with _cb1:
-            info_box(
-                tipo   = "bear",
-                titulo = f"{_n_del} ativo{'s' if _n_del != 1 else ''} selecionado{'s' if _n_del != 1 else ''}",
-                texto  = _labels,
-                icone  = "🗑",
-            )
-        with _cb2:
-            _cols_del = st.columns(2)
-            if _cols_del[0].button(
-                f"remover {_n_del}",
-                type="primary",
-                use_container_width=True,
-                key="btn_remover_varios",
-            ):
-                _dialog_remover_varios(tuple(_del_selecionados), watchlist_id_ativo)
-            if _cols_del[1].button(
-                "limpar",
-                use_container_width=True,
-                key="btn_limpar_sel",
-            ):
-                st.session_state['del_selecionados'] = []
-                st.rerun(scope="fragment")
+            with _cb2:
+                _cols_del = st.columns(2)
+                if _cols_del[0].button(
+                    f"remover {_n_del}",
+                    type="primary",
+                    use_container_width=True,
+                    key="btn_remover_varios",
+                ):
+                    _dialog_remover_varios(tuple(_del_selecionados), watchlist_id_ativo)
+                if _cols_del[1].button(
+                    "limpar",
+                    use_container_width=True,
+                    key="btn_limpar_sel",
+                ):
+                    st.session_state['del_selecionados'] = []
+                    st.rerun(scope="fragment")
 
 # ==========================================
 # RELATÓRIO SEMANAL

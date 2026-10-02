@@ -27,7 +27,7 @@ from utils.components import (
 from utils.ai_client import chamar_ia, SYSTEM_MACRO
 from utils.fmp_client import get_earnings_calendar as _fmp_earnings_calendar
 from utils.formatters import fmt_preco, fmt_pct, fmt_numero
-from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores
+from utils.charts import base_layout, chart_type_toggle, _cores as _chart_cores, _font_family_ui
 from utils.macro_context import garantir_macro_context
 # Regime consolidado via macro_state.get_macro_state (substitui o uso direto de
 # macro_regime/regime_classifier no hero — agora há uma leitura única).
@@ -58,93 +58,94 @@ topbar(
     user_name=_user_top_macro.get('username', '') or _user_top_macro.get('nome', '') or 'usuário',
     sync_label="Dados em cache",
 )
-page_header("Cenário macro", "Entenda o ciclo econômico e o contexto por trás das suas decisões.")
+page_header("Cenário macro", "Juros, inflação, atividade e risco — explore séries, regimes e relações entre ativos.")
 
 _SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
                  "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
 _secao = section_selector(_SECOES_MACRO, key="macro_secao")
 
 
-# Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
-try:
-    from utils.macro_state import render_cockpit_macro
-    render_cockpit_macro("BR")
-except Exception:
-    pass
+with st.expander("Contexto macro · regime, ciclos e juro real", expanded=False):
+    # Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
+    try:
+        from utils.macro_state import render_cockpit_macro
+        render_cockpit_macro("BR")
+    except Exception:
+        pass
 
-if "FRED_API_KEY" not in st.secrets:
-    info_box(
-        tipo   = "amber",
-        titulo = "aviso de arquitetura",
-        texto  = "chave da api do FRED não foi encontrada em secrets.toml. sem ela, dados dos EUA e risco global ficarão indisponíveis.",
-        icone  = "⚠",
-    )
+    if "FRED_API_KEY" not in st.secrets:
+        info_box(
+            tipo   = "amber",
+            titulo = "Dados dos EUA indisponíveis",
+            texto  = "chave da api do FRED não foi encontrada em secrets.toml. sem ela, dados dos EUA e risco global ficarão indisponíveis.",
+            icone  = "⚠",
+        )
 
-# ── Regime Macro — leitura CONSOLIDADA (fonte única: macro_state) ────────────
-# Antes havia 3 leituras concorrentes do regime (este hero + aba ciclo + setores
-# do macro_regime). Agora o hero é a síntese dos 3 motores via macro_state, com
-# o campo de CONSENSO. A aba ciclo continua como o deep-dive detalhado.
-section_title("regime macro — leitura consolidada (3 motores)")
+    # ── Regime Macro — leitura CONSOLIDADA (fonte única: macro_state) ────────────
+    # Antes havia 3 leituras concorrentes do regime (este hero + aba ciclo + setores
+    # do macro_regime). Agora o hero é a síntese dos 3 motores via macro_state, com
+    # o campo de CONSENSO. A aba ciclo continua como o deep-dive detalhado.
+    section_title("Regime consolidado")
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _macro_state_cached():
-    """
-    Estado macro CANÔNICO consolidando os 3 motores de regime: selic×vix
-    (macro_regime), curva/vix/cpi/momentum (regime_classifier) e leading
-    indicators BR/US (ciclo_economico) — com campo de consenso. Cache 1h:
-    faz várias chamadas yfinance (compartilhadas via close_series).
-    """
-    from utils.macro_state import get_macro_state
-    return get_macro_state()
-
-
-def _fase_tom(fase: str) -> str:
-    return {"expansao": "bull", "vale": "bull",
-            "pico": "amber", "contracao": "bear"}.get(fase, "amber")
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _macro_state_cached():
+        """
+        Estado macro CANÔNICO consolidando os 3 motores de regime: selic×vix
+        (macro_regime), curva/vix/cpi/momentum (regime_classifier) e leading
+        indicators BR/US (ciclo_economico) — com campo de consenso. Cache 1h:
+        faz várias chamadas yfinance (compartilhadas via close_series).
+        """
+        from utils.macro_state import get_macro_state
+        return get_macro_state()
 
 
-try:
-    _ms = _macro_state_cached()
-    _tom_regime = {
-        "alinhado_risk_on":  "bull",
-        "alinhado_risk_off": "bear",
-        "divergente":        "amber",
-    }.get(_ms.consenso, "amber")
+    def _fase_tom(fase: str) -> str:
+        return {"expansao": "bull", "vale": "bull",
+                "pico": "amber", "contracao": "bear"}.get(fase, "amber")
 
-    _sr_tom = "bear" if _ms.selic_real > 7 else ("amber" if _ms.selic_real > 4 else "bull")
-    _sinais_lst = [
-        ("ciclo (curva/vix/cpi/mom)", _ms.fase_ciclo, _fase_tom(_ms.fase_ciclo), f"{int(_ms.fase_prob*100)}%"),
-        ("ciclo br (leading)",        _ms.fase_br,    _fase_tom(_ms.fase_br),    "🇧🇷"),
-        ("ciclo us (leading)",        _ms.fase_us,    _fase_tom(_ms.fase_us),    "🇺🇸"),
-        ("regime juro×risco",         _ms.regime_label, _tom_regime,            f"{_ms.score_ambiente}/100"),
-        ("juro real (fisher)",        f"{_ms.selic_real:+.1f}%", _sr_tom,        "selic"),
-    ]
-    if _ms.curve_slope_10y_2y is not None:
-        _cs_tom = "bear" if _ms.curve_slope_10y_2y < 0 else "bull"
-        _sinais_lst.append(("curva us 10y-2y", f"{_ms.curve_slope_10y_2y:+.2f}pp", _cs_tom, "slope"))
 
-    hero_macro(
-        score     = int(_ms.fase_prob * 100),
-        label     = f"{_ms.fase_ciclo.upper()} · {_ms.regime_label}",
-        descricao = _ms.consenso_nota,
-        tom       = _tom_regime,
-        sinais    = _sinais_lst,
-    )
-except Exception as e:
-    info_box(
-        tipo   = "amber",
-        titulo = "leitura de regime indisponível",
-        texto  = str(e),
-        icone  = "⚠",
-    )
+    try:
+        _ms = _macro_state_cached()
+        _tom_regime = {
+            "alinhado_risk_on":  "bull",
+            "alinhado_risk_off": "bear",
+            "divergente":        "amber",
+        }.get(_ms.consenso, "amber")
 
-# Handoff do funil: do REGIME para a ROTAÇÃO SETORIAL (próximo passo do analista —
-# "onde olhar" dado o regime). Torna a navegação macro → discovery explícita.
-try:
-    st.page_link("pages/2_Discovery.py",
-                 label="🗺️ rastrear os setores favorecidos por este regime na Discovery →")
-except Exception:
-    pass
+        _sr_tom = "bear" if _ms.selic_real > 7 else ("amber" if _ms.selic_real > 4 else "bull")
+        _sinais_lst = [
+            ("ciclo (curva/vix/cpi/mom)", _ms.fase_ciclo, _fase_tom(_ms.fase_ciclo), f"{int(_ms.fase_prob*100)}%"),
+            ("ciclo br (leading)",        _ms.fase_br,    _fase_tom(_ms.fase_br),    "🇧🇷"),
+            ("ciclo us (leading)",        _ms.fase_us,    _fase_tom(_ms.fase_us),    "🇺🇸"),
+            ("regime juro×risco",         _ms.regime_label, _tom_regime,            f"{_ms.score_ambiente}/100"),
+            ("juro real (fisher)",        f"{_ms.selic_real:+.1f}%", _sr_tom,        "selic"),
+        ]
+        if _ms.curve_slope_10y_2y is not None:
+            _cs_tom = "bear" if _ms.curve_slope_10y_2y < 0 else "bull"
+            _sinais_lst.append(("curva us 10y-2y", f"{_ms.curve_slope_10y_2y:+.2f}pp", _cs_tom, "slope"))
+
+        hero_macro(
+            score     = int(_ms.fase_prob * 100),
+            label     = f"{_ms.fase_ciclo.upper()} · {_ms.regime_label}",
+            descricao = _ms.consenso_nota,
+            tom       = _tom_regime,
+            sinais    = _sinais_lst,
+        )
+    except Exception as e:
+        info_box(
+            tipo   = "amber",
+            titulo = "leitura de regime indisponível",
+            texto  = str(e),
+            icone  = "⚠",
+        )
+
+    # Handoff do funil: do REGIME para a ROTAÇÃO SETORIAL (próximo passo do analista —
+    # "onde olhar" dado o regime). Torna a navegação macro → discovery explícita.
+    try:
+        st.page_link("pages/2_Discovery.py",
+                     label="Explorar rotação setorial")
+    except Exception:
+        pass
 
 # ==========================================
 # funções globais de cache e apoio
@@ -1180,18 +1181,25 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
 
 
 if _secao == "🌐 painel global":
+    aba_sel = section_selector(
+        ["🇧🇷 brasil", "🇺🇸 estados unidos", "🌍 europa/ásia", "🌐 risco", "🛢️ commodities", "📰 macro news"],
+        key="macro_mercado", label="Mercado",
+    )
     auto_refresh_indicator(1440) # atualizado diariamente pelo cache
     
     with st.spinner("sincronizando feed de bancos centrais e mídia global via apis oficiais..."):
         df_br_master, df_global_master, df_comm_master = puxar_historico_mestre()
         
-        col_espaco, col_btn, col_filtro = st.columns([5, 2, 3])
+        col_filtro, col_btn = st.columns([4, 1])
         with col_btn:
             if st.button("Recarregar dados", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
         with col_filtro:
-            janela = st.radio("horizonte de tempo:", ["3 anos", "5 anos", "10 anos"], index=1, horizontal=True, label_visibility="collapsed")
+            janela = section_selector(
+                ["1 ano", "3 anos", "5 anos", "10 anos"], key="macro_horizonte",
+                default="5 anos", label="Histórico",
+            )
             
         anos_filtro = int(janela.split()[0])
         data_corte = datetime.datetime.today() - datetime.timedelta(days=365 * anos_filtro)
@@ -1269,35 +1277,32 @@ if _secao == "🌐 painel global":
                 "label":        _regime_label,
             }
 
-        section_title("leitura macroeconômica (ai synthesis)")
-        if st.button("Gerar relatório do cenário atual >>", type="primary"):
-            with st.spinner("processando vetores de juros, inflação e risco global..."):
-                _prompt_macro = (
-                    "dados macroeconômicos atuais:\n"
-                    f"brasil — selic: {valor_atual_seguro(df_br, 'Selic') or 0:.2f}%, "
-                    f"ipca: {valor_atual_seguro(df_br, 'IPCA') or 0:.2f}%\n"
-                    f"eua — fed funds: {valor_atual_seguro(df_global, 'FEDFUNDS') or 0:.2f}%, "
-                    f"cpi m/m: {valor_atual_seguro(df_global, 'CPI_MoM') or 0:.2f}%\n"
-                    f"europa — bce: {valor_atual_seguro(df_global, 'ECBDFR') or 0:.2f}%\n"
-                    f"risco global — vix: {valor_atual_seguro(df_global, 'VIXCLS') or 0:.2f}\n\n"
-                    "escreva 3 bullet points curtos em português, letra minúscula:\n"
-                    "1. relação juros brasil x eua e implicação para o câmbio.\n"
-                    "2. temperatura inflacionária global.\n"
-                    "3. apetite ao risco (vix) e o que isso sinaliza para emergentes."
-                )
-                chamar_ia(
-                    prompt_usuario = _prompt_macro,
-                    system         = SYSTEM_MACRO,
-                    max_tokens     = 400,
-                    temperatura    = 0.3,
-                    stream         = True,
-                )
+        with st.expander("Síntese do cenário com IA", expanded=False):
+            section_title("Síntese do cenário")
+            if st.button("Gerar síntese macro", type="primary"):
+                with st.spinner("processando vetores de juros, inflação e risco global..."):
+                    _prompt_macro = (
+                        "dados macroeconômicos atuais:\n"
+                        f"brasil — selic: {valor_atual_seguro(df_br, 'Selic') or 0:.2f}%, "
+                        f"ipca: {valor_atual_seguro(df_br, 'IPCA') or 0:.2f}%\n"
+                        f"eua — fed funds: {valor_atual_seguro(df_global, 'FEDFUNDS') or 0:.2f}%, "
+                        f"cpi m/m: {valor_atual_seguro(df_global, 'CPI_MoM') or 0:.2f}%\n"
+                        f"europa — bce: {valor_atual_seguro(df_global, 'ECBDFR') or 0:.2f}%\n"
+                        f"risco global — vix: {valor_atual_seguro(df_global, 'VIXCLS') or 0:.2f}\n\n"
+                        "escreva 3 bullet points curtos em português, letra minúscula:\n"
+                        "1. relação juros brasil x eua e implicação para o câmbio.\n"
+                        "2. temperatura inflacionária global.\n"
+                        "3. apetite ao risco (vix) e o que isso sinaliza para emergentes."
+                    )
+                    chamar_ia(
+                        prompt_usuario = _prompt_macro,
+                        system         = SYSTEM_MACRO,
+                        max_tokens     = 400,
+                        temperatura    = 0.3,
+                        stream         = True,
+                    )
         
-        st.markdown("---")
-        
-        aba_sel = st.radio("selecione o mercado:", ["🇧🇷 brasil", "🇺🇸 estados unidos", "🌍 europa/ásia", "🌐 risco", "🛢️ commodities", "📰 macro news"], horizontal=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        
+
         if aba_sel == "🇧🇷 brasil":
             _macro_tipo = chart_type_toggle(key="macro_br", default="linha")
             c1, c2, c3, c4 = st.columns(4)
@@ -1797,7 +1802,7 @@ if _secao == "🌐 painel global":
                 fig_divida.add_hline(
                     y=60, line_color=_cc_div["amber"], line_dash="dash", line_width=1,
                     annotation_text="limite prudencial 60% pib",
-                    annotation_font=dict(color=_cc_div["amber"], size=10, family="Inter, system-ui, sans-serif"),
+                    annotation_font=dict(color=_cc_div["amber"], size=10, family=_font_family_ui()),
                 )
                 st.plotly_chart(fig_divida, use_container_width=True, config={'responsive': True})
                 st.caption("dívida bruta do governo geral (% do pib). acima de ~80% e subindo eleva o prêmio de risco brasil, pressiona câmbio e juros longos. a tracejada marca o limite prudencial.")
@@ -2714,7 +2719,7 @@ if _secao == "🌐 painel global":
             _cc_t10 = _chart_cores()
             fig_t10 = criar_grafico_macro(df_global, 'T10Y2Y', "spread 10y-2y (%)", _cc_t10["info"])
             fig_t10.add_hline(y=0, line_color=_cc_t10["bear"], line_dash="dash", line_width=1)
-            fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color=_cc_t10["bear"], size=10, family="Inter, system-ui, sans-serif"), showarrow=False, yshift=-14)
+            fig_t10.add_annotation(x=0.01, y=0, xref="paper", text="zona de inversão", font=dict(color=_cc_t10["bear"], size=10, family=_font_family_ui()), showarrow=False, yshift=-14)
             st.plotly_chart(fig_t10, use_container_width=True, config={'responsive': True})
             st.caption(
                 "spread 10y−2y (fred: t10y2y): diferença entre o rendimento do treasury 10 anos e o de "
@@ -3246,296 +3251,313 @@ if _secao == "🔄 ciclo econômico":
     _dados_fase_br = FASES_CICLO.get(_fase_br, FASES_CICLO['expansao'])
     _dados_fase_us = FASES_CICLO.get(_fase_us, FASES_CICLO['expansao'])
 
-    # ── Cards de fase BR e EUA ────────────────────────────────────────
-    _cc1, _cc2 = st.columns(2)
+    _ciclo_visao = section_selector(
+        ["Diagnóstico", "Indicadores", "Setores e alocação"], key="macro_ciclo_visao", label="Detalhe do ciclo",
+    )
+    _ind_br = _ciclo_br.get('indicadores', {})
+    _ind_us = _ciclo_us.get('indicadores', {})
+    _alertas_todos = _ciclo_br.get('alertas', []) + _ciclo_us.get('alertas', [])
+    _alloc = get_alocacao_sugerida(_fase_br, _fase_us)
+    if _ciclo_visao != "Diagnóstico":
+        _c_br, _c_us = st.columns(2)
+        with _c_br:
+            metric_card("Ciclo Brasil", _dados_fase_br['label'], f"Confiança {_ciclo_br.get('confianca', 0):.0f}%", "info")
+        with _c_us:
+            metric_card("Ciclo EUA", _dados_fase_us['label'], f"Confiança {_ciclo_us.get('confianca', 0):.0f}%", "info")
 
-    for _col_c, _dados_f, _ciclo, _pais in [
-        (_cc1, _dados_fase_br, _ciclo_br, "🇧🇷 brasil"),
-        (_cc2, _dados_fase_us, _ciclo_us, "🇺🇸 eua"),
-    ]:
-        with _col_c:
-            _cor_f    = _dados_f['cor']
-            _conf     = _ciclo.get('confianca', 0)
-            _n_ind    = _ciclo.get('n_indicadores', 0)
+    if _ciclo_visao == "Diagnóstico":
+        # ── Cards de fase BR e EUA ────────────────────────────────────────
+        _cc1, _cc2 = st.columns(2)
 
-            st.markdown(
-                f'<div style="background:var(--bg-surface);'
-                f'border:1px solid var(--border-subtle);'
-                f'border-top:3px solid {_cor_f};'
-                f'border-radius:6px;padding:16px;'
-                f'margin-bottom:12px;">'
+        for _col_c, _dados_f, _ciclo, _pais in [
+            (_cc1, _dados_fase_br, _ciclo_br, "🇧🇷 brasil"),
+            (_cc2, _dados_fase_us, _ciclo_us, "🇺🇸 eua"),
+        ]:
+            with _col_c:
+                _cor_f    = _dados_f['cor']
+                _conf     = _ciclo.get('confianca', 0)
+                _n_ind    = _ciclo.get('n_indicadores', 0)
 
-                f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.78rem;color:var(--text-muted);'
-                f'text-transform:uppercase;'
-                f'margin-bottom:4px;">'
-                f'{_pais} — fase do ciclo</div>'
-
-                f'<div style="font-size:1.5rem;'
-                f'margin-bottom:4px;">'
-                f'{_dados_f["icone"]}</div>'
-
-                f'<div style="font-family:var(--font-data,monospace);'
-                f'font-size:1rem;font-weight:700;'
-                f'color:{_cor_f};margin-bottom:6px;">'
-                f'{_dados_f["label"].upper()}</div>'
-
-                f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.78rem;color:var(--text-muted);'
-                f'line-height:1.6;margin-bottom:10px;">'
-                f'{_dados_f["descricao"]}</div>'
-
-                f'<div style="display:flex;gap:16px;'
-                f'border-top:1px solid var(--border-subtle);'
-                f'padding-top:8px;">'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.78rem;color:var(--text-muted);'
-                f'text-transform:uppercase;">confiança</div>'
-                f'<div style="font-family:var(--font-data,monospace);'
-                f'color:{_cor_f};font-weight:600;">'
-                f'{_conf:.0f}pp</div>'
-                f'</div>'
-
-                f'<div style="text-align:center;">'
-                f'<div style="font-size:0.78rem;color:var(--text-muted);'
-                f'text-transform:uppercase;">indicadores</div>'
-                f'<div style="font-family:var(--font-data,monospace);'
-                f'color:var(--text-secondary);">{_n_ind} usados</div>'
-                f'</div>'
-
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            _fase_atual = _ciclo.get('fase_provavel', 'expansao')
-            tooltip(f"ciclo_{_fase_atual}")
-
-            # Scores das 4 fases como mini barras
-            section_title("probabilidade por fase")
-            for _fn, _fk in [
-                ("expansão",  "score_expansao"),
-                ("pico",      "score_pico"),
-                ("contração", "score_contracao"),
-                ("vale",      "score_vale"),
-            ]:
-                _sv = _ciclo.get(_fk, 0)
-                _fc = FASES_CICLO.get(
-                    _fk.replace('score_', ''), {}
-                ).get('cor', '#555')
-                _destaque = (
-                    _fn.replace('ã', 'a').replace('ç', 'c')
-                    in _fase_br if _pais == "🇧🇷 brasil"
-                    else _fn.replace('ã', 'a').replace('ç', 'c')
-                    in _fase_us
-                )
                 st.markdown(
-                    f'<div style="display:flex;'
-                    f'align-items:center;gap:8px;'
-                    f'margin-bottom:4px;">'
+                    f'<div style="background:var(--bg-surface);'
+                    f'border:1px solid var(--border-subtle);'
+                    f'border-top:3px solid {_cor_f};'
+                    f'border-radius:6px;padding:16px;'
+                    f'margin-bottom:12px;">'
+
                     f'<div style="font-family:var(--font-ui,sans-serif);'
                     f'font-size:0.78rem;color:var(--text-muted);'
-                    f'min-width:70px;">{_fn}</div>'
-                    f'<div style="flex:1;background:var(--bg-elevated,#111);'
-                    f'border-radius:2px;height:6px;">'
-                    f'<div style="background:{_fc};'
-                    f'border-radius:2px;height:6px;'
-                    f'width:{_sv}%;"></div>'
-                    f'</div>'
+                    f'text-transform:uppercase;'
+                    f'margin-bottom:4px;">'
+                    f'{_pais} — fase do ciclo</div>'
+
+                    f'<div style="font-size:1.5rem;'
+                    f'margin-bottom:4px;">'
+                    f'{_dados_f["icone"]}</div>'
+
                     f'<div style="font-family:var(--font-data,monospace);'
-                    f'font-size:0.78rem;'
-                    f'color:{"var(--accent)" if _destaque else "var(--text-muted)"};'
-                    f'min-width:30px;text-align:right;">'
-                    f'{_sv}%</div>'
+                    f'font-size:1rem;font-weight:700;'
+                    f'color:{_cor_f};margin-bottom:6px;">'
+                    f'{_dados_f["label"].upper()}</div>'
+
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.78rem;color:var(--text-muted);'
+                    f'line-height:1.6;margin-bottom:10px;">'
+                    f'{_dados_f["descricao"]}</div>'
+
+                    f'<div style="display:flex;gap:16px;'
+                    f'border-top:1px solid var(--border-subtle);'
+                    f'padding-top:8px;">'
+
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:0.78rem;color:var(--text-muted);'
+                    f'text-transform:uppercase;">confiança</div>'
+                    f'<div style="font-family:var(--font-data,monospace);'
+                    f'color:{_cor_f};font-weight:600;">'
+                    f'{_conf:.0f}pp</div>'
+                    f'</div>'
+
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:0.78rem;color:var(--text-muted);'
+                    f'text-transform:uppercase;">indicadores</div>'
+                    f'<div style="font-family:var(--font-data,monospace);'
+                    f'color:var(--text-secondary);">{_n_ind} usados</div>'
+                    f'</div>'
+
+                    f'</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-                tooltip(f"ciclo_{_fk.replace('score_', '')}")
+                _fase_atual = _ciclo.get('fase_provavel', 'expansao')
+                tooltip(f"ciclo_{_fase_atual}")
 
-    # ── Alertas dos indicadores ───────────────────────────────────────
-    _alertas_todos = (
-        _ciclo_br.get('alertas', [])
-        + _ciclo_us.get('alertas', [])
-    )
-    if _alertas_todos:
+                # Scores das 4 fases como mini barras
+                section_title("probabilidade por fase")
+                for _fn, _fk in [
+                    ("expansão",  "score_expansao"),
+                    ("pico",      "score_pico"),
+                    ("contração", "score_contracao"),
+                    ("vale",      "score_vale"),
+                ]:
+                    _sv = _ciclo.get(_fk, 0)
+                    _fc = FASES_CICLO.get(
+                        _fk.replace('score_', ''), {}
+                    ).get('cor', '#555')
+                    _destaque = (
+                        _fn.replace('ã', 'a').replace('ç', 'c')
+                        in _fase_br if _pais == "🇧🇷 brasil"
+                        else _fn.replace('ã', 'a').replace('ç', 'c')
+                        in _fase_us
+                    )
+                    st.markdown(
+                        f'<div style="display:flex;'
+                        f'align-items:center;gap:8px;'
+                        f'margin-bottom:4px;">'
+                        f'<div style="font-family:var(--font-ui,sans-serif);'
+                        f'font-size:0.78rem;color:var(--text-muted);'
+                        f'min-width:70px;">{_fn}</div>'
+                        f'<div style="flex:1;background:var(--bg-elevated,#111);'
+                        f'border-radius:2px;height:6px;">'
+                        f'<div style="background:{_fc};'
+                        f'border-radius:2px;height:6px;'
+                        f'width:{_sv}%;"></div>'
+                        f'</div>'
+                        f'<div style="font-family:var(--font-data,monospace);'
+                        f'font-size:0.78rem;'
+                        f'color:{"var(--accent)" if _destaque else "var(--text-muted)"};'
+                        f'min-width:30px;text-align:right;">'
+                        f'{_sv}%</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    tooltip(f"ciclo_{_fk.replace('score_', '')}")
+
+        # ── Alertas dos indicadores ───────────────────────────────────────
+        _alertas_todos = (
+            _ciclo_br.get('alertas', [])
+            + _ciclo_us.get('alertas', [])
+        )
+        if _alertas_todos:
+            st.markdown("<br>", unsafe_allow_html=True)
+            section_title("🚨 sinais dos indicadores")
+            for _al in _alertas_todos:
+                st.markdown(
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.75rem;color:var(--text-muted);'
+                    f'padding:4px 0;border-bottom:1px solid var(--border-subtle);">'
+                    f'{_al}</div>',
+                    unsafe_allow_html=True,
+                )
+
+    if _ciclo_visao == "Indicadores":
+        # ── Indicadores detalhados ────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        section_title("🚨 sinais dos indicadores")
-        for _al in _alertas_todos:
+        section_title("📊 indicadores utilizados")
+
+        _ind_br = _ciclo_br.get('indicadores', {})
+        _ind_us = _ciclo_us.get('indicadores', {})
+
+        _ind_cols = st.columns(2)
+
+        _map_labels_br = {
+            'ibc_br_yoy':           ('IBC-Br atividade (YoY)', '%'),
+            'ibc_br_3m':            ('IBC-Br momentum (3m dessaz)', '%'),
+            'selic_real':           ('Selic Real (Selic - IPCA 12m)', '%'),
+            'spread_curva_br':      ('Spread Curva BR (IMA-B 5+ vs 5)', 'pp'),
+            'ibov_ret_6m':          ('Retorno IBOV 6 meses', '%'),
+            'ibov_acima_mm200':     ('IBOV acima da MM200', ''),
+            'usd_brl':              ('USD/BRL atual', 'R$'),
+            'usd_brl_vs_media':     ('USD/BRL vs Média 60d', '%'),
+        }
+        _map_labels_us = {
+            'yield_curve_spread':   ('Yield Curve 10y-2y', 'pp'),
+            'sp500_ret_6m':         ('Retorno S&P500 6 meses', '%'),
+            'sp500_acima_mm200':    ('S&P500 acima da MM200', ''),
+            'credit_spread_trend':  ('Credit Spreads HYG/IEF (3m)', '%'),
+            'fed_funds_gap':        ('Fed Funds vs Neutro (r*)', 'pp'),
+            'vix':                  ('VIX', 'pts'),
+        }
+
+        with _ind_cols[0]:
             st.markdown(
-                f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.75rem;color:var(--text-muted);'
-                f'padding:4px 0;border-bottom:1px solid var(--border-subtle);">'
-                f'{_al}</div>',
+                '<div style="font-family:var(--font-ui,sans-serif);'
+                'font-size:0.78rem;color:var(--accent);'
+                'margin-bottom:8px;">🇧🇷 indicadores br</div>',
                 unsafe_allow_html=True,
             )
-
-    # ── Indicadores detalhados ────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("📊 indicadores utilizados")
-
-    _ind_br = _ciclo_br.get('indicadores', {})
-    _ind_us = _ciclo_us.get('indicadores', {})
-
-    _ind_cols = st.columns(2)
-
-    _map_labels_br = {
-        'ibc_br_yoy':           ('IBC-Br atividade (YoY)', '%'),
-        'ibc_br_3m':            ('IBC-Br momentum (3m dessaz)', '%'),
-        'selic_real':           ('Selic Real (Selic - IPCA 12m)', '%'),
-        'spread_curva_br':      ('Spread Curva BR (IMA-B 5+ vs 5)', 'pp'),
-        'ibov_ret_6m':          ('Retorno IBOV 6 meses', '%'),
-        'ibov_acima_mm200':     ('IBOV acima da MM200', ''),
-        'usd_brl':              ('USD/BRL atual', 'R$'),
-        'usd_brl_vs_media':     ('USD/BRL vs Média 60d', '%'),
-    }
-    _map_labels_us = {
-        'yield_curve_spread':   ('Yield Curve 10y-2y', 'pp'),
-        'sp500_ret_6m':         ('Retorno S&P500 6 meses', '%'),
-        'sp500_acima_mm200':    ('S&P500 acima da MM200', ''),
-        'credit_spread_trend':  ('Credit Spreads HYG/IEF (3m)', '%'),
-        'fed_funds_gap':        ('Fed Funds vs Neutro (r*)', 'pp'),
-        'vix':                  ('VIX', 'pts'),
-    }
-
-    with _ind_cols[0]:
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif);'
-            'font-size:0.78rem;color:var(--accent);'
-            'margin-bottom:8px;">🇧🇷 indicadores br</div>',
-            unsafe_allow_html=True,
-        )
-        for _k, (_lbl, _un) in _map_labels_br.items():
-            _v = _ind_br.get(_k)
-            if _v is None:
-                continue
-            _v_str = (
-                ("✅" if _v else "❌")
-                if isinstance(_v, bool)
-                else f"{_v}{_un}"
-            )
-            st.markdown(
-                f'<div style="display:flex;'
-                f'justify-content:space-between;'
-                f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
-                f'<span style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
-                f'<span style="font-family:var(--font-data,monospace);'
-                f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-    with _ind_cols[1]:
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif);'
-            'font-size:0.78rem;color:var(--accent);'
-            'margin-bottom:8px;">🇺🇸 indicadores eua</div>',
-            unsafe_allow_html=True,
-        )
-        for _k, (_lbl, _un) in _map_labels_us.items():
-            _v = _ind_us.get(_k)
-            if _v is None:
-                continue
-            _v_str = (
-                ("✅" if _v else "❌")
-                if isinstance(_v, bool)
-                else f"{_v}{_un}"
-            )
-            st.markdown(
-                f'<div style="display:flex;'
-                f'justify-content:space-between;'
-                f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
-                f'<span style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
-                f'<span style="font-family:var(--font-data,monospace);'
-                f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-    # ── Recomendações setoriais por fase ─────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("🎯 setores favorecidos nesta fase")
-
-    _rec_cols = st.columns(2)
-
-    for _col_r, _dados_f, _pais in [
-        (_rec_cols[0], _dados_fase_br, "🇧🇷 br"),
-        (_rec_cols[1], _dados_fase_us, "🇺🇸 eua"),
-    ]:
-        with _col_r:
-            st.markdown(
-                f'<div style="font-family:var(--font-ui,sans-serif);'
-                f'font-size:0.78rem;color:{_dados_f["cor"]};'
-                f'margin-bottom:6px;font-weight:600;">'
-                f'{_pais} — {_dados_f["label"]}</div>',
-                unsafe_allow_html=True,
-            )
-
-            _key_set = (
-                'setores_br' if _pais == "🇧🇷 br"
-                else 'setores_us'
-            )
-
-            st.markdown(
-                '<div style="font-size:0.78rem;color:var(--bull);'
-                'text-transform:uppercase;margin-bottom:3px;">'
-                '✅ favorecidos</div>',
-                unsafe_allow_html=True,
-            )
-            for _sf in _dados_f[_key_set]['favorecidos']:
+            for _k, (_lbl, _un) in _map_labels_br.items():
+                _v = _ind_br.get(_k)
+                if _v is None:
+                    continue
+                _v_str = (
+                    ("✅" if _v else "❌")
+                    if isinstance(_v, bool)
+                    else f"{_v}{_un}"
+                )
                 st.markdown(
-                    f'<div style="font-family:var(--font-ui,sans-serif);'
-                    f'font-size:0.72rem;color:var(--bull);'
-                    f'padding:2px 0;">→ {_sf}</div>',
+                    f'<div style="display:flex;'
+                    f'justify-content:space-between;'
+                    f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
+                    f'<span style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
+                    f'<span style="font-family:var(--font-data,monospace);'
+                    f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
+        with _ind_cols[1]:
             st.markdown(
-                '<div style="font-size:0.78rem;color:var(--bear);'
-                'text-transform:uppercase;margin:8px 0 3px;">'
-                '✗ evitar</div>',
+                '<div style="font-family:var(--font-ui,sans-serif);'
+                'font-size:0.78rem;color:var(--accent);'
+                'margin-bottom:8px;">🇺🇸 indicadores eua</div>',
                 unsafe_allow_html=True,
             )
-            for _se in _dados_f[_key_set]['evitar']:
+            for _k, (_lbl, _un) in _map_labels_us.items():
+                _v = _ind_us.get(_k)
+                if _v is None:
+                    continue
+                _v_str = (
+                    ("✅" if _v else "❌")
+                    if isinstance(_v, bool)
+                    else f"{_v}{_un}"
+                )
                 st.markdown(
-                    f'<div style="font-family:var(--font-ui,sans-serif);'
-                    f'font-size:0.72rem;color:var(--bear);'
-                    f'padding:2px 0;">→ {_se}</div>',
+                    f'<div style="display:flex;'
+                    f'justify-content:space-between;'
+                    f'padding:3px 0;border-bottom:1px solid var(--border-subtle);">'
+                    f'<span style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.78rem;color:var(--text-muted);">{_lbl}</span>'
+                    f'<span style="font-family:var(--font-data,monospace);'
+                    f'font-size:0.72rem;color:var(--text-secondary);">{_v_str}</span>'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
-    # ── Alocação sugerida ─────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_title("💼 alocação sugerida para o ciclo atual")
+    if _ciclo_visao == "Setores e alocação":
+        # ── Recomendações setoriais por fase ─────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("🎯 setores favorecidos nesta fase")
 
-    _alloc = get_alocacao_sugerida(_fase_br, _fase_us)
+        _rec_cols = st.columns(2)
 
-    _alloc_cols = st.columns(len(_alloc))
-    _alloc_cores = {
-        'ações br':   '#FF9900',
-        'ações eua':  '#00B0FF',
-        'fiis':       '#00C853',
-        'renda fixa': '#555555',
-    }
+        for _col_r, _dados_f, _pais in [
+            (_rec_cols[0], _dados_fase_br, "🇧🇷 br"),
+            (_rec_cols[1], _dados_fase_us, "🇺🇸 eua"),
+        ]:
+            with _col_r:
+                st.markdown(
+                    f'<div style="font-family:var(--font-ui,sans-serif);'
+                    f'font-size:0.78rem;color:{_dados_f["cor"]};'
+                    f'margin-bottom:6px;font-weight:600;">'
+                    f'{_pais} — {_dados_f["label"]}</div>',
+                    unsafe_allow_html=True,
+                )
 
-    for _col_a, (_classe, _pct) in zip(
-        _alloc_cols, _alloc.items()
-    ):
-        with _col_a:
-            metric_card(
-                _classe,
-                f"{_pct}%",
-                "sugestão pelo ciclo",
-                cor_delta="amber",
-            )
+                _key_set = (
+                    'setores_br' if _pais == "🇧🇷 br"
+                    else 'setores_us'
+                )
 
-    st.caption(
-        "alocação derivada mecanicamente das fases identificadas. "
-        "br: 60% do peso | eua: 40% do peso. "
-        "não constitui recomendação de investimento. "
-        "ajuste conforme seu perfil e horizonte."
-    )
+                st.markdown(
+                    '<div style="font-size:0.78rem;color:var(--bull);'
+                    'text-transform:uppercase;margin-bottom:3px;">'
+                    '✅ favorecidos</div>',
+                    unsafe_allow_html=True,
+                )
+                for _sf in _dados_f[_key_set]['favorecidos']:
+                    st.markdown(
+                        f'<div style="font-family:var(--font-ui,sans-serif);'
+                        f'font-size:0.72rem;color:var(--bull);'
+                        f'padding:2px 0;">→ {_sf}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown(
+                    '<div style="font-size:0.78rem;color:var(--bear);'
+                    'text-transform:uppercase;margin:8px 0 3px;">'
+                    '✗ evitar</div>',
+                    unsafe_allow_html=True,
+                )
+                for _se in _dados_f[_key_set]['evitar']:
+                    st.markdown(
+                        f'<div style="font-family:var(--font-ui,sans-serif);'
+                        f'font-size:0.72rem;color:var(--bear);'
+                        f'padding:2px 0;">→ {_se}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Alocação sugerida ─────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_title("💼 alocação sugerida para o ciclo atual")
+
+        _alloc = get_alocacao_sugerida(_fase_br, _fase_us)
+
+        _alloc_cols = st.columns(len(_alloc))
+        _alloc_cores = {
+            'ações br':   '#FF9900',
+            'ações eua':  '#00B0FF',
+            'fiis':       '#00C853',
+            'renda fixa': '#555555',
+        }
+
+        for _col_a, (_classe, _pct) in zip(
+            _alloc_cols, _alloc.items()
+        ):
+            with _col_a:
+                metric_card(
+                    _classe,
+                    f"{_pct}%",
+                    "sugestão pelo ciclo",
+                    cor_delta="amber",
+                )
+
+        st.caption(
+            "alocação derivada mecanicamente das fases identificadas. "
+            "br: 60% do peso | eua: 40% do peso. "
+            "não constitui recomendação de investimento. "
+            "ajuste conforme seu perfil e horizonte."
+        )
 
     # ── Análise IA do ciclo ───────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -3604,16 +3626,18 @@ if _secao == "🔄 ciclo econômico":
 if _secao == "📅 calendário de eventos":
     section_title("📅 calendário de eventos de mercado")
 
-    cal_tab1, cal_tab2 = st.tabs(["🏛️ decisões macro", "📊 earnings"])
+    _cal_visao = section_selector(
+        ["🏛️ decisões macro", "📊 earnings"], key="macro_calendario_tipo", label="Eventos",
+    )
 
     # ── Tab: Decisões Macro ─────────────────────────────────────────────────
-    with cal_tab1:
+    if _cal_visao == "🏛️ decisões macro":
         status_card(
             "cobertura",
             "eventos macro fixos (copom, fed, cpi, payroll) — próximos 90 dias.",
             tipo="info"
         )
-        fc1, fc2 = st.columns([3, 1])
+        fc1, fc2, fc3 = st.columns([2, 1, 1])
         with fc1:
             filtro_cat = st.multiselect(
                 "filtrar por categoria:",
@@ -3622,12 +3646,18 @@ if _secao == "📅 calendário de eventos":
                 key="cal_filtro_cat"
             )
         with fc2:
-            janela_dias = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela")
+            janela_dias = st.selectbox("Próximos dias", [7, 30, 60, 90], index=3, key="cal_janela")
+        with fc3:
+            _cal_so_alto = st.toggle("Só alto impacto", key="macro_cal_alto")
 
         hoje = datetime.date.today()
         limite_cal = hoje + datetime.timedelta(days=janela_dias)
         eventos_macro = get_eventos_macro_fixos()
-        eventos_macro = [e for e in eventos_macro if e['categoria'] in filtro_cat and e['data'] <= limite_cal]
+        eventos_macro = [
+            e for e in eventos_macro
+            if e['categoria'] in filtro_cat and hoje <= e['data'] <= limite_cal
+            and (not _cal_so_alto or e.get('impacto') == 'alto')
+        ]
 
         if not eventos_macro:
             empty_state("📅", "sem eventos", f"nenhum evento macro nos próximos {janela_dias} dias.")
@@ -3643,7 +3673,7 @@ if _secao == "📅 calendário de eventos":
                 _render_evento_card(ev, key_prefix=f"macro_{ev.get('_uid','')}")
 
     # ── Tab: Earnings ───────────────────────────────────────────────────────
-    with cal_tab2:
+    if _cal_visao == "📊 earnings":
         status_card(
             "cobertura",
             "earnings dates de todas as empresas disponíveis no FMP. cache de 1h.",
@@ -3653,7 +3683,7 @@ if _secao == "📅 calendário de eventos":
         with ec1:
             filtro_ticker = st.text_input("filtrar ticker (opcional):", placeholder="ex: AAPL, MSFT...", key="cal_filtro_ticker")
         with ec2:
-            janela_earn = st.selectbox("janela:", [30, 60, 90], index=2, key="cal_janela_earnings")
+            janela_earn = st.selectbox("Próximos dias", [7, 30, 60, 90], index=3, key="cal_janela_earnings")
 
         hoje_earn = datetime.date.today()
         limite_earn = hoje_earn + datetime.timedelta(days=janela_earn)
@@ -3688,67 +3718,115 @@ if _secao == "📅 calendário de eventos":
                 _render_evento_card(ev, key_prefix=f"earn_{ev.get('ticker','')}_{ev.get('data','')}")
 
 if _secao == "🔭 overlay macro × preços":
-    st.write("sobreponha a cotação do ativo com indicadores macroeconômicos globais para identificar correlações.")
-    
-    col_sel_ov, col_man_ov, col_ind = st.columns([3, 2, 3])
-    with col_sel_ov:
-        opcoes_ov = get_opcoes_selectbox()
-        selecao_ov = st.selectbox("ativo:", opcoes_ov, key="overlay_sel")
-    with col_man_ov:
-        ticker_manual_ov = st.text_input("ou digite:", "", key="overlay_manual").strip().upper()
-    with col_ind:
-        indicador = st.selectbox("indicador macro:", ["taxa selic (brasil)", "ipca (inflação br)", "fed funds rate (juros eua)", "treasury 10y (eua)", "vix (s&p 500 volatility)"])
+    section_title("Relação entre preço e indicador macro")
+    st.caption("Carregue um estudo e ajuste o recorte ou a escala. O último gráfico permanece disponível durante a exploração.")
 
-    ticker_input = ticker_manual_ov if ticker_manual_ov else (ticker_from_label(selecao_ov) or "PETR4.SA")
+    with st.form("macro_overlay_form"):
+        col_sel_ov, col_man_ov, col_ind, col_periodo_ov = st.columns([3, 2, 3, 1])
+        with col_sel_ov:
+            opcoes_ov = get_opcoes_selectbox()
+            selecao_ov = st.selectbox("Ativo", opcoes_ov, key="overlay_sel")
+        with col_man_ov:
+            ticker_manual_ov = st.text_input("Ticker manual", "", key="overlay_manual", placeholder="PETR4.SA, AAPL").strip().upper()
+        with col_ind:
+            indicador = st.selectbox("Indicador macro", ["taxa selic (brasil)", "ipca (inflação br)", "fed funds rate (juros eua)", "treasury 10y (eua)", "vix (s&p 500 volatility)"], key="overlay_indicador")
+        with col_periodo_ov:
+            _ov_anos = st.selectbox("Histórico", [1, 3, 5, 10], index=2, format_func=lambda x: f"{x} ano" if x == 1 else f"{x} anos", key="overlay_anos")
+        _ov_carregar = st.form_submit_button("Carregar séries", type="primary", use_container_width=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("Gerar overlay macro", type="primary", use_container_width=True):
+    if _ov_carregar:
+        ticker_input = ticker_manual_ov if ticker_manual_ov else ticker_from_label(selecao_ov)
         if not ticker_input or ticker_input.startswith("─"):
-            st.warning("selecione um ativo válido para iniciar a análise.")
+            st.warning("Selecione um ativo válido para iniciar o estudo.")
         else:
-            with st.spinner(f"buscando histórico de {ticker_input.lower()} e série macroeconômica..."):
+            with st.spinner(f"Carregando {ticker_input} e a série macro..."):
                 try:
-                    stock_data = yf.download(ticker_input, period="5y", auto_adjust=True, progress=False)['Close']
-                    if isinstance(stock_data, pd.DataFrame): stock_data = stock_data[ticker_input]
+                    stock_data = yf.download(ticker_input, period=f"{_ov_anos}y", auto_adjust=True, progress=False)['Close']
+                    if isinstance(stock_data, pd.DataFrame):
+                        stock_data = stock_data[ticker_input]
                     stock_data = stock_data.dropna()
-                    if hasattr(stock_data.index, 'tz') and stock_data.index.tz is not None: stock_data.index = stock_data.index.tz_localize(None)
-
-                    hoje = datetime.datetime.today()
-                    inicio = hoje - datetime.timedelta(days=5*365)
-                    macro_data = None
-                    macro_name = ""
-
-                    if "selic" in indicador.lower(): macro_data, macro_name = sgs.get({'Selic': 432}, start=inicio)['Selic'], "taxa selic (%)"
-                    elif "ipca" in indicador.lower(): macro_data, macro_name = sgs.get({'IPCA': 433}, start=inicio)['IPCA'], "ipca (%)"
+                    if getattr(stock_data.index, 'tz', None) is not None:
+                        stock_data.index = stock_data.index.tz_localize(None)
+                    inicio = datetime.datetime.today() - datetime.timedelta(days=_ov_anos * 365)
+                    macro_data, macro_name = None, ""
+                    if "selic" in indicador.lower():
+                        macro_data, macro_name = sgs.get({'Selic': 432}, start=inicio)['Selic'], "Selic (%)"
+                    elif "ipca" in indicador.lower():
+                        macro_data, macro_name = sgs.get({'IPCA': 433}, start=inicio)['IPCA'], "IPCA mensal (%)"
                     else:
                         fred = Fred(api_key=st.secrets["FRED_API_KEY"])
-                        if "fed funds" in indicador.lower(): macro_data, macro_name = fred.get_series('FEDFUNDS', observation_start=inicio), "fed funds rate (%)"
-                        elif "treasury" in indicador.lower(): macro_data, macro_name = fred.get_series('DGS10', observation_start=inicio), "treasury 10y (%)"
-                        elif "vix" in indicador.lower(): macro_data, macro_name = fred.get_series('VIXCLS', observation_start=inicio), "índice vix"
-
-                    if macro_data is not None:
+                        if "fed funds" in indicador.lower():
+                            macro_data, macro_name = fred.get_series('FEDFUNDS', observation_start=inicio), "Fed funds (%)"
+                        elif "treasury" in indicador.lower():
+                            macro_data, macro_name = fred.get_series('DGS10', observation_start=inicio), "Treasury 10y (%)"
+                        elif "vix" in indicador.lower():
+                            macro_data, macro_name = fred.get_series('VIXCLS', observation_start=inicio), "VIX (pontos)"
+                    if macro_data is None or macro_data.dropna().empty or stock_data.empty:
+                        st.warning("Uma das séries está indisponível. O estudo anterior foi mantido.")
+                    else:
                         macro_data = macro_data.dropna()
-                        if hasattr(macro_data.index, 'tz') and macro_data.index.tz is not None: macro_data.index = macro_data.index.tz_localize(None)
+                        if getattr(macro_data.index, 'tz', None) is not None:
+                            macro_data.index = macro_data.index.tz_localize(None)
+                        st.session_state['macro_overlay_estudo'] = {
+                            'ticker': ticker_input, 'indicador': macro_name,
+                            'preco': stock_data, 'macro': macro_data,
+                            'anos': _ov_anos,
+                        }
+                except Exception as e:
+                    st.error(f"Não foi possível carregar as séries: {e}")
 
-                        fig = make_subplots(specs=[[{"secondary_y": True}]])
-                        _cc_ov = _chart_cores()
-                        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data, name=ticker_input.lower(), line=dict(color=_cc_ov["accent"], width=2)), secondary_y=False)
-                        fig.add_trace(go.Scatter(x=macro_data.index, y=macro_data, name=macro_name, line=dict(color=_cc_ov["info"], dash="dot", width=2)), secondary_y=True)
-
-                        layout_macro = base_layout(height=500, title=f"estudo de correlação: {ticker_input.lower()} vs {macro_name}")
-                        fig.update_layout(**layout_macro)
-                        fig.update_yaxes(title_text=f"preço {ticker_input.lower()}", showgrid=True, gridcolor=_cc_ov["border"], secondary_y=False)
-                        fig.update_yaxes(title_text=macro_name, showgrid=False, secondary_y=True)
-                        fig.update_xaxes(showgrid=True, gridcolor=_cc_ov["border"])
-
-                        st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
-                        st.caption("sobrepõe o preço do ativo (eixo esq.) ao indicador macro (eixo dir.) em 5 anos. movimentos alinhados ou opostos revelam a sensibilidade do ativo àquele fator.")
-                    else: st.warning("não foi possível obter a série de dados macroeconómicos.")
-                except Exception as e: st.error(f"erro ao processar e alinhar os dados: {e}")
+    _ov_estudo = st.session_state.get('macro_overlay_estudo')
+    if _ov_estudo:
+        stock_data, macro_data = _ov_estudo['preco'], _ov_estudo['macro']
+        # As duas séries têm frequências diferentes. Usa apenas datas em comum,
+        # levando a última observação macro. Datas são de referência, não de divulgação.
+        _ov_alinhado = pd.concat([
+            stock_data.rename('preco'),
+            macro_data.reindex(macro_data.index.union(stock_data.index)).sort_index().ffill().reindex(stock_data.index).rename('macro'),
+        ], axis=1).dropna()
+        if _ov_alinhado.empty:
+            st.info("As séries carregadas não têm um intervalo comum.")
+        else:
+            _ov_c1, _ov_c2 = st.columns([3, 2])
+            with _ov_c1:
+                _ov_janela = section_selector(["Tudo", "12 meses", "6 meses", "3 meses"], key="overlay_recorte", label="Recorte")
+            with _ov_c2:
+                _ov_escala = section_selector(["Dois eixos", "Base 100"], key="overlay_escala", label="Escala")
+            _ov_dias = {"12 meses": 365, "6 meses": 183, "3 meses": 92}.get(_ov_janela)
+            _ov_exibir = _ov_alinhado
+            if _ov_dias:
+                _ov_exibir = _ov_alinhado.loc[_ov_alinhado.index >= _ov_alinhado.index.max() - pd.Timedelta(days=_ov_dias)]
+            if _ov_exibir.empty:
+                st.info("Não há observações nesse recorte.")
+            else:
+                _ov_normalizado = _ov_escala == "Base 100"
+                if _ov_normalizado and (_ov_exibir.iloc[0] <= 0).any():
+                    st.info("Base 100 requer valores iniciais positivos. Exibindo os valores originais neste recorte.")
+                    _ov_normalizado = False
+                _ov_plot = _ov_exibir.div(_ov_exibir.iloc[0]).mul(100) if _ov_normalizado else _ov_exibir
+                fig = make_subplots(specs=[[{"secondary_y": not _ov_normalizado}]])
+                _cc_ov = _chart_cores()
+                fig.add_trace(go.Scatter(x=_ov_plot.index, y=_ov_plot['preco'], name=_ov_estudo['ticker'], line=dict(color=_cc_ov['accent'], width=2)), secondary_y=False)
+                fig.add_trace(go.Scatter(x=_ov_plot.index, y=_ov_plot['macro'], name=_ov_estudo['indicador'], line=dict(color=_cc_ov['info'], width=2, dash='dot')), secondary_y=not _ov_normalizado)
+                fig.update_layout(**base_layout(height=500, title=f"{_ov_estudo['ticker']} × {_ov_estudo['indicador']}"))
+                fig.update_yaxes(title_text="Base 100" if _ov_normalizado else f"Preço {_ov_estudo['ticker']}", secondary_y=False)
+                if not _ov_normalizado:
+                    fig.update_yaxes(title_text=_ov_estudo['indicador'], showgrid=False, secondary_y=True)
+                fig.update_xaxes(rangeslider=dict(visible=True, thickness=0.08))
+                st.plotly_chart(fig, use_container_width=True, config={'responsive': True})
+                st.caption(f"{len(_ov_exibir):,} observações · {_ov_exibir.index.min():%d/%m/%Y} a {_ov_exibir.index.max():%d/%m/%Y} · Macro alinhado pela última observação. Datas de referência podem diferir da divulgação; não indica causalidade.")
+                with st.expander("Dados do recorte"):
+                    st.dataframe(_ov_exibir.rename(columns={'preco': _ov_estudo['ticker'], 'macro': _ov_estudo['indicador']}), use_container_width=True)
+                    st.download_button("Exportar estudo em CSV", _ov_exibir.to_csv().encode('utf-8'), file_name=f"overlay_{_ov_estudo['ticker']}.csv", mime="text/csv", key="overlay_csv")
+    else:
+        empty_state("", "Nenhum estudo carregado", "Escolha um ativo e um indicador acima. Depois explore escalas, recortes e dados sem perder o gráfico.")
 
 if _secao == "🧠 sentimento":
     section_title("😱 fear & greed — eua | brasil | global")
     tooltip("fear_greed")
+    _sentimento_visao = section_selector(
+        ["Componentes", "Resumo"], key="macro_sentimento_visao", label="Sentimento",
+    )
 
     with st.spinner("calculando índices de sentimento..."):
         # Cache-first: tenta Supabase (4h TTL), senão calcula live
@@ -3795,7 +3873,7 @@ if _secao == "🧠 sentimento":
                 mode="gauge+number",
                 value=score,
                 domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': label.upper(), 'font': {'size': 11, 'color': _cor_fg, 'family': 'Inter, system-ui, sans-serif'}},
+                title={'text': label.upper(), 'font': {'size': 11, 'color': _cor_fg, 'family': _font_family_ui()}},
                 gauge={
                     'axis': {'range': [0, 100], 'tickfont': {'size': 9, 'color': _cc_fg["muted"]}},
                     'bar': {'color': _cor_fg, 'thickness': 0.25},
@@ -3809,34 +3887,75 @@ if _secao == "🧠 sentimento":
                     ],
                     'threshold': {'line': {'color': _cor_fg, 'width': 2}, 'thickness': 0.75, 'value': score},
                 },
-                number={'font': {'size': 32, 'color': _cor_fg, 'family': 'Inter, system-ui, sans-serif'}},
+                number={'font': {'size': 32, 'color': _cor_fg, 'family': _font_family_ui()}},
             ))
             _fig_fg.update_layout(height=220, paper_bgcolor=_cc_fg["surface"], plot_bgcolor=_cc_fg["surface"], margin=dict(l=20, r=20, t=30, b=10))
             st.plotly_chart(_fig_fg, use_container_width=True, config={'responsive': True}, key=f"fg_gauge_{titulo}")
 
-    _renderizar_gauge(_col_fg1, _fg_eua.get('score', 50), _fg_eua.get('label', '—'), "🇺🇸 eua")
-    _renderizar_gauge(_col_fg2, _fg_br.get('score', 50), _fg_br.get('label', '—'), "🇧🇷 brasil")
-    _renderizar_gauge(_col_fg3, _score_global, _label_global, "🌍 global")
-
-    st.caption(
-        "eua: 7 componentes (momentum s&p500, vix, 52w, nasdaq/sp500, "
-        "ouro, vix/vol.realizada, bitcoin). "
-        "brasil: 7 componentes (momentum ibov, vix, 52w ibov, "
-        "small/ibov, dólar, volume ibov). "
-        "global: média ponderada 50% eua + 50% brasil."
-    )
+    if _sentimento_visao == "Resumo":
+        _renderizar_gauge(_col_fg1, _fg_eua.get('score', 50), _fg_eua.get('label', '—'), "🇺🇸 eua")
+        _renderizar_gauge(_col_fg2, _fg_br.get('score', 50), _fg_br.get('label', '—'), "🇧🇷 brasil")
+        _renderizar_gauge(_col_fg3, _score_global, _label_global, "🌍 global")
+    else:
+        _sentimento_pais = section_selector(["Brasil", "EUA", "Comparar"], key="macro_sentimento_pais", label="Mercado")
+        _linhas_sent = []
+        _br_labels = {
+            'momentum_ibov': 'IBOV vs MM125', 'vix_invertido': 'VIX invertido',
+            'range_52s': 'Range 52 semanas', 'small_vs_ibov': 'Small caps vs IBOV',
+            'dolar_invertido': 'Dólar invertido', 'volume_ibov': 'Volume IBOV',
+        }
+        for _pais_sent, _componentes_sent in [
+            ('Brasil', _fg_br.get('scores') or _fg_br.get('componentes') or {}),
+            ('EUA', _fg_eua.get('componentes') or {}),
+        ]:
+            if _sentimento_pais != 'Comparar' and _sentimento_pais != _pais_sent:
+                continue
+            for _nome_sent, _comp_sent in _componentes_sent.items():
+                if isinstance(_comp_sent, dict):
+                    _valor_sent = _comp_sent.get('score')
+                    _label_sent = _comp_sent.get('label') or _br_labels.get(_nome_sent, _nome_sent.replace('_', ' '))
+                    _observacao_sent = str(_comp_sent.get('valor') or '')
+                else:
+                    _valor_sent = _comp_sent
+                    _label_sent = _br_labels.get(_nome_sent, _nome_sent.replace('_', ' '))
+                    _observacao_sent = ''
+                try:
+                    _valor_sent = float(_valor_sent)
+                except (TypeError, ValueError):
+                    continue
+                _linhas_sent.append({'Mercado': _pais_sent, 'Componente': _label_sent, 'Score': _valor_sent, 'Observação': _observacao_sent})
+        if _linhas_sent:
+            _df_sent = pd.DataFrame(_linhas_sent).sort_values('Score')
+            _cc_sent = _chart_cores()
+            _fig_sent = go.Figure(go.Bar(
+                x=_df_sent['Score'], y=_df_sent['Mercado'] + ' · ' + _df_sent['Componente'], orientation='h',
+                marker_color=[_cc_sent['bear'] if x < 40 else _cc_sent['bull'] if x > 60 else _cc_sent['muted'] for x in _df_sent['Score']],
+                customdata=_df_sent[['Observação']].values, hovertemplate='%{y}<br>Score: %{x:.0f}/100<br>%{customdata[0]}<extra></extra>',
+            ))
+            _fig_sent.add_vline(x=50, line_color=_cc_sent['border'], line_dash='dot')
+            _fig_sent.update_layout(**base_layout(height=max(320, len(_df_sent) * 32 + 65), title="Sentimento por componente"))
+            _fig_sent.update_xaxes(range=[0, 100], title_text="Medo ← score → ganância")
+            _fig_sent.update_yaxes(showgrid=False)
+            st.plotly_chart(_fig_sent, use_container_width=True, config={'responsive': True})
+            with st.expander('Valores e sinais usados no índice'):
+                st.dataframe(_df_sent, hide_index=True, use_container_width=True)
+        else:
+            st.info('Sem componentes disponíveis para este mercado. O score neutro pode representar falta de dados; amplie o recorte ou recarregue as séries.')
+    st.caption('Índices próprios calculados a partir dos componentes disponíveis. Brasil e EUA têm composições diferentes; o global combina 50% de cada score. As barras permitem comparar os sinais, não a certeza de uma projeção.')
 
 if _secao == "🔗 correlações":
     section_title("🔗 correlação dinâmica entre ativos")
 
-    status_card(
-        "como interpretar",
-        "correlação próxima de +1: ativos se movem juntos (sem diversificação real). "
-        "correlação próxima de 0: ativos independentes (boa diversificação). "
-        "correlação próxima de -1: ativos se movem em direções opostas (hedge natural). "
-        "a matriz usa a janela selecionada; o gráfico mostra como a correlação MUDA ao longo do tempo.",
-        tipo="info",
-    )
+    st.caption("Correlações de retornos diários · Ajuste o universo e a janela para comparar relações atuais e sua evolução.")
+    with st.expander("Como interpretar correlações", expanded=False):
+        status_card(
+            "como interpretar",
+            "correlação próxima de +1: ativos se movem juntos (sem diversificação real). "
+            "correlação próxima de 0: ativos independentes (boa diversificação). "
+            "correlação próxima de -1: ativos se movem em direções opostas (hedge natural). "
+            "a matriz usa a janela selecionada; o gráfico mostra como a correlação MUDA ao longo do tempo.",
+            tipo="info",
+        )
 
     # ── monta lista de tickers: watchlist do usuário + benchmarks ────────────
     from database.db import listar_watchlist, get_watchlist_padrao
@@ -3852,6 +3971,15 @@ if _secao == "🔗 correlações":
     benchmarks    = ['^BVSP', '^GSPC', 'BRL=X', 'GC=F']
     tickers_todos = list(dict.fromkeys(tickers_wl + benchmarks))
 
+    _universo_corr = st.multiselect(
+        "Ativos na matriz", tickers_todos, default=tickers_todos,
+        key="macro_corr_universo", format_func=lambda x: x.replace('.SA', ''),
+        help="O recorte muda a matriz e os pares acompanhados. Inclua ao menos dois ativos.",
+    )
+    if len(_universo_corr) < 2:
+        st.info("Selecione ao menos dois ativos para explorar correlações.")
+        st.stop()
+
     # ── seletor de janela ────────────────────────────────────────────────────
     janela_corr = st.select_slider(
         "janela de correlação:",
@@ -3862,7 +3990,7 @@ if _secao == "🔗 correlações":
     )
 
     with st.spinner("calculando correlações..."):
-        corr_data = calcular_correlacoes(tuple(tickers_todos), janela=janela_corr)
+        corr_data = calcular_correlacoes(tuple(_universo_corr), janela=janela_corr)
 
     # ── heatmap da matriz ────────────────────────────────────────────────────
     if corr_data['matriz_atual'] is not None:
@@ -3874,19 +4002,19 @@ if _secao == "🔗 correlações":
             x=matriz.columns.tolist(),
             y=matriz.index.tolist(),
             colorscale=[
-                [0.0, '#FF1744'],   # -1: correlação inversa
-                [0.5, '#111111'],   # 0:  neutro
-                [1.0, '#00C853'],   # +1: correlação perfeita
+                [0.0, _cc_heat['info']],   # -1: correlação inversa
+                [0.5, _cc_heat['surface']], # 0: neutro
+                [1.0, _cc_heat['amber']],  # +1: movimentos alinhados
             ],
             zmid=0,
             zmin=-1, zmax=1,
             text=matriz.values.round(2),
             texttemplate="%{text}",
-            textfont={"size": 10, "color": _cc_heat["text"], "family": "Inter, system-ui, sans-serif"},
+            textfont={"size": 10, "color": _cc_heat["text"], "family": _font_family_ui()},
             hoverongaps=False,
             showscale=True,
             colorbar=dict(
-                tickfont=dict(color=_cc_heat["muted"], family='Inter, system-ui, sans-serif'),
+                tickfont=dict(color=_cc_heat["muted"], family=_font_family_ui()),
                 bordercolor=_cc_heat["border"],
             ),
         ))
@@ -3896,8 +4024,8 @@ if _secao == "🔗 correlações":
             title=f"matriz de correlação — janela {janela_corr} dias",
         )
         fig_heat.update_layout(**layout_heat)
-        fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family='Inter, system-ui, sans-serif'))
-        fig_heat.update_yaxes(tickfont=dict(size=9, family='Inter, system-ui, sans-serif'))
+        fig_heat.update_xaxes(tickangle=45, tickfont=dict(size=9, family=_font_family_ui()))
+        fig_heat.update_yaxes(tickfont=dict(size=9, family=_font_family_ui()))
 
         st.plotly_chart(fig_heat, use_container_width=True, config={'responsive': True})
         st.caption(
@@ -3968,7 +4096,14 @@ if _secao == "🔗 correlações":
         fig_roll = go.Figure()
         cores    = ["#FF9900", "#00B0FF", "#00C853", "#FF1744", "#E040FB", "#00BCD4"]
 
+        _pares_corr = list(corr_data['rolling_pairs'])
+        _pares_exibir = st.multiselect(
+            "Pares no gráfico", _pares_corr, default=_pares_corr[:3],
+            key="macro_corr_pares", help="Clique na legenda para isolar uma linha ou combine pares aqui.",
+        )
         for i, (par, serie) in enumerate(corr_data['rolling_pairs'].items()):
+            if par not in _pares_exibir:
+                continue
             fig_roll.add_trace(go.Scatter(
                 x=serie.index,
                 y=serie.values,
@@ -3983,7 +4118,7 @@ if _secao == "🔗 correlações":
         fig_roll.add_hline(
             y=0.7,  line_color=_cc_roll["amber"], line_dash="dash",  line_width=1,
             annotation_text="alta correlação (0.7)",
-            annotation_font=dict(color=_cc_roll["amber"], family="Inter, system-ui, sans-serif", size=10),
+            annotation_font=dict(color=_cc_roll["amber"], family=_font_family_ui(), size=10),
         )
         fig_roll.add_hline(
             y=0,    line_color=_cc_roll["border"], line_dash="dot",   line_width=1,
@@ -3991,7 +4126,7 @@ if _secao == "🔗 correlações":
         fig_roll.add_hline(
             y=-0.7, line_color=_cc_roll["info"], line_dash="dash",  line_width=1,
             annotation_text="correlação inversa (-0.7)",
-            annotation_font=dict(color=_cc_roll["info"], family="Inter, system-ui, sans-serif", size=10),
+            annotation_font=dict(color=_cc_roll["info"], family=_font_family_ui(), size=10),
         )
 
         layout_roll = base_layout(
@@ -4003,7 +4138,11 @@ if _secao == "🔗 correlações":
                       'gridcolor': _cc_roll["border"], 'showgrid': True},
         })
         fig_roll.update_layout(**layout_roll)
-        st.plotly_chart(fig_roll, use_container_width=True, config={'responsive': True})
+        if _pares_exibir:
+            fig_roll.update_xaxes(rangeslider=dict(visible=True, thickness=0.07))
+            st.plotly_chart(fig_roll, use_container_width=True, config={'responsive': True})
+        else:
+            st.info("Selecione um par para acompanhar a evolução da correlação.")
         st.caption(
             "cada linha representa a correlação rolante entre um ativo da watchlist "
             "e seu benchmark natural (ativos .SA vs ibovespa; ativos globais vs s&p500). "

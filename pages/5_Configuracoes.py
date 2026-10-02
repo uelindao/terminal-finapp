@@ -795,254 +795,121 @@ if _secao_c == "🤖 minha ia":
 # TAB 6 — APARÊNCIA / TEMAS
 # ══════════════════════════════════════════════════════════════════════════════
 if _secao_c == "🎨 aparência":
-    section_title("🎨 tema visual")
+    import json as _appearance_json
+    from utils.appearance import (
+        PERFIS_VISUAIS, PERFIS_ORDER, PRESETS_APARENCIA, DENSIDADES,
+        get_perfil_ativo, get_densidade_ativa, set_perfil, set_densidade,
+        aplicar_preset, get_aparencia_estado, restaurar_aparencia,
+    )
+    from utils.themes import (
+        TEMAS, TEMAS_ORDER, get_tema_ativo, set_tema,
+        FONTES_TITULO, FONTES_UI, FONTES_DATA, get_fontes_ativas, resetar_fontes,
+    )
+    from utils.charts import base_layout, _axis, _palette
+    import plotly.graph_objects as _appearance_go
 
-    try:
-        from utils.themes import TEMAS, TEMAS_ORDER, TEMAS_META, get_tema_ativo, set_tema
+    section_title("Perfis de leitura")
+    st.caption("O perfil muda a composição, a tipografia, a densidade e os gráficos. A paleta e o espaçamento podem ser combinados livremente.")
+    _preset_cols = st.columns(4)
+    for _col, (_preset_id, _preset) in zip(_preset_cols, PRESETS_APARENCIA.items()):
+        with _col:
+            st.markdown(f"**{_preset['nome']}**")
+            st.caption(PERFIS_VISUAIS[_preset['perfil']]['desc'])
+            st.button("Aplicar perfil", key=f"cfg_preset_{_preset_id}", use_container_width=True,
+                      on_click=aplicar_preset, args=(_preset_id,))
 
-        ativo = get_tema_ativo()
+    section_title("Combinar aparência")
+    _choices = [
+        ("Composição", "_cfg_visual_profile", PERFIS_ORDER, get_perfil_ativo(),
+         lambda k: PERFIS_VISUAIS[k]["nome"], set_perfil),
+        ("Paleta", "_cfg_visual_palette", TEMAS_ORDER, get_tema_ativo(),
+         lambda k: TEMAS[k]["nome"], set_tema),
+        ("Densidade", "_cfg_visual_density", list(DENSIDADES), get_densidade_ativa(),
+         lambda k: DENSIDADES[k]["nome"], set_densidade),
+    ]
+    def _appearance_choice_changed(key, setter):
+        setter(st.session_state[key])
+    for _col, (_label, _key, _options, _active, _formatter, _setter) in zip(st.columns(3), _choices):
+        with _col:
+            if st.session_state.get(_key) != _active:
+                st.session_state[_key] = _active
+            st.selectbox(_label, _options, format_func=_formatter, key=_key,
+                         on_change=_appearance_choice_changed, args=(_key, _setter))
+    st.caption(PERFIS_VISUAIS[get_perfil_ativo()]["uso"])
 
-        st.markdown(
-            '<div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:20px;">'
-            'Escolha a paleta de cores do terminal. A escolha persiste enquanto a sessão estiver ativa '
-            'e pode ser salva via URL (<code>?theme=nome</code>).'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+    section_title("Prévia da bancada")
+    st.caption("Dados ilustrativos para comparar a apresentação. Seus dados financeiros permanecem os mesmos ao trocar a aparência.")
+    _preview_values, _preview_chart = st.columns([1, 2])
+    with _preview_values:
+        metric_card("Cotação · amostra", "R$ 128,42", "+1,24% no período", cor_delta="bull")
+        metric_card("Indicador · amostra", "72 / 100", "Valores alinhados pela fonte de dados")
+    with _preview_chart:
+        _palette_preview = _palette()
+        _preview_fig = _appearance_go.Figure()
+        _preview_fig.add_trace(_appearance_go.Scatter(
+            x=list(range(1, 13)), y=[100, 102, 101, 105, 104, 106, 105, 109, 108, 111, 110, 113],
+            name="Série A", mode="lines", line=dict(color=_palette_preview[0]),
+        ))
+        _preview_fig.add_trace(_appearance_go.Scatter(
+            x=list(range(1, 13)), y=[100, 101, 100, 102, 103, 102, 104, 103, 106, 107, 106, 108],
+            name="Série B", mode="lines", line=dict(color=_palette_preview[1]),
+        ))
+        _preview_fig.update_layout(**base_layout(), xaxis=_axis(), yaxis=_axis())
+        st.plotly_chart(_preview_fig, use_container_width=True, theme=None, key="cfg_appearance_chart")
 
-        from utils.themes import TEMAS_FONTES_DEFAULT, FONTES_TITULO as _FT, FONTES_UI as _FU, FONTES_DATA as _FD
+    with st.expander("Tipografia personalizada", expanded=False):
+        st.caption("O padrão acompanha o perfil. Você pode substituir cada família de fonte separadamente.")
+        def _font_changed(part):
+            st.session_state[f"_appearance_font_{part}"] = st.session_state[f"_font_{part}"]
+        _font_catalogs = [("titulo", "Títulos", FONTES_TITULO), ("ui", "Interface", FONTES_UI), ("data", "Dados", FONTES_DATA)]
+        for _col, (_part, _label, _catalog) in zip(st.columns(3), _font_catalogs):
+            with _col:
+                _font_key = f"_font_{_part}"
+                _override = st.session_state.get(f"_appearance_font_{_part}", st.session_state.get(_font_key, ""))
+                if _override not in _catalog:
+                    _override = ""
+                if st.session_state.get(_font_key) != _override:
+                    st.session_state[_font_key] = _override
+                st.selectbox(_label, [""] + list(_catalog), key=_font_key,
+                    format_func=lambda k, catalog=_catalog: catalog[k]["nome"] if k else "Padrão do perfil",
+                    on_change=_font_changed, args=(_part,))
+        st.button("Restaurar fontes do perfil", key="_reset_fonts", on_click=resetar_fontes)
+        _active_fonts = get_fontes_ativas()
+        st.caption(" · ".join(catalog[_active_fonts[part]]["nome"] for part, _, catalog in _font_catalogs))
 
-        def _render_tema_card(col, tid, ativo):
-            tema   = TEMAS[tid]
-            _vars  = tema["vars"]
-            _bg    = _vars["--bg-surface"]
-            _acc   = _vars["--accent"]
-            _bull  = _vars["--bull"]
-            _bear  = _vars["--bear"]
-            _txt   = _vars["--text-primary"]
-            _brd   = _vars["--border-normal"]
-            _light = tema.get("is_light", False)
-            _shadow = "rgba(0,0,0,.08)" if _light else "rgba(0,0,0,.3)"
-            _is_active = (tid == ativo)
-            _border_w  = "2px" if _is_active else "1px"
-            _border_c  = _acc if _is_active else _brd
-            _selected_badge = (
-                f'<span style="font-size:0.78rem;background:{_acc};'
-                f'color:{"#fff" if _light else "#000"};'
-                f'padding:1px 5px;border-radius:3px;font-weight:700;">ATIVO</span>'
-                if _is_active else ""
-            )
-            _fdef = TEMAS_FONTES_DEFAULT.get(tid, TEMAS_FONTES_DEFAULT["dark"])
-            _font_titulo_name = _FT.get(_fdef["titulo"], {}).get("nome", "—")
-            _font_ui_name     = _FU.get(_fdef["ui"],     {}).get("nome", "—")
-            _font_data_name   = _FD.get(_fdef["data"],   {}).get("nome", "—")
-
-            col.markdown(
-                f'''<div style="background:{_bg};border:{_border_w} solid {_border_c};
-                    border-radius:12px;padding:16px;margin-bottom:8px;
-                    box-shadow:0 4px 16px {_shadow};transition:all .15s ease;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                        <span style="font-size:1.2rem">{tema['emoji']}</span>
-                        {_selected_badge}
-                    </div>
-                    <div style="font-family:'Inter',system-ui;font-size:.78rem;
-                        font-weight:600;color:{_txt};margin-bottom:3px;">{tema['nome']}</div>
-                    <div style="font-family:'Inter',system-ui;font-size:0.78rem;
-                        color:{_vars['--text-muted']};margin-bottom:10px;">{tema['desc']}</div>
-                    <div style="display:flex;gap:5px;margin-bottom:10px;">
-                        <div style="width:18px;height:18px;border-radius:50%;background:{_acc};
-                            border:1px solid rgba(0,0,0,.1);" title="acento"></div>
-                        <div style="width:18px;height:18px;border-radius:50%;background:{_bull};
-                            border:1px solid rgba(0,0,0,.1);" title="alta"></div>
-                        <div style="width:18px;height:18px;border-radius:50%;background:{_bear};
-                            border:1px solid rgba(0,0,0,.1);" title="baixa"></div>
-                        <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--info']};
-                            border:1px solid rgba(0,0,0,.1);" title="info"></div>
-                        <div style="width:18px;height:18px;border-radius:50%;background:{_vars['--amber']};
-                            border:1px solid rgba(0,0,0,.1);" title="alerta"></div>
-                    </div>
-                    <div style="font-family:'Inter',system-ui;font-size:.57rem;
-                        color:{_vars['--text-muted']};border-top:1px solid {_brd};
-                        padding-top:8px;display:flex;flex-direction:column;gap:2px;">
-                        <span>H · <em>{_font_titulo_name}</em></span>
-                        <span>UI · <em>{_font_ui_name}</em></span>
-                        <span>## · <em>{_font_data_name}</em></span>
-                    </div>
-                </div>''',
-                unsafe_allow_html=True,
-            )
-            if col.button(
-                "✓ aplicar" if _is_active else "aplicar",
-                key=f"_tema_cfg_{tid}",
-                type="primary" if _is_active else "secondary",
-                use_container_width=True,
-            ):
-                set_tema(tid)
-                st.rerun()
-
-        # Grade agrupada — Escuros (3+2) e Claros (2)
-        _escuros = [t for t in TEMAS_ORDER if not TEMAS[t].get("is_light")]
-        _claros  = [t for t in TEMAS_ORDER if TEMAS[t].get("is_light")]
-
-        st.markdown(
-            '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
-            'color:var(--text-muted);font-family:var(--font-ui);margin:8px 0 6px;">🌙 temas escuros</div>',
-            unsafe_allow_html=True,
-        )
-        for row_tids in [_escuros[:3], _escuros[3:6], _escuros[6:]]:
-            if not row_tids:
-                continue
-            _cols = st.columns(len(row_tids))
-            for _col, tid in zip(_cols, row_tids):
-                _render_tema_card(_col, tid, ativo)
-
-        st.markdown(
-            '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
-            'color:var(--text-muted);font-family:var(--font-ui);margin:16px 0 6px;">☀️ temas claros</div>',
-            unsafe_allow_html=True,
-        )
-        _cols_claros = st.columns(len(_claros))
-        for _col, tid in zip(_cols_claros, _claros):
-            _render_tema_card(_col, tid, ativo)
-
-        # ── Tipografia personalizável ─────────────────────────────────────────
-        st.markdown("---")
-        section_title("🔤 tipografia")
-
-        from utils.themes import (FONTES_TITULO, FONTES_UI, FONTES_DATA,
-                                   get_fontes_ativas, resetar_fontes,
-                                   TEMAS_FONTES_DEFAULT)
-
-        fontes_ativas = get_fontes_ativas()
-        defaults_tema = TEMAS_FONTES_DEFAULT.get(ativo, TEMAS_FONTES_DEFAULT["dark"])
-
-        st.markdown(
-            '<div style="font-size:.82rem;color:var(--text-secondary);margin-bottom:16px;">'
-            'Escolha as fontes independentemente das cores do tema. '
-            'Fontes de <strong>título</strong> aplicam em h1/h2/h3 e no logotipo. '
-            'Fontes de <strong>interface</strong> aplicam em labels, botões e texto corrido. '
-            'Fontes de <strong>dados</strong> aplicam em números, preços e código monospace.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-        col_ft, col_fu, col_fd = st.columns(3)
-
-        with col_ft:
-            st.markdown(
-                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
-                'color:var(--text-muted);margin-bottom:4px;">Títulos / Display</div>',
-                unsafe_allow_html=True,
-            )
-            keys_titulo = list(FONTES_TITULO.keys())
-            idx_t = keys_titulo.index(fontes_ativas["titulo"]) if fontes_ativas["titulo"] in keys_titulo else 0
-            st.selectbox(
-                "Fonte de títulos",
-                options=keys_titulo,
-                format_func=lambda k: FONTES_TITULO[k]["nome"],
-                index=idx_t,
-                label_visibility="collapsed",
-                key="_font_titulo",
-            )
-            st.markdown(
-                f'<div style="font-family:{FONTES_TITULO.get(st.session_state.get("_font_titulo", fontes_ativas["titulo"]), FONTES_TITULO[fontes_ativas["titulo"]])["css"]};'
-                f'font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-top:6px;">'
-                f'Terminal Financeiro</div>'
-                f'<div style="font-family:{FONTES_TITULO.get(st.session_state.get("_font_titulo", fontes_ativas["titulo"]), FONTES_TITULO[fontes_ativas["titulo"]])["css"]};'
-                f'font-size:.72rem;color:var(--text-muted);">Preview do título</div>',
-                unsafe_allow_html=True,
-            )
-
-        with col_fu:
-            st.markdown(
-                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
-                'color:var(--text-muted);margin-bottom:4px;">Interface / Corpo</div>',
-                unsafe_allow_html=True,
-            )
-            keys_ui = list(FONTES_UI.keys())
-            idx_u = keys_ui.index(fontes_ativas["ui"]) if fontes_ativas["ui"] in keys_ui else 0
-            st.selectbox(
-                "Fonte de interface",
-                options=keys_ui,
-                format_func=lambda k: FONTES_UI[k]["nome"],
-                index=idx_u,
-                label_visibility="collapsed",
-                key="_font_ui",
-            )
-            st.markdown(
-                f'<div style="font-family:{FONTES_UI.get(st.session_state.get("_font_ui", fontes_ativas["ui"]), FONTES_UI[fontes_ativas["ui"]])["css"]};'
-                f'font-size:.85rem;color:var(--text-secondary);margin-top:6px;">'
-                f'Labels, botões e texto corrido</div>'
-                f'<div style="font-family:{FONTES_UI.get(st.session_state.get("_font_ui", fontes_ativas["ui"]), FONTES_UI[fontes_ativas["ui"]])["css"]};'
-                f'font-size:0.78rem;text-transform:uppercase;letter-spacing:.06em;'
-                f'color:var(--text-muted);">Preview de label</div>',
-                unsafe_allow_html=True,
-            )
-
-        with col_fd:
-            st.markdown(
-                '<div style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.08em;'
-                'color:var(--text-muted);margin-bottom:4px;">Dados / Números</div>',
-                unsafe_allow_html=True,
-            )
-            keys_data = list(FONTES_DATA.keys())
-            idx_d = keys_data.index(fontes_ativas["data"]) if fontes_ativas["data"] in keys_data else 0
-            st.selectbox(
-                "Fonte de dados",
-                options=keys_data,
-                format_func=lambda k: FONTES_DATA[k]["nome"],
-                index=idx_d,
-                label_visibility="collapsed",
-                key="_font_data",
-            )
-            st.markdown(
-                f'<div style="font-family:{FONTES_DATA.get(st.session_state.get("_font_data", fontes_ativas["data"]), FONTES_DATA[fontes_ativas["data"]])["css"]};'
-                f'font-size:1.1rem;font-weight:700;color:var(--text-primary);margin-top:6px;">'
-                f'+12.48%  R$38,90</div>'
-                f'<div style="font-family:{FONTES_DATA.get(st.session_state.get("_font_data", fontes_ativas["data"]), FONTES_DATA[fontes_ativas["data"]])["css"]};'
-                f'font-size:.72rem;color:var(--text-muted);">Preview de número</div>',
-                unsafe_allow_html=True,
-            )
-
-        # Botão reset
-        st.markdown("<br>", unsafe_allow_html=True)
-        c1, c2 = st.columns([1, 4])
-        with c1:
-            if st.button("Padrão do tema", key="_reset_fonts", use_container_width=True):
-                resetar_fontes()
-                st.rerun()
-        with c2:
-            ft_nome = FONTES_TITULO.get(fontes_ativas["titulo"], {}).get("nome", "—")
-            fu_nome = FONTES_UI.get(fontes_ativas["ui"],         {}).get("nome", "—")
-            fd_nome = FONTES_DATA.get(fontes_ativas["data"],     {}).get("nome", "—")
-            padroes = defaults_tema
-            eh_padrao = (
-                fontes_ativas["titulo"] == padroes["titulo"] and
-                fontes_ativas["ui"]     == padroes["ui"]     and
-                fontes_ativas["data"]   == padroes["data"]
-            )
-            cor_status = "var(--bull)" if eh_padrao else "var(--accent)"
-            icone = "✓" if eh_padrao else "✎"
-            st.markdown(
-                f'<div style="font-size:.72rem;color:{cor_status};padding:6px 0;">'
-                f'{icone}  {ft_nome} · {fu_nome} · {fd_nome}'
-                f'{"  (padrão do tema)" if eh_padrao else ""}</div>',
-                unsafe_allow_html=True,
-            )
-
-    except Exception as e:
-        st.error(f"erro ao carregar temas: {e}")
+    with st.expander("Exportar ou restaurar minha aparência", expanded=False):
+        st.caption("A escolha acompanha esta sessão e os parâmetros do link. Exporte um arquivo para conservar também suas fontes personalizadas e restaurar em outro navegador.")
+        st.download_button("Exportar aparência", data=_appearance_json.dumps(get_aparencia_estado(), ensure_ascii=False, indent=2),
+                           file_name="finterminal-aparencia.json", mime="application/json", key="cfg_export_appearance")
+        def _import_appearance():
+            file = st.session_state.get("cfg_import_appearance")
+            if file is None:
+                return
+            try:
+                data = _appearance_json.loads(file.getvalue().decode("utf-8"))
+                if not isinstance(data, dict) or not any(data.get(k) in catalog for k, catalog in (("perfil", PERFIS_VISUAIS), ("paleta", TEMAS), ("densidade", DENSIDADES)) if isinstance(data.get(k), str)):
+                    raise ValueError("O arquivo não contém um perfil de aparência.")
+                restaurar_aparencia(data, preservar_url=False)
+                set_perfil(st.session_state.get("_visual_profile", "mesa"))
+                set_tema(st.session_state.get("_theme", "dark"))
+                set_densidade(st.session_state.get("_visual_density", "auto"))
+                st.session_state["_appearance_import_message"] = "Aparência restaurada."
+            except (ValueError, UnicodeDecodeError, TypeError):
+                st.session_state["_appearance_import_message"] = "Arquivo inválido. Use um JSON exportado pelo terminal."
+        st.file_uploader("Restaurar arquivo de aparência", type=["json"], key="cfg_import_appearance", on_change=_import_appearance)
+        if st.session_state.get("_appearance_import_message"):
+            st.caption(st.session_state["_appearance_import_message"])
 
     st.markdown("---")
     section_title("⌨️ atalhos de teclado")
     st.markdown("""
 | Atalho | Ação |
 |--------|------|
-| `Ctrl+K` | Abre o command palette (busca tickers e páginas) |
-| `Alt+1` | Home |
-| `Alt+2` | Research |
-| `Alt+3` | Discovery |
-| `Alt+4` | Macro |
+| `Ctrl+K` | Abre a busca de ativos e páginas |
+| `Alt+1` | Visão geral |
+| `Alt+2` | Análise de ativos |
+| `Alt+3` | Oportunidades |
+| `Alt+4` | Cenário macro |
 | `Alt+5` | Portfolio |
 | `Alt+6` | Configurações |
 | `↑ ↓` | Navegar no command palette |

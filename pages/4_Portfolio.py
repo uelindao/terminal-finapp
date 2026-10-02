@@ -57,9 +57,9 @@ topbar(
     user_name=_user_top_pf.get('username', '') or _user_top_pf.get('nome', '') or 'usuário',
     sync_label="Dados em cache",
 )
-page_header("Sua carteira", "Acompanhe suas posições, entenda o risco e planeje os próximos movimentos.")
+page_header("Carteira", "Posições, exposição, risco e hipóteses — escolha o estudo e explore os dados.")
 from utils.components import page_jump_links
-page_jump_links([("Posições", "ft-portfolio-positions"), ("Registrar operação", "ft-portfolio-operation"), ("Análises", "ft-portfolio-analysis")])
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_betas(tickers_tuple: tuple) -> dict:
@@ -1037,14 +1037,40 @@ if '_pending_entrada' in st.session_state:
     # não chama st.rerun() — os sliders lerão os valores
     # quando forem renderizados ainda nesta execução
 
-# 4. criação das tabs
-# LAZY RENDERING (P4-1): as abas do Portfolio são ACOPLADAS — portfolio_id_ativo,
-# pesos_atuais, ativos_alocados e live_data são computados em "posições" e usados
-# pelas análises. Em vez do hoist arriscado desse setup, "posições" (o núcleo +
-# os dados compartilhados) fica SEMPRE renderizado no topo (st.container), e as 7
-# seções analíticas PESADAS (risco/stress/backtest/chat...) são gateadas por um
-# seletor abaixo (F3-1: grupo → sub-seleção) — só a seção ativa renderiza. Elimina
-# o custo de render de todas as análises a cada rerun sem tocar no fluxo de dados.
+# Aplicar navegação pendente antes de criar os widgets (ação rápida do diário).
+if "_portfolio_focus_next" in st.session_state:
+    _pf_pending = st.session_state.pop("_portfolio_focus_next")
+    st.session_state.update(_pf_pending)
+
+_portfolio_workspace = section_selector(
+    ["Posições", "Análises"], key="portfolio_workspace", label="Área da carteira",
+)
+if _portfolio_workspace == "Análises":
+    _GRUPOS_PF = {
+        "📊 composição":  ["📊 concentração"],
+        "📐 risco":       ["📐 risco", "⚡ stress test"],
+        "📈 performance": ["📊 backtesting"],
+        "📋 gestão & ia": ["📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"],
+    }
+    _grupos_keys = list(_GRUPOS_PF.keys())
+    _grupo_pf = section_selector(_grupos_keys, key="portfolio_grupo", label="análise")
+    if _grupo_pf not in _GRUPOS_PF:
+        _grupo_pf = _grupos_keys[0]
+    _subs_pf = _GRUPOS_PF[_grupo_pf]
+    if len(_subs_pf) > 1:
+        from utils.components import tabs_pill as _tabs_pill_pf
+        _secao_pf = _tabs_pill_pf(
+            _subs_pf, key="portfolio_sub_" + str(_grupos_keys.index(_grupo_pf)),
+            default=_subs_pf[0],
+        )
+    else:
+        _secao_pf = _subs_pf[0]
+
+else:
+    _secao_pf = "__positions__"
+
+# As posições preparam os dados comuns em um painel recolhível. Cada análise
+# é escolhida no topo e só a seção ativa executa os cálculos específicos.
 
 # variáveis partilhadas entre tabs — preenchidas em tab_posicoes
 live_data: dict      = {}
@@ -1071,1330 +1097,1351 @@ with st.container():
     portfolio_ativo = portfolios_lista[portfolio_idx]
     portfolio_id_ativo = portfolio_ativo['id']
     _portfolio_overview = st.container()
-    # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
-    try:
-        from utils.macro_state import render_cockpit_macro as _rcm
-        _rcm('BR')
-    except Exception:
-        pass
+    with st.expander("Posições, operações e desempenho", expanded=_portfolio_workspace == "Posições"):
+        # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
+        with st.expander("Contexto macro da carteira", expanded=False):
+            try:
+                from utils.macro_state import render_cockpit_macro as _rcm
+                _rcm('BR')
+            except Exception:
+                pass
 
 
-    # Detecta troca de portfólio e limpa caches do chat
-    _prev_portfolio_id = st.session_state.get('_prev_portfolio_id_chat')
-    if _prev_portfolio_id and _prev_portfolio_id != portfolio_id_ativo:
-        for _ck in ['chat_portfolio_contexto', 'chat_ctx_version',
-                    'pesos_ativos_cache', 'live_data_cache',
-                    'health_chat_cache', 'metricas_cache',
-                    'chat_portfolio_msgs']:
-            st.session_state.pop(_ck, None)
-        st.session_state.pop(
-            f"pesos_ativos_cache_{_prev_portfolio_id}", None
-        )
-    st.session_state['_prev_portfolio_id_chat'] = portfolio_id_ativo
-
-    with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
-            st.session_state['show_portfolio_manager'] = not st.session_state.get('show_portfolio_manager', False)
-
-    if st.session_state.get('show_portfolio_manager', False):
-        with st.expander("Gerenciar portfólios", expanded=True):
-            st.markdown("##### criar novo portfólio")
-            with st.form("form_novo_portfolio", clear_on_submit=True):
-                fc1, fc2, fc3 = st.columns(3)
-                with fc1:
-                    novo_pf_nome = st.text_input("nome:", placeholder="ex: ações EUA")
-                with fc2:
-                    novo_pf_icone = st.selectbox("ícone:", ["💼", "🇧🇷", "🇺🇸", "🏢", "📈", "₿", "🌍"])
-                with fc3:
-                    novo_pf_cor = st.selectbox("cor:", ["#FF9900", "#00C853", "#00B0FF", "#E040FB", "#FF1744"])
-                if st.form_submit_button("Criar portfólio", type="primary"):
-                    if novo_pf_nome.strip():
-                        criar_portfolio(novo_pf_nome.strip(), icone=novo_pf_icone, cor=novo_pf_cor)
-                        st.success(f"✅ portfólio '{novo_pf_nome}' criado!")
-                        st.rerun()
-                    else:
-                        st.warning("digite um nome para o portfólio.")
-            st.markdown("---")
-            st.markdown("##### portfólios existentes")
-            for pf in portfolios_lista:
-                pc1, pc2, pc3 = st.columns([4, 1, 1])
-                pc1.markdown(f"{pf['icone']} **{pf['nome']}** — {pf['total_ativos']} ativos")
-                if pf['padrao']:
-                    pc2.markdown('<span class="badge badge-amber">padrão</span>', unsafe_allow_html=True)
-                else:
-                    if pc2.button("⭐ padrão", key=f"pf_pad_{pf['id']}", use_container_width=True):
-                        definir_portfolio_padrao(pf['id'])
-                        st.rerun()
-                if pc3.button("🗑️ excluir", key=f"pf_del_{pf['id']}", use_container_width=True, disabled=(len(portfolios_lista) <= 1)):
-                    confirm_action("Remover carteira?", f"A carteira '{pf['nome']}' e suas posições serão removidas.",
-                                   lambda portfolio_id=pf['id']: deletar_portfolio(portfolio_id), key=f"delete_pf_manager_{pf['id']}")
-
-    watchlist = listar_watchlist()
-    pesos_atuais = {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}
-
-    # ── ALINHAMENTO CARTEIRA × REGIME (PLANO_FRONT F3-2) ──────────────────────
-    # Elo entre o motor macro (tilt setorial, mesmo do health score) e a carteira:
-    # quanto do capital está em setores FAVORECIDOS vs PENALIZADOS pelo regime.
-    # Ponderado por CUSTO (qtd × preço médio) — cache-first, sem cotação ao vivo.
-    try:
-        from utils.alinhamento_regime import alinhamento_regime as _alin_reg
-        _posicoes_al = [
-            {"ticker": t, "peso": float(d.get("quantidade") or 0) * float(d.get("preco_medio") or 0)}
-            for t, d in pesos_atuais.items()
-        ]
-        _posicoes_al = [p for p in _posicoes_al if p["peso"] > 0]
-        if not _posicoes_al:  # fallback: sem qtd/pm, usa o campo peso (peso-alvo)
-            _posicoes_al = [
-                {"ticker": t, "peso": float(d.get("peso") or 0)}
-                for t, d in pesos_atuais.items() if float(d.get("peso") or 0) > 0
-            ]
-        if _posicoes_al:
-            _al = _alin_reg(_posicoes_al, get_todos_fundamentos_cache(),
-                            st.session_state.get("macro_context", {}) or {})
-            _saldo = _al["saldo_pontos"]
-            _hl_cor = ("var(--bull)" if _saldo > 0.3 else
-                       "var(--bear)" if _saldo < -0.3 else "var(--amber)")
-            _hl_txt = ("carteira alinhada ao regime" if _saldo > 0.3 else
-                       "carteira contra o regime" if _saldo < -0.3 else
-                       "carteira neutra ao regime")
-
-            def _al_seg(lbl, val, cor):
-                return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
-                        f'<span style="font-family:var(--font-ui);font-size:0.78rem;color:var(--text-muted);'
-                        f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
-                        f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
-                        f'color:{cor};white-space:nowrap;">{val}</span></div>')
-
-            _segs_al = [
-                _al_seg("alinhamento", _hl_txt, _hl_cor),
-                _al_seg("🟢 favorecidos", f"{_al['favoravel_pct']:.0f}%", "var(--bull)"),
-                _al_seg("🔴 penalizados", f"{_al['desfavoravel_pct']:.0f}%", "var(--bear)"),
-                _al_seg("⚪ neutros", f"{_al['neutro_pct']:.0f}%", "var(--text-muted)"),
-            ]
-            if _al["sem_setor_pct"] >= 1:
-                _segs_al.append(_al_seg("sem setor", f"{_al['sem_setor_pct']:.0f}%", "var(--text-muted)"))
-
-            st.markdown(
-                f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
-                f'border-left:4px solid {_hl_cor};border-radius:var(--radius-md);'
-                f'padding:12px 20px;margin:6px 0 14px 0;display:flex;align-items:center;'
-                f'gap:28px;flex-wrap:wrap;">' + "".join(_segs_al) + '</div>',
-                unsafe_allow_html=True,
+        # Detecta troca de portfólio e limpa caches do chat
+        _prev_portfolio_id = st.session_state.get('_prev_portfolio_id_chat')
+        if _prev_portfolio_id and _prev_portfolio_id != portfolio_id_ativo:
+            for _ck in ['chat_portfolio_contexto', 'chat_ctx_version',
+                        'pesos_ativos_cache', 'live_data_cache',
+                        'health_chat_cache', 'metricas_cache',
+                        'chat_portfolio_msgs']:
+                st.session_state.pop(_ck, None)
+            st.session_state.pop(
+                f"pesos_ativos_cache_{_prev_portfolio_id}", None
             )
+        st.session_state['_prev_portfolio_id_chat'] = portfolio_id_ativo
 
-            with st.expander("Ver alinhamento por posição", expanded=False):
-                _imp_badge = {"favoravel": ("favorecido", "var(--bull)"),
-                              "desfavoravel": ("penalizado", "var(--bear)"),
-                              "neutro": ("neutro", "var(--text-muted)"),
-                              "sem_setor": ("sem setor", "var(--text-muted)")}
-                _linhas_al = []
-                for _it in _al["itens"]:
-                    _lbl_al, _cor_al = _imp_badge.get(_it["impacto"], ("neutro", "var(--text-muted)"))
-                    _setor_al = (_it["setor"] or "—")[:28]
-                    _linhas_al.append(
-                        f'<div style="display:flex;justify-content:space-between;gap:12px;'
-                        f'padding:5px 0;border-bottom:1px solid var(--border-subtle);">'
-                        f'<span style="font-family:var(--font-data);color:var(--text-primary);min-width:80px;">{_it["ticker"]}</span>'
-                        f'<span style="color:var(--text-muted);font-size:0.8rem;flex:1;">{_setor_al}</span>'
-                        f'<span style="font-family:var(--font-data);color:var(--text-secondary);min-width:52px;text-align:right;">{_it["peso_pct"]:.1f}%</span>'
-                        f'<span style="color:{_cor_al};font-size:0.78rem;min-width:82px;text-align:right;">{_lbl_al}</span>'
-                        f'</div>'
-                    )
-                st.markdown("".join(_linhas_al), unsafe_allow_html=True)
-                st.caption("ponderado pelo custo (quantidade × preço médio) de cada posição. "
-                           "favorecido / penalizado = tilt do setor no regime macro atual "
-                           "(mesmo motor do health score).")
-    except Exception:
-        pass
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Gerenciar", use_container_width=True, key="btn_gerenciar_portfolio"):
+                st.session_state['show_portfolio_manager'] = not st.session_state.get('show_portfolio_manager', False)
 
-    tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
-    posicoes_ativas = []
-
-    for t in tickers_unicos:
-        p_atual = pesos_atuais.get(t, {})
-        qtd = float(p_atual.get('quantidade') or 0)
-        if qtd > 0:
-            pm = float(p_atual.get('preco_medio') or 0)
-            posicoes_ativas.append({
-                "ticker": t,
-                "quantidade": qtd,
-                "preço médio": pm,
-                "valor estimado": qtd * pm
-            })
-
-    # ══ IMPORTAÇÃO VIA PLANILHA ══════════════════════════════════════════════
-    with st.expander("Importar portfólio via planilha", expanded=False):
-
-        col_imp1, col_imp2 = st.columns([3, 1])
-        with col_imp1:
-            st.markdown(
-                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
-                'color:var(--text-muted); line-height:1.6;">'
-                '📋 <b>formato aceito:</b> CSV ou Excel com colunas '
-                '<code>ticker</code>, <code>quantidade</code>, '
-                '<code>preco_medio</code>.<br>'
-                '💡 <b>dica:</b> envie prints da sua corretora para o Claude '
-                'ou ChatGPT pedindo para gerar um CSV neste formato.</div>',
-                unsafe_allow_html=True,
-            )
-        with col_imp2:
-            st.download_button(
-                label               = "📄 baixar template",
-                data                = TEMPLATE_CSV,
-                file_name           = "template_portfolio.csv",
-                mime                = "text/csv",
-                use_container_width = True,
-                key                 = "dl_template_portfolio",
-            )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        arquivo_imp = st.file_uploader(
-            "selecione o arquivo:",
-            type = ['csv', 'xlsx', 'xls'],
-            key  = "uploader_portfolio",
-            help = "CSV ou Excel com ticker, quantidade e preço médio",
-        )
-
-        if arquivo_imp is not None:
-            resultado_imp = importar_planilha(
-                arquivo_imp.read(), arquivo_imp.name
-            )
-
-            if resultado_imp['posicoes']:
-                section_title(
-                    f"✅ {len(resultado_imp['posicoes'])} posições detectadas "
-                    f"— confirme antes de importar"
-                )
-
-                # ── Preview ──────────────────────────────────────────────
-                df_prev = pd.DataFrame(resultado_imp['posicoes'])[
-                    ['ticker', 'nome', 'quantidade', 'preco_medio', 'mercado']
-                ].copy()
-                df_prev['valor_estimado'] = (
-                    df_prev['quantidade'] * df_prev['preco_medio']
-                ).apply(lambda x: f"R$ {x:,.2f}")
-                df_prev['preco_medio'] = df_prev['preco_medio'].apply(
-                    lambda x: f"R$ {x:,.2f}"
-                )
-                def _generic_html_table(df: pd.DataFrame, first_col_left: bool = True) -> None:
-                    # Render via html_table (F0-2): tabela genérica mono.
-                    from utils.components import html_table as _ht_gen
-                    _cols = list(df.columns)
-                    _aligns = [("left" if (i == 0 and first_col_left) else "right")
-                               for i in range(len(_cols))]
-                    _rows = [[str(row[c]) for c in _cols] for _, row in df.iterrows()]
-                    _classes = [["mono"] * len(_cols) for _ in range(len(_rows))]
-                    _ht_gen(_cols, _rows, aligns=_aligns, classes=_classes)
-                _generic_html_table(df_prev)
-
-                # Erros não-críticos como warnings
-                for erro_imp in resultado_imp['erros']:
-                    st.warning(f"⚠️ {erro_imp}")
-
-                st.markdown("---")
-
-                col_conf1, col_conf2, col_conf3 = st.columns(3)
-                with col_conf1:
-                    modo_import = st.radio(
-                        "modo de importação:",
-                        options=['adicionar', 'substituir'],
-                        format_func=lambda x: {
-                            'adicionar':  '➕ adicionar às posições atuais',
-                            'substituir': '🔄 substituir portfólio inteiro',
-                        }[x],
-                        key="modo_importacao",
-                    )
-
-                with col_conf3:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button(
-                        "Confirmar importação",
-                        type="primary",
-                        use_container_width=True,
-                        key="btn_confirmar_import",
-                    ):
-                        from database.db import (
-                            adicionar_ativo, get_watchlist_padrao,
-                        )
-
-                        wl_id_imp  = get_watchlist_padrao()
-                        importados = 0
-                        erros_imp  = []
-
-                        for pos in resultado_imp['posicoes']:
-                            try:
-                                # Garante que o ativo existe na watchlist
-                                adicionar_ativo(
-                                    ticker       = pos['ticker'],
-                                    nome         = pos['nome'],
-                                    mercado      = pos['mercado'],
-                                    watchlist_id = wl_id_imp,
-                                )
-                                # Salva posição no portfólio
-                                salvar_peso(
-                                    pos['ticker'],
-                                    0.0,
-                                    pos['preco_medio'],
-                                    pos['quantidade'],
-                                    portfolio_id=portfolio_id_ativo,
-                                )
-                                importados += 1
-                            except Exception as e_pos:
-                                erros_imp.append(
-                                    f"{pos['ticker']}: {e_pos}"
-                                )
-
-                        if importados > 0:
-                            st.success(
-                                f"✅ {importados} posições importadas com sucesso!"
-                            )
+        if st.session_state.get('show_portfolio_manager', False):
+            with st.expander("Gerenciar portfólios", expanded=True):
+                st.markdown("##### criar novo portfólio")
+                with st.form("form_novo_portfolio", clear_on_submit=True):
+                    fc1, fc2, fc3 = st.columns(3)
+                    with fc1:
+                        novo_pf_nome = st.text_input("nome:", placeholder="ex: ações EUA")
+                    with fc2:
+                        novo_pf_icone = st.selectbox("ícone:", ["💼", "🇧🇷", "🇺🇸", "🏢", "📈", "₿", "🌍"])
+                    with fc3:
+                        novo_pf_cor = st.selectbox("cor:", ["#FF9900", "#00C853", "#00B0FF", "#E040FB", "#FF1744"])
+                    if st.form_submit_button("Criar portfólio", type="primary"):
+                        if novo_pf_nome.strip():
+                            criar_portfolio(novo_pf_nome.strip(), icone=novo_pf_icone, cor=novo_pf_cor)
+                            st.success(f"✅ portfólio '{novo_pf_nome}' criado!")
                             st.rerun()
-                        for e_msg in erros_imp:
-                            st.error(f"❌ {e_msg}")
+                        else:
+                            st.warning("digite um nome para o portfólio.")
+                st.markdown("---")
+                st.markdown("##### portfólios existentes")
+                for pf in portfolios_lista:
+                    pc1, pc2, pc3 = st.columns([4, 1, 1])
+                    pc1.markdown(f"{pf['icone']} **{pf['nome']}** — {pf['total_ativos']} ativos")
+                    if pf['padrao']:
+                        pc2.markdown('<span class="badge badge-amber">padrão</span>', unsafe_allow_html=True)
+                    else:
+                        if pc2.button("⭐ padrão", key=f"pf_pad_{pf['id']}", use_container_width=True):
+                            definir_portfolio_padrao(pf['id'])
+                            st.rerun()
+                    if pc3.button("🗑️ excluir", key=f"pf_del_{pf['id']}", use_container_width=True, disabled=(len(portfolios_lista) <= 1)):
+                        confirm_action("Remover carteira?", f"A carteira '{pf['nome']}' e suas posições serão removidas.",
+                                       lambda portfolio_id=pf['id']: deletar_portfolio(portfolio_id), key=f"delete_pf_manager_{pf['id']}")
 
-            else:
-                st.error("não foi possível detectar posições no arquivo.")
-                for erro_imp in resultado_imp['erros']:
-                    st.error(f"❌ {erro_imp}")
-                st.info(
-                    "💡 verifique se o arquivo tem as colunas: "
-                    "ticker, quantidade, preco_medio"
+        watchlist = listar_watchlist()
+        pesos_atuais = {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}
+
+        # ── ALINHAMENTO CARTEIRA × REGIME (PLANO_FRONT F3-2) ──────────────────────
+        # Elo entre o motor macro (tilt setorial, mesmo do health score) e a carteira:
+        # quanto do capital está em setores FAVORECIDOS vs PENALIZADOS pelo regime.
+        # Ponderado por CUSTO (qtd × preço médio) — cache-first, sem cotação ao vivo.
+        try:
+            from utils.alinhamento_regime import alinhamento_regime as _alin_reg
+            _posicoes_al = [
+                {"ticker": t, "peso": float(d.get("quantidade") or 0) * float(d.get("preco_medio") or 0)}
+                for t, d in pesos_atuais.items()
+            ]
+            _posicoes_al = [p for p in _posicoes_al if p["peso"] > 0]
+            if not _posicoes_al:  # fallback: sem qtd/pm, usa o campo peso (peso-alvo)
+                _posicoes_al = [
+                    {"ticker": t, "peso": float(d.get("peso") or 0)}
+                    for t, d in pesos_atuais.items() if float(d.get("peso") or 0) > 0
+                ]
+            if _posicoes_al:
+                _al = _alin_reg(_posicoes_al, get_todos_fundamentos_cache(),
+                                st.session_state.get("macro_context", {}) or {})
+                _saldo = _al["saldo_pontos"]
+                _hl_cor = ("var(--bull)" if _saldo > 0.3 else
+                           "var(--bear)" if _saldo < -0.3 else "var(--amber)")
+                _hl_txt = ("carteira alinhada ao regime" if _saldo > 0.3 else
+                           "carteira contra o regime" if _saldo < -0.3 else
+                           "carteira neutra ao regime")
+
+                def _al_seg(lbl, val, cor):
+                    return (f'<div style="display:flex;flex-direction:column;gap:2px;">'
+                            f'<span style="font-family:var(--font-ui);font-size:0.78rem;color:var(--text-muted);'
+                            f'text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">{lbl}</span>'
+                            f'<span style="font-family:var(--font-data);font-size:0.92rem;font-weight:600;'
+                            f'color:{cor};white-space:nowrap;">{val}</span></div>')
+
+                _segs_al = [
+                    _al_seg("alinhamento", _hl_txt, _hl_cor),
+                    _al_seg("🟢 favorecidos", f"{_al['favoravel_pct']:.0f}%", "var(--bull)"),
+                    _al_seg("🔴 penalizados", f"{_al['desfavoravel_pct']:.0f}%", "var(--bear)"),
+                    _al_seg("⚪ neutros", f"{_al['neutro_pct']:.0f}%", "var(--text-muted)"),
+                ]
+                if _al["sem_setor_pct"] >= 1:
+                    _segs_al.append(_al_seg("sem setor", f"{_al['sem_setor_pct']:.0f}%", "var(--text-muted)"))
+
+                st.markdown(
+                    f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+                    f'border-left:4px solid {_hl_cor};border-radius:var(--radius-md);'
+                    f'padding:12px 20px;margin:6px 0 14px 0;display:flex;align-items:center;'
+                    f'gap:28px;flex-wrap:wrap;">' + "".join(_segs_al) + '</div>',
+                    unsafe_allow_html=True,
                 )
 
-    st.markdown('<div id="ft-portfolio-positions"></div>', unsafe_allow_html=True)
+                with st.expander("Ver alinhamento por posição", expanded=False):
+                    _imp_badge = {"favoravel": ("favorecido", "var(--bull)"),
+                                  "desfavoravel": ("penalizado", "var(--bear)"),
+                                  "neutro": ("neutro", "var(--text-muted)"),
+                                  "sem_setor": ("sem setor", "var(--text-muted)")}
+                    _linhas_al = []
+                    for _it in _al["itens"]:
+                        _lbl_al, _cor_al = _imp_badge.get(_it["impacto"], ("neutro", "var(--text-muted)"))
+                        _setor_al = (_it["setor"] or "—")[:28]
+                        _linhas_al.append(
+                            f'<div style="display:flex;justify-content:space-between;gap:12px;'
+                            f'padding:5px 0;border-bottom:1px solid var(--border-subtle);">'
+                            f'<span style="font-family:var(--font-data);color:var(--text-primary);min-width:80px;">{_it["ticker"]}</span>'
+                            f'<span style="color:var(--text-muted);font-size:0.8rem;flex:1;">{_setor_al}</span>'
+                            f'<span style="font-family:var(--font-data);color:var(--text-secondary);min-width:52px;text-align:right;">{_it["peso_pct"]:.1f}%</span>'
+                            f'<span style="color:{_cor_al};font-size:0.78rem;min-width:82px;text-align:right;">{_lbl_al}</span>'
+                            f'</div>'
+                        )
+                    st.markdown("".join(_linhas_al), unsafe_allow_html=True)
+                    st.caption("ponderado pelo custo (quantidade × preço médio) de cada posição. "
+                               "favorecido / penalizado = tilt do setor no regime macro atual "
+                               "(mesmo motor do health score).")
+        except Exception:
+            pass
 
-    # ══ TABELA DE POSIÇÕES ATIVAS ════════════════════════════════════════════
-    if posicoes_ativas:
-        with st.expander("Editar quantidades e preços médios", expanded=False):
-            section_title("📋 posições ativas")
-            df_ativas = pd.DataFrame(posicoes_ativas)
+        tickers_unicos = list(set([item['ticker'] for item in watchlist] + list(pesos_atuais.keys())))
+        posicoes_ativas = []
 
-            df_ativas_editado = st.data_editor(
-                df_ativas,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="fixed",
-                column_config={
-                    "ticker": st.column_config.TextColumn("ativo", disabled=True),
-                    "quantidade": st.column_config.NumberColumn("quantidade", min_value=0.0, step=0.001, format="%.4f"),
-                    "preço médio": st.column_config.NumberColumn("preço médio (R$/US$)", min_value=0.0, step=0.01, format="%.4f"),
-                    "valor estimado": st.column_config.NumberColumn("valor estimado", disabled=True, format="%.2f")
-                }
-            )
+        for t in tickers_unicos:
+            p_atual = pesos_atuais.get(t, {})
+            qtd = float(p_atual.get('quantidade') or 0)
+            if qtd > 0:
+                pm = float(p_atual.get('preco_medio') or 0)
+                posicoes_ativas.append({
+                    "ticker": t,
+                    "quantidade": qtd,
+                    "preço médio": pm,
+                    "valor estimado": qtd * pm
+                })
 
-            patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
-            num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
+        # ══ IMPORTAÇÃO VIA PLANILHA ══════════════════════════════════════════════
+        with st.expander("Importar portfólio via planilha", expanded=False):
 
-            c_txt, c_nav, c_btn = st.columns([3, 2, 1])
-            with c_txt:
-                st.markdown(f"<div style='font-family:var(--font-data,monospace); font-size: 0.85rem; color:var(--text-muted); padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
-            with c_nav:
-                _tickers_port = df_ativas['ticker'].tolist()
-                _sel_nav = st.selectbox(
-                    "Abrir análise do ativo",
-                    [""] + [t.replace('.SA','') for t in _tickers_port],
-                    label_visibility="collapsed",
-                    key="port_nav_ticker",
-                    placeholder="Selecione um ativo",
+            col_imp1, col_imp2 = st.columns([3, 1])
+            with col_imp1:
+                st.markdown(
+                    '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
+                    'color:var(--text-muted); line-height:1.6;">'
+                    '📋 <b>formato aceito:</b> CSV ou Excel com colunas '
+                    '<code>ticker</code>, <code>quantidade</code>, '
+                    '<code>preco_medio</code>.<br>'
+                    '💡 <b>dica:</b> envie prints da sua corretora para o Claude '
+                    'ou ChatGPT pedindo para gerar um CSV neste formato.</div>',
+                    unsafe_allow_html=True,
                 )
-                if _sel_nav:
-                    _match = next((t for t in _tickers_port if t.replace('.SA','') == _sel_nav), _sel_nav)
-                    st.session_state['research_ticker_externo'] = _match
-                    st.switch_page("pages/1_Research.py")
-            with c_btn:
-                btn_salvar = st.button("Salvar correções da tabela", type="primary", use_container_width=True)
-
-            if btn_salvar:
-                df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
-                patrimonio_total = df_ativas_editado['valor total'].sum()
-
-                for _, row in df_ativas_editado.iterrows():
-                    t = row['ticker']
-                    qtd = row['quantidade']
-                    pm = row['preço médio']
-                    v_total = row['valor total']
-                    peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                    # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
-                    import math as _mt
-                    def _sn(v):
-                        if v is None: return None
-                        try: return None if _mt.isnan(v) or _mt.isinf(v) else v
-                        except TypeError: return v
-                    salvar_peso(t, _sn(peso_real), _sn(pm), _sn(qtd), portfolio_id=portfolio_id_ativo)
-
-                st.success("✅ posições atualizadas.")
-                st.rerun()
-    else:
-        empty_state("📋", "nenhuma posição ativa", "adicione sua primeira posição abaixo.")
-
-    st.markdown('<div id="ft-portfolio-operation"></div>', unsafe_allow_html=True)
-    with st.expander("Registrar compra ou venda", expanded=not bool(posicoes_ativas)):
-        with st.form("form_add_posicao", clear_on_submit=True):
-            col_op, col_f1, col_f2, col_f3 = st.columns([1, 2, 1, 1], gap="small")
-
-            with col_op:
-                tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
-
-            with col_f1:
-                opcoes_wl = [w['ticker'] for w in watchlist]
-                ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
-
-            with col_f2:
-                qtd_form = st.number_input("quantidade operada", min_value=0.0, step=0.001, format="%.4f")
-
-            with col_f3:
-                pm_form = st.number_input("preço (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
-
-            ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
+            with col_imp2:
+                st.download_button(
+                    label               = "📄 baixar template",
+                    data                = TEMPLATE_CSV,
+                    file_name           = "template_portfolio.csv",
+                    mime                = "text/csv",
+                    use_container_width = True,
+                    key                 = "dl_template_portfolio",
+                )
 
             st.markdown("<br>", unsafe_allow_html=True)
-            btn_add = st.form_submit_button("Registrar operação no portfólio", type="primary", use_container_width=True)
 
-            if btn_add:
-                ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
-
-                if ticker_final and qtd_form > 0 and pm_form > 0:
-                    # Obter dados atuais da posição antes da operação
-                    p_atual = pesos_atuais.get(ticker_final, {})
-                    qtd_atual = float(p_atual.get('quantidade') or 0)
-                    pm_atual = float(p_atual.get('preco_medio') or 0)
-
-                    if "Comprar" in tipo_op:
-                        nova_qtd = qtd_atual + qtd_form
-                        # Cálculo inteligente de Preço Médio
-                        novo_pm = ((qtd_atual * pm_atual) + (qtd_form * pm_form)) / nova_qtd if nova_qtd > 0 else pm_form
-
-                        salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
-                        st.success(f"✅ compra de {qtd_form} cotas de {ticker_final} registrada! novo PM: {novo_pm:.2f}")
-                        time.sleep(1.5)
-                        st.rerun()
-
-                    elif "Vender" in tipo_op:
-                        if qtd_form > qtd_atual:
-                            st.warning(f"⚠️ você está tentando vender {qtd_form} cotas, mas só possui {qtd_atual} de {ticker_final}.")
-                        else:
-                            nova_qtd = qtd_atual - qtd_form
-                            # Em vendas, o Preço Médio das cotas restantes NÃO muda. Se zerar a posição, zera o PM.
-                            novo_pm = pm_atual if nova_qtd > 0 else 0.0
-
-                            salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
-                            st.success(f"✅ venda de {qtd_form} cotas de {ticker_final} registrada com sucesso!")
-                            time.sleep(1.5)
-                            st.rerun()
-                else:
-                    st.warning("preencha ticker, uma quantidade maior que zero e um preço válido.")
-
-    ativos_alocados = {t: d for t, d in pesos_atuais.items() if d['peso'] > 0}
-
-    if ativos_alocados:
-        tickers_com_peso = list(ativos_alocados.keys())
-
-        with st.spinner("a sincronizar cotações em tempo real para cálculo de p&l..."):
-            live_data = {}
-            for t in tickers_com_peso:
-                t_base = mapear_ticker_base(t)
-                try:
-                    hist = yf.Ticker(t_base).history(period="5d")['Close'].dropna()
-                    if not hist.empty:
-                        live_data[t] = float(hist.iloc[-1])
-                    else:
-                        live_data[t] = 0.0
-                except Exception as _e:
-                    logger.debug(f"[portfolio] live_data fallback para {t_base}: {_e}")
-                    live_data[t] = 0.0
-
-        st.markdown("---")
-        section_title("📊 performance e distribuição")
-
-        linhas_portfolio = []
-        custo_total_carteira = 0.0
-        valor_atual_carteira = 0.0
-
-        health_raw = get_health_scores()
-        health_data = {h['ticker']: h.get('score', 50) for h in health_raw}
-
-        for t, dados in ativos_alocados.items():
-            qtd = float(dados.get('quantidade') or 0)
-            pm = float(dados.get('preco_medio') or 0)
-            preco_atual = live_data.get(t, 0.0)
-            custo_posicao = qtd * pm
-            valor_posicao = qtd * preco_atual
-            pnl_valor = valor_posicao - custo_posicao
-            pnl_pct = (pnl_valor / custo_posicao * 100) if custo_posicao > 0 else 0.0
-
-            custo_total_carteira += custo_posicao
-            valor_atual_carteira += valor_posicao
-
-            linhas_portfolio.append({
-                "ativo": t, "qtd": qtd, "preço médio": pm, "preço atual": preco_atual,
-                "custo total": custo_posicao, "valor atual": valor_posicao,
-                "p&l ($)": pnl_valor, "p&l (%)": pnl_pct, "health score": health_data.get(mapear_ticker_base(t), "n/d")
-            })
-
-        df_portfolio = pd.DataFrame(linhas_portfolio)
-        df_portfolio['peso atual (%)'] = (df_portfolio['valor atual'] / valor_atual_carteira) * 100 if valor_atual_carteira > 0 else 0.0
-
-        pnl_global_valor = valor_atual_carteira - custo_total_carteira
-        pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
-
-        # ── PERFORMANCE VS BENCHMARKS ─────────────────────────────────
-        st.markdown("---")
-        section_title("📈 performance da carteira vs benchmarks")
-
-        label_com_tooltip(
-            "retorno ponderado pelo valor de mercado de cada posição "
-            "vs ibovespa, s&p500 (via ivvb11), ifix e cdi.",
-            texto_custom=(
-                "metodologia: retorno diário ponderado pelo valor "
-                "de mercado de cada posição (twr simplificado). "
-                "cdi via bcb série 12 (taxa overnight acumulada). "
-                "base 100 = início do período selecionado."
-            ),
-            cor="var(--text-muted)",
-            tamanho="0.72rem",
-        )
-
-        _periodo_perf = st.radio(
-            "período:",
-            ["3mo", "6mo", "1y", "2y"],
-            format_func=lambda x: {
-                "3mo": "3 meses",
-                "6mo": "6 meses",
-                "1y":  "1 ano",
-                "2y":  "2 anos",
-            }[x],
-            horizontal=True,
-            key="radio_periodo_perf",
-        )
-
-        # Monta tuple de posições para cache
-        _pos_dict_perf = [
-            {
-                'ticker': t,
-                'quantidade': float(d.get('quantidade', 0) or 0),
-                'preco_medio': float(d.get('preco_medio', 0) or 0),
-            }
-            for t, d in ativos_alocados.items()
-            if float(d.get('quantidade', 0) or 0) > 0
-        ]
-
-        if not _pos_dict_perf:
-            info_box(
-                tipo   = "info",
-                titulo = "sem posições com quantidade/preço",
-                texto  = "adicione posições com quantidade e preço médio para calcular a performance.",
-                icone  = "📭",
+            arquivo_imp = st.file_uploader(
+                "selecione o arquivo:",
+                type = ['csv', 'xlsx', 'xls'],
+                key  = "uploader_portfolio",
+                help = "CSV ou Excel com ticker, quantidade e preço médio",
             )
-        else:
-            with st.spinner("calculando performance vs benchmarks..."):
-                _perf = calcular_performance_vs_benchmarks(
-                    tuple(
-                        (p['ticker'], p['quantidade'], p['preco_medio'])
-                        for p in _pos_dict_perf
-                    ),
-                    periodo=_periodo_perf,
+
+            if arquivo_imp is not None:
+                resultado_imp = importar_planilha(
+                    arquivo_imp.read(), arquivo_imp.name
                 )
 
-            if not _perf or not _perf.get('series'):
-                info_box(
-                    tipo   = "amber",
-                    titulo = "performance indisponível",
-                    texto  = "não foi possível calcular. verifique se os tickers estão corretos.",
-                    icone  = "⚠",
+                if resultado_imp['posicoes']:
+                    section_title(
+                        f"✅ {len(resultado_imp['posicoes'])} posições detectadas "
+                        f"— confirme antes de importar"
+                    )
+
+                    # ── Preview ──────────────────────────────────────────────
+                    df_prev = pd.DataFrame(resultado_imp['posicoes'])[
+                        ['ticker', 'nome', 'quantidade', 'preco_medio', 'mercado']
+                    ].copy()
+                    df_prev['valor_estimado'] = (
+                        df_prev['quantidade'] * df_prev['preco_medio']
+                    ).apply(lambda x: f"R$ {x:,.2f}")
+                    df_prev['preco_medio'] = df_prev['preco_medio'].apply(
+                        lambda x: f"R$ {x:,.2f}"
+                    )
+                    def _generic_html_table(df: pd.DataFrame, first_col_left: bool = True) -> None:
+                        # Render via html_table (F0-2): tabela genérica mono.
+                        from utils.components import html_table as _ht_gen
+                        _cols = list(df.columns)
+                        _aligns = [("left" if (i == 0 and first_col_left) else "right")
+                                   for i in range(len(_cols))]
+                        _rows = [[str(row[c]) for c in _cols] for _, row in df.iterrows()]
+                        _classes = [["mono"] * len(_cols) for _ in range(len(_rows))]
+                        _ht_gen(_cols, _rows, aligns=_aligns, classes=_classes)
+                    _generic_html_table(df_prev)
+
+                    # Erros não-críticos como warnings
+                    for erro_imp in resultado_imp['erros']:
+                        st.warning(f"⚠️ {erro_imp}")
+
+                    st.markdown("---")
+
+                    col_conf1, col_conf2, col_conf3 = st.columns(3)
+                    with col_conf1:
+                        modo_import = st.radio(
+                            "modo de importação:",
+                            options=['adicionar', 'substituir'],
+                            format_func=lambda x: {
+                                'adicionar':  '➕ adicionar às posições atuais',
+                                'substituir': '🔄 substituir portfólio inteiro',
+                            }[x],
+                            key="modo_importacao",
+                        )
+
+                    with col_conf3:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button(
+                            "Confirmar importação",
+                            type="primary",
+                            use_container_width=True,
+                            key="btn_confirmar_import",
+                        ):
+                            from database.db import (
+                                adicionar_ativo, get_watchlist_padrao,
+                            )
+
+                            wl_id_imp  = get_watchlist_padrao()
+                            importados = 0
+                            erros_imp  = []
+
+                            for pos in resultado_imp['posicoes']:
+                                try:
+                                    # Garante que o ativo existe na watchlist
+                                    adicionar_ativo(
+                                        ticker       = pos['ticker'],
+                                        nome         = pos['nome'],
+                                        mercado      = pos['mercado'],
+                                        watchlist_id = wl_id_imp,
+                                    )
+                                    # Salva posição no portfólio
+                                    salvar_peso(
+                                        pos['ticker'],
+                                        0.0,
+                                        pos['preco_medio'],
+                                        pos['quantidade'],
+                                        portfolio_id=portfolio_id_ativo,
+                                    )
+                                    importados += 1
+                                except Exception as e_pos:
+                                    erros_imp.append(
+                                        f"{pos['ticker']}: {e_pos}"
+                                    )
+
+                            if importados > 0:
+                                st.success(
+                                    f"✅ {importados} posições importadas com sucesso!"
+                                )
+                                st.rerun()
+                            for e_msg in erros_imp:
+                                st.error(f"❌ {e_msg}")
+
+                else:
+                    st.error("não foi possível detectar posições no arquivo.")
+                    for erro_imp in resultado_imp['erros']:
+                        st.error(f"❌ {erro_imp}")
+                    st.info(
+                        "💡 verifique se o arquivo tem as colunas: "
+                        "ticker, quantidade, preco_medio"
+                    )
+
+        st.markdown('<div id="ft-portfolio-positions"></div>', unsafe_allow_html=True)
+
+        # ══ TABELA DE POSIÇÕES ATIVAS ════════════════════════════════════════════
+        if posicoes_ativas:
+            with st.expander("Editar quantidades e preços médios", expanded=False):
+                section_title("📋 posições ativas")
+                df_ativas = pd.DataFrame(posicoes_ativas)
+
+                df_ativas_editado = st.data_editor(
+                    df_ativas,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    column_config={
+                        "ticker": st.column_config.TextColumn("ativo", disabled=True),
+                        "quantidade": st.column_config.NumberColumn("quantidade", min_value=0.0, step=0.001, format="%.4f"),
+                        "preço médio": st.column_config.NumberColumn("preço médio (R$/US$)", min_value=0.0, step=0.01, format="%.4f"),
+                        "valor estimado": st.column_config.NumberColumn("valor estimado", disabled=True, format="%.2f")
+                    }
                 )
-            else:
-                _met = _perf.get('metricas', {})
-                if _met:
-                    _met_rows = []
-                    for _nm, _mv in _met.items():
-                        _cor_ret = "🟢" if _mv['retorno'] > 0 else "🔴"
-                        _met_rows.append({
-                            'ativo / índice': _nm,
-                            'retorno':   f"{_cor_ret} {_mv['retorno']:+.2f}%",
-                            'vol. anual':f"{_mv['vol']:.2f}%",
-                            'sharpe':    f"{_mv['sharpe']:.2f}",
-                            'max drawdown': f"{_mv['drawdown']:.2f}%",
-                        })
-                    _df_met = pd.DataFrame(_met_rows)
-                    # Métricas de performance via html_table (F0-2).
-                    from utils.components import html_table as _ht_met
-                    _cols_m = list(_df_met.columns)
-                    _aligns_m = ["left" if c == "ativo / índice" else "right" for c in _cols_m]
-                    _rows_m, _classes_m = [], []
-                    for _, row in _df_met.iterrows():
-                        cells, cls = [], []
-                        for col in _cols_m:
-                            _v = str(row[col])
-                            _pct = '%' in _v
-                            _tone = "bull" if ('+' in _v and _pct) else ("bear" if ('-' in _v and _pct) else "")
-                            _c = "mono" + (" strong" if col == "retorno" else "") + (f" {_tone}" if _tone else "")
-                            cells.append(_v); cls.append(_c)
-                        _rows_m.append(cells); _classes_m.append(cls)
-                    _ht_met(_cols_m, _rows_m, aligns=_aligns_m, classes=_classes_m)
+
+                patrimonio_estimado = (df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']).sum()
+                num_posicoes = len(df_ativas_editado[df_ativas_editado['quantidade'] > 0])
+
+                c_txt, c_nav, c_btn = st.columns([3, 2, 1])
+                with c_txt:
+                    st.markdown(f"<div style='font-family:var(--font-data,monospace); font-size: 0.85rem; color:var(--text-muted); padding-top: 10px;'>patrimônio estimado: {fmt_preco(patrimonio_estimado, '$')} | {num_posicoes} posições ativas</div>", unsafe_allow_html=True)
+                with c_nav:
+                    _tickers_port = df_ativas['ticker'].tolist()
+                    _sel_nav = st.selectbox(
+                        "Abrir análise do ativo",
+                        [""] + [t.replace('.SA','') for t in _tickers_port],
+                        label_visibility="collapsed",
+                        key="port_nav_ticker",
+                        placeholder="Selecione um ativo",
+                    )
+                    if _sel_nav:
+                        _match = next((t for t in _tickers_port if t.replace('.SA','') == _sel_nav), _sel_nav)
+                        st.session_state['research_ticker_externo'] = _match
+                        st.switch_page("pages/1_Research.py")
+                with c_btn:
+                    btn_salvar = st.button("Salvar correções da tabela", type="primary", use_container_width=True)
+
+                if btn_salvar:
+                    df_ativas_editado['valor total'] = df_ativas_editado['quantidade'] * df_ativas_editado['preço médio']
+                    patrimonio_total = df_ativas_editado['valor total'].sum()
+
+                    for _, row in df_ativas_editado.iterrows():
+                        t = row['ticker']
+                        qtd = row['quantidade']
+                        pm = row['preço médio']
+                        v_total = row['valor total']
+                        peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
+                        # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+                        import math as _mt
+                        def _sn(v):
+                            if v is None: return None
+                            try: return None if _mt.isnan(v) or _mt.isinf(v) else v
+                            except TypeError: return v
+                        salvar_peso(t, _sn(peso_real), _sn(pm), _sn(qtd), portfolio_id=portfolio_id_ativo)
+
+                    st.success("✅ posições atualizadas.")
+                    st.rerun()
+        else:
+            empty_state("📋", "nenhuma posição ativa", "adicione sua primeira posição abaixo.")
+
+        st.markdown('<div id="ft-portfolio-operation"></div>', unsafe_allow_html=True)
+        with st.expander("Registrar compra ou venda", expanded=not bool(posicoes_ativas)):
+            with st.form("form_add_posicao", clear_on_submit=True):
+                col_op, col_f1, col_f2, col_f3 = st.columns([1, 2, 1, 1], gap="small")
+
+                with col_op:
+                    tipo_op = st.radio("tipo de operação:", ["🟢 Comprar", "🔴 Vender"])
+
+                with col_f1:
+                    opcoes_wl = [w['ticker'] for w in watchlist]
+                    ticker_sel = st.selectbox("ativo da watchlist", opcoes_wl, format_func=lambda x: x.lower()) if opcoes_wl else None
+
+                with col_f2:
+                    qtd_form = st.number_input("quantidade operada", min_value=0.0, step=0.001, format="%.4f")
+
+                with col_f3:
+                    pm_form = st.number_input("preço (R$/US$)", min_value=0.0, step=0.01, format="%.4f")
+
+                ticker_manual_form = st.text_input("ou digite um ticker manualmente (sobrescreve seleção acima):", placeholder="ex: PETR4.SA ou AAPL").strip().upper()
 
                 st.markdown("<br>", unsafe_allow_html=True)
+                btn_add = st.form_submit_button("Registrar operação no portfólio", type="primary", use_container_width=True)
 
-                _series = _perf.get('series', {})
-                if _series:
-                    _fig_perf = go.Figure()
-                    _cc_perf = _chart_cores()
-                    _cores_perf = {
-                        'minha carteira': _cc_perf["accent"],
-                        'ibovespa':       _cc_perf["bull"],
-                        's&p500 (br)':    _cc_perf["info"],
-                        'ifix (fiis)':    '#8B5CF6',
-                        'cdi':            _cc_perf["muted"],
-                        'cdi (aprox)':    _cc_perf["muted"],
-                    }
+                if btn_add:
+                    ticker_final = ticker_manual_form if ticker_manual_form else ticker_sel
 
-                    if 'minha carteira' in _series:
-                        _s = _series['minha carteira']
-                        _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
-                        _fig_perf.add_trace(go.Scatter(
-                            x=_s.index, y=_s.values,
-                            name=f"minha carteira ({_ret_f:+.1f}%)",
-                            line=dict(color=_cc_perf["accent"], width=3),
-                            hovertemplate=(
-                                '%{x}<br>carteira: %{y:.1f}<extra></extra>'
-                            ),
-                        ))
+                    if ticker_final and qtd_form > 0 and pm_form > 0:
+                        # Obter dados atuais da posição antes da operação
+                        p_atual = pesos_atuais.get(ticker_final, {})
+                        qtd_atual = float(p_atual.get('quantidade') or 0)
+                        pm_atual = float(p_atual.get('preco_medio') or 0)
 
-                    for _nm, _s in _series.items():
-                        if _nm == 'minha carteira' or _s.empty:
-                            continue
-                        _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
-                        _cor   = _cores_perf.get(_nm, '#555')
-                        _fig_perf.add_trace(go.Scatter(
-                            x=_s.index, y=_s.values,
-                            name=f"{_nm} ({_ret_f:+.1f}%)",
-                            line=dict(color=_cor, width=1.5, dash='dot'),
-                            hovertemplate=(
-                                f'%{{x}}<br>{_nm}: %{{y:.1f}}<extra></extra>'
-                            ),
-                        ))
+                        if "Comprar" in tipo_op:
+                            nova_qtd = qtd_atual + qtd_form
+                            # Cálculo inteligente de Preço Médio
+                            novo_pm = ((qtd_atual * pm_atual) + (qtd_form * pm_form)) / nova_qtd if nova_qtd > 0 else pm_form
 
-                    _fig_perf.add_hline(
-                        y=100, line_color=_chart_cores()["muted"],
-                        line_dash='dash', line_width=1,
+                            salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
+                            st.success(f"✅ compra de {qtd_form} cotas de {ticker_final} registrada! novo PM: {novo_pm:.2f}")
+                            time.sleep(1.5)
+                            st.rerun()
+
+                        elif "Vender" in tipo_op:
+                            if qtd_form > qtd_atual:
+                                st.warning(f"⚠️ você está tentando vender {qtd_form} cotas, mas só possui {qtd_atual} de {ticker_final}.")
+                            else:
+                                nova_qtd = qtd_atual - qtd_form
+                                # Em vendas, o Preço Médio das cotas restantes NÃO muda. Se zerar a posição, zera o PM.
+                                novo_pm = pm_atual if nova_qtd > 0 else 0.0
+
+                                salvar_peso(ticker_final, 0.0, novo_pm, nova_qtd, portfolio_id=portfolio_id_ativo)
+                                st.success(f"✅ venda de {qtd_form} cotas de {ticker_final} registrada com sucesso!")
+                                time.sleep(1.5)
+                                st.rerun()
+                    else:
+                        st.warning("preencha ticker, uma quantidade maior que zero e um preço válido.")
+
+        ativos_alocados = {t: d for t, d in pesos_atuais.items() if float(d.get('quantidade') or 0) > 0}
+
+        if ativos_alocados:
+            tickers_com_peso = list(ativos_alocados.keys())
+
+            with st.spinner("Atualizando cotações e resultado das posições..."):
+                live_data = {}
+                for t in tickers_com_peso:
+                    t_base = mapear_ticker_base(t)
+                    try:
+                        hist = yf.Ticker(t_base).history(period="5d")['Close'].dropna()
+                        if not hist.empty:
+                            live_data[t] = float(hist.iloc[-1])
+                        else:
+                            live_data[t] = 0.0
+                    except Exception as _e:
+                        logger.debug(f"[portfolio] live_data fallback para {t_base}: {_e}")
+                        live_data[t] = 0.0
+
+            st.markdown("---")
+            section_title("📊 performance e distribuição")
+
+            linhas_portfolio = []
+            custo_total_carteira = 0.0
+            valor_atual_carteira = 0.0
+
+            health_raw = get_health_scores()
+            health_data = {h['ticker']: h.get('score', 50) for h in health_raw}
+
+            for t, dados in ativos_alocados.items():
+                qtd = float(dados.get('quantidade') or 0)
+                pm = float(dados.get('preco_medio') or 0)
+                preco_atual = live_data.get(t, 0.0)
+                custo_posicao = qtd * pm
+                valor_posicao = qtd * preco_atual
+                pnl_valor = valor_posicao - custo_posicao
+                pnl_pct = (pnl_valor / custo_posicao * 100) if custo_posicao > 0 else 0.0
+
+                custo_total_carteira += custo_posicao
+                valor_atual_carteira += valor_posicao
+
+                linhas_portfolio.append({
+                    "ativo": t, "qtd": qtd, "preço médio": pm, "preço atual": preco_atual,
+                    "custo total": custo_posicao, "valor atual": valor_posicao,
+                    "p&l ($)": pnl_valor, "p&l (%)": pnl_pct, "health score": health_data.get(mapear_ticker_base(t), "n/d")
+                })
+
+            df_portfolio = pd.DataFrame(linhas_portfolio)
+            _pf_cambio_display = get_cambio_usd_brl()
+            df_portfolio['moeda'] = df_portfolio['ativo'].map(lambda t: 'BRL' if mapear_ticker_base(t).endswith('.SA') else 'USD')
+            _pf_fator_fx = df_portfolio['moeda'].map({'BRL': 1.0, 'USD': _pf_cambio_display})
+            df_portfolio['valor em BRL'] = df_portfolio['valor atual'] * _pf_fator_fx
+            df_portfolio['custo em BRL'] = df_portfolio['custo total'] * _pf_fator_fx
+            df_portfolio['p&l em BRL'] = df_portfolio['p&l ($)'] * _pf_fator_fx
+            custo_total_carteira = float(df_portfolio['custo em BRL'].sum())
+            valor_atual_carteira = float(df_portfolio['valor em BRL'].sum())
+            df_portfolio['peso atual (%)'] = (df_portfolio['valor em BRL'] / valor_atual_carteira) * 100 if valor_atual_carteira > 0 else 0.0
+
+            pnl_global_valor = valor_atual_carteira - custo_total_carteira
+            pnl_global_pct = (pnl_global_valor / custo_total_carteira * 100) if custo_total_carteira > 0 else 0.0
+
+            # ── persiste dados para o chat IA (tab_chat usa estes) ──
+            st.session_state['pesos_ativos_cache'] = [
+                {
+                    'ticker':      row['ativo'],
+                    'quantidade':  row['qtd'],
+                    'preco_medio': row['preço médio'],
+                    'preco_atual': row['preço atual'],
+                    'valor':       row['valor atual'],
+                    'peso_pct':    row['peso atual (%)'],
+                    'pnl_pct':     row['p&l (%)'],
+                    'health_score': row['health score'],
+                }
+                for _, row in df_portfolio.iterrows()
+            ]
+            st.session_state['metricas_cache'] = {
+                'valor_total':   valor_atual_carteira,
+                'custo_total':   custo_total_carteira,
+                'pnl_total_pct': pnl_global_pct,
+                'num_posicoes':  len(df_portfolio),
+            }
+
+            # Tabela de posições HTML — P&L colorido, health bar, link para Research
+            def _pf_table_html(df: pd.DataFrame) -> None:
+                # Render via html_table (F0-2): barras de health/peso mantidas na célula.
+                from utils.components import html_table as _ht_pf
+                _hdrs = ["Ativo", "Moeda", "Qtd", "PM", "Preço", "Custo", "Valor", "P&L", "P&L %", "Health", "Peso %"]
+                _aligns = ["left", "left"] + ["right"] * 9
+                _max_peso = float(df['peso atual (%)'].max()) if not df.empty else 1.0
+                _rows, _classes = [], []
+                for _, row in df.iterrows():
+                    _tk = str(row['ativo'])
+                    _pnl_v = float(row['p&l ($)']); _pnl_p = float(row['p&l (%)'])
+                    _peso = float(row['peso atual (%)'])
+                    _tone = "bull" if _pnl_v >= 0 else "bear"
+                    try:
+                        _hsi = int(row.get('health score'))
+                        _hc = "var(--bull)" if _hsi >= 65 else ("var(--amber)" if _hsi >= 40 else "var(--bear)")
+                        _hs_html = (f'<div style="display:flex;align-items:center;gap:5px;">'
+                                    f'<div style="flex:1;background:var(--border-subtle);border-radius:2px;height:4px;overflow:hidden;">'
+                                    f'<div style="width:{_hsi}%;height:100%;background:{_hc};border-radius:2px;"></div></div>'
+                                    f'<span style="font-size:0.75rem;color:{_hc};font-family:var(--font-data);min-width:20px;">{_hsi}</span></div>')
+                    except (TypeError, ValueError):
+                        _hs_html = "—"
+                    _pw_pct = min((_peso / _max_peso) * 100, 100) if _max_peso > 0 else 0
+                    _peso_html = (f'<div style="display:flex;align-items:center;gap:5px;">'
+                                  f'<div style="flex:1;background:var(--border-subtle);border-radius:2px;height:4px;overflow:hidden;">'
+                                  f'<div style="width:{_pw_pct:.0f}%;height:100%;background:var(--accent);border-radius:2px;"></div></div>'
+                                  f'<span style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-data);min-width:30px;">{_peso:.1f}%</span></div>')
+                    _rows.append([
+                        f'<a href="{ticker_nav_url(_tk)}" target="_self" '
+                        f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk.replace(".SA","")}</a>',
+                        str(row['moeda']), f"{row['qtd']:.4f}", f"{row['preço médio']:.4f}", f"{row['preço atual']:.2f}",
+                        f"{row['custo total']:,.0f}", f"{row['valor atual']:,.0f}",
+                        f"{_pnl_v:+,.0f}", f"{_pnl_p:+.2f}%", _hs_html, _peso_html,
+                    ])
+                    _classes.append([
+                        "mono", "mono muted", "mono muted", "mono", "mono strong", "mono muted", "mono strong",
+                        f"mono strong {_tone}", f"mono strong {_tone}", "", "",
+                    ])
+                _ht_pf(_hdrs, _rows, aligns=_aligns, classes=_classes)
+
+            section_title("Explorar posições")
+            _pf_f1, _pf_f2, _pf_f3 = st.columns([2, 2, 2])
+            with _pf_f1:
+                _pf_busca = st.text_input("Filtrar ticker", key="portfolio_posicoes_busca", placeholder="PETR, AAPL...").strip().upper()
+            with _pf_f2:
+                _pf_recorte = st.selectbox("Recorte", ["Todas", "Brasil · BRL", "Exterior · USD", "Em alta no custo", "Em queda no custo"], key="portfolio_posicoes_recorte")
+            with _pf_f3:
+                _pf_ordem = st.selectbox("Ordenar por", ["Ticker", "P&L % · maior", "P&L % · menor", "Health · maior", "Health · menor"], key="portfolio_posicoes_ordem")
+            _pf_exibir = df_portfolio.copy()
+            if _pf_busca:
+                _pf_exibir = _pf_exibir[_pf_exibir['ativo'].str.upper().str.contains(_pf_busca, regex=False)]
+            _pf_br_mask = _pf_exibir['ativo'].map(mapear_ticker_base).str.endswith('.SA')
+            if _pf_recorte == "Brasil · BRL":
+                _pf_exibir = _pf_exibir[_pf_br_mask]
+            elif _pf_recorte == "Exterior · USD":
+                _pf_exibir = _pf_exibir[~_pf_br_mask]
+            elif _pf_recorte == "Em alta no custo":
+                _pf_exibir = _pf_exibir[_pf_exibir['p&l (%)'] >= 0]
+            elif _pf_recorte == "Em queda no custo":
+                _pf_exibir = _pf_exibir[_pf_exibir['p&l (%)'] < 0]
+            if _pf_ordem.startswith("P&L"):
+                _pf_exibir = _pf_exibir.sort_values('p&l (%)', ascending=_pf_ordem.endswith('menor'))
+            elif _pf_ordem.startswith("Health"):
+                _pf_exibir = _pf_exibir.assign(_health_sort=pd.to_numeric(_pf_exibir['health score'], errors='coerce')).sort_values('_health_sort', ascending=_pf_ordem.endswith('menor'), na_position='last').drop(columns='_health_sort')
+            else:
+                _pf_exibir = _pf_exibir.sort_values('ativo')
+            st.caption(f"{len(_pf_exibir)} de {len(df_portfolio)} posições · Recorte apenas da tabela; resumo e análises usam a carteira inteira. Valores de cada posição na moeda de origem.")
+            if _pf_exibir.empty:
+                st.info("Nenhuma posição corresponde ao recorte. Amplie o filtro para voltar à tabela completa.")
+            else:
+                _pf_table_html(_pf_exibir)
+
+            # F3-3: ação rápida — registrar decisão de uma posição direto no diário
+            # (o ticker da tabela já linka p/ Research). Salta para gestão & ia › diário
+            # com o ticker preenchido.
+            _tk_pos_list = [str(r['ativo']) for _, r in df_portfolio.iterrows()]
+            if _tk_pos_list:
+                _qa1, _qa2 = st.columns([3, 1])
+                with _qa1:
+                    _tk_dec = st.selectbox("registrar decisão de:", _tk_pos_list,
+                                           key="qa_dec_ticker", label_visibility="collapsed")
+                with _qa2:
+                    if st.button("Registrar decisão", key="qa_dec_btn",
+                                 use_container_width=True):
+                        st.session_state["diario_ticker_manual"] = _tk_dec
+                        st.session_state["_diario_expandir"] = True
+                        st.session_state["_portfolio_focus_next"] = {
+                            "portfolio_workspace": "Análises",
+                            "portfolio_grupo": "📋 gestão & ia",
+                            "portfolio_sub_3": "📝 diário de decisões",
+                        }
+                        st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            csv = df_portfolio.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Exportar carteira em CSV",
+                data=csv,
+                file_name="portfolio_finapp.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.expander("Comparar desempenho com índices", expanded=False):
+                if _portfolio_workspace == "Posições":
+                    # ── PERFORMANCE VS BENCHMARKS ─────────────────────────────────
+                    st.markdown("---")
+                    section_title("📈 performance da carteira vs benchmarks")
+
+                    if len(set(df_portfolio['moeda'])) > 1:
+                        st.info("Carteira mista: esta série usa custos nominais como pesos e retornos na moeda de origem; não inclui variação cambial. O patrimônio em BRL é apresentado no resumo da carteira.")
+                    label_com_tooltip(
+                        "retorno com pesos fixos pelo custo de cada posição "
+                        "vs ibovespa, s&p500 (via ivvb11), ifix e cdi.",
+                        texto_custom=(
+                            "metodologia: retorno diário ponderado pelo custo "
+                            "nominal das posições (pesos fixos). "
+                            "cdi via bcb série 12 (taxa overnight acumulada). "
+                            "base 100 = início do período selecionado."
+                        ),
+                        cor="var(--text-muted)",
+                        tamanho="0.72rem",
                     )
 
-                    _lay_perf = base_layout(
-                        height=420,
-                        title=f"performance comparada — base 100 ({_periodo_perf})",
-                    )
-                    _lay_perf.update(
-                        yaxis=dict(title='base 100', showgrid=True, gridcolor=_chart_cores()["border"]),
-                        xaxis=dict(showgrid=False),
-                    )
-                    _fig_perf.update_layout(**_lay_perf)
-                    st.plotly_chart(
-                        _fig_perf, use_container_width=True,
-                        config={'responsive': True},
-                    )
-
-                    st.caption(
-                        "base 100 = início do período. "
-                        "carteira: retorno ponderado pelo valor de mercado. "
-                        "cdi: taxa overnight acumulada (bcb série 12). "
-                        "s&p500: via ivvb11 (em r$, sem hedge cambial)."
+                    _periodo_perf = st.radio(
+                        "período:",
+                        ["3mo", "6mo", "1y", "2y"],
+                        format_func=lambda x: {
+                            "3mo": "3 meses",
+                            "6mo": "6 meses",
+                            "1y":  "1 ano",
+                            "2y":  "2 anos",
+                        }[x],
+                        horizontal=True,
+                        key="radio_periodo_perf",
                     )
 
-                # Alpha vs CDI e Ibov
-                _ret_cart = _met.get('minha carteira', {}).get('retorno', 0)
-                _ret_cdi  = (
-                    _met.get('cdi', _met.get('cdi (aprox)', {}))
-                    .get('retorno', 0)
+                    # Monta tuple de posições para cache
+                    _pos_dict_perf = [
+                        {
+                            'ticker': t,
+                            'quantidade': float(d.get('quantidade', 0) or 0),
+                            'preco_medio': float(d.get('preco_medio', 0) or 0),
+                        }
+                        for t, d in ativos_alocados.items()
+                        if float(d.get('quantidade', 0) or 0) > 0
+                    ]
+
+                    if not _pos_dict_perf:
+                        info_box(
+                            tipo   = "info",
+                            titulo = "sem posições com quantidade/preço",
+                            texto  = "adicione posições com quantidade e preço médio para calcular a performance.",
+                            icone  = "📭",
+                        )
+                    else:
+                        with st.spinner("calculando performance vs benchmarks..."):
+                            _perf = calcular_performance_vs_benchmarks(
+                                tuple(
+                                    (p['ticker'], p['quantidade'], p['preco_medio'])
+                                    for p in _pos_dict_perf
+                                ),
+                                periodo=_periodo_perf,
+                            )
+
+                        if not _perf or not _perf.get('series'):
+                            info_box(
+                                tipo   = "amber",
+                                titulo = "performance indisponível",
+                                texto  = "não foi possível calcular. verifique se os tickers estão corretos.",
+                                icone  = "⚠",
+                            )
+                        else:
+                            _met = _perf.get('metricas', {})
+                            if _met:
+                                _met_rows = []
+                                for _nm, _mv in _met.items():
+                                    _cor_ret = "🟢" if _mv['retorno'] > 0 else "🔴"
+                                    _met_rows.append({
+                                        'ativo / índice': _nm,
+                                        'retorno':   f"{_cor_ret} {_mv['retorno']:+.2f}%",
+                                        'vol. anual':f"{_mv['vol']:.2f}%",
+                                        'sharpe':    f"{_mv['sharpe']:.2f}",
+                                        'max drawdown': f"{_mv['drawdown']:.2f}%",
+                                    })
+                                _df_met = pd.DataFrame(_met_rows)
+                                # Métricas de performance via html_table (F0-2).
+                                from utils.components import html_table as _ht_met
+                                _cols_m = list(_df_met.columns)
+                                _aligns_m = ["left" if c == "ativo / índice" else "right" for c in _cols_m]
+                                _rows_m, _classes_m = [], []
+                                for _, row in _df_met.iterrows():
+                                    cells, cls = [], []
+                                    for col in _cols_m:
+                                        _v = str(row[col])
+                                        _pct = '%' in _v
+                                        _tone = "bull" if ('+' in _v and _pct) else ("bear" if ('-' in _v and _pct) else "")
+                                        _c = "mono" + (" strong" if col == "retorno" else "") + (f" {_tone}" if _tone else "")
+                                        cells.append(_v); cls.append(_c)
+                                    _rows_m.append(cells); _classes_m.append(cls)
+                                _ht_met(_cols_m, _rows_m, aligns=_aligns_m, classes=_classes_m)
+
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                            _series = _perf.get('series', {})
+                            if _series:
+                                _fig_perf = go.Figure()
+                                _cc_perf = _chart_cores()
+                                _cores_perf = {
+                                    'minha carteira': _cc_perf["accent"],
+                                    'ibovespa':       _cc_perf["bull"],
+                                    's&p500 (br)':    _cc_perf["info"],
+                                    'ifix (fiis)':    '#8B5CF6',
+                                    'cdi':            _cc_perf["muted"],
+                                    'cdi (aprox)':    _cc_perf["muted"],
+                                }
+
+                                if 'minha carteira' in _series:
+                                    _s = _series['minha carteira']
+                                    _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
+                                    _fig_perf.add_trace(go.Scatter(
+                                        x=_s.index, y=_s.values,
+                                        name=f"minha carteira ({_ret_f:+.1f}%)",
+                                        line=dict(color=_cc_perf["accent"], width=3),
+                                        hovertemplate=(
+                                            '%{x}<br>carteira: %{y:.1f}<extra></extra>'
+                                        ),
+                                    ))
+
+                                for _nm, _s in _series.items():
+                                    if _nm == 'minha carteira' or _s.empty:
+                                        continue
+                                    _ret_f = float(_s.iloc[-1]) - 100 if not _s.empty else 0
+                                    _cor   = _cores_perf.get(_nm, '#555')
+                                    _fig_perf.add_trace(go.Scatter(
+                                        x=_s.index, y=_s.values,
+                                        name=f"{_nm} ({_ret_f:+.1f}%)",
+                                        line=dict(color=_cor, width=1.5, dash='dot'),
+                                        hovertemplate=(
+                                            f'%{{x}}<br>{_nm}: %{{y:.1f}}<extra></extra>'
+                                        ),
+                                    ))
+
+                                _fig_perf.add_hline(
+                                    y=100, line_color=_chart_cores()["muted"],
+                                    line_dash='dash', line_width=1,
+                                )
+
+                                _lay_perf = base_layout(
+                                    height=420,
+                                    title=f"performance comparada — base 100 ({_periodo_perf})",
+                                )
+                                _lay_perf.update(
+                                    yaxis=dict(title='base 100', showgrid=True, gridcolor=_chart_cores()["border"]),
+                                    xaxis=dict(showgrid=False),
+                                )
+                                _fig_perf.update_layout(**_lay_perf)
+                                st.plotly_chart(
+                                    _fig_perf, use_container_width=True,
+                                    config={'responsive': True},
+                                )
+
+                                st.caption(
+                                    "base 100 = início do período. "
+                                    "carteira: retorno com pesos fixos pelo custo nominal. "
+                                    "cdi: taxa overnight acumulada (bcb série 12). "
+                                    "s&p500: via ivvb11 (em r$, sem hedge cambial)."
+                                )
+
+                            # Alpha vs CDI e Ibov
+                            _ret_cart = _met.get('minha carteira', {}).get('retorno', 0)
+                            _ret_cdi  = (
+                                _met.get('cdi', _met.get('cdi (aprox)', {}))
+                                .get('retorno', 0)
+                            )
+                            _ret_ibov = _met.get('ibovespa', {}).get('retorno', 0)
+                            _alpha_cdi  = _ret_cart - _ret_cdi
+                            _alpha_ibov = _ret_cart - _ret_ibov
+
+                            portfolio_kpis([
+                                {
+                                    "nome":     "retorno carteira",
+                                    "valor":    f"{_ret_cart:+.2f}%",
+                                    "sublabel": f"no período de {_periodo_perf}",
+                                    "tone":     "bull" if _ret_cart > 0 else "bear",
+                                    "icone":    "📈" if _ret_cart > 0 else "📉",
+                                },
+                                {
+                                    "nome":     "alpha vs cdi",
+                                    "valor":    f"{_alpha_cdi:+.2f}pp",
+                                    "sublabel": "acima ou abaixo do cdi",
+                                    "tone":     "bull" if _alpha_cdi > 0 else "bear",
+                                    "icone":    "🎯",
+                                },
+                                {
+                                    "nome":     "alpha vs ibovespa",
+                                    "valor":    f"{_alpha_ibov:+.2f}pp",
+                                    "sublabel": "acima ou abaixo do ibov",
+                                    "tone":     "bull" if _alpha_ibov > 0 else "bear",
+                                    "icone":    "🇧🇷",
+                                },
+                            ])
+
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                            # ── Exibe análise cacheada se houver ──────────────────────────
+                            try:
+                                from database.db import get_ai_analysis as _get_ai_pf
+                                _uid_perf_view = st.session_state.get('user_id')
+                                _db_cache_pf = _get_ai_pf(
+                                    tipo="portfolio",
+                                    ticker=None,
+                                    user_id=_uid_perf_view,
+                                    modo=f"performance_{_periodo_perf}",
+                                )
+                                if _db_cache_pf:
+                                    st.markdown(
+                                        f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
+                                        f'border-left:3px solid var(--accent); border-radius:6px; padding:12px 16px; margin-bottom:12px;">'
+                                        f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
+                                        f'color:var(--text-muted); margin-bottom:8px;">'
+                                        f'⚡ análise via cache supabase '
+                                        f'— gerada em {str(_db_cache_pf.get("created_at",""))[:16].replace("T"," ")}'
+                                        f'</div>'
+                                        f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
+                                        f'color:var(--text-primary); line-height:1.7; white-space:pre-wrap;">'
+                                        f'{_db_cache_pf["conteudo"]}'
+                                        f'</div></div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                    st.caption("clique no botão abaixo para regenerar.")
+                            except Exception:
+                                pass
+
+                            if st.button(
+                                "Ia: analisar performance e sugerir ajustes",
+                                key="btn_ia_perf",
+                                type="secondary",
+                                use_container_width=True,
+                            ):
+                                _macro_perf = st.session_state.get('macro_context', {})
+
+                                # ── Concentração setorial e exposição cambial ──────────
+                                _setor_conc = {}
+                                _fx_exp = {"br": 0.0, "us": 0.0}
+                                _top_positions = []
+                                try:
+                                    from database.db import get_todos_fundamentos_cache as _gtc
+                                    _cache_pf = _gtc() or {}
+                                    _tot_v = sum((p.get('valor') or 0) for p in (st.session_state.get('pesos_ativos_cache') or []))
+                                    for _p in (st.session_state.get('pesos_ativos_cache') or []):
+                                        _tk = _p.get('ticker', '')
+                                        _v = float(_p.get('valor') or 0)
+                                        _fd_p = _cache_pf.get(_tk) or _cache_pf.get(mapear_ticker_base(_tk)) or {}
+                                        _set = _fd_p.get('setor') or 'outros'
+                                        _setor_conc[_set] = _setor_conc.get(_set, 0) + _v
+                                        if _tk.endswith('.SA'):
+                                            _fx_exp['br'] += _v
+                                        else:
+                                            _fx_exp['us'] += _v
+                                        _top_positions.append(_p)
+                                    if _tot_v > 0:
+                                        _setor_conc = {k: v / _tot_v * 100 for k, v in _setor_conc.items()}
+                                        _fx_exp = {k: v / _tot_v * 100 for k, v in _fx_exp.items()}
+                                    # Ordena top por peso
+                                    _top_positions = sorted(
+                                        _top_positions, key=lambda x: -(x.get('peso_pct') or 0)
+                                    )[:10]
+                                except Exception:
+                                    pass
+
+                                from utils.ai_prompts import build_portfolio_performance_prompt
+                                _prompt_perf = build_portfolio_performance_prompt(
+                                    metricas         = _met,
+                                    posicoes_top     = _top_positions,
+                                    setor_concentracao = _setor_conc,
+                                    fx_exposicao     = _fx_exp,
+                                    periodo          = _periodo_perf,
+                                    macro_context    = _macro_perf,
+                                    alpha_cdi        = _alpha_cdi,
+                                    alpha_ibov       = _alpha_ibov,
+                                )
+                                from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
+                                _us_perf = st.session_state.get('user_settings', {})
+                                _resposta_perf = chamar_ia(
+                                    prompt_usuario=_prompt_perf,
+                                    system=SYSTEM_PORTFOLIO,
+                                    max_tokens=1000,
+                                    temperatura=0.3,
+                                    stream=True,
+                                    user_settings=_us_perf,
+                                )
+                                # ── Persiste no Supabase (TTL 1 dia, por user_id+periodo) ──
+                                if _resposta_perf:
+                                    try:
+                                        from database.db import save_ai_analysis
+                                        _uid_perf = st.session_state.get('user_id')
+                                        save_ai_analysis(
+                                            tipo="portfolio",
+                                            ticker=None,
+                                            user_id=_uid_perf,
+                                            modo=f"performance_{_periodo_perf}",
+                                            conteudo=_resposta_perf,
+                                            modelo="auto",
+                                            ttl_horas=24,
+                                        )
+                                    except Exception:
+                                        pass
+
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                section_title("⚖️ alocação por ativo")
+                fig_pie = go.Figure(go.Pie(labels=df_portfolio['ativo'], values=df_portfolio['valor em BRL'], hole=0.4, textinfo='label+percent', marker=dict(line=dict(color='#010101', width=2))))
+                layout_pie = base_layout(height=350)
+                if 'xaxis' in layout_pie:
+                    layout_pie['xaxis']['visible'] = False
+                if 'yaxis' in layout_pie:
+                    layout_pie['yaxis']['visible'] = False
+                fig_pie.update_layout(**layout_pie)
+                st.plotly_chart(fig_pie, use_container_width=True, config={'responsive': True})
+                st.caption(f"Pesos consolidados em reais · USD/BRL usado: {_pf_cambio_display:.4f}. Valores das posições em USD convertidos pelo mesmo câmbio do resumo.")
+
+            with col_g2:
+                section_title("📈 p&l por ativo")
+                _cc_pnl = _chart_cores()
+                df_pnl  = df_portfolio.sort_values(by='p&l em BRL', ascending=True)
+                fig_bar = go.Figure(go.Bar(
+                    x=df_pnl['p&l em BRL'], y=df_pnl['ativo'], orientation='h',
+                    marker_color=[_cc_pnl["bear"] if val < 0 else _cc_pnl["bull"]
+                                  for val in df_pnl['p&l em BRL']],
+                    hovertemplate="%{y}<br>P&L em BRL: <b>R$ %{x:+,.2f}</b><extra></extra>",
+                ))
+                layout_bar = base_layout(height=350)
+                if 'yaxis' in layout_bar:
+                    layout_bar['yaxis']['showgrid'] = False
+                fig_bar.update_layout(**layout_bar)
+                st.plotly_chart(fig_bar, use_container_width=True, config={'responsive': True})
+                st.caption("Resultado não realizado de cada posição em BRL; custos e valores em USD convertidos pelo câmbio atual do painel, sem decomposição do efeito cambial histórico.")
+
+            # ── VISÃO CONSOLIDADA POR MOEDA ──────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            cambio_atual = get_cambio_usd_brl()
+
+            posicoes_brl = []
+            posicoes_usd = []
+
+            for t, dados in ativos_alocados.items():
+                qtd = float(dados.get('quantidade') or 0)
+                pm  = float(dados.get('preco_medio') or 0)
+                if qtd <= 0:
+                    continue
+
+                t_base_moeda = mapear_ticker_base(t)
+                eh_br        = t_base_moeda.endswith('.SA')
+                preco_atual  = live_data.get(t, 0.0)
+
+                if preco_atual <= 0:
+                    continue
+
+                valor_atual  = preco_atual * qtd
+                valor_custo  = pm * qtd
+                pl_moeda     = valor_atual - valor_custo
+                pl_pct       = ((valor_atual / valor_custo) - 1) * 100 if valor_custo > 0 else 0.0
+
+                entry = {
+                    'ticker':          t,
+                    'qtd':             qtd,
+                    'pm':              pm,
+                    'preco_atual':     preco_atual,
+                    'valor_atual':     valor_atual,
+                    'valor_custo':     valor_custo,
+                    'pl_moeda':        pl_moeda,
+                    'pl_pct':          pl_pct,
+                    'moeda':           'BRL' if eh_br else 'USD',
+                    'valor_atual_brl': valor_atual if eh_br else valor_atual * cambio_atual,
+                    'valor_custo_brl': valor_custo if eh_br else valor_custo * cambio_atual,
+                    'pl_brl':          pl_moeda if eh_br else pl_moeda * cambio_atual,
+                }
+
+                if eh_br:
+                    posicoes_brl.append(entry)
+                else:
+                    posicoes_usd.append(entry)
+
+            if posicoes_brl or posicoes_usd:
+                section_title("💰 visão consolidada por moeda")
+
+                total_brl_carteira = (
+                    sum(p['valor_atual_brl'] for p in posicoes_brl) +
+                    sum(p['valor_atual_brl'] for p in posicoes_usd)
                 )
-                _ret_ibov = _met.get('ibovespa', {}).get('retorno', 0)
-                _alpha_cdi  = _ret_cart - _ret_cdi
-                _alpha_ibov = _ret_cart - _ret_ibov
+                total_custo_brl = (
+                    sum(p['valor_custo_brl'] for p in posicoes_brl) +
+                    sum(p['valor_custo_brl'] for p in posicoes_usd)
+                )
+                pl_total_brl = total_brl_carteira - total_custo_brl
+                pl_total_pct = ((total_brl_carteira / total_custo_brl) - 1) * 100 if total_custo_brl > 0 else 0.0
+
+                with _portfolio_overview:
+                    if _portfolio_workspace == "Análises":
+                        portfolio_kpis([
+                            {"nome": "Patrimônio em BRL", "valor": f"R$ {total_brl_carteira:,.2f}", "sublabel": f"{len(df_portfolio)} posições", "tone": "info"},
+                            {"nome": "P&L sobre custo", "valor": f"{pl_total_pct:+.2f}%", "sublabel": f"R$ {pl_total_brl:+,.2f}", "tone": "bull" if pl_total_brl >= 0 else "bear"},
+                        ])
+                    else:
+                        # ── Banner do portfólio (design system v5) ───────────────────────
+                        portfolio_hero(
+                            titulo      = "Patrimônio em reais",
+                            valor_atual = total_brl_carteira,
+                            custo_total = total_custo_brl,
+                            pnl_valor   = pl_total_brl,
+                            pnl_pct     = pl_total_pct,
+                            moeda       = "R$",
+                            data_source = "",
+                        )
+
+                        # ── KPIs auxiliares ──────────────────────────────────────────────
+                        _pf_kpis = [
+                            {
+                                "nome":     "custo alocado",
+                                "valor":    total_custo_brl,
+                                "sublabel": "total investido (preço médio × qtd)",
+                                "tone":     "info",
+                                "icone":    "💰",
+                            },
+                            {
+                                "nome":     "p&l global",
+                                "valor":    pl_total_brl,
+                                "sublabel": f"{pl_total_pct:+.2f}% sobre custo",
+                                "tone":     "bull" if pl_total_brl >= 0 else "bear",
+                                "icone":    "📈" if pl_total_brl >= 0 else "📉",
+                            },
+                            {
+                                "nome":     "posições",
+                                "valor":    f"{len(df_portfolio)}",
+                                "sublabel": "ativos no portfólio",
+                                "tone":     "accent",
+                                "icone":    "📊",
+                            },
+                            {
+                                "nome":     "valor médio/posição",
+                                "valor":    (total_brl_carteira / max(len(df_portfolio), 1)),
+                                "sublabel": "ticket médio atual",
+                                "tone":     "info",
+                                "icone":    "🎯",
+                            },
+                        ]
+                        portfolio_kpis(_pf_kpis)
+                    if posicoes_usd:
+                        st.caption(f"Posições em USD convertidas a R$ {cambio_atual:.4f}/USD. O custo usa o mesmo câmbio atual.")
+
+
+                total_usd  = sum(p['valor_atual'] for p in posicoes_usd)
+                custo_usd  = sum(p['valor_custo'] for p in posicoes_usd)
+                pl_usd     = total_usd - custo_usd
+                pl_usd_pct = ((total_usd / custo_usd) - 1) * 100 if custo_usd > 0 else 0.0
 
                 portfolio_kpis([
                     {
-                        "nome":     "retorno carteira",
-                        "valor":    f"{_ret_cart:+.2f}%",
-                        "sublabel": f"no período de {_periodo_perf}",
-                        "tone":     "bull" if _ret_cart > 0 else "bear",
-                        "icone":    "📈" if _ret_cart > 0 else "📉",
-                    },
-                    {
-                        "nome":     "alpha vs cdi",
-                        "valor":    f"{_alpha_cdi:+.2f}pp",
-                        "sublabel": "acima ou abaixo do cdi",
-                        "tone":     "bull" if _alpha_cdi > 0 else "bear",
-                        "icone":    "🎯",
-                    },
-                    {
-                        "nome":     "alpha vs ibovespa",
-                        "valor":    f"{_alpha_ibov:+.2f}pp",
-                        "sublabel": "acima ou abaixo do ibov",
-                        "tone":     "bull" if _alpha_ibov > 0 else "bear",
-                        "icone":    "🇧🇷",
-                    },
-                ])
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                # ── Exibe análise cacheada se houver ──────────────────────────
-                try:
-                    from database.db import get_ai_analysis as _get_ai_pf
-                    _uid_perf_view = st.session_state.get('user_id')
-                    _db_cache_pf = _get_ai_pf(
-                        tipo="portfolio",
-                        ticker=None,
-                        user_id=_uid_perf_view,
-                        modo=f"performance_{_periodo_perf}",
-                    )
-                    if _db_cache_pf:
-                        st.markdown(
-                            f'<div style="background:var(--bg-surface); border:1px solid var(--border-subtle); '
-                            f'border-left:3px solid var(--accent); border-radius:6px; padding:12px 16px; margin-bottom:12px;">'
-                            f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
-                            f'color:var(--text-muted); margin-bottom:8px;">'
-                            f'⚡ análise via cache supabase '
-                            f'— gerada em {str(_db_cache_pf.get("created_at",""))[:16].replace("T"," ")}'
-                            f'</div>'
-                            f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
-                            f'color:var(--text-primary); line-height:1.7; white-space:pre-wrap;">'
-                            f'{_db_cache_pf["conteudo"]}'
-                            f'</div></div>',
-                            unsafe_allow_html=True,
-                        )
-                        st.caption("clique no botão abaixo para regenerar.")
-                except Exception:
-                    pass
-
-                if st.button(
-                    "Ia: analisar performance e sugerir ajustes",
-                    key="btn_ia_perf",
-                    type="secondary",
-                    use_container_width=True,
-                ):
-                    _macro_perf = st.session_state.get('macro_context', {})
-
-                    # ── Concentração setorial e exposição cambial ──────────
-                    _setor_conc = {}
-                    _fx_exp = {"br": 0.0, "us": 0.0}
-                    _top_positions = []
-                    try:
-                        from database.db import get_todos_fundamentos_cache as _gtc
-                        _cache_pf = _gtc() or {}
-                        _tot_v = sum((p.get('valor') or 0) for p in (st.session_state.get('pesos_ativos_cache') or []))
-                        for _p in (st.session_state.get('pesos_ativos_cache') or []):
-                            _tk = _p.get('ticker', '')
-                            _v = float(_p.get('valor') or 0)
-                            _fd_p = _cache_pf.get(_tk) or _cache_pf.get(mapear_ticker_base(_tk)) or {}
-                            _set = _fd_p.get('setor') or 'outros'
-                            _setor_conc[_set] = _setor_conc.get(_set, 0) + _v
-                            if _tk.endswith('.SA'):
-                                _fx_exp['br'] += _v
-                            else:
-                                _fx_exp['us'] += _v
-                            _top_positions.append(_p)
-                        if _tot_v > 0:
-                            _setor_conc = {k: v / _tot_v * 100 for k, v in _setor_conc.items()}
-                            _fx_exp = {k: v / _tot_v * 100 for k, v in _fx_exp.items()}
-                        # Ordena top por peso
-                        _top_positions = sorted(
-                            _top_positions, key=lambda x: -(x.get('peso_pct') or 0)
-                        )[:10]
-                    except Exception:
-                        pass
-
-                    from utils.ai_prompts import build_portfolio_performance_prompt
-                    _prompt_perf = build_portfolio_performance_prompt(
-                        metricas         = _met,
-                        posicoes_top     = _top_positions,
-                        setor_concentracao = _setor_conc,
-                        fx_exposicao     = _fx_exp,
-                        periodo          = _periodo_perf,
-                        macro_context    = _macro_perf,
-                        alpha_cdi        = _alpha_cdi,
-                        alpha_ibov       = _alpha_ibov,
-                    )
-                    from utils.ai_client import chamar_ia, SYSTEM_PORTFOLIO
-                    _us_perf = st.session_state.get('user_settings', {})
-                    _resposta_perf = chamar_ia(
-                        prompt_usuario=_prompt_perf,
-                        system=SYSTEM_PORTFOLIO,
-                        max_tokens=1000,
-                        temperatura=0.3,
-                        stream=True,
-                        user_settings=_us_perf,
-                    )
-                    # ── Persiste no Supabase (TTL 1 dia, por user_id+periodo) ──
-                    if _resposta_perf:
-                        try:
-                            from database.db import save_ai_analysis
-                            _uid_perf = st.session_state.get('user_id')
-                            save_ai_analysis(
-                                tipo="portfolio",
-                                ticker=None,
-                                user_id=_uid_perf,
-                                modo=f"performance_{_periodo_perf}",
-                                conteudo=_resposta_perf,
-                                modelo="auto",
-                                ttl_horas=24,
-                            )
-                        except Exception:
-                            pass
-
-        # ── persiste dados para o chat IA (tab_chat usa estes) ──
-        st.session_state['pesos_ativos_cache'] = [
-            {
-                'ticker':      row['ativo'],
-                'quantidade':  row['qtd'],
-                'preco_medio': row['preço médio'],
-                'preco_atual': row['preço atual'],
-                'valor':       row['valor atual'],
-                'peso_pct':    row['peso atual (%)'],
-                'pnl_pct':     row['p&l (%)'],
-                'health_score': row['health score'],
-            }
-            for _, row in df_portfolio.iterrows()
-        ]
-        st.session_state['metricas_cache'] = {
-            'valor_total':   valor_atual_carteira,
-            'custo_total':   custo_total_carteira,
-            'pnl_total_pct': pnl_global_pct,
-            'num_posicoes':  len(df_portfolio),
-        }
-
-        # Tabela de posições HTML — P&L colorido, health bar, link para Research
-        def _pf_table_html(df: pd.DataFrame) -> None:
-            # Render via html_table (F0-2): barras de health/peso mantidas na célula.
-            from utils.components import html_table as _ht_pf
-            _hdrs = ["Ativo", "Qtd", "PM", "Preço", "Custo", "Valor", "P&L $", "P&L %", "Health", "Peso %"]
-            _aligns = ["left"] + ["right"] * 9
-            _max_peso = float(df['peso atual (%)'].max()) if not df.empty else 1.0
-            _rows, _classes = [], []
-            for _, row in df.iterrows():
-                _tk = str(row['ativo'])
-                _pnl_v = float(row['p&l ($)']); _pnl_p = float(row['p&l (%)'])
-                _peso = float(row['peso atual (%)'])
-                _tone = "bull" if _pnl_v >= 0 else "bear"
-                try:
-                    _hsi = int(row.get('health score'))
-                    _hc = "var(--bull)" if _hsi >= 65 else ("var(--amber)" if _hsi >= 40 else "var(--bear)")
-                    _hs_html = (f'<div style="display:flex;align-items:center;gap:5px;">'
-                                f'<div style="flex:1;background:var(--border-subtle);border-radius:2px;height:4px;overflow:hidden;">'
-                                f'<div style="width:{_hsi}%;height:100%;background:{_hc};border-radius:2px;"></div></div>'
-                                f'<span style="font-size:0.75rem;color:{_hc};font-family:var(--font-data);min-width:20px;">{_hsi}</span></div>')
-                except (TypeError, ValueError):
-                    _hs_html = "—"
-                _pw_pct = min((_peso / _max_peso) * 100, 100) if _max_peso > 0 else 0
-                _peso_html = (f'<div style="display:flex;align-items:center;gap:5px;">'
-                              f'<div style="flex:1;background:var(--border-subtle);border-radius:2px;height:4px;overflow:hidden;">'
-                              f'<div style="width:{_pw_pct:.0f}%;height:100%;background:var(--accent);border-radius:2px;"></div></div>'
-                              f'<span style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-data);min-width:30px;">{_peso:.1f}%</span></div>')
-                _rows.append([
-                    f'<a href="{ticker_nav_url(_tk)}" target="_self" '
-                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk.replace(".SA","")}</a>',
-                    f"{row['qtd']:.4f}", f"{row['preço médio']:.4f}", f"{row['preço atual']:.2f}",
-                    f"{row['custo total']:,.0f}", f"{row['valor atual']:,.0f}",
-                    f"{_pnl_v:+,.0f}", f"{_pnl_p:+.2f}%", _hs_html, _peso_html,
-                ])
-                _classes.append([
-                    "mono", "mono muted", "mono", "mono strong", "mono muted", "mono strong",
-                    f"mono strong {_tone}", f"mono strong {_tone}", "", "",
-                ])
-            _ht_pf(_hdrs, _rows, aligns=_aligns, classes=_classes)
-
-        _pf_table_html(df_portfolio)
-
-        # F3-3: ação rápida — registrar decisão de uma posição direto no diário
-        # (o ticker da tabela já linka p/ Research). Salta para gestão & ia › diário
-        # com o ticker preenchido.
-        _tk_pos_list = [str(r['ativo']) for _, r in df_portfolio.iterrows()]
-        if _tk_pos_list:
-            _qa1, _qa2 = st.columns([3, 1])
-            with _qa1:
-                _tk_dec = st.selectbox("registrar decisão de:", _tk_pos_list,
-                                       key="qa_dec_ticker", label_visibility="collapsed")
-            with _qa2:
-                if st.button("Registrar decisão", key="qa_dec_btn",
-                             use_container_width=True):
-                    st.session_state["diario_ticker_manual"] = _tk_dec
-                    st.session_state["_diario_expandir"] = True
-                    st.session_state["portfolio_grupo"] = "📋 gestão & ia"
-                    st.session_state["portfolio_sub_3"] = "📝 diário de decisões"
-                    st.rerun()
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        csv = df_portfolio.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Exportar carteira em CSV",
-            data=csv,
-            file_name="portfolio_finapp.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            section_title("⚖️ alocação por ativo")
-            fig_pie = go.Figure(go.Pie(labels=df_portfolio['ativo'], values=df_portfolio['valor atual'], hole=0.4, textinfo='label+percent', marker=dict(line=dict(color='#010101', width=2))))
-            layout_pie = base_layout(height=350)
-            if 'xaxis' in layout_pie:
-                layout_pie['xaxis']['visible'] = False
-            if 'yaxis' in layout_pie:
-                layout_pie['yaxis']['visible'] = False
-            fig_pie.update_layout(**layout_pie)
-            st.plotly_chart(fig_pie, use_container_width=True, config={'responsive': True})
-            st.caption("distribuição do capital entre os ativos da carteira. concentração excessiva em poucos nomes eleva o risco idiossincrático — fatias muito grandes merecem atenção.")
-
-        with col_g2:
-            section_title("📈 p&l por ativo")
-            _cc_pnl = _chart_cores()
-            df_pnl  = df_portfolio.sort_values(by='p&l ($)', ascending=True)
-            fig_bar = go.Figure(go.Bar(
-                x=df_pnl['p&l ($)'], y=df_pnl['ativo'], orientation='h',
-                marker_color=[_cc_pnl["bear"] if val < 0 else _cc_pnl["bull"]
-                              for val in df_pnl['p&l ($)']],
-                hovertemplate="%{y}<br>P&L: <b>%{x:+,.2f}</b><extra></extra>",
-            ))
-            layout_bar = base_layout(height=350)
-            if 'yaxis' in layout_bar:
-                layout_bar['yaxis']['showgrid'] = False
-            fig_bar.update_layout(**layout_bar)
-            st.plotly_chart(fig_bar, use_container_width=True, config={'responsive': True})
-            st.caption("lucro/prejuízo não realizado por posição. identifica os ativos que puxam o resultado da carteira para cima ou para baixo.")
-
-        # ── VISÃO CONSOLIDADA POR MOEDA ──────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        cambio_atual = get_cambio_usd_brl()
-
-        posicoes_brl = []
-        posicoes_usd = []
-
-        for t, dados in ativos_alocados.items():
-            qtd = float(dados.get('quantidade') or 0)
-            pm  = float(dados.get('preco_medio') or 0)
-            if qtd <= 0:
-                continue
-
-            t_base_moeda = mapear_ticker_base(t)
-            eh_br        = t_base_moeda.endswith('.SA')
-            preco_atual  = live_data.get(t, 0.0)
-
-            if preco_atual <= 0:
-                continue
-
-            valor_atual  = preco_atual * qtd
-            valor_custo  = pm * qtd
-            pl_moeda     = valor_atual - valor_custo
-            pl_pct       = ((valor_atual / valor_custo) - 1) * 100 if valor_custo > 0 else 0.0
-
-            entry = {
-                'ticker':          t,
-                'qtd':             qtd,
-                'pm':              pm,
-                'preco_atual':     preco_atual,
-                'valor_atual':     valor_atual,
-                'valor_custo':     valor_custo,
-                'pl_moeda':        pl_moeda,
-                'pl_pct':          pl_pct,
-                'moeda':           'BRL' if eh_br else 'USD',
-                'valor_atual_brl': valor_atual if eh_br else valor_atual * cambio_atual,
-                'valor_custo_brl': valor_custo if eh_br else valor_custo * cambio_atual,
-                'pl_brl':          pl_moeda if eh_br else pl_moeda * cambio_atual,
-            }
-
-            if eh_br:
-                posicoes_brl.append(entry)
-            else:
-                posicoes_usd.append(entry)
-
-        if posicoes_brl or posicoes_usd:
-            section_title("💰 visão consolidada por moeda")
-
-            total_brl_carteira = (
-                sum(p['valor_atual_brl'] for p in posicoes_brl) +
-                sum(p['valor_atual_brl'] for p in posicoes_usd)
-            )
-            total_custo_brl = (
-                sum(p['valor_custo_brl'] for p in posicoes_brl) +
-                sum(p['valor_custo_brl'] for p in posicoes_usd)
-            )
-            pl_total_brl = total_brl_carteira - total_custo_brl
-            pl_total_pct = ((total_brl_carteira / total_custo_brl) - 1) * 100 if total_custo_brl > 0 else 0.0
-
-            with _portfolio_overview:
-                # ── Banner do portfólio (design system v5) ───────────────────────
-                portfolio_hero(
-                    titulo      = "Patrimônio em reais",
-                    valor_atual = total_brl_carteira,
-                    custo_total = total_custo_brl,
-                    pnl_valor   = pl_total_brl,
-                    pnl_pct     = pl_total_pct,
-                    moeda       = "R$",
-                    data_source = "",
-                )
-
-                # ── KPIs auxiliares ──────────────────────────────────────────────
-                _pf_kpis = [
-                    {
-                        "nome":     "custo alocado",
-                        "valor":    total_custo_brl,
-                        "sublabel": "total investido (preço médio × qtd)",
+                        "nome":     "patrimônio total (brl)",
+                        "valor":    f"R$ {total_brl_carteira:,.2f}",
+                        "sublabel": f"custo R$ {total_custo_brl:,.2f}",
                         "tone":     "info",
-                        "icone":    "💰",
+                        "icone":    "💎",
                     },
                     {
-                        "nome":     "p&l global",
-                        "valor":    pl_total_brl,
+                        "nome":     "p&l total brl",
+                        "valor":    f"R$ {pl_total_brl:+,.2f}",
                         "sublabel": f"{pl_total_pct:+.2f}% sobre custo",
                         "tone":     "bull" if pl_total_brl >= 0 else "bear",
                         "icone":    "📈" if pl_total_brl >= 0 else "📉",
                     },
                     {
-                        "nome":     "posições",
-                        "valor":    f"{len(df_portfolio)}",
-                        "sublabel": "ativos no portfólio",
-                        "tone":     "accent",
-                        "icone":    "📊",
+                        "nome":     "p&l eua (usd)",
+                        "valor":    f"$ {pl_usd:+,.2f}",
+                        "sublabel": f"{pl_usd_pct:+.2f}% · câmbio R$ {cambio_atual:.2f}",
+                        "tone":     "bull" if pl_usd >= 0 else "bear",
+                        "icone":    "🇺🇸",
                     },
                     {
-                        "nome":     "valor médio/posição",
-                        "valor":    (total_brl_carteira / max(len(df_portfolio), 1)),
-                        "sublabel": "ticket médio atual",
+                        "nome":     "USD/BRL usado no painel",
+                        "valor":    f"R$ {cambio_atual:.4f}",
+                        "sublabel": "conversão das posições em USD",
                         "tone":     "info",
-                        "icone":    "🎯",
+                        "icone":    "💱",
                     },
-                ]
-                portfolio_kpis(_pf_kpis)
-                if posicoes_usd:
-                    st.caption(f"Posições em USD convertidas a R$ {cambio_atual:.4f}/USD. O custo usa o mesmo câmbio atual.")
+                ])
 
+                st.markdown("---")
+                col_br, col_us = st.columns(2)
 
-            total_usd  = sum(p['valor_atual'] for p in posicoes_usd)
-            custo_usd  = sum(p['valor_custo'] for p in posicoes_usd)
-            pl_usd     = total_usd - custo_usd
-            pl_usd_pct = ((total_usd / custo_usd) - 1) * 100 if custo_usd > 0 else 0.0
+                with col_br:
+                    section_title("🇧🇷 ativos brasileiros (brl)")
+                    total_br_val  = sum(p['valor_atual'] for p in posicoes_brl)
+                    total_br_cust = sum(p['valor_custo'] for p in posicoes_brl)
+                    pl_br         = total_br_val - total_br_cust
+                    pl_br_pct     = ((total_br_val / total_br_cust) - 1) * 100 if total_br_cust > 0 else 0.0
 
-            # contribuição cambial = diferença entre converter o P&L USD pelo câmbio atual
-            # e o P&L BRL "real" das posições USD (custo em câmbio da época vs. câmbio hoje)
-            pl_brl_posicoes_usd   = sum(p['pl_brl'] for p in posicoes_usd)
-            pl_usd_em_brl_simples = pl_usd * cambio_atual
-            contrib_cambio        = pl_brl_posicoes_usd - pl_usd_em_brl_simples
-
-            portfolio_kpis([
-                {
-                    "nome":     "patrimônio total (brl)",
-                    "valor":    f"R$ {total_brl_carteira:,.2f}",
-                    "sublabel": f"custo R$ {total_custo_brl:,.2f}",
-                    "tone":     "info",
-                    "icone":    "💎",
-                },
-                {
-                    "nome":     "p&l total brl",
-                    "valor":    f"R$ {pl_total_brl:+,.2f}",
-                    "sublabel": f"{pl_total_pct:+.2f}% sobre custo",
-                    "tone":     "bull" if pl_total_brl >= 0 else "bear",
-                    "icone":    "📈" if pl_total_brl >= 0 else "📉",
-                },
-                {
-                    "nome":     "p&l eua (usd)",
-                    "valor":    f"$ {pl_usd:+,.2f}",
-                    "sublabel": f"{pl_usd_pct:+.2f}% · câmbio R$ {cambio_atual:.2f}",
-                    "tone":     "bull" if pl_usd >= 0 else "bear",
-                    "icone":    "🇺🇸",
-                },
-                {
-                    "nome":     "contribuição cambial",
-                    "valor":    f"R$ {contrib_cambio:+,.2f}",
-                    "sublabel": "efeito usd/brl no resultado",
-                    "tone":     "bull" if contrib_cambio >= 0 else "bear",
-                    "icone":    "💱",
-                },
-            ])
-
-            st.markdown("---")
-            col_br, col_us = st.columns(2)
-
-            with col_br:
-                section_title("🇧🇷 ativos brasileiros (brl)")
-                total_br_val  = sum(p['valor_atual'] for p in posicoes_brl)
-                total_br_cust = sum(p['valor_custo'] for p in posicoes_brl)
-                pl_br         = total_br_val - total_br_cust
-                pl_br_pct     = ((total_br_val / total_br_cust) - 1) * 100 if total_br_cust > 0 else 0.0
-
-                st.markdown(
-                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
-                    f'<span style="color:var(--text-muted);">patrimônio: </span>'
-                    f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_br_val:,.2f}</span> | '
-                    f'<span style="color:var(--text-muted);">p&l: </span>'
-                    f'<span style="color:{"var(--bull)" if pl_br >= 0 else "var(--bear)"}; font-weight:bold;">'
-                    f'R$ {pl_br:+,.2f} ({pl_br_pct:+.1f}%)</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-                for pos in sorted(posicoes_brl, key=lambda x: abs(x['pl_pct']), reverse=True):
-                    cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
                     st.markdown(
-                        f'<div style="display:flex; justify-content:space-between; '
-                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
-                        f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
-                        f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
-                        f'<span style="color:var(--text-muted);">R$ {pos["preco_atual"]:,.2f}</span>'
-                        f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
-                        f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
+                        f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
+                        f'<span style="color:var(--text-muted);">patrimônio: </span>'
+                        f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_br_val:,.2f}</span> | '
+                        f'<span style="color:var(--text-muted);">p&l: </span>'
+                        f'<span style="color:{"var(--bull)" if pl_br >= 0 else "var(--bear)"}; font-weight:bold;">'
+                        f'R$ {pl_br:+,.2f} ({pl_br_pct:+.1f}%)</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
 
-            with col_us:
-                section_title("🇺🇸 ativos eua (usd + brl)")
-
-                st.markdown(
-                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
-                    f'<span style="color:var(--text-muted);">em usd: </span>'
-                    f'<span style="color:var(--text-primary); font-weight:bold;">$ {total_usd:,.2f}</span> | '
-                    f'<span style="color:var(--text-muted);">em brl: </span>'
-                    f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
-                    f'<br><span style="color:var(--text-muted); font-size:0.78rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-                for pos in sorted(posicoes_usd, key=lambda x: abs(x['pl_pct']), reverse=True):
-                    cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
-                    st.markdown(
-                        f'<div style="display:flex; justify-content:space-between; '
-                        f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
-                        f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
-                        f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
-                        f'<span style="color:var(--text-muted);">$ {pos["preco_atual"]:,.2f}</span>'
-                        f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
-                        f'<span style="color:{cor_p}; font-size:0.78rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-        # ── rebalanceamento inteligente ───────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("Rebalanceamento inteligente", expanded=False):
-
-            st.markdown(
-                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); margin-bottom:16px;">'
-                'defina a alocação-alvo (%) para cada ativo e veja exatamente quanto '
-                'comprar ou vender para rebalancear a carteira.</div>',
-                unsafe_allow_html=True,
-            )
-
-            pesos_alvo_list = get_pesos_alvo(portfolio_id_ativo)
-            pesos_alvo_dict = {p['ticker']: float(p['peso_alvo']) for p in pesos_alvo_list}
-
-            if valor_atual_carteira <= 0:
-                st.warning("adicione posições com quantidade e preço para usar o rebalanceamento.")
-            else:
-                # ── 1. definição dos alvos ────────────────────────────────────
-                section_title("1. defina os pesos-alvo (%)")
-
-                tickers_port = [
-                    t for t, d in ativos_alocados.items()
-                    if float(d.get('quantidade') or 0) > 0
-                ]
-
-                total_alvo  = 0.0
-                novos_alvos = {}
-
-                n_cols     = min(4, len(tickers_port))
-                cols_alvo  = st.columns(n_cols) if n_cols > 0 else [st]
-                for i, t in enumerate(tickers_port):
-                    with cols_alvo[i % len(cols_alvo)]:
-                        alvo_atual = pesos_alvo_dict.get(t, 0.0)
-                        novo_alvo  = st.number_input(
-                            f"{t.replace('.SA', '')}",
-                            min_value=0.0, max_value=100.0,
-                            value=float(alvo_atual),
-                            step=1.0, format="%.1f",
-                            key=f"alvo_{t}",
+                    for pos in sorted(posicoes_brl, key=lambda x: abs(x['pl_pct']), reverse=True):
+                        cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
+                        st.markdown(
+                            f'<div style="display:flex; justify-content:space-between; '
+                            f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
+                            f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
+                            f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
+                            f'<span style="color:var(--text-muted);">R$ {pos["preco_atual"]:,.2f}</span>'
+                            f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
+                            f'<span style="color:{cor_p};">R$ {pos["pl_moeda"]:+,.0f}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True,
                         )
-                        novos_alvos[t] = novo_alvo
-                        total_alvo    += novo_alvo
 
-                # Indicador de soma dos alvos
-                cor_total = "var(--bull)" if abs(total_alvo - 100) < 0.1 else "var(--bear)"
-                aviso_soma = "✅" if abs(total_alvo - 100) < 0.1 else "⚠️ deve somar 100%"
+                with col_us:
+                    section_title("🇺🇸 ativos eua (usd + brl)")
+
+                    st.markdown(
+                        f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; margin-bottom:8px;">'
+                        f'<span style="color:var(--text-muted);">em usd: </span>'
+                        f'<span style="color:var(--text-primary); font-weight:bold;">$ {total_usd:,.2f}</span> | '
+                        f'<span style="color:var(--text-muted);">em brl: </span>'
+                        f'<span style="color:var(--text-primary); font-weight:bold;">R$ {total_usd * cambio_atual:,.2f}</span>'
+                        f'<br><span style="color:var(--text-muted); font-size:0.78rem;">câmbio: R$ {cambio_atual:.4f}/USD</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    for pos in sorted(posicoes_usd, key=lambda x: abs(x['pl_pct']), reverse=True):
+                        cor_p = "var(--bull)" if pos['pl_pct'] >= 0 else "var(--bear)"
+                        st.markdown(
+                            f'<div style="display:flex; justify-content:space-between; '
+                            f'padding:4px 0; border-bottom:1px solid var(--border-subtle); '
+                            f'font-family:var(--font-data,monospace); font-size:0.75rem;">'
+                            f'<a href="{ticker_nav_url(pos["ticker"])}" class="ticker-nav" style="font-size:0.75rem;">{pos["ticker"].replace(".SA","")}</a>'
+                            f'<span style="color:var(--text-muted);">$ {pos["preco_atual"]:,.2f}</span>'
+                            f'<span style="color:{cor_p};">{pos["pl_pct"]:+.1f}%</span>'
+                            f'<span style="color:{cor_p}; font-size:0.78rem;">R$ {pos["pl_brl"]:+,.0f}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+            # ── rebalanceamento inteligente ───────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.expander("Rebalanceamento inteligente", expanded=False):
+
                 st.markdown(
-                    f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; '
-                    f'color:{cor_total}; margin:8px 0;">'
-                    f'total alocado: {total_alvo:.1f}% {aviso_soma}</div>',
+                    '<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; color:var(--text-muted); margin-bottom:16px;">'
+                    'defina a alocação-alvo (%) para cada ativo e veja exatamente quanto '
+                    'comprar ou vender para rebalancear a carteira.</div>',
                     unsafe_allow_html=True,
                 )
 
-                col_s1, col_s2 = st.columns([1, 3])
-                with col_s1:
-                    if st.button("Salvar alvos", type="primary", use_container_width=True,
-                                 key="btn_salvar_alvos"):
-                        for t, alvo in novos_alvos.items():
-                            salvar_peso_alvo(portfolio_id_ativo, t, alvo)
-                        st.success("✅ alvos salvos!")
-                        st.rerun()
+                pesos_alvo_list = get_pesos_alvo(portfolio_id_ativo)
+                pesos_alvo_dict = {p['ticker']: float(p['peso_alvo']) for p in pesos_alvo_list}
 
-                # ── 2. plano de rebalanceamento ───────────────────────────────
-                if pesos_alvo_dict and abs(total_alvo - 100) < 5:
+                if valor_atual_carteira <= 0:
+                    st.warning("adicione posições com quantidade e preço para usar o rebalanceamento.")
+                else:
+                    # ── 1. definição dos alvos ────────────────────────────────────
+                    section_title("1. defina os pesos-alvo (%)")
 
-                    section_title("2. plano de rebalanceamento")
+                    tickers_port = [
+                        t for t, d in ativos_alocados.items()
+                        if float(d.get('quantidade') or 0) > 0
+                    ]
 
-                    aporte_adicional = st.number_input(
-                        "aporte adicional disponível (R$):",
-                        min_value=0.0, value=0.0,
-                        step=100.0, format="%.2f",
-                        key="aporte_rebal",
-                        help="valor extra que você quer aportar agora",
+                    total_alvo  = 0.0
+                    novos_alvos = {}
+
+                    n_cols     = min(4, len(tickers_port))
+                    cols_alvo  = st.columns(n_cols) if n_cols > 0 else [st]
+                    for i, t in enumerate(tickers_port):
+                        with cols_alvo[i % len(cols_alvo)]:
+                            alvo_atual = pesos_alvo_dict.get(t, 0.0)
+                            novo_alvo  = st.number_input(
+                                f"{t.replace('.SA', '')}",
+                                min_value=0.0, max_value=100.0,
+                                value=float(alvo_atual),
+                                step=1.0, format="%.1f",
+                                key=f"alvo_{t}",
+                            )
+                            novos_alvos[t] = novo_alvo
+                            total_alvo    += novo_alvo
+
+                    # Indicador de soma dos alvos
+                    cor_total = "var(--bull)" if abs(total_alvo - 100) < 0.1 else "var(--bear)"
+                    aviso_soma = "✅" if abs(total_alvo - 100) < 0.1 else "⚠️ deve somar 100%"
+                    st.markdown(
+                        f'<div style="font-family:var(--font-data,monospace); font-size:0.85rem; '
+                        f'color:{cor_total}; margin:8px 0;">'
+                        f'total alocado: {total_alvo:.1f}% {aviso_soma}</div>',
+                        unsafe_allow_html=True,
                     )
 
-                    valor_total_novo = valor_atual_carteira + aporte_adicional
+                    col_s1, col_s2 = st.columns([1, 3])
+                    with col_s1:
+                        if st.button("Salvar alvos", type="primary", use_container_width=True,
+                                     key="btn_salvar_alvos"):
+                            for t, alvo in novos_alvos.items():
+                                salvar_peso_alvo(portfolio_id_ativo, t, alvo)
+                            st.success("✅ alvos salvos!")
+                            st.rerun()
 
-                    dados_rebal = []
-                    for t, dados in ativos_alocados.items():
-                        qtd_atual = float(dados.get('quantidade') or 0)
-                        if qtd_atual <= 0:
-                            continue
+                    # ── 2. plano de rebalanceamento ───────────────────────────────
+                    if pesos_alvo_dict and abs(total_alvo - 100) < 5:
 
-                        preco_at  = live_data.get(t, 0.0)
-                        val_atual = qtd_atual * preco_at
-                        pct_atual = (val_atual / valor_atual_carteira * 100
-                                     if valor_atual_carteira > 0 else 0.0)
+                        section_title("2. plano de rebalanceamento")
 
-                        alvo_pct  = pesos_alvo_dict.get(t, 0.0)
-                        val_alvo  = valor_total_novo * alvo_pct / 100
-                        diferenca = val_alvo - val_atual
-                        qtd_op    = diferenca / preco_at if preco_at > 0 else 0.0
-                        desvio_pp = pct_atual - alvo_pct
+                        aporte_adicional = st.number_input(
+                            "aporte adicional disponível (R$):",
+                            min_value=0.0, value=0.0,
+                            step=100.0, format="%.2f",
+                            key="aporte_rebal",
+                            help="valor extra que você quer aportar agora",
+                        )
 
-                        dados_rebal.append({
-                            'ticker':       t.replace('.SA', ''),
-                            '_ticker_orig': t,
-                            'peso atual':   f"{pct_atual:.1f}%",
-                            'peso alvo':    f"{alvo_pct:.1f}%",
-                            'desvio':       desvio_pp,
-                            'valor atual':  val_atual,
-                            'valor alvo':   val_alvo,
-                            'diferença R$': diferenca,
-                            'ação':         qtd_op,
-                            'preço':        preco_at,
-                        })
+                        valor_total_novo = valor_atual_carteira + aporte_adicional
 
-                    if dados_rebal:
-                        dados_rebal.sort(key=lambda x: abs(x['desvio']), reverse=True)
+                        dados_rebal = []
+                        for t, dados in ativos_alocados.items():
+                            qtd_atual = float(dados.get('quantidade') or 0)
+                            if qtd_atual <= 0:
+                                continue
 
-                        for d in dados_rebal:
-                            cor_op = "var(--bull)" if d['diferença R$'] > 0 else "var(--bear)"
-                            op_txt = "COMPRAR" if d['diferença R$'] > 0 else "VENDER"
-                            seta   = "▲" if d['diferença R$'] > 0 else "▼"
+                            preco_at  = live_data.get(t, 0.0)
+                            val_atual = qtd_atual * preco_at
+                            pct_atual = (val_atual / valor_atual_carteira * 100
+                                         if valor_atual_carteira > 0 else 0.0)
 
-                            r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3], gap="small")
-                            with r1:
-                                st.markdown(
-                                    f'<div style="font-family:var(--font-data,monospace); color:var(--accent); font-weight:bold;">{d["ticker"]}</div>'
-                                    f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; color:var(--text-muted);">{d["peso atual"]} → {d["peso alvo"]}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with r2:
-                                cor_dev = ("var(--bear)" if abs(d['desvio']) > 5
-                                           else "var(--amber)" if abs(d['desvio']) > 2
-                                           else "var(--bull)")
-                                st.markdown(
-                                    f'<div style="font-family:var(--font-data,monospace); color:{cor_dev}; font-size:0.85rem;">'
-                                    f'desvio: {d["desvio"]:+.1f}pp</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with r3:
-                                st.markdown(
-                                    f'<div style="font-family:var(--font-data,monospace); color:var(--text-muted); font-size:0.8rem;">'
-                                    f'R$ {d["valor atual"]:,.0f} → R$ {d["valor alvo"]:,.0f}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with r4:
-                                st.markdown(
-                                    f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.85rem; font-weight:bold;">'
-                                    f'{seta} {op_txt} R$ {abs(d["diferença R$"]):,.2f}</div>',
-                                    unsafe_allow_html=True,
-                                )
-                            with r5:
-                                if d['preço'] > 0 and abs(d['ação']) >= 0.01:
-                                    qtd_fmt = (
-                                        f"{d['ação']:+.0f} cotas"
-                                        if abs(d['ação']) >= 1
-                                        else f"{d['ação']:+.4f} lotes"
-                                    )
+                            alvo_pct  = pesos_alvo_dict.get(t, 0.0)
+                            val_alvo  = valor_total_novo * alvo_pct / 100
+                            diferenca = val_alvo - val_atual
+                            qtd_op    = diferenca / preco_at if preco_at > 0 else 0.0
+                            desvio_pp = pct_atual - alvo_pct
+
+                            dados_rebal.append({
+                                'ticker':       t.replace('.SA', ''),
+                                '_ticker_orig': t,
+                                'peso atual':   f"{pct_atual:.1f}%",
+                                'peso alvo':    f"{alvo_pct:.1f}%",
+                                'desvio':       desvio_pp,
+                                'valor atual':  val_atual,
+                                'valor alvo':   val_alvo,
+                                'diferença R$': diferenca,
+                                'ação':         qtd_op,
+                                'preço':        preco_at,
+                            })
+
+                        if dados_rebal:
+                            dados_rebal.sort(key=lambda x: abs(x['desvio']), reverse=True)
+
+                            for d in dados_rebal:
+                                cor_op = "var(--bull)" if d['diferença R$'] > 0 else "var(--bear)"
+                                op_txt = "COMPRAR" if d['diferença R$'] > 0 else "VENDER"
+                                seta   = "▲" if d['diferença R$'] > 0 else "▼"
+
+                                r1, r2, r3, r4, r5 = st.columns([2, 2, 2, 3, 3], gap="small")
+                                with r1:
                                     st.markdown(
-                                        f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.8rem;">'
-                                        f'{qtd_fmt} @ R$ {d["preço"]:,.2f}</div>',
+                                        f'<div style="font-family:var(--font-data,monospace); color:var(--accent); font-weight:bold;">{d["ticker"]}</div>'
+                                        f'<div style="font-family:var(--font-data,monospace); font-size:0.78rem; color:var(--text-muted);">{d["peso atual"]} → {d["peso alvo"]}</div>',
                                         unsafe_allow_html=True,
                                     )
+                                with r2:
+                                    cor_dev = ("var(--bear)" if abs(d['desvio']) > 5
+                                               else "var(--amber)" if abs(d['desvio']) > 2
+                                               else "var(--bull)")
+                                    st.markdown(
+                                        f'<div style="font-family:var(--font-data,monospace); color:{cor_dev}; font-size:0.85rem;">'
+                                        f'desvio: {d["desvio"]:+.1f}pp</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                with r3:
+                                    st.markdown(
+                                        f'<div style="font-family:var(--font-data,monospace); color:var(--text-muted); font-size:0.8rem;">'
+                                        f'R$ {d["valor atual"]:,.0f} → R$ {d["valor alvo"]:,.0f}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                with r4:
+                                    st.markdown(
+                                        f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.85rem; font-weight:bold;">'
+                                        f'{seta} {op_txt} R$ {abs(d["diferença R$"]):,.2f}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+                                with r5:
+                                    if d['preço'] > 0 and abs(d['ação']) >= 0.01:
+                                        qtd_fmt = (
+                                            f"{d['ação']:+.0f} cotas"
+                                            if abs(d['ação']) >= 1
+                                            else f"{d['ação']:+.4f} lotes"
+                                        )
+                                        st.markdown(
+                                            f'<div style="font-family:var(--font-data,monospace); color:{cor_op}; font-size:0.8rem;">'
+                                            f'{qtd_fmt} @ R$ {d["preço"]:,.2f}</div>',
+                                            unsafe_allow_html=True,
+                                        )
 
-                            st.markdown(
-                                '<div style="height:1px; background:var(--border-subtle); margin:4px 0;"></div>',
-                                unsafe_allow_html=True,
-                            )
+                                st.markdown(
+                                    '<div style="height:1px; background:var(--border-subtle); margin:4px 0;"></div>',
+                                    unsafe_allow_html=True,
+                                )
 
-                        # Resumo
-                        total_compras = sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] > 0)
-                        total_vendas  = abs(sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] < 0))
-                        aporte_liq    = max(0.0, total_compras - total_vendas)
+                            # Resumo
+                            total_compras = sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] > 0)
+                            total_vendas  = abs(sum(d['diferença R$'] for d in dados_rebal if d['diferença R$'] < 0))
+                            aporte_liq    = max(0.0, total_compras - total_vendas)
 
-                        st.markdown("---")
-                        portfolio_kpis([
-                            {
-                                "nome":     "total a comprar",
-                                "valor":    f"R$ {total_compras:,.2f}",
-                                "sublabel": "ordens de compra agregadas",
-                                "tone":     "bull",
-                                "icone":    "🟢",
-                            },
-                            {
-                                "nome":     "total a vender",
-                                "valor":    f"R$ {total_vendas:,.2f}",
-                                "sublabel": "ordens de venda agregadas",
-                                "tone":     "bear",
-                                "icone":    "🔴",
-                            },
-                            {
-                                "nome":     "aporte necessário",
-                                "valor":    f"R$ {aporte_liq:,.2f}",
-                                "sublabel": "além do que já tem em carteira",
-                                "tone":     "amber",
-                                "icone":    "💰",
-                            },
-                        ])
+                            st.markdown("---")
+                            portfolio_kpis([
+                                {
+                                    "nome":     "total a comprar",
+                                    "valor":    f"R$ {total_compras:,.2f}",
+                                    "sublabel": "ordens de compra agregadas",
+                                    "tone":     "bull",
+                                    "icone":    "🟢",
+                                },
+                                {
+                                    "nome":     "total a vender",
+                                    "valor":    f"R$ {total_vendas:,.2f}",
+                                    "sublabel": "ordens de venda agregadas",
+                                    "tone":     "bear",
+                                    "icone":    "🔴",
+                                },
+                                {
+                                    "nome":     "aporte necessário",
+                                    "valor":    f"R$ {aporte_liq:,.2f}",
+                                    "sublabel": "além do que já tem em carteira",
+                                    "tone":     "amber",
+                                    "icone":    "💰",
+                                },
+                            ])
 
-# ══════════════════════════════════════════════════════════════════════════
-# SELETOR DE ANÁLISE (P4-1) — renderiza SÓ a seção escolhida abaixo das posições
-# ══════════════════════════════════════════════════════════════════════════
-st.markdown("<br>", unsafe_allow_html=True)
+# A preparação dos dados permanece no bloco de posições. A análise escolhida
+# aparece logo após o resumo e o painel recolhido, sem refazer o benchmark.
 st.markdown('<div id="ft-portfolio-analysis"></div>', unsafe_allow_html=True)
-section_title("Análises da carteira")
-
-# F3-1: as 7 análises agrupadas em 4 GRUPOS (grupo → sub-seleção), dando hierarquia
-# e encurtando o seletor. Os branches `if _secao_pf == "<label>"` abaixo continuam
-# intactos — muda apenas COMO _secao_pf é derivado.
-_GRUPOS_PF = {
-    "📊 composição":  ["📊 concentração"],
-    "📐 risco":       ["📐 risco", "⚡ stress test"],
-    "📈 performance": ["📊 backtesting"],
-    "📋 gestão & ia": ["📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"],
-}
-_grupos_keys = list(_GRUPOS_PF.keys())
-_grupo_pf = section_selector(_grupos_keys, key="portfolio_grupo", label="análise")
-if _grupo_pf not in _GRUPOS_PF:
-    _grupo_pf = _grupos_keys[0]
-_subs_pf = _GRUPOS_PF[_grupo_pf]
-if len(_subs_pf) > 1:
-    from utils.components import tabs_pill as _tabs_pill_pf
-    _secao_pf = _tabs_pill_pf(
-        _subs_pf, key="portfolio_sub_" + str(_grupos_keys.index(_grupo_pf)),
-        default=_subs_pf[0],
-    )
-else:
-    _secao_pf = _subs_pf[0]
 
 # ==========================================
 # tab 2: concentração de risco
@@ -2440,6 +2487,7 @@ if _secao_pf == "📊 concentração":
     # ── MONTA DADOS DE CONCENTRAÇÃO ──────────────────────────────────────
     _cache_fund = get_todos_fundamentos_cache()
 
+    _cambio_conc = get_cambio_usd_brl()
     _total_cart = 0.0
     for _p in _pesos_conc:
         _qtd = float(_p.get('quantidade') or 0)
@@ -2448,7 +2496,7 @@ if _secao_pf == "📊 concentração":
         # Fallback: usa preco_medio do banco se cotação live falhou
         if _pr <= 0:
             _pr = float(_p.get('preco_medio') or 0)
-        _total_cart += _pr * _qtd
+        _total_cart += _pr * _qtd * (1.0 if mapear_ticker_base(_tb).endswith('.SA') else _cambio_conc)
 
     if _total_cart <= 0:
         empty_state(
@@ -2467,10 +2515,9 @@ if _secao_pf == "📊 concentração":
             _preco  = _live_conc.get(_t, {}).get('preco', 0.0)
             if _preco <= 0:
                 _preco = float(_p.get('preco_medio') or 0)
-            _valor  = _preco * _qtd
+            _eh_br = mapear_ticker_base(_t).endswith('.SA')
+            _valor  = _preco * _qtd * (1.0 if _eh_br else _cambio_conc)
             _peso   = (_valor / _total_cart * 100) if _total_cart > 0 else 0.0
-
-            _eh_br = _t.endswith('.SA')
             _moeda = 'BRL' if _eh_br else 'USD'
             _pais  = 'Brasil' if _eh_br else 'EUA'
 
@@ -2594,63 +2641,39 @@ if _secao_pf == "📊 concentração":
             },
         ])
 
-        # ── GRÁFICOS DE PIZZA ────────────────────────────────────────────
-        st.markdown("---")
-
-        _cores_pizza = [
-            "#FF9900", "#00C853", "#00B0FF", "#FF1744", "#E040FB",
-            "#FFD700", "#8B00FF", "#FF69B4", "#00BFFF", "#B87333",
-            "#C0C0C0", "#90EE90", "#DEB887", "#6F4E37", "#F5F5DC",
-            "#E5E4E2", "#FF8C00",
-        ]
-
-        def _pizza_chart(labels, values, title, height=290):
-            _fig = go.Figure(go.Pie(
-                labels=labels,
-                values=values,
-                hole=0.45,
-                textinfo='label+percent',
-                textfont=dict(family=_font_family_ui(), size=10, color=_chart_cores()["muted"]),
-                marker=dict(
-                    colors=_cores_pizza[:len(labels)],
-                    line=dict(color=_chart_cores()["surface"], width=2),
-                ),
-                hovertemplate='%{label}<br>%{value:.1f}%<extra></extra>',
+        section_title("Explorar distribuição")
+        _conc_c1, _conc_c2 = st.columns([3, 2])
+        with _conc_c1:
+            _conc_dimensao = section_selector(["Ativo", "Setor", "País", "Moeda"], key="portfolio_conc_dimensao", label="Dimensão")
+        with _conc_c2:
+            _conc_formato = section_selector(["Barras", "Distribuição"], key="portfolio_conc_formato", label="Visualização")
+        _conc_grupos = {
+            "Ativo": {_dc['ticker']: _dc['peso'] for _dc in dados_conc},
+            "Setor": setores_peso,
+            "País": paises_peso,
+            "Moeda": moedas_peso,
+        }[_conc_dimensao]
+        _conc_serie = pd.Series(_conc_grupos).sort_values(ascending=True)
+        _cc_conc = _chart_cores()
+        _conc_cores = [_cc_conc['accent'], _cc_conc['info'], _cc_conc['bull'], _cc_conc['amber'], _cc_conc['bear']]
+        if _conc_formato == "Barras":
+            _fig_conc = go.Figure(go.Bar(
+                x=_conc_serie.values, y=_conc_serie.index, orientation='h',
+                marker_color=_cc_conc['accent'], text=[f"{x:.1f}%" for x in _conc_serie.values],
+                textposition='outside', hovertemplate='%{y}<br>Peso: %{x:.2f}%<extra></extra>',
             ))
-            _layout = base_layout(height=height, title=title)
-            _layout['showlegend'] = False
-            _fig.update_layout(**_layout)
-            return _fig
-
-        _cg1, _cg2, _cg3 = st.columns(3)
-
-        with _cg1:
-            _labels_a = [_dc['ticker'] for _dc in dados_conc]
-            _values_a = [_dc['peso']   for _dc in dados_conc]
-            st.plotly_chart(
-                _pizza_chart(_labels_a, _values_a, "por ativo"),
-                use_container_width=True,
-                config={'responsive': True},
-            )
-
-        with _cg2:
-            _labels_s = list(setores_peso.keys())
-            _values_s = list(setores_peso.values())
-            st.plotly_chart(
-                _pizza_chart(_labels_s, _values_s, "por setor"),
-                use_container_width=True,
-                config={'responsive': True},
-            )
-
-        with _cg3:
-            _labels_m = list(moedas_peso.keys())
-            _values_m = list(moedas_peso.values())
-            st.plotly_chart(
-                _pizza_chart(_labels_m, _values_m, "por moeda"),
-                use_container_width=True,
-                config={'responsive': True},
-            )
-        st.caption("distribuição do capital por ativo, setor e moeda. boa diversificação evita concentração excessiva em um único nome, setor ou moeda — reduz o risco não-remunerado.")
+            _fig_conc.update_layout(**base_layout(height=max(300, len(_conc_serie) * 30 + 70), title=f"Concentração por {_conc_dimensao.lower()}"))
+            _fig_conc.update_xaxes(title_text="Peso (%)", range=[0, max(100, _conc_serie.max() * 1.15)])
+            _fig_conc.update_yaxes(showgrid=False)
+        else:
+            _fig_conc = go.Figure(go.Pie(
+                labels=_conc_serie.index, values=_conc_serie.values, hole=0.5,
+                textinfo='label+percent', sort=True, marker=dict(colors=_conc_cores),
+                hovertemplate='%{label}<br>Peso: %{value:.2f}%<extra></extra>',
+            ))
+            _fig_conc.update_layout(**base_layout(height=360, title=f"Concentração por {_conc_dimensao.lower()}"))
+        st.plotly_chart(_fig_conc, use_container_width=True, config={'responsive': True})
+        st.caption(f"Pesos consolidados em BRL · USD/BRL usado: {_cambio_conc:.4f}. Na falta de cotação, usa o preço médio da posição. Alterne a dimensão para examinar a concentração.")
 
         # ── MATRIZ DE CORRELAÇÃO ─────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2740,7 +2763,7 @@ if _secao_pf == "📊 concentração":
                     y=_ticks_clean,
                     text=_text,
                     texttemplate="%{text}",
-                    textfont=dict(size=11, color='white', family='Inter, system-ui, sans-serif'),
+                    textfont=dict(size=11, color='white', family=_font_family_ui()),
                     colorscale=[
                         [0.0,  "#1565C0"],   # azul escuro — correlação negativa
                         [0.35, "#1a1a1a"],   # neutro — correlação zero
@@ -2766,8 +2789,8 @@ if _secao_pf == "📊 concentração":
                 )
                 _cc_corr = _chart_cores()
                 _lay_corr.update(
-                    xaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family='Inter, system-ui, sans-serif')),
-                    yaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family='Inter, system-ui, sans-serif')),
+                    xaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family=_font_family_ui())),
+                    yaxis=dict(tickfont=dict(size=10, color=_cc_corr["muted"], family=_font_family_ui())),
                     margin=dict(l=80, r=40, t=40, b=80),
                     autosize=True,
                 )
@@ -2825,7 +2848,14 @@ if _secao_pf == "📊 concentração":
 # tab 3: risco institucional (VaR, Brinson, fatores, dividendos)
 # ==========================================
 if _secao_pf == "📐 risco":
-    section_title("📐 risco institucional do portfólio")
+    section_title("Risco da carteira")
+    _moedas_risco = {'BRL' if mapear_ticker_base(t).endswith('.SA') else 'USD' for t in ativos_alocados}
+    if len(_moedas_risco) > 1:
+        st.info("Carteira mista: os modelos de risco usam pesos e retornos na moeda de origem, sem variação cambial. Valores monetários destes estudos não correspondem ao patrimônio consolidado em BRL.")
+    _estudo_risco = section_selector(
+        ["VaR e CVaR", "Macro e sizing", "Atribuição Brinson", "Fatores", "Proventos"],
+        key="portfolio_estudo_risco", label="Estudo de risco",
+    )
 
     if not ativos_alocados:
         empty_state(
@@ -2873,8 +2903,8 @@ if _secao_pf == "📐 risco":
                 h["ticker"]: h.get("score") for h in (get_health_scores() or [])
             }
 
-            with st.expander("Exposição macro do book (regime + inflação setorial)",
-                             expanded=True):
+            if _estudo_risco == "Macro e sizing":
+                section_title("Exposição macro da carteira")
                 try:
                     from utils.portfolio_sizing import exposicao_macro_book
                     _exp_macro = exposicao_macro_book(
@@ -2891,7 +2921,7 @@ if _secao_pf == "📐 risco":
                         else "amber"
                     )
                     status_card(
-                        "leitura macro do book",
+                        "Exposição ao regime macro",
                         _exp_macro["leitura"],
                         tipo="bear" if _tone_book == "bear" else (
                             "bull" if _tone_book == "bull" else "info"),
@@ -2920,8 +2950,8 @@ if _secao_pf == "📐 risco":
                 else:
                     st.caption("exposição macro indisponível (sem setor/cache).")
 
-            with st.expander("Sizing sugerido — risk parity tiltado por edge e macro",
-                             expanded=False):
+            if _estudo_risco == "Macro e sizing":
+                section_title("Pesos por paridade de risco, score e macro")
                 st.markdown(
                     "*peso-alvo = paridade de risco (1/volatilidade) × edge (health score) "
                     "× vento macro-setorial. compare com seu peso atual para rebalancear.*"
@@ -2969,7 +2999,7 @@ if _secao_pf == "📐 risco":
                     st.caption("dados insuficientes para sizing (precisa de histórico de preços).")
 
             # ── Seção VaR ───────────────────────────────────────────────
-            with st.expander("Value-at-risk (VaR e CVaR)", expanded=True):
+            if _estudo_risco == "VaR e CVaR":
                 st.markdown(
                     "*VaR responde: 'em um dia ruim típico (1 em 20 ou 1 em 100), "
                     "quanto a carteira pode perder?'. CVaR responde: 'se passar do VaR, "
@@ -3129,14 +3159,14 @@ if _secao_pf == "📐 risco":
                             f"não o paramétrico."
                         )
                     st.info(
-                        f"📐 com 95% de confiança, a carteira perde no máximo "
-                        f"**{_p95_pct}** ({_p95_brl}) em {_label_horizonte}. "
-                        f"se passar disso, a perda média esperada é **{_c95_pct}** "
-                        f"({_c95_brl}).{_diag}"
+                        f"VaR histórico de 95% estimado: **{_p95_pct}** ({_p95_brl}) "
+                        f"no horizonte de {_label_horizonte}. "
+                        f"Na cauda além desse VaR, o CVaR estima perda média de **{_c95_pct}** "
+                        f"({_c95_brl}). O VaR não é um limite máximo de perda.{_diag}"
                     )
 
             # ── Decomposição Brinson ──────────────────────────────────────
-            with st.expander("Decomposição brinson (atribuição por setor)", expanded=False):
+            if _estudo_risco == "Atribuição Brinson":
                 st.markdown(
                     "*decompõe o retorno excessivo vs benchmark em três efeitos: "
                     "**alocação** (peso setorial diferente do mercado), **seleção** "
@@ -3337,7 +3367,7 @@ if _secao_pf == "📐 risco":
                         )
                     st.info(_veredito)
 
-            with st.expander("Exposição a fatores fama-french", expanded=False):
+            if _estudo_risco == "Fatores":
                 st.markdown(
                     "*regressão dos retornos da carteira sobre 3 fatores estilo "
                     "Fama-French. **β_MKT** mede sensibilidade ao mercado, **β_SMB** "
@@ -3472,7 +3502,7 @@ if _secao_pf == "📐 risco":
                     )
                     _fig_betas.add_hline(y=0, line_width=1, line_color=_chart_cores()["muted"])
                     st.plotly_chart(_fig_betas, use_container_width=True)
-                    st.caption("sensibilidade da carteira a cada fator de risco (mercado, câmbio, juros), com intervalo de 95%. betas altos indicam maior exposição àquele fator.")
+                    st.caption("Sensibilidade aos fatores de mercado, tamanho (SMB) e valor (HML), com intervalo de confiança de 95%.")
 
                     # Sumário em linguagem natural
                     _interp_mkt = (
@@ -3499,7 +3529,7 @@ if _secao_pf == "📐 risco":
                         f"variância dos retornos da carteira."
                     )
 
-            with st.expander("Projeção de dividendos 12m", expanded=False):
+            if _estudo_risco == "Proventos":
                 st.markdown(
                     "*projeta os próximos 12 pagamentos por ticker replicando o padrão "
                     "histórico × crescimento yoy (cap ±10%). lê do cache dividend_history "
@@ -3524,9 +3554,8 @@ if _secao_pf == "📐 risco":
 
                 if _proj.renda_total_12m <= 0:
                     st.info(
-                        "sem histórico de dividendos suficiente no cache para projetar. "
-                        "verifique se o ETL `sync_br` / `sync_us` já populou a tabela "
-                        "`dividend_history`."
+                        "Histórico de proventos insuficiente para projetar. "
+                        "Atualize os dados dos ativos e tente novamente."
                     )
                 else:
                     # Header — 3 cards
@@ -3604,7 +3633,7 @@ if _secao_pf == "📐 risco":
                             for col in _cols_dv:
                                 _v = str(row[col])
                                 if col == "ticker":
-                                    cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
+                                    cell = (f'<a href="{ticker_nav_url(str(_v))}" target="_self" '
                                             f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
                                             f'{_v.replace(".SA","")}</a>'); c = "mono"
                                 elif col == "growth yoy":
@@ -3633,6 +3662,9 @@ if _secao_pf == "📐 risco":
 # ==========================================
 if _secao_pf == "⚡ stress test":
     section_title("⚡ stress test de portfólio")
+    _stress_modelo = section_selector(
+        ["Choques de bolsa", "Choques setoriais"], key="portfolio_stress_modelo", label="Modelo do cenário",
+    )
 
     status_card(
         "metodologia",
@@ -3640,334 +3672,344 @@ if _secao_pf == "⚡ stress test":
         tipo="info"
     )
 
-    ativos_stress = {t: d for t, d in {p['ticker']: p for p in get_pesos(portfolio_id=st.session_state.get('portfolio_id_stress', get_portfolio_padrao()))}.items() if d.get('quantidade', 0) > 0}
+    ativos_stress = {t: d for t, d in {p['ticker']: p for p in get_pesos(portfolio_id=portfolio_id_ativo)}.items() if float(d.get('quantidade') or 0) > 0}
+    if st.session_state.get('_stress_portfolio_id') != portfolio_id_ativo:
+        st.session_state.pop('stress_resultado', None)
+        st.session_state.pop('stress_resumo', None)
+        st.session_state['_stress_portfolio_id'] = portfolio_id_ativo
 
     if not ativos_stress:
         empty_state("⚡", "portfólio vazio", "adicione posições na aba posições & p&l para rodar o stress test.")
     else:
-        st.markdown("---")
-        section_title("⚙️ configurar cenários")
-
-        cenarios_padrao = {
-            "🔴 crise financeira severa": {"ibov": -35.0, "sp500": -40.0, "dolar": +35.0, "selic": +3.0},
-            "🟠 recessão brasil": {"ibov": -20.0, "sp500": -5.0, "dolar": +20.0, "selic": +2.0},
-            "🟡 aperto monetário fed": {"ibov": -10.0, "sp500": -15.0, "dolar": +10.0, "selic": +1.0},
-            "🟢 pouso suave (bull case)": {"ibov": +15.0, "sp500": +12.0, "dolar": -8.0, "selic": -1.5},
-            "✏️ cenário personalizado": None,
-        }
-
-        sc1, sc2 = st.columns([2, 3])
-        with sc1:
-            cenario_sel = st.selectbox("cenário macro:", list(cenarios_padrao.keys()), key="stress_cenario")
-
-        with sc2:
-            if cenarios_padrao[cenario_sel] is not None:
-                c = cenarios_padrao[cenario_sel]
-                st.markdown(f"""
-                <div style="font-family:var(--font-data,monospace); font-size:0.82rem; color:var(--text-muted); padding:8px; background:var(--bg-surface); border-radius:4px; border-left:3px solid var(--accent);">
-                IBOV: <span style="color:{'var(--bear)' if c['ibov']<0 else 'var(--bull)'}">{c['ibov']:+.1f}%</span> &nbsp;|&nbsp;
-                S&P500: <span style="color:{'var(--bear)' if c['sp500']<0 else 'var(--bull)'}">{c['sp500']:+.1f}%</span> &nbsp;|&nbsp;
-                Dólar: <span style="color:{'var(--bear)' if c['dolar']<0 else 'var(--bull)'}">{c['dolar']:+.1f}%</span> &nbsp;|&nbsp;
-                Selic: <span style="color:{'var(--bear)' if c['selic']<0 else 'var(--bull)'}">{c['selic']:+.2f}pp</span>
-                </div>
-                """, unsafe_allow_html=True)
-                choque_ibov = c['ibov']
-                choque_sp = c['sp500']
-            else:
-                p1, p2 = st.columns(2)
-                with p1:
-                    choque_ibov = st.slider("ibov (%):", -60.0, 30.0, -20.0, 5.0, key="stress_ibov")
-                    choque_dolar = st.slider("dólar (%):", -20.0, 50.0, 10.0, 5.0, key="stress_dolar")
-                with p2:
-                    choque_sp = st.slider("s&p500 (%):", -60.0, 30.0, -15.0, 5.0, key="stress_sp")
-                    choque_selic = st.slider("selic (pp):", -3.0, 5.0, 1.0, 0.5, key="stress_selic")
-
-        btn_stress = st.button("Rodar stress test", type="primary", use_container_width=True)
-
-        if btn_stress:
-            with st.spinner("calculando betas e simulando cenários..."):
-                tickers_stress = list(ativos_stress.keys())
-                betas_calc = calcular_betas(tuple(tickers_stress))
-
-                linhas_stress = []
-                for t, dados in ativos_stress.items():
-                    qtd = float(dados.get('quantidade') or 0)
-                    pm = float(dados.get('preco_medio') or 0)
-                    valor_pos = qtd * pm
-
-                    beta_info = betas_calc.get(t, {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')})
-
-                    if beta_info['is_br']:
-                        impacto_pct = beta_info['beta_ibov'] * choque_ibov
-                    else:
-                        impacto_pct = beta_info['beta_sp'] * choque_sp
-
-                    impacto_valor = valor_pos * (impacto_pct / 100)
-                    valor_estressado = valor_pos + impacto_valor
-
-                    linhas_stress.append({
-                        'ticker': t,
-                        'valor atual (R$)': round(valor_pos, 2),
-                        'beta': beta_info['beta_ibov'] if beta_info['is_br'] else beta_info['beta_sp'],
-                        'benchmark': 'ibov' if beta_info['is_br'] else 's&p500',
-                        'impacto (%)': round(impacto_pct, 2),
-                        'impacto (R$)': round(impacto_valor, 2),
-                        'valor estressado (R$)': round(valor_estressado, 2),
-                    })
-
-                df_stress = pd.DataFrame(linhas_stress).sort_values('impacto (R$)')
-                patrimonio_atual = df_stress['valor atual (R$)'].sum()
-                patrimonio_stress = df_stress['valor estressado (R$)'].sum()
-                impacto_total = patrimonio_stress - patrimonio_atual
-                impacto_total_pct = (impacto_total / patrimonio_atual * 100) if patrimonio_atual > 0 else 0
-
-                st.session_state['stress_resultado'] = df_stress
-                st.session_state['stress_resumo'] = {
-                    'patrimonio_atual': patrimonio_atual,
-                    'patrimonio_stress': patrimonio_stress,
-                    'impacto_total': impacto_total,
-                    'impacto_total_pct': impacto_total_pct,
-                    'cenario': cenario_sel
-                }
-
-        if 'stress_resultado' in st.session_state and 'stress_resumo' in st.session_state:
-            df_s = st.session_state['stress_resultado']
-            resumo = st.session_state['stress_resumo']
-
+        if _stress_modelo == "Choques de bolsa":
             st.markdown("---")
-            section_title(f"📊 resultado — {resumo['cenario']}")
-            tooltip("beta")
+            section_title("⚙️ configurar cenários")
 
-            cor_impacto = "bull" if resumo['impacto_total'] >= 0 else "bear"
-            rc1, rc2, rc3 = st.columns(3)
-            with rc1:
-                metric_card("patrimônio atual", fmt_numero(resumo['patrimonio_atual'], "R$ "))
-            with rc2:
-                metric_card("patrimônio estressado", fmt_numero(resumo['patrimonio_stress'], "R$ "),
-                           fmt_pct(resumo['impacto_total_pct']), cor_impacto)
-            with rc3:
-                metric_card("impacto total", fmt_numero(resumo['impacto_total'], "R$ "),
-                           "perda estimada" if resumo['impacto_total'] < 0 else "ganho estimado", cor_impacto)
+            cenarios_padrao = {
+                "🔴 crise financeira severa": {"ibov": -35.0, "sp500": -40.0, "dolar": +35.0, "selic": +3.0},
+                "🟠 recessão brasil": {"ibov": -20.0, "sp500": -5.0, "dolar": +20.0, "selic": +2.0},
+                "🟡 aperto monetário fed": {"ibov": -10.0, "sp500": -15.0, "dolar": +10.0, "selic": +1.0},
+                "🟢 pouso suave (bull case)": {"ibov": +15.0, "sp500": +12.0, "dolar": -8.0, "selic": -1.5},
+                "✏️ cenário personalizado": None,
+            }
 
-            def _stress_table_html(df: pd.DataFrame) -> None:
-                # Render via html_table (F0-2): impacto colorido por classe.
-                from utils.components import html_table as _ht_st
-                _col_map = {
-                    'ticker': ('Ticker', 'left'),
-                    'valor atual (R$)': ('Valor Atual', 'right'),
-                    'beta': ('Beta', 'right'),
-                    'impacto (%)': ('Impacto %', 'right'),
-                    'impacto (R$)': ('Impacto R$', 'right'),
-                    'valor estressado (R$)': ('Valor Stress.', 'right'),
-                }
-                _cols = [c for c in _col_map if c in df.columns]
-                _headers = [_col_map[c][0] for c in _cols]
-                _aligns = [_col_map[c][1] for c in _cols]
-                _rows, _classes = [], []
-                for _, row in df.iterrows():
-                    cells, cls = [], []
-                    for col in _cols:
-                        _v = row[col]
-                        if col == 'ticker':
-                            cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
-                                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
-                                    f'{str(_v).replace(".SA","")}</a>'); c = "mono"
-                        elif col in ('impacto (%)', 'impacto (R$)'):
-                            try:
-                                _fv = float(_v)
-                                cell = f"{_fv:+.2f}%" if col == 'impacto (%)' else f"R$ {_fv:+,.2f}"
-                                c = "mono strong " + ("bull" if _fv > 0 else "bear")
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
-                        elif col == 'beta':
-                            try:
-                                cell = f"{float(_v):.2f}"; c = "mono"
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
-                        elif col in ('valor atual (R$)', 'valor estressado (R$)'):
-                            try:
-                                cell = f"R$ {float(_v):,.2f}"; c = "mono"
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
+            sc1, sc2 = st.columns([2, 3])
+            with sc1:
+                cenario_sel = st.selectbox("cenário macro:", list(cenarios_padrao.keys()), key="stress_cenario")
+
+            with sc2:
+                if cenarios_padrao[cenario_sel] is not None:
+                    c = cenarios_padrao[cenario_sel]
+                    st.markdown(f"""
+                    <div style="font-family:var(--font-data,monospace); font-size:0.82rem; color:var(--text-muted); padding:8px; background:var(--bg-surface); border-radius:4px; border-left:3px solid var(--accent);">
+                    IBOV: <span style="color:{'var(--bear)' if c['ibov']<0 else 'var(--bull)'}">{c['ibov']:+.1f}%</span> &nbsp;|&nbsp;
+                    S&P500: <span style="color:{'var(--bear)' if c['sp500']<0 else 'var(--bull)'}">{c['sp500']:+.1f}%</span> &nbsp;|&nbsp;
+                    Dólar: <span style="color:{'var(--bear)' if c['dolar']<0 else 'var(--bull)'}">{c['dolar']:+.1f}%</span> &nbsp;|&nbsp;
+                    Selic: <span style="color:{'var(--bear)' if c['selic']<0 else 'var(--bull)'}">{c['selic']:+.2f}pp</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    choque_ibov = c['ibov']
+                    choque_sp = c['sp500']
+                else:
+                    p1, p2 = st.columns(2)
+                    with p1:
+                        choque_ibov = st.slider("ibov (%):", -60.0, 30.0, -20.0, 5.0, key="stress_ibov")
+                    with p2:
+                        choque_sp = st.slider("s&p500 (%):", -60.0, 30.0, -15.0, 5.0, key="stress_sp")
+
+            st.caption("Este modelo aplica os choques de bolsa aos betas históricos. Dólar e Selic descrevem o cenário; não entram neste cálculo por beta.")
+            _stress_auto = st.toggle("Atualizar resultado ao ajustar o cenário", value=True, key="stress_exploracao_auto")
+            btn_stress = st.button("Calcular sensibilidade", type="primary", use_container_width=True)
+
+            if btn_stress or (_stress_auto and 'stress_resultado' in st.session_state):
+                with st.spinner("calculando betas e simulando cenários..."):
+                    tickers_stress = list(ativos_stress.keys())
+                    betas_calc = calcular_betas(tuple(tickers_stress))
+
+                    _stress_cambio = get_cambio_usd_brl()
+                    linhas_stress = []
+                    for t, dados in ativos_stress.items():
+                        qtd = float(dados.get('quantidade') or 0)
+                        pm = float(dados.get('preco_medio') or 0)
+                        valor_pos = qtd * pm * (1.0 if mapear_ticker_base(t).endswith('.SA') else _stress_cambio)
+
+                        beta_info = betas_calc.get(t, {'beta_ibov': 1.0, 'beta_sp': 1.0, 'is_br': t.endswith('.SA')})
+
+                        if beta_info['is_br']:
+                            impacto_pct = beta_info['beta_ibov'] * choque_ibov
                         else:
-                            cell = str(_v); c = ""
-                        cells.append(cell); cls.append(c)
-                    _rows.append(cells); _classes.append(cls)
-                _ht_st(_headers, _rows, aligns=_aligns, classes=_classes)
+                            impacto_pct = beta_info['beta_sp'] * choque_sp
 
-            _stress_table_html(df_s)
+                        impacto_valor = valor_pos * (impacto_pct / 100)
+                        valor_estressado = valor_pos + impacto_valor
 
-            _cc_stress = _chart_cores()
-            fig_stress = go.Figure(go.Bar(
-                x=df_s['impacto (R$)'],
-                y=df_s['ticker'],
-                orientation='h',
-                marker_color=[_cc_stress["bear"] if v < 0 else _cc_stress["bull"]
-                              for v in df_s['impacto (R$)']],
-                hovertemplate='%{y}<br>impacto: R$ %{x:+,.2f}<extra></extra>',
-            ))
-            fig_stress.add_vline(x=0, line_color=_cc_stress["border"], line_width=1)
-            fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
-            st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
-            st.caption("impacto estimado de cada cenário de stress histórico sobre o valor da carteira. mostra a vulnerabilidade a choques como crises cambiais, alta de juros ou quedas de bolsa.")
+                        linhas_stress.append({
+                            'ticker': t,
+                            'base de custo (R$)': round(valor_pos, 2),
+                            'beta': beta_info['beta_ibov'] if beta_info['is_br'] else beta_info['beta_sp'],
+                            'benchmark': 'ibov' if beta_info['is_br'] else 's&p500',
+                            'impacto (%)': round(impacto_pct, 2),
+                            'impacto (R$)': round(impacto_valor, 2),
+                            'valor estressado (R$)': round(valor_estressado, 2),
+                        })
 
-            if st.button("Ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
-                with st.spinner("deepseek analisando exposições..."):
-                    _prompt_stress = (
-                        f"cenário de stress: {resumo['cenario']}\n"
-                        f"impacto total estimado: {resumo['impacto_total_pct']:+.1f}% "
-                        f"(R$ {resumo['impacto_total']:+,.2f})\n\n"
-                        f"posições e impactos:\n{df_s.to_csv(index=False)}\n\n"
-                        "responda com 4 bullet points em português, letra minúscula:\n"
-                        "1. qual posição representa o maior risco no cenário e por quê.\n"
-                        "2. sugestão de hedge ou redução de exposição.\n"
-                        "3. quais posições podem se beneficiar neste cenário (naturalmente defensivas).\n"
-                        "4. recomendação de realocação para reduzir o impacto total em pelo menos 30%."
-                    )
-                    chamar_ia(
-                        prompt_usuario = _prompt_stress,
-                        system         = SYSTEM_PORTFOLIO,
-                        max_tokens     = 600,
-                        temperatura    = 0.3,
-                        stream         = True,
-                    )
+                    df_stress = pd.DataFrame(linhas_stress).sort_values('impacto (R$)')
+                    patrimonio_atual = df_stress['base de custo (R$)'].sum()
+                    patrimonio_stress = df_stress['valor estressado (R$)'].sum()
+                    impacto_total = patrimonio_stress - patrimonio_atual
+                    impacto_total_pct = (impacto_total / patrimonio_atual * 100) if patrimonio_atual > 0 else 0
 
-        # ── Stress setorial (sensibilidades pré-definidas por setor) ────────
-        st.markdown("---")
-        section_title("🎯 stress setorial (sensibilidades pré-definidas)")
-        st.markdown(
-            "<div style='font-family:var(--font-ui,sans-serif);font-size:0.78rem;"
-            "color:var(--text-muted);margin-bottom:12px;'>"
-            "diferente do stress por beta (que aplica choque uniforme via β_IBOV/β_SP), "
-            "aqui cada cenário tem <b>impacto setorial específico</b> baseado em literatura macro. "
-            "ex.: copom +200bps ajuda banco mas penaliza varejo/construção; usd +10% beneficia "
-            "exportadoras (vale, petro, suzano) e prejudica importadoras (varejo).</div>",
-            unsafe_allow_html=True,
-        )
+                    st.session_state['stress_resultado'] = df_stress
+                    st.session_state['stress_resumo'] = {
+                        'patrimonio_atual': patrimonio_atual,
+                        'patrimonio_stress': patrimonio_stress,
+                        'impacto_total': impacto_total,
+                        'impacto_total_pct': impacto_total_pct,
+                        'cenario': cenario_sel
+                    }
 
-        from utils.portfolio_stress import (
-            calcular_stress_setorial, CENARIOS as _CENARIOS_SETOR,
-        )
+            if 'stress_resultado' in st.session_state and 'stress_resumo' in st.session_state:
+                df_s = st.session_state['stress_resultado']
+                resumo = st.session_state['stress_resumo']
 
-        cenario_set_sel = st.selectbox(
-            "cenário setorial:",
-            list(_CENARIOS_SETOR.keys()),
-            key="stress_setorial_cenario",
-        )
+                st.markdown("---")
+                section_title(f"📊 resultado — {resumo['cenario']}")
+                tooltip("beta")
 
-        # Constrói pesos e setores a partir das posições
-        from database.db import get_todos_fundamentos_cache as _gt_cache
-        _cache_st = _gt_cache()
-        _setores_st = {t: d.get("setor") or "" for t, d in _cache_st.items()}
+                cor_impacto = "bull" if resumo['impacto_total'] >= 0 else "bear"
+                rc1, rc2, rc3 = st.columns(3)
+                with rc1:
+                    metric_card("base de custo em BRL", fmt_numero(resumo['patrimonio_atual'], "R$ "))
+                with rc2:
+                    metric_card("patrimônio estressado", fmt_numero(resumo['patrimonio_stress'], "R$ "),
+                               fmt_pct(resumo['impacto_total_pct']), cor_impacto)
+                with rc3:
+                    metric_card("impacto total", fmt_numero(resumo['impacto_total'], "R$ "),
+                               "perda estimada" if resumo['impacto_total'] < 0 else "ganho estimado", cor_impacto)
 
-        _pesos_st: dict[str, float] = {}
-        _valor_total_st = 0.0
-        for _tk, _dados in ativos_stress.items():
-            _qtd = float(_dados.get("quantidade") or 0)
-            _pm = float(_dados.get("preco_medio") or 0)
-            _v = _qtd * _pm
-            if _v <= 0:
-                continue
-            _pesos_st[_tk] = _v
-            _valor_total_st += _v
-        if _valor_total_st > 0:
-            _pesos_st = {t: v / _valor_total_st for t, v in _pesos_st.items()}
-
-        _r_set = calcular_stress_setorial(
-            _pesos_st, _setores_st, cenario_set_sel, _valor_total_st,
-        )
-
-        if _r_set is None:
-            st.info("não foi possível calcular o stress setorial.")
-        else:
-            _emoji_imp = "🔴" if _r_set.impacto_total_pct < -3 else ("🟠" if _r_set.impacto_total_pct < 0 else "🟢")
-            _cs1, _cs2, _cs3 = st.columns(3)
-            with _cs1:
-                metric_card(
-                    "patrimônio atual",
-                    fmt_numero(_r_set.valor_carteira, "R$ "),
-                )
-            with _cs2:
-                metric_card(
-                    "patrimônio estressado",
-                    fmt_numero(_r_set.valor_carteira + _r_set.impacto_total_brl, "R$ "),
-                    f"{_r_set.impacto_total_pct:+.2f}%",
-                    "bear" if _r_set.impacto_total_pct < 0 else "bull",
-                )
-            with _cs3:
-                metric_card(
-                    f"{_emoji_imp} impacto total",
-                    fmt_numero(_r_set.impacto_total_brl, "R$ "),
-                    cenario_set_sel,
-                    "bear" if _r_set.impacto_total_pct < 0 else "bull",
-                )
-
-            # Tabela por posição
-            st.markdown("##### impacto por posição")
-            _df_pos = pd.DataFrame(_r_set.por_posicao)
-            if not _df_pos.empty:
-                _df_pos_r = _df_pos.rename(columns={
-                    "ticker": "ticker", "setor": "setor",
-                    "peso_pct": "peso (%)", "impacto_setor_pct": "impacto setor (%)",
-                    "contribuicao_pct": "contribuição (pp)", "contribuicao_brl": "contribuição (R$)",
-                })
-                # Atribuição por posição via html_table (F0-2).
-                from utils.components import html_table as _ht_pos
-                _cols_pos = list(_df_pos_r.columns)
-                _aligns_pos = ["left" if c in ("ticker", "setor") else "right" for c in _cols_pos]
-                _color_cols_pos = ("contribuição (pp)", "contribuição (R$)", "impacto setor (%)")
-                _rows_pos, _classes_pos = [], []
-                for _, row in _df_pos_r.iterrows():
-                    cells, cls = [], []
-                    for col in _cols_pos:
-                        _v = row[col]
-                        if col == "ticker":
-                            cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
-                                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
-                                    f'{str(_v).replace(".SA","")}</a>'); c = "mono"
-                        elif col in _color_cols_pos:
-                            try:
-                                _fv = float(_v)
-                                if col == "contribuição (pp)": cell = f"{_fv:+.2f}pp"
-                                elif col == "contribuição (R$)": cell = f"R$ {_fv:+,.0f}"
-                                else: cell = f"{_fv:+.1f}%"
-                                c = "mono strong " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
-                            except (TypeError, ValueError):
+                def _stress_table_html(df: pd.DataFrame) -> None:
+                    # Render via html_table (F0-2): impacto colorido por classe.
+                    from utils.components import html_table as _ht_st
+                    _col_map = {
+                        'ticker': ('Ticker', 'left'),
+                        'base de custo (R$)': ('Base de custo', 'right'),
+                        'beta': ('Beta', 'right'),
+                        'impacto (%)': ('Impacto %', 'right'),
+                        'impacto (R$)': ('Impacto R$', 'right'),
+                        'valor estressado (R$)': ('Valor Stress.', 'right'),
+                    }
+                    _cols = [c for c in _col_map if c in df.columns]
+                    _headers = [_col_map[c][0] for c in _cols]
+                    _aligns = [_col_map[c][1] for c in _cols]
+                    _rows, _classes = [], []
+                    for _, row in df.iterrows():
+                        cells, cls = [], []
+                        for col in _cols:
+                            _v = row[col]
+                            if col == 'ticker':
+                                cell = (f'<a href="{ticker_nav_url(str(_v))}" target="_self" '
+                                        f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                                        f'{str(_v).replace(".SA","")}</a>'); c = "mono"
+                            elif col in ('impacto (%)', 'impacto (R$)'):
+                                try:
+                                    _fv = float(_v)
+                                    cell = f"{_fv:+.2f}%" if col == 'impacto (%)' else f"R$ {_fv:+,.2f}"
+                                    c = "mono strong " + ("bull" if _fv > 0 else "bear")
+                                except (TypeError, ValueError):
+                                    cell = "—"; c = "muted"
+                            elif col == 'beta':
+                                try:
+                                    cell = f"{float(_v):.2f}"; c = "mono"
+                                except (TypeError, ValueError):
+                                    cell = "—"; c = "muted"
+                            elif col in ('base de custo (R$)', 'valor estressado (R$)'):
+                                try:
+                                    cell = f"R$ {float(_v):,.2f}"; c = "mono"
+                                except (TypeError, ValueError):
+                                    cell = "—"; c = "muted"
+                            else:
                                 cell = str(_v); c = ""
-                        elif col == "peso (%)":
-                            try:
-                                cell = f"{float(_v):.1f}%"; c = "mono"
-                            except (TypeError, ValueError):
-                                cell = str(_v); c = ""
-                        else:
-                            cell = str(_v); c = ""
-                        cells.append(cell); cls.append(c)
-                    _rows_pos.append(cells); _classes_pos.append(cls)
-                _ht_pos(_cols_pos, _rows_pos, aligns=_aligns_pos, classes=_classes_pos)
+                            cells.append(cell); cls.append(c)
+                        _rows.append(cells); _classes.append(cls)
+                    _ht_st(_headers, _rows, aligns=_aligns, classes=_classes)
 
-            # Gráfico por setor
-            st.markdown("##### impacto por setor (R$)")
-            _df_setor = pd.DataFrame(_r_set.por_setor)
-            if not _df_setor.empty:
-                _df_setor["contribuicao_brl"] = _df_setor["contribuicao_pct"] / 100 * _r_set.valor_carteira
-                _df_setor = _df_setor.sort_values("contribuicao_brl")
-                _cc_set = _chart_cores()
-                fig_st_set = go.Figure(go.Bar(
-                    x=_df_setor["contribuicao_brl"],
-                    y=_df_setor["setor"],
-                    orientation="h",
-                    marker_color=[_cc_set["bear"] if v < 0 else _cc_set["bull"]
-                                  for v in _df_setor["contribuicao_brl"]],
-                    text=[f"R$ {v:+,.0f}".replace(",", ".") for v in _df_setor["contribuicao_brl"]],
-                    textposition="outside",
-                    hovertemplate="<b>%{y}</b><br>contribuição: R$ %{x:+,.0f}<extra></extra>",
+                _stress_ordenar = st.selectbox("Ordenar contribuições", ["Impacto em valor", "Impacto percentual", "Beta"], key="stress_resultado_ordem")
+                _stress_col = {"Impacto em valor": "impacto (R$)", "Impacto percentual": "impacto (%)", "Beta": "beta"}[_stress_ordenar]
+                df_s = df_s.sort_values(_stress_col)
+                _stress_table_html(df_s)
+
+                _cc_stress = _chart_cores()
+                fig_stress = go.Figure(go.Bar(
+                    x=df_s['impacto (R$)'],
+                    y=df_s['ticker'],
+                    orientation='h',
+                    marker_color=[_cc_stress["bear"] if v < 0 else _cc_stress["bull"]
+                                  for v in df_s['impacto (R$)']],
+                    hovertemplate='%{y}<br>impacto: R$ %{x:+,.2f}<extra></extra>',
                 ))
-                fig_st_set.add_vline(x=0, line_color=_cc_set["border"], line_width=1)
-                fig_st_set.update_layout(**base_layout(
-                    height=max(280, len(_df_setor) * 36 + 60),
-                    title="contribuição por setor",
-                ))
-                st.plotly_chart(fig_st_set, use_container_width=True, config={'responsive': True})
+                fig_stress.add_vline(x=0, line_color=_cc_stress["border"], line_width=1)
+                fig_stress.update_layout(**base_layout(height=max(300, len(df_s) * 35 + 80), title="impacto por posição (R$)"))
+                st.plotly_chart(fig_stress, use_container_width=True, config={'responsive': True})
+                st.caption("Impacto dos choques de bolsa sobre a base de custo em BRL (quantidade × preço médio). Valores em USD usam o câmbio atual; o modelo não simula variação cambial.")
+
+                if st.button("Ia: recomendar proteções para este cenário", type="primary", use_container_width=True):
+                    with st.spinner("deepseek analisando exposições..."):
+                        _prompt_stress = (
+                            f"cenário de stress: {resumo['cenario']}\n"
+                            f"impacto total estimado: {resumo['impacto_total_pct']:+.1f}% "
+                            f"(R$ {resumo['impacto_total']:+,.2f})\n\n"
+                            f"posições e impactos:\n{df_s.to_csv(index=False)}\n\n"
+                            "responda com 4 bullet points em português, letra minúscula:\n"
+                            "1. qual posição representa o maior risco no cenário e por quê.\n"
+                            "2. sugestão de hedge ou redução de exposição.\n"
+                            "3. quais posições podem se beneficiar neste cenário (naturalmente defensivas).\n"
+                            "4. recomendação de realocação para reduzir o impacto total em pelo menos 30%."
+                        )
+                        chamar_ia(
+                            prompt_usuario = _prompt_stress,
+                            system         = SYSTEM_PORTFOLIO,
+                            max_tokens     = 600,
+                            temperatura    = 0.3,
+                            stream         = True,
+                        )
+
+        if _stress_modelo == "Choques setoriais":
+            # ── Stress setorial (sensibilidades pré-definidas por setor) ────────
+            st.markdown("---")
+            section_title("🎯 stress setorial (sensibilidades pré-definidas)")
+            st.markdown(
+                "<div style='font-family:var(--font-ui,sans-serif);font-size:0.78rem;"
+                "color:var(--text-muted);margin-bottom:12px;'>"
+                "diferente do stress por beta (que aplica choque uniforme via β_IBOV/β_SP), "
+                "aqui cada cenário tem <b>impacto setorial específico</b> baseado em literatura macro. "
+                "ex.: copom +200bps ajuda banco mas penaliza varejo/construção; usd +10% beneficia "
+                "exportadoras (vale, petro, suzano) e prejudica importadoras (varejo).</div>",
+                unsafe_allow_html=True,
+            )
+
+            from utils.portfolio_stress import (
+                calcular_stress_setorial, CENARIOS as _CENARIOS_SETOR,
+            )
+
+            cenario_set_sel = st.selectbox(
+                "cenário setorial:",
+                list(_CENARIOS_SETOR.keys()),
+                key="stress_setorial_cenario",
+            )
+
+            # Constrói pesos e setores a partir das posições
+            from database.db import get_todos_fundamentos_cache as _gt_cache
+            _cache_st = _gt_cache()
+            _setores_st = {t: d.get("setor") or "" for t, d in _cache_st.items()}
+
+            _pesos_st: dict[str, float] = {}
+            _valor_total_st = 0.0
+            for _tk, _dados in ativos_stress.items():
+                _qtd = float(_dados.get("quantidade") or 0)
+                _pm = float(_dados.get("preco_medio") or 0)
+                _v = _qtd * _pm * (1.0 if mapear_ticker_base(_tk).endswith('.SA') else get_cambio_usd_brl())
+                if _v <= 0:
+                    continue
+                _pesos_st[_tk] = _v
+                _valor_total_st += _v
+            if _valor_total_st > 0:
+                _pesos_st = {t: v / _valor_total_st for t, v in _pesos_st.items()}
+
+            _r_set = calcular_stress_setorial(
+                _pesos_st, _setores_st, cenario_set_sel, _valor_total_st,
+            )
+
+            if _r_set is None:
+                st.info("não foi possível calcular o stress setorial.")
+            else:
+                _emoji_imp = "🔴" if _r_set.impacto_total_pct < -3 else ("🟠" if _r_set.impacto_total_pct < 0 else "🟢")
+                _cs1, _cs2, _cs3 = st.columns(3)
+                with _cs1:
+                    metric_card(
+                        "patrimônio atual",
+                        fmt_numero(_r_set.valor_carteira, "R$ "),
+                    )
+                with _cs2:
+                    metric_card(
+                        "patrimônio estressado",
+                        fmt_numero(_r_set.valor_carteira + _r_set.impacto_total_brl, "R$ "),
+                        f"{_r_set.impacto_total_pct:+.2f}%",
+                        "bear" if _r_set.impacto_total_pct < 0 else "bull",
+                    )
+                with _cs3:
+                    metric_card(
+                        f"{_emoji_imp} impacto total",
+                        fmt_numero(_r_set.impacto_total_brl, "R$ "),
+                        cenario_set_sel,
+                        "bear" if _r_set.impacto_total_pct < 0 else "bull",
+                    )
+
+                # Tabela por posição
+                st.markdown("##### impacto por posição")
+                _df_pos = pd.DataFrame(_r_set.por_posicao)
+                if not _df_pos.empty:
+                    _df_pos_r = _df_pos.rename(columns={
+                        "ticker": "ticker", "setor": "setor",
+                        "peso_pct": "peso (%)", "impacto_setor_pct": "impacto setor (%)",
+                        "contribuicao_pct": "contribuição (pp)", "contribuicao_brl": "contribuição (R$)",
+                    })
+                    # Atribuição por posição via html_table (F0-2).
+                    from utils.components import html_table as _ht_pos
+                    _cols_pos = list(_df_pos_r.columns)
+                    _aligns_pos = ["left" if c in ("ticker", "setor") else "right" for c in _cols_pos]
+                    _color_cols_pos = ("contribuição (pp)", "contribuição (R$)", "impacto setor (%)")
+                    _rows_pos, _classes_pos = [], []
+                    for _, row in _df_pos_r.iterrows():
+                        cells, cls = [], []
+                        for col in _cols_pos:
+                            _v = row[col]
+                            if col == "ticker":
+                                cell = (f'<a href="{ticker_nav_url(str(_v))}" target="_self" '
+                                        f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                                        f'{str(_v).replace(".SA","")}</a>'); c = "mono"
+                            elif col in _color_cols_pos:
+                                try:
+                                    _fv = float(_v)
+                                    if col == "contribuição (pp)": cell = f"{_fv:+.2f}pp"
+                                    elif col == "contribuição (R$)": cell = f"R$ {_fv:+,.0f}"
+                                    else: cell = f"{_fv:+.1f}%"
+                                    c = "mono strong " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
+                                except (TypeError, ValueError):
+                                    cell = str(_v); c = ""
+                            elif col == "peso (%)":
+                                try:
+                                    cell = f"{float(_v):.1f}%"; c = "mono"
+                                except (TypeError, ValueError):
+                                    cell = str(_v); c = ""
+                            else:
+                                cell = str(_v); c = ""
+                            cells.append(cell); cls.append(c)
+                        _rows_pos.append(cells); _classes_pos.append(cls)
+                    _ht_pos(_cols_pos, _rows_pos, aligns=_aligns_pos, classes=_classes_pos)
+
+                # Gráfico por setor
+                st.markdown("##### impacto por setor (R$)")
+                _df_setor = pd.DataFrame(_r_set.por_setor)
+                if not _df_setor.empty:
+                    _df_setor["contribuicao_brl"] = _df_setor["contribuicao_pct"] / 100 * _r_set.valor_carteira
+                    _df_setor = _df_setor.sort_values("contribuicao_brl")
+                    _cc_set = _chart_cores()
+                    fig_st_set = go.Figure(go.Bar(
+                        x=_df_setor["contribuicao_brl"],
+                        y=_df_setor["setor"],
+                        orientation="h",
+                        marker_color=[_cc_set["bear"] if v < 0 else _cc_set["bull"]
+                                      for v in _df_setor["contribuicao_brl"]],
+                        text=[f"R$ {v:+,.0f}".replace(",", ".") for v in _df_setor["contribuicao_brl"]],
+                        textposition="outside",
+                        hovertemplate="<b>%{y}</b><br>contribuição: R$ %{x:+,.0f}<extra></extra>",
+                    ))
+                    fig_st_set.add_vline(x=0, line_color=_cc_set["border"], line_width=1)
+                    fig_st_set.update_layout(**base_layout(
+                        height=max(280, len(_df_setor) * 36 + 60),
+                        title="contribuição por setor",
+                    ))
+                    st.plotly_chart(fig_st_set, use_container_width=True, config={'responsive': True})
 
 # ==========================================
 # tab 3: backtesting
@@ -4760,7 +4802,7 @@ if _secao_pf == "📝 diário de decisões":
                 for col in _cols:
                     _v = row[col]
                     if col == 'ticker':
-                        cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
+                        cell = (f'<a href="{ticker_nav_url(str(_v))}" target="_self" '
                                 f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
                                 f'{str(_v).replace(".SA","")}</a>'); c = "mono"
                     elif col == 'retorno %':
@@ -4782,7 +4824,29 @@ if _secao_pf == "📝 diário de decisões":
                     cells.append(cell); cls.append(c)
                 _rows.append(cells); _classes.append(cls)
             _ht_dec(_cols, _rows, aligns=_aligns, classes=_classes)
-        _decisoes_table_html(df_decisoes)
+        _diario_f1, _diario_f2 = st.columns([2, 1])
+        with _diario_f1:
+            _diario_busca = st.text_input("Filtrar ticker ou tese", key="diario_busca", placeholder="Ativo ou trecho da hipótese").strip().lower()
+        with _diario_f2:
+            _diario_status = st.selectbox("Resultado", ["Todos", "acerto", "erro", "neutro", "⏳ aguardando"], key="diario_filtro_resultado")
+        _diario_view = df_decisoes.copy()
+        if _diario_busca:
+            _ids_match = [d['id'] for d in decisoes if _diario_busca in str(d.get('ticker', '')).lower() or _diario_busca in str(d.get('tese', '')).lower()]
+            _diario_view = _diario_view[_diario_view['id'].isin(_ids_match)]
+        if _diario_status != "Todos":
+            _diario_view = _diario_view[_diario_view['resultado'] == _diario_status]
+        st.caption(f"{len(_diario_view)} de {len(df_decisoes)} decisões · Estatísticas acima consideram o histórico completo.")
+        if _diario_view.empty:
+            st.info("Nenhuma decisão nesse recorte.")
+        else:
+            _decisoes_table_html(_diario_view)
+            _diario_dados = {d['id']: d for d in decisoes}
+            with st.expander("Abrir tese completa"):
+                _diario_id = st.selectbox(
+                    "Decisão", _diario_view['id'].tolist(), key="diario_tese_foco",
+                    format_func=lambda x: f"{_diario_dados[x]['ticker']} · {_diario_dados[x]['tipo']} · {_diario_dados[x]['data_decisao']}",
+                )
+                st.markdown(str(_diario_dados[_diario_id].get('tese') or 'Sem tese registrada.'))
 
         with st.expander("Julgar uma decisão (atualizar status)"):
             c_u1, c_u2, c_u3 = st.columns([2, 2, 2])
@@ -4916,6 +4980,16 @@ if _secao_pf == "🧾 imposto de renda":
             prejuizo_acum    = -abs(prejuizo_ir),
         )
 
+        st.session_state['portfolio_ir_snapshot'] = {
+            'resultado': resultado_ir, 'ticker': ticker_ir or 'TICKER',
+            'tipo': tipo_ir, 'preco_compra': preco_compra_ir, 'quantidade': qtd_ir,
+        }
+
+    _ir_snapshot = st.session_state.get('portfolio_ir_snapshot')
+    if _ir_snapshot:
+        resultado_ir = _ir_snapshot['resultado']
+        _ir_tipo_result = _ir_snapshot['tipo']
+        st.caption(f"Último cálculo · {_ir_snapshot['ticker']} · {_ir_snapshot['quantidade']:g} unidades. Envie o formulário para atualizar o resultado.")
         st.markdown("---")
         section_title("📊 resultado do cálculo")
 
@@ -4955,7 +5029,7 @@ if _secao_pf == "🧾 imposto de renda":
             )
         with rc4:
             lucro_liq = lucro - ir_dev
-            custo_base = preco_compra_ir * float(qtd_ir)
+            custo_base = _ir_snapshot['preco_compra'] * float(_ir_snapshot['quantidade'])
             retorno_pct = (lucro_liq / custo_base * 100) if custo_base > 0 else 0.0
             metric_card(
                 "lucro líquido após IR",
@@ -4984,12 +5058,12 @@ if _secao_pf == "🧾 imposto de renda":
 
         # Alerta DARF
         if resultado_ir['ir_devido'] >= 10.0:
-            codigo_darf = "6015" if tipo_ir in ('acao_br', 'acao_us') else "3317"
+            codigo_darf = "6015" if _ir_tipo_result in ('acao_br', 'acao_us') else "3317"
             status_card(
                 "⚡ lembrete: DARF",
                 f"você tem R$ {resultado_ir['ir_devido']:,.2f} de IR a recolher. "
                 f"emita o DARF pelo site da Receita Federal "
-                f"(código {codigo_darf} para {'ações' if tipo_ir != 'fii' else 'FIIs'}) "
+                f"(código {codigo_darf} para {'ações' if _ir_tipo_result != 'fii' else 'FIIs'}) "
                 f"até o último dia útil do próximo mês.",
                 tipo="amber",
             )
@@ -5044,7 +5118,7 @@ if _secao_pf == "🧾 imposto de renda":
 # ==========================================
 if _secao_pf == "💬 chat ia":
 
-    section_title("💬 chat com sua carteira — deepseek v4 pro")
+    section_title("💬 Investigar a carteira com IA")
 
     st.markdown(
         '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); '
@@ -5370,20 +5444,21 @@ if _secao_pf == "💬 chat ia":
         "minha exposição a juros está adequada?",
     ]
 
-    # Renderiza em grid 2 colunas para não overflow
-    _sug_rows = [_sugestoes[i:i+2] for i in range(0, len(_sugestoes), 2)]
-
-    for _row in _sug_rows:
-        _scols = st.columns(len(_row))
-        for _sci, _sug in enumerate(_row):
-            with _scols[_sci]:
-                if st.button(
-                    _sug,
-                    key=f"sug_{_sug[:20]}",
-                    use_container_width=True,
-                ):
-                    st.session_state["chat_input_pendente"] = _sug
-                    st.rerun()
+    _sug_cols = st.columns(3)
+    for _sc, _sug in zip(_sug_cols, _sugestoes[:3]):
+        with _sc:
+            if st.button(_sug, key=f"sug_{_sug[:20]}", use_container_width=True):
+                st.session_state["chat_input_pendente"] = _sug
+                st.rerun()
+    with st.expander("Mais perguntas · risco, macro e posições", expanded=False):
+        _sug_rows = [_sugestoes[i:i+2] for i in range(3, len(_sugestoes), 2)]
+        for _row in _sug_rows:
+            _scols = st.columns(len(_row))
+            for _sci, _sug in enumerate(_row):
+                with _scols[_sci]:
+                    if st.button(_sug, key=f"sug_{_sug[:20]}", use_container_width=True):
+                        st.session_state["chat_input_pendente"] = _sug
+                        st.rerun()
 
     # ── carrega user da sessão ────────────────────────────────────────────
 
@@ -5408,14 +5483,9 @@ if _secao_pf == "💬 chat ia":
     st.markdown("---")
 
     for _msg in st.session_state["chat_portfolio_msgs"]:
-        _role   = _msg["role"]
-        _avatar = "👤" if _role == "user" else "⚡"
-        with st.chat_message(_role, avatar=_avatar):
-            st.markdown(
-                f'<div style="font-family:var(--font-data,monospace); font-size:0.83rem; '
-                f'color:var(--text-primary); line-height:1.6;">{_msg["content"]}</div>',
-                unsafe_allow_html=True,
-            )
+        _role = _msg['role']
+        with st.chat_message(_role, avatar="👤" if _role == 'user' else "⚡"):
+            st.markdown(str(_msg.get('content') or ''))
 
     # ── input do usuário ──────────────────────────────────────────────────
 
@@ -5433,11 +5503,7 @@ if _secao_pf == "💬 chat ia":
         )
         salvar_mensagem_chat(_user_id_chat, _portfolio_id_chat, 'user', _pergunta)
         with st.chat_message("user", avatar="👤"):
-            st.markdown(
-                f'<div style="font-family:var(--font-data,monospace); font-size:0.83rem; '
-                f'color:var(--text-primary);">{_pergunta}</div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown(_pergunta)
 
         # Monta o prompt: contexto (semi-estático) → histórico → pergunta atual
         # Ordem garante máximo cache hit no prefixo

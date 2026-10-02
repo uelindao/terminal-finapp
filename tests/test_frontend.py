@@ -230,3 +230,19 @@ def test_asset_search_does_not_invent_symbols_for_unknown_words():
     from utils.components import _resolver_ticker_busca
     with patch("utils.market_data.buscar_ativo_yahoo", return_value=[]):
         assert _resolver_ticker_busca("XYZABC") is None
+
+
+def test_section_selection_returns_after_navigation_widget_cleanup():
+    at = app('''
+        import streamlit as st
+        from utils.components import section_selector
+        page = st.radio("Página", ["Análise", "Outra página"], key="page")
+        if page == "Análise":
+            st.text(section_selector(["Preço", "Fundamentos"], "section"))
+    ''')
+    at.get("button_group")[0].set_value("Fundamentos").run()
+    at.radio[0].set_value("Outra página").run()
+    assert "section" not in at.session_state
+    at.radio[0].set_value("Análise").run()
+    assert not at.exception
+    assert at.text[0].value == "Fundamentos"

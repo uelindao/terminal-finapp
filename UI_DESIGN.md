@@ -1,57 +1,71 @@
 # Interface do FinTerminal
 
-O terminal reúne uma visão diária do mercado, análise individual, descoberta de ativos, contexto macro e gestão da carteira. A interface usa os dados e modelos existentes; os componentes compartilhados organizam sua apresentação e a navegação.
+O FinTerminal é uma bancada pessoal de análise. A interface prioriza exploração de séries, comparações, contexto técnico e registro de hipóteses. Os controles ficam perto dos dados; informações complementares são abertas quando necessárias.
 
-## Direção visual
+## Perfis de leitura
 
-Carbon é o tema padrão: grafite, acento lima e cores distintas para alta, queda, atenção e informação. IBM Plex Sans dá hierarquia aos títulos, DM Sans serve à leitura e IBM Plex Mono alinha os números. As fontes têm alternativas locais quando o serviço de fontes está indisponível.
+A aparência tem três dimensões independentes: composição, paleta e densidade. Quatro presets combinam essas dimensões, mas qualquer perfil aceita qualquer paleta. Fontes manuais sobrevivem à navegação entre páginas.
 
-A cor de destaque identifica seleção e ação. Métricas usam números em primeiro plano e contexto abaixo. Cards têm bordas discretas e cantos pequenos. Brilhos, fundos decorativos e ícones repetidos foram reduzidos. Os temas existentes continuam disponíveis em Aparência.
+| Perfil | Composição | Gráficos |
+| --- | --- | --- |
+| Terminal compacto | Bancada ampla, métricas em linhas, cantos retos, fontes IBM Plex e espaçamento compacto. | Altura padrão 330 px, traços finos e grade discreta. |
+| Mesa de análise | Painéis equilibrados, hierarquia moderada e espaço para cruzar contexto e preço. | Altura padrão 400 px e grade pontilhada. |
+| Caderno quantitativo | Superfícies abertas, seções pautadas, títulos serifados e largura de leitura menor. | Altura padrão 450 px, sem grade. |
+| Radar visual | Área ampla, números em destaque, painéis maiores e hierarquia voltada às relações visuais. | Altura padrão 480 px e linhas mais espessas. |
 
-## Organização das páginas
+Alturas explícitas de estudos específicos continuam válidas. No celular, alvos de toque mantêm pelo menos 44 px mesmo com densidade compacta. Legendas mantêm opacidade integral para conservar contraste.
 
-| Página | Entrada e tarefa principal |
+Configurações → Aparência permite aplicar presets, combinar composição/paleta/densidade, visualizar uma amostra real dos componentes e substituir as famílias tipográficas. O arquivo JSON exportado contém apenas a aparência e pode ser restaurado em outro navegador. A sessão e os parâmetros `theme`, `profile` e `density` conservam as preferências de leitura; fontes personalizadas podem ser conservadas pelo arquivo exportado.
+
+## Organização e exploração
+
+| Página | Controles e comportamento |
 | --- | --- |
-| Login | Formulário com rótulos visíveis e orientação clara para entrar. |
-| Visão geral | Mercado, atenção diária, contexto, carteira, watchlist e relatórios, com atalhos locais. |
-| Análise de ativos | Identificação do ativo e seletor de seção antes dos detalhes. Pesquisa por ticker ou empresa. |
-| Oportunidades | Rotação setorial, filtros quantitativos, momentum e IA. Navegação antes do contexto macro. |
-| Cenário macro | Seletor de seção no início, síntese do regime e detalhamento progressivo dos indicadores. |
-| Carteira | Carteira ativa, patrimônio e resultado antes da edição. Operações e importação ficam em painéis recolhidos. |
-| Configurações | Conta, listas, carteiras, alertas, IA e aparência. Administração e backfill aparecem somente para administradores. |
+| Login | Linguagem pessoal e técnica, campos visíveis e entrada pelo formulário. |
+| Visão geral | Atalhos locais, separação BRL/USD e watchlist em Lista, Mapa ou Comparar. |
+| Análise de ativos | Cabeçalho compacto, resumo complementar recolhido, seleção de estudo no início e análise individual ou comparação. |
+| Oportunidades | Resultado do screener antes dos critérios, tabela ou mapa com eixos selecionáveis, seleção de ativos e comparação; momentum com mapa/linhas/barras. |
+| Cenário macro | Contexto recolhível, recortes por período, estudo do ciclo por perspectiva, calendário filtrável, overlay persistente e pares selecionáveis nas correlações. |
+| Carteira | Área Posições ou Análises, composição por ativo/setor/país/moeda, estudos de risco independentes, cenários de stress e diário filtrável. |
+| Configurações | Conta, listas, carteiras, alertas, IA e aparência. Backfill e administração permanecem disponíveis apenas ao administrador. |
 
-## Comportamentos de UX
+Na watchlist, o mapa relaciona retorno e score. O modo Ativo permite inspeção por clique; Grupo permite seleção por caixa ou laço. A seleção abre uma leitura rápida e oferece acesso à análise individual. A comparação carrega históricos pelo leitor central de preços somente nessa visualização, oferece quatro períodos e alterna retorno e drawdown. Séries por data usam somente observações compartilhadas, sem preencher lacunas, e conservam a moeda original de cada ativo. O fallback de séries sem datas informa explicitamente o alinhamento por observação.
 
-- Navegação entre páginas por links nativos do Streamlit, com nomes orientados às tarefas.
-- Seções e filtros usam controles nativos. A seleção permanece após atualização, e clicar na seção atual não deixa a página sem conteúdo.
-- Busca pelo formulário, com Enter, mensagem para entrada vazia e navegação direta à análise.
-- Ctrl+K abre a busca de ativos e páginas; Escape fecha e devolve o foco. Alt+1 a Alt+6 navegam entre páginas.
-- Filtros de P/L mínimo e máximo têm rótulos próprios. Faixas inválidas mostram orientação e bloqueiam a aplicação.
-- Watchlist mostra uma linha por ativo no computador e cards identificados no celular. As ações ficam em Opções; seleção em lote é opcional.
-- Remoções de listas, carteiras e usuários nas configurações exigem confirmação. O fluxo de confirmação de ativos da Home permanece.
-- A permissão de notificações é solicitada pelo controle de ativação, em vez de interromper a abertura do terminal.
-- O resumo da Home separa BRL e USD. Cotações incompletas são identificadas. A Carteira usa a consolidação em BRL já existente e explicita que posições e custos em USD usam o câmbio atual.
-- A barra superior comunica atualizações periódicas, evitando sugerir cotação contínua em tempo real.
+O estudo técnico permite mudar o período, candle/linha, escala, médias e volume. As médias são calculadas com o histórico anterior ao recorte. Comparações de ativos dividem matriz/retorno, scores e síntese IA. As ferramentas de IA também são escolhidas por foco, evitando executar e renderizar todos os estudos de uma vez.
+
+Os seletores compartilhados lembram a seção após sair e voltar à página. Abrir um ticker força o escopo individual; a ação explícita de comparar mantém o escopo múltiplo e os ativos escolhidos. Ctrl+K abre a busca, Escape fecha e restaura o foco, e Alt+1 a Alt+6 navegam entre páginas.
+
+## Precisão da apresentação
+
+- Ausência de score no screener aparece como não calculado, sem ser confundida com uma avaliação negativa. Pontos sem valor em um dos eixos ficam fora do mapa.
+- Valores consolidados e gráficos de composição da Carteira usam BRL e o câmbio atual já disponível. A base do stress por beta é identificada como custo, com conversão das posições em USD.
+- Os modelos de risco existentes mantêm retornos na moeda de origem. Para carteiras mistas, a interface informa que esses estudos não incluem variação cambial e que seus valores monetários não equivalem ao patrimônio consolidado em BRL.
+- Overlay macro usa datas de referência da série, que podem diferir da divulgação. Sobreposição visual e normalização não medem causalidade.
+- A barra superior comunica atualizações periódicas. Notificações continuam por ativação explícita em Alertas.
 
 ## Manutenção
 
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `utils/themes.py` | Paletas, fontes, tokens semânticos e seleção de tema. O identificador `dark` continua válido e corresponde ao Carbon. |
-| `utils/interface.css` | Layout, controles, responsividade, foco visível e redução de movimentos. |
-| `utils/style.py` | Aplicação dos tokens, folha de estilo e template dos gráficos. |
-| `utils/components.py` | Cabeçalhos, seleção de seções, busca, watchlist, métricas e confirmação de ações. |
-| `utils/auth.py` | Login e navegação lateral compartilhada; o mecanismo de sessão foi preservado. |
-| `utils/portfolio_view.py` | Agrupamento de valores por moeda para apresentação na Home. |
-| `tests/test_frontend.py` | Regressões de interação, contraste dos temas principais e apresentação por moeda. |
+| `utils/appearance.py` | Perfis, densidade, presets e importação/exportação de estado validado. |
+| `utils/themes.py` | Paletas, fontes, contraste e tokens efetivos da aparência. |
+| `utils/interface.css` | Composição, responsividade, densidade, controles e foco visível. |
+| `utils/style.py` | Aplicação dos estilos e do template dos gráficos. |
+| `utils/charts.py` | Templates Plotly, eixos, guias de leitura e comportamento dos perfis. |
+| `utils/components.py` | Cabeçalhos, seletores persistentes, busca, métricas, watchlist e confirmação. |
+| `utils/market_explorer.py` | Mapa, inspeção de ativos e comparação interativa da watchlist. |
+| `utils/portfolio_view.py` | Agrupamento por moeda na apresentação da Home. |
+| `utils/auth.py` | Login e navegação lateral compartilhada. |
 
-Use tokens de cor e fonte nos novos componentes. Preserve as chaves dos widgets ao alterar seus rótulos: elas mantêm seleção, parâmetros de URL e navegação. Para operações destrutivas, passe uma ação com o identificador do item capturado à função `confirm_action`.
+Use tokens de cor, fonte e espaçamento nos novos componentes. Preserve chaves dos widgets. Prefira callbacks para presets e ações que modificam widgets já existentes. Para remoções, capture o identificador do item na ação passada a `confirm_action`.
 
-## Validação
+A seleção nativa de gráficos segue a [API de seleção do Streamlit](https://docs.streamlit.io/develop/api-reference/charts/st.plotly_chart). No mapa da watchlist, clique individual e seleção de grupos têm modos separados para evitar a substituição do comportamento de clique pelo controle de seleção múltipla.
 
-A suíte completa passou com 201 testes. Os testes de interface verificam persistência de seleção, filtros na URL, busca, ações por ativo, confirmação/cancelamento, login, troca de temas, escape de texto e separação das moedas. Os temas Carbon, Koyfin e Papel têm testes de contraste mínimo de 4,5:1 para suas cores principais de texto sobre fundo e superfície; isso não substitui uma auditoria completa de acessibilidade.
+## Validação desta rodada
 
-A revisão no Chromium utilizou dados ilustrativos e serviços externos isolados. Foram verificadas as seis páginas em 1440 × 1000 e 390 × 844, sem transbordamento horizontal, além de filtros, presets, configurações pessoais, busca, atalhos e subseções analíticas. A validação visual não autentica uma conta real nem confirma a disponibilidade das APIs de produção.
+A suíte completa passou com 214 testes. Inclui regressões de estado, navegação, aparência, importação inválida, fontes entre páginas, dados ausentes, janelas comparáveis, alinhamento por data e preenchimento dos gráficos.
+
+A inspeção no Chromium utilizou serviços externos isolados e dados ilustrativos. Foram verificadas as seis páginas, suas seções e estudos, configurações administrativas, login, os quatro perfis em 1440 × 1000 e 390 × 844, seleção de pontos, comparação de ativos, filtro do diário e histórico financeiro com apenas dois trimestres. Não houve transbordamento horizontal nos cenários verificados. A validação local não autentica uma conta real nem confirma a disponibilidade das APIs de produção.
 
 ```sh
 python -m pytest -q
@@ -59,4 +73,4 @@ python -m compileall -q Home.py pages utils
 streamlit run Home.py
 ```
 
-A entrada opcional `streamlit_app.py` mantém o roteamento centralizado e evita configurar a página novamente na Home. A dependência mínima é Streamlit 1.41.
+A entrada opcional `streamlit_app.py` mantém o roteamento centralizado. A dependência mínima permanece Streamlit 1.41.

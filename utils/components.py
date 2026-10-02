@@ -14,16 +14,24 @@ from html import escape as _escape
 def _clean_label(label: str) -> str:
     """Remove decoração inicial, preservando símbolos no conteúdo financeiro."""
     text = _re.sub(r"^[^\wÀ-ÿ]+", "", str(label)).strip()
-    return _re.sub(r"\bia\b", "IA", text[:1].upper() + text[1:], flags=_re.I)
+    text = text[:1].upper() + text[1:]
+    for acronym in ("IA", "P/L", "P/VP", "ROE", "ROIC", "EBITDA", "RSI", "MACD", "DY", "CAGR", "YTD", "USD", "BRL", "ETF", "FIIs", "VaR", "CVaR"):
+        text = _re.sub(r"(?<!\w)" + _re.escape(acronym) + r"(?!\w)", acronym, text, flags=_re.I)
+    return text
 
 
 
 def ticker_nav_url(ticker: str) -> str:
     """Gera URL de navegação para Research com token de sessão embutido."""
-    s = st.session_state.get('session_token', '')
-    if s:
-        return f"?research_ticker={ticker}&s={s}"
-    return f"?research_ticker={ticker}"
+    from urllib.parse import urlencode
+    params = {"research_ticker": ticker}
+    if st.session_state.get('session_token'):
+        params["s"] = st.session_state['session_token']
+    for key in ("theme", "profile", "density"):
+        value = st.query_params.get(key)
+        if value:
+            params[key] = value
+    return "?" + urlencode(params)
 
 _ticker_nav_url = ticker_nav_url  # alias interno
 
@@ -38,7 +46,9 @@ def handle_ticker_nav():
     if _rt:
         # Prioridade: token da URL → session_state (aba já logada)
         _s = st.query_params.get("s") or st.session_state.get('session_token', '')
+        appearance_params = {key: st.query_params.get(key) for key in ("theme", "profile", "density") if st.query_params.get(key)}
         st.query_params.clear()
+        st.query_params.update(appearance_params)
         if _s:
             st.query_params["s"] = _s
         st.session_state['research_ticker_externo'] = _rt
@@ -50,7 +60,7 @@ def page_header(titulo: str, subtitulo: str = ""):
     title = _clean_label(titulo)
     st.markdown(
         '<header class="ft-page-header">'
-        '<div class="ft-page-eyebrow">Seu espaço de análise</div>'
+        '<div class="ft-page-eyebrow">FinTerminal / Análise pessoal</div>'
         f'<h1>{_escape(title)}</h1>'
         + (f'<p>{_escape(subtitulo)}</p>' if subtitulo else '') + '</header>',
         unsafe_allow_html=True,
@@ -68,10 +78,11 @@ def section_selector(secoes: list[str], key: str, *, label: str = "Seção",
     if not secoes:
         return ""
     preferred = default if default in secoes else secoes[0]
+    previous_key = f"_section_previous_{key}"
     current = st.session_state.get(key)
     if current not in secoes:
-        st.session_state[key] = preferred
-    previous_key = f"_section_previous_{key}"
+        remembered = st.session_state.get(previous_key)
+        st.session_state[key] = remembered if remembered in secoes else preferred
     st.session_state[previous_key] = st.session_state[key]
     def changed():
         selected = st.session_state.get(key)
@@ -194,7 +205,7 @@ def watchlist_row(ticker: str, nome: str, preco: float, var_1d: float,
         health = f'<span class="color-{tone}">{int(score)}<span class="ft-watchlist-max"> / 100</span></span>'
     else:
         health = '<span class="color-muted">—</span>'
-    spark = inline_sparkline(serie_30d, tone="bull" if var_1m >= 0 else "bear", largura=110, altura=28) if serie_30d and len(serie_30d) >= 2 else '<span class="color-muted">—</span>'
+    spark = inline_sparkline(serie_30d, tone="auto" if var_1m is None else "bull" if var_1m >= 0 else "bear", largura=110, altura=28) if serie_30d is not None and len(serie_30d) >= 2 else '<span class="color-muted">—</span>'
     notice = ''
     if alertas:
         notice = f'<span class="ft-watchlist-alert" title="{_escape(str(alertas[0]), quote=True)}">Atenção</span>'
@@ -1427,9 +1438,17 @@ def inline_sparkline(
       "auto"  → bull se serie[-1] >= serie[0], bear caso contrário
       bull|bear|amber|info|accent|muted
     """
-    if not serie:
+    if serie is None or len(serie) == 0:
         return ""
-    vals = [float(v) for v in serie if v is not None]
+    from math import isfinite
+    vals = []
+    for value in serie:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(number):
+            vals.append(number)
     if len(vals) < 2:
         return ""
     if tone == "auto":
@@ -2247,7 +2266,9 @@ def kpi_index_row(
         nome   = it.get("nome", "")
         valor  = it.get("valor", "")
         var    = float(it.get("var_pct", 0) or 0)
-        serie  = it.get("serie") or []
+        serie  = it.get("serie")
+        if serie is None:
+            serie = []
         ticker = it.get("ticker", "")
         sufixo = it.get("sufixo", "")
 
@@ -2548,7 +2569,7 @@ def portfolio_hero(
 
     # Sparkline grande (80px alto)
     spark = ""
-    if serie_valor and len(serie_valor) >= 2:
+    if serie_valor is not None and len(serie_valor) >= 2:
         spark = inline_sparkline(serie_valor, tone=tone, largura=320, altura=80)
 
     src_html = ""
@@ -2637,7 +2658,9 @@ def portfolio_kpis(items: list[dict]) -> None:
         valor   = it.get("valor", "")
         sub     = it.get("sublabel", "")
         var_pct = it.get("var_pct")
-        serie   = it.get("serie") or []
+        serie   = it.get("serie")
+        if serie is None:
+            serie = []
         icone   = it.get("icone", "")
         ticker  = it.get("ticker_chip", "")
         tone_in = it.get("tone")
@@ -3209,7 +3232,7 @@ def ticker_hero(
             pass
 
     spark_html = ""
-    if serie_30d and len(serie_30d) >= 2:
+    if serie_30d is not None and len(serie_30d) >= 2:
         spark_html = inline_sparkline(
             serie_30d, tone=tone, largura=320, altura=90,
         )

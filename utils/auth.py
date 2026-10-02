@@ -99,12 +99,12 @@ def _render_tela_login():
     st.markdown('<div class="ft-login-brand">FIN<span style="color:var(--accent)"> / </span>TERMINAL</div>', unsafe_allow_html=True)
     intro, gap, col = st.columns([1.2, .15, 1], vertical_alignment="center")
     with intro:
-        st.markdown('<div class="ft-login-art"><div class="ft-page-eyebrow">Inteligência financeira pessoal</div>'
-                    '<h1>Mais contexto.<br><em>Melhores decisões.</em></h1>'
-                    '<p>Conecte fundamentos, cenário econômico e sua carteira em um único espaço de análise.</p>'
+        st.markdown('<div class="ft-login-art"><div class="ft-page-eyebrow">Estação de análise pessoal</div>'
+                    '<h1>Mercado, modelos<br><em>e hipóteses.</em></h1>'
+                    '<p>Explore séries, compare ativos e registre suas decisões. Fundamentos, macro e carteira no mesmo ambiente.</p>'
                     '<div class="ft-login-index"><span>01 / MERCADO</span><span>02 / ANÁLISE</span><span>03 / CARTEIRA</span></div></div>', unsafe_allow_html=True)
     with col:
-        st.markdown('<div class="ft-login-heading">Acesse seu terminal</div><div class="ft-login-caption">Entre com sua conta para continuar suas análises.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="ft-login-heading">Abrir sessão</div><div class="ft-login-caption">Identifique-se para carregar suas listas e posições.</div>', unsafe_allow_html=True)
         with st.container():
             with st.form("form_login"):
                 usuario_input = st.text_input(

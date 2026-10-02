@@ -69,6 +69,27 @@ def _font_family_data() -> str:
         return "'JetBrains Mono', 'Courier New', monospace"
 
 
+def _chart_style() -> dict:
+    """Effective profile tokens for plots; explicit page heights stay authoritative."""
+    from utils.themes import get_design_tokens
+    tokens = get_design_tokens()
+    return {
+        "height": int(tokens.get("--chart-height", "400").removesuffix("px")),
+        "font_size": int(tokens.get("--chart-font-size", "12").removesuffix("px")),
+        "grid": tokens.get("--chart-grid", _cores()["border"]),
+        "grid_visible": tokens.get("--chart-grid-visible", "true") == "true",
+        "grid_dash": tokens.get("--chart-grid-dash", "solid"),
+        "hovermode": tokens.get("--chart-hovermode", "x unified"),
+        "line_width": float(tokens.get("--chart-line-width", "1.8")),
+        "fill_opacity": float(tokens.get("--chart-fill-opacity", "0.10")),
+    }
+
+
+def _fill_color(color: str) -> str:
+    from utils.themes import _rgba
+    return _rgba(color, _chart_style()["fill_opacity"])
+
+
 # ── Templates Plotly por tema (registrados em pio.templates) ──────────────────
 
 def _template_para_tema(tema_id: str) -> "go.layout.Template":
@@ -77,14 +98,19 @@ def _template_para_tema(tema_id: str) -> "go.layout.Template":
 
     if tema_id not in TEMAS:
         tema_id = "dark"
-    t       = TEMAS[tema_id]["vars"]
+    from utils.themes import get_design_tokens
+    t = get_design_tokens() if tema_id == _ativo_id() else TEMAS[tema_id]["vars"]
     palette = list(get_chart_palette()) if tema_id == _ativo_id() else CORES_SERIES
 
     # Para palette do tema solicitado (sem depender do ativo)
     from utils.themes import CHART_PALETTES
     palette = CHART_PALETTES.get(tema_id, CHART_PALETTES.get("dark", CORES_SERIES))
 
-    fontes  = TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+    fontes = TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+    if tema_id == _ativo_id():
+        from utils.themes import get_fontes_ativas
+        fontes = get_fontes_ativas()
+    style = _chart_style()
     font_ui   = FONTES_UI.get(fontes["ui"],   FONTES_UI["inter"])["css"]
     font_data = FONTES_DATA.get(fontes["data"], FONTES_DATA["jetbrains_mono"])["css"]
 
@@ -101,8 +127,10 @@ def _template_para_tema(tema_id: str) -> "go.layout.Template":
             colorway      = palette,
             paper_bgcolor = surface,
             plot_bgcolor  = surface,
-            font          = dict(family=font_ui, color=muted, size=12),
-            hovermode     = "x unified",
+            font          = dict(family=font_ui, color=muted, size=style["font_size"]),
+            height=style["height"], dragmode="pan",
+            hovermode=style["hovermode"],
+            modebar=dict(bgcolor="rgba(0,0,0,0)", color=muted, activecolor=t.get("--accent")),
             hoverlabel    = dict(
                 bgcolor    = elev,
                 bordercolor= border,
@@ -115,12 +143,14 @@ def _template_para_tema(tema_id: str) -> "go.layout.Template":
                 bgcolor="rgba(0,0,0,0)", borderwidth=0,
             ),
             xaxis = dict(
-                showgrid=True, gridcolor=border, gridwidth=1,
+                showgrid=style["grid_visible"], gridcolor=style["grid"], gridwidth=1, griddash=style["grid_dash"],
+                showspikes=True, spikemode="across", spikesnap="cursor", spikethickness=1, spikecolor=muted,
                 zeroline=False, linecolor=border,
                 tickfont=dict(family=font_ui, size=11, color=muted),
             ),
             yaxis = dict(
-                showgrid=True, gridcolor=border, gridwidth=1,
+                showgrid=style["grid_visible"], gridcolor=style["grid"], gridwidth=1, griddash=style["grid_dash"],
+                showspikes=True, spikemode="across", spikesnap="cursor", spikethickness=1, spikecolor=muted,
                 zeroline=False, linecolor=border,
                 tickfont=dict(family=font_ui, size=11, color=muted),
             ),
@@ -159,20 +189,28 @@ def aplicar_template_ativo() -> None:
     plotly.express criados depois da chamada.
     """
     registrar_templates()
-    pio.templates.default = f"finterminal_{_ativo_id()}"
+    # Rebuild the active template so profile and font changes take effect immediately.
+    from utils.appearance import get_perfil_ativo, get_densidade_ativa
+    name = f"finterminal_{_ativo_id()}_{get_perfil_ativo()}_{get_densidade_ativa()}"
+    pio.templates[name] = _template_para_tema(_ativo_id())
+    pio.templates.default = name
 
 
-def base_layout(height: int = 400, title: str = "") -> dict:
+def base_layout(height: int | None = None, title: str = "") -> dict:
     """Retorna o layout base para qualquer gráfico (cores+fontes dinâmicas por tema)."""
     c     = _cores()
     fu    = _font_family_ui()
     fd    = _font_family_data()
+    style = _chart_style()
     layout = dict(
+        template=_template_para_tema(_ativo_id()),
         paper_bgcolor=c["surface"],
         plot_bgcolor=c["surface"],
-        font=dict(family=fu, color=c["muted"], size=12),
+        font=dict(family=fu, color=c["muted"], size=style["font_size"]),
+        dragmode="pan",
+        modebar=dict(bgcolor="rgba(0,0,0,0)", color=c["muted"], activecolor=c["accent"]),
         margin=dict(l=0, r=0, t=30 if title else 12, b=0),
-        hovermode="x unified",
+        hovermode=style["hovermode"],
         hoverlabel=dict(
             bgcolor=c["elevated"],
             bordercolor=c["border"],
@@ -185,7 +223,7 @@ def base_layout(height: int = 400, title: str = "") -> dict:
             font=dict(color=c["muted"], size=11, family=fu),
             bgcolor="rgba(0,0,0,0)", borderwidth=0,
         ),
-        height=height,
+        height=height if height is not None else style["height"],
     )
     if title:
         layout["title"] = dict(
@@ -200,9 +238,13 @@ def _axis() -> dict:
     """Retorna estilo de eixo para o tema ativo."""
     c  = _cores()
     fu = _font_family_ui()
+    style = _chart_style()
     return dict(
-        showgrid=True,
-        gridcolor=c["border"],
+        showgrid=style["grid_visible"],
+        gridcolor=style["grid"],
+        griddash=style["grid_dash"],
+        showspikes=True, spikemode="across", spikesnap="cursor",
+        spikethickness=1, spikecolor=c["muted"],
         gridwidth=1,
         zeroline=False,
         linecolor=c["border"],
@@ -283,9 +325,9 @@ def linha(df, x_col, y_col, titulo="", cor=None, height=300, fill=False):
         x=df[x_col] if x_col else df.index,
         y=df[y_col],
         mode="lines",
-        line=dict(color=cor, width=1.8),
+        line=dict(color=cor, width=_chart_style()["line_width"]),
         fill="tozeroy" if fill else "none",
-        fillcolor=f"{cor}18" if fill else None,
+        fillcolor=_fill_color(cor) if fill else None,
         hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
     ))
     ax = _axis()
@@ -333,9 +375,9 @@ def linha_ou_barras(
         fig.add_trace(go.Scatter(
             x=xs, y=ys,
             mode="lines",
-            line=dict(color=cor, width=1.8),
+            line=dict(color=cor, width=_chart_style()["line_width"]),
             fill="tozeroy" if fill else "none",
-            fillcolor=f"{cor}18" if fill else None,
+            fillcolor=_fill_color(cor) if fill else None,
             hovertemplate="%{x}<br><b>%{y:.2f}</b><extra></extra>",
         ))
 
@@ -359,8 +401,8 @@ def velas(df, titulo="", height=500, mostrar_volume=True):
         open=df["Open"], high=df["High"],
         low=df["Low"],   close=df["Close"],
         name="Preço",
-        increasing=dict(line=dict(color=c["bull"]), fillcolor=f'{c["bull"]}20'),
-        decreasing=dict(line=dict(color=c["bear"]), fillcolor=f'{c["bear"]}20'),
+        increasing=dict(line=dict(color=c["bull"]), fillcolor=_fill_color(c['bull'])),
+        decreasing=dict(line=dict(color=c["bear"]), fillcolor=_fill_color(c['bear'])),
         hoverlabel=dict(font=dict(family="Inter, system-ui, sans-serif")),
     )
 
@@ -461,7 +503,7 @@ def base100(df, titulo="", height=400):
         fig.add_trace(go.Scatter(
             x=df.index, y=df[col],
             name=f"{col} ({retorno:+.1f}%)",
-            line=dict(color=cor, width=1.8),
+            line=dict(color=cor, width=_chart_style()["line_width"]),
             hovertemplate=f"{col}<br>%{{x}}<br>Base 100: %{{y:.1f}}<extra></extra>",
         ))
 

@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import datetime
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.formatters import traduzir_setor
 from utils.setores import normalizar_setor as _norm_setor_disc, LABEL_SETOR as _LABEL_SETOR_DISC
 
@@ -37,7 +38,7 @@ from utils.components import (
     page_header, section_title, section_selector, status_card, empty_state,
     inject_keyboard_shortcuts, metric_card, tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url, topbar,
-    portfolio_kpis, info_box, chip_filter_row, tabs_pill,
+    portfolio_kpis, info_box, chip_filter_row, tabs_pill, page_jump_links,
 )
 from utils.ai_client import chamar_ia, SYSTEM_ANALISTA
 from utils.charts import base_layout, chart_type_toggle, barras_verticais, _cores as _chart_cores
@@ -74,7 +75,7 @@ topbar(
     user_name=_user_top_disc.get('username', '') or _user_top_disc.get('nome', '') or 'usuário',
     sync_label="Dados em cache",
 )
-page_header("Oportunidades", "Comece pelos setores, refine seus filtros e aprofunde a análise dos ativos.")
+page_header("Exploração de mercado", "Setores, filtros quantitativos, força relativa e assimetria.")
 
 _SECOES_D = ["🗺️ rotação setorial", "🔍 screener quantitativo",
              "🚀 momentum & radar", "🧠 ia: oportunidades do dia"]
@@ -84,6 +85,7 @@ _pending_secao_d = st.session_state.pop("_discovery_secao_pending", None)
 if _pending_secao_d in _SECOES_D:
     st.session_state["discovery_secao"] = _pending_secao_d
 _secao_d = section_selector(_SECOES_D, key="discovery_secao")
+_foco_momentum = section_selector(["Força relativa", "Radar de assimetria"], key="discovery_momentum_foco") if _secao_d == "🚀 momentum & radar" else None
 # Barra de contexto macro sempre-on (regime/juro real/vix) — UX: nunca perder o pano de fundo.
 try:
     from utils.macro_state import render_cockpit_macro as _rcm
@@ -102,19 +104,19 @@ def modal_salvar_screener(ticker: str, nome: str, mercado: str):
     acao_wl = st.radio("destino:", ["watchlist existente", "criar nova watchlist"], horizontal=True, key=f"radio_dest_{ticker}")
     watchlists_disp = listar_watchlists()
     dest_id = None
-    
+
     if acao_wl == "watchlist existente":
         opcoes_dest = {f"{wl['icone']} {wl['nome']}": wl['id'] for wl in watchlists_disp}
         sel_dest = st.selectbox("selecione a watchlist:", list(opcoes_dest.keys()), key=f"sel_exist_{ticker}")
         dest_id = opcoes_dest[sel_dest]
     else:
         nome_nova_wl = st.text_input("nome da nova watchlist:", placeholder="ex: radar de dividendos", key=f"input_nova_{ticker}")
-    
+
     if st.button("Confirmar", type="primary", use_container_width=True, key=f"btn_conf_{ticker}"):
         if acao_wl == "criar nova watchlist":
             if nome_nova_wl.strip(): dest_id = criar_watchlist(nome_nova_wl.strip(), icone="🎯", cor="#00C853")
             else: return st.warning("digite um nome para a nova watchlist.")
-        
+
         adicionar_ativo(ticker, nome, mercado, watchlist_id=dest_id)
         st.success(f"✅ {ticker.lower()} salvo com sucesso!")
         time.sleep(1); st.rerun()
@@ -453,6 +455,49 @@ def rodar_screener(
     return df
 
 
+def _ia_table_html(df: "pd.DataFrame") -> None:
+    # Render via html_table (F0-2): coloração via classes centrais.
+    from utils.components import html_table as _ht_ia
+    _num_cols = ['score total','qualidade (hs)','qualidade','valuation','timing','rsi','5d %','3m %','topo %']
+    _cols_ia = list(df.columns)
+    _aligns_ia = ["left" if c in ("ticker","nome","mercado") else "right" for c in _cols_ia]
+    _rows_ia, _classes_ia = [], []
+    for _, row in df.iterrows():
+        cells, cls = [], []
+        for col in _cols_ia:
+            _v = row[col]
+            if col == 'ticker':
+                cell = (f'<a href="{ticker_nav_url(_v)}" '
+                        f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
+                        f'{str(_v).replace(".SA","")}</a>'); c = "mono"
+            elif col == 'nome':
+                cell = str(_v)[:18] if pd.notna(_v) else "—"; c = "muted"
+            elif col == 'mercado':
+                cell = str(_v); c = "muted"
+            elif col == 'score total':
+                try:
+                    _si = int(round(float(_v))); cell = str(_si)
+                    c = "mono strong " + ("bull" if _si >= 65 else "amber" if _si >= 45 else "bear")
+                except (TypeError, ValueError):
+                    cell = "—"; c = "muted"
+            elif col in ('5d %','3m %'):
+                try:
+                    _fv = float(_v); cell = f"{_fv:+.1f}%"
+                    c = "mono " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
+                except (TypeError, ValueError):
+                    cell = "—"; c = "muted"
+            elif col in _num_cols:
+                try:
+                    cell = f"{float(_v):.0f}"; c = "mono"
+                except (TypeError, ValueError):
+                    cell = "—"; c = "muted"
+            else:
+                cell = str(_v); c = ""
+            cells.append(cell); cls.append(c)
+        _rows_ia.append(cells); _classes_ia.append(cls)
+    _ht_ia(_cols_ia, _rows_ia, aligns=_aligns_ia, classes=_classes_ia)
+
+
 # 6. interface de separadores (tabs)
 # Momentum e Radar fundidos numa única aba (antes eram duas que se sobrepunham):
 # momentum = força relativa técnica; radar = oportunidades por health×valuation×timing.
@@ -466,14 +511,11 @@ def rodar_screener(
 # ==========================================
 # tab 1 — momentum (força relativa)
 # ==========================================
-if _secao_d == "🚀 momentum & radar":
+if _secao_d == "🚀 momentum & radar" and _foco_momentum == "Força relativa":
     section_title("🚀 momentum screener — força relativa")
 
-    status_card(
-        "metodologia",
-        "score de momentum de 0 a 100 baseado em 6 critérios: retorno 1y, 6m, 3m e 1m (positivo = ponto), preço acima da MM50 e MM200. ativos com score alto têm momentum técnico consistente em múltiplas janelas.",
-        tipo="info"
-    )
+    with st.expander("Como o momentum é calculado", expanded=False):
+        st.caption("Score de 0 a 100: retornos positivos em 1 ano, 6, 3 e 1 mês, mais preço acima da MM50 e MM200. Os filtros de score e top N exploram o último cálculo sem consultar o mercado novamente.")
 
     mc1, mc2, mc3 = st.columns([3, 2, 2])
     with mc1:
@@ -487,7 +529,7 @@ if _secao_d == "🚀 momentum & radar":
         mom_top_n = st.slider("top N ativos:", 5, 30, 15, 5, key="mom_top_n")
     with mc3:
         st.markdown("<br>", unsafe_allow_html=True)
-        btn_momentum = st.button("Calcular momentum", type="primary", use_container_width=True)
+        btn_momentum = st.button("Atualizar momentum", type="primary", use_container_width=True)
 
     score_minimo = st.slider("score mínimo de momentum:", 0, 100, 50, 10, key="mom_score_min")
 
@@ -508,10 +550,19 @@ if _secao_d == "🚀 momentum & radar":
             with st.spinner(f"calculando momentum de {len(mom_lista)} ativos..."):
                 resultados_mom = calcular_momentum(tuple(mom_lista))
                 df_mom = pd.DataFrame(resultados_mom)
-                if not df_mom.empty:
-                    df_mom = df_mom[df_mom['score momentum'] >= score_minimo]
-                    df_mom = df_mom.head(mom_top_n)
-                    st.session_state['momentum_resultado'] = df_mom
+                st.session_state['momentum_base'] = df_mom
+                st.session_state['momentum_universos_aplicados'] = list(mom_universos)
+
+    if 'momentum_base' in st.session_state:
+        _mom_base = st.session_state['momentum_base']
+        st.session_state['momentum_resultado'] = (_mom_base[_mom_base['score momentum'] >= score_minimo].head(mom_top_n).copy()
+                                                 if not _mom_base.empty else pd.DataFrame())
+        _mom_universos_aplicados = st.session_state.get('momentum_universos_aplicados', [])
+        st.caption("Último cálculo: " + " · ".join(_mom_universos_aplicados))
+        if set(_mom_universos_aplicados) != set(mom_universos):
+            st.info("Universo alterado. Atualize o momentum para calcular a nova seleção; score e top N já filtram o último cálculo.")
+        if st.session_state['momentum_resultado'].empty:
+            st.info("Nenhum ativo no recorte atual. Reduza o score mínimo ou atualize o cálculo.")
 
     if 'momentum_resultado' in st.session_state and not st.session_state['momentum_resultado'].empty:
         df_m = st.session_state['momentum_resultado']
@@ -558,7 +609,7 @@ if _secao_d == "🚀 momentum & radar":
             for col in _show_mom:
                 _v = _row_mom[col]
                 if col == 'ticker':
-                    _cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
+                    _cell = (f'<a href="{ticker_nav_url(_v)}" '
                              f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
                              f'{str(_v).replace(".SA","")}</a>')
                     _c = "mono"
@@ -574,7 +625,7 @@ if _secao_d == "🚀 momentum & radar":
                         _cell = "—"; _c = "muted"
                 elif col in ('acima mm50', 'acima mm200'):
                     try:
-                        _bv = bool(_v); _cell = "✓" if _bv else "✗"; _c = "bull" if _bv else "bear"
+                        _bv = _v is True or str(_v) == "✅"; _cell = "✓" if _bv else "✗"; _c = "bull" if _bv else "bear"
                     except (TypeError, ValueError):
                         _cell = "—"; _c = "muted"
                 elif col in _ret_cols_mom:
@@ -591,7 +642,13 @@ if _secao_d == "🚀 momentum & radar":
 
         section_title("📊 mapa de retornos por janela temporal")
 
-        _mom_tipo = chart_type_toggle(key="mom_retornos", default="linha")
+        _mom_view = section_selector(["Mapa", "Linhas", "Barras"], key="discovery_momentum_chart")
+        _mom_tipo = "barras" if _mom_view == "Barras" else "linha"
+        _mom_opcoes = df_m['ticker'].tolist()
+        if any(t not in _mom_opcoes for t in st.session_state.get("mom_grafico_ativos", [])):
+            st.session_state.pop("mom_grafico_ativos", None)
+        _mom_ativos = st.multiselect("Ativos no gráfico", _mom_opcoes, default=_mom_opcoes[:8], key="mom_grafico_ativos", max_selections=10)
+        _mom_plot = df_m[df_m['ticker'].isin(_mom_ativos)]
         _cc_mom   = _chart_cores()
         _cores_seq = [_cc_mom["accent"], _cc_mom["info"], _cc_mom["bull"],
                       _cc_mom["amber"], _cc_mom["bear"], "#8B5CF6", "#06B6D4", "#EC4899",
@@ -601,7 +658,7 @@ if _secao_d == "🚀 momentum & radar":
         janelas = ['ret 1m (%)', 'ret 3m (%)', 'ret 6m (%)', 'ret 1y (%)']
         labels  = ['1 mês', '3 meses', '6 meses', '1 ano']
 
-        for i, (_, row) in enumerate(df_m.head(10).iterrows()):
+        for i, (_, row) in enumerate(_mom_plot.iterrows()):
             cor_i = _cores_seq[i % len(_cores_seq)]
             if _mom_tipo == "barras":
                 fig_mom.add_trace(go.Bar(
@@ -620,8 +677,17 @@ if _secao_d == "🚀 momentum & radar":
                     hovertemplate=f"{row['ticker']}<br>%{{x}}: %{{y:+.1f}}%<extra></extra>",
                 ))
 
-        fig_mom.add_hline(y=0, line_color=_cc_mom["border"], line_dash="dash", line_width=1)
-        _lay_mom = base_layout(height=400, title="retorno acumulado por janela — top 10 ativos")
+        if _mom_view == "Mapa":
+            fig_mom = go.Figure(go.Heatmap(
+                x=labels, y=_mom_plot['ticker'].tolist(), z=_mom_plot[janelas].to_numpy(),
+                colorscale=[[0, _cc_mom['bear']], [0.5, _cc_mom['surface']], [1, _cc_mom['bull']]], zmid=0,
+                text=_mom_plot[janelas].round(1).to_numpy(), texttemplate="%{text:+.1f}%",
+                hovertemplate="%{y} · %{x}<br>%{z:+.2f}%<extra></extra>", colorbar=dict(title="Retorno %"),
+            ))
+            fig_mom.update_yaxes(autorange="reversed")
+        else:
+            fig_mom.add_hline(y=0, line_color=_cc_mom["border"], line_dash="dash", line_width=1)
+        _lay_mom = base_layout(height=400, title="Retorno acumulado por janela · seleção atual")
         if _mom_tipo == "barras":
             _lay_mom["barmode"] = "group"
         fig_mom.update_layout(**_lay_mom)
@@ -671,400 +737,474 @@ if _secao_d == "🚀 momentum & radar":
 # tab 2 — screener quantitativo
 # ==========================================
 if _secao_d == "🔍 screener quantitativo":
-    section_title("🕵️ screener quantitativo — filtros paramétricos")
+    section_title("Screener quantitativo")
+    if 'screener_resultado' in st.session_state:
+        page_jump_links([("Resultado", "resultado-screener"), ("Critérios", "criterios-screener")])
+    _resultados_screener = st.container()
 
-    # ── 🌉 PONTE 4: CONTEXTO MACRO PARA O SCREENER ───────────────────────────
-    try:
-        from utils.macro_regime import classificar_regime
-        _mc = st.session_state.get("macro_context", {})
-        _regime_scr = classificar_regime(
-            selic=_mc.get("selic"), vix=_mc.get("vix"),
-            ipca=_mc.get("ipca"), treasury_10y=_mc.get("treasury_10y"),
+    with st.expander("Regime macro e setores favorecidos", expanded=False):
+        # ── 🌉 PONTE 4: CONTEXTO MACRO PARA O SCREENER ───────────────────────────
+        try:
+            from utils.macro_regime import classificar_regime
+            _mc = st.session_state.get("macro_context", {})
+            _regime_scr = classificar_regime(
+                selic=_mc.get("selic"), vix=_mc.get("vix"),
+                ipca=_mc.get("ipca"), treasury_10y=_mc.get("treasury_10y"),
+            )
+            _fav_scr  = _regime_scr.get("setores_favorecidos", [])
+            _prej_scr = _regime_scr.get("setores_prejudicados", [])
+            _lbl_scr  = _regime_scr.get("label", "neutro")
+            _pos_scr  = _regime_scr.get("posicionamento", "")
+            _scr_amb  = _regime_scr.get("score_ambiente", 50)
+            _cor_amb  = "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
+
+            _selic_val = _mc.get("selic")
+            # ipca_12m (% aa) vem do macro_cache; ipca do session_state é mensal — não usar.
+            _ipca_12m = _mc.get("ipca_12m")
+            if _ipca_12m is None:
+                try:
+                    from database.db import get_all_macro_cache
+                    _mc_cache = {r["indicator"]: r["value"] for r in (get_all_macro_cache() or [])}
+                    _ipca_12m = _mc_cache.get("ipca_12m")
+                    if _ipca_12m is not None:
+                        _ipca_12m = float(_ipca_12m)
+                except Exception:
+                    _ipca_12m = None
+            # Fisher: selic_real = (1 + selic/100) / (1 + ipca_12m/100) - 1
+            if _selic_val and _ipca_12m:
+                _selic_r_scr = round(((1 + _selic_val / 100) / (1 + _ipca_12m / 100) - 1) * 100, 1)
+            else:
+                _selic_r_scr = None
+            _cor_selic_r = "var(--bear)" if (_selic_r_scr or 0) > 8 else ("var(--amber)" if (_selic_r_scr or 0) > 4 else "var(--bull)")
+
+            st.markdown(
+                f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
+                f'border-left:4px solid {_cor_amb};border-radius:6px;'
+                f'padding:12px 16px;margin-bottom:12px;font-family:var(--font-ui,sans-serif);">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
+                f'<div>'
+                f'<span style="color:var(--text-muted);font-size:0.78rem;text-transform:uppercase;">regime macro atual</span><br>'
+                f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
+                f'<span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;">score {_scr_amb}/100</span>'
+                f'</div>'
+                + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">selic real</span><br>'
+                   f'<span style="color:{_cor_selic_r};font-size:0.8rem;">'
+                   f'{_selic_r_scr:+.1f}%aa</span></div>' if _selic_r_scr else '')
+                + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores favorecidos</span><br>'
+                   f'<span style="color:var(--bull);font-size:0.78rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
+                   if _fav_scr else '')
+                + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores em cautela</span><br>'
+                   f'<span style="color:var(--bear);font-size:0.78rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
+                   if _prej_scr else '')
+                + f'<div style="color:var(--text-muted);font-size:0.78rem;max-width:280px;">{_pos_scr}</div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
+
+    st.markdown('<span id="criterios-screener"></span>', unsafe_allow_html=True)
+    with st.expander("Critérios e presets", expanded="screener_resultado" not in st.session_state):
+        # ── seleção de universo (tabs_pill) ─────────────────────────────────────
+        from utils.components import tabs_pill as _tabs_pill_disc, info_box as _info_box_disc
+        _univ_labels = [
+            f"🇧🇷 B3 ({len(SCREENER_B3)})",
+            f"🏢 FIIs ({len(FII_TODOS)})",
+            f"🇺🇸 EUA ({len(SCREENER_US)})",
+        ]
+        _forced_univ = st.session_state.pop("screener_univ_force", None)
+        if _forced_univ in ("b3", "fii", "us"):
+            st.session_state["screener_univ_pill"] = _univ_labels[{"b3": 0, "fii": 1, "us": 2}[_forced_univ]]
+        _univ_pick = _tabs_pill_disc(_univ_labels, key="screener_univ_pill", default=_univ_labels[0])
+        universo_sel = (
+            'b3'  if _univ_pick.startswith("🇧🇷")
+            else 'fii' if _univ_pick.startswith("🏢")
+            else 'us'
         )
-        _fav_scr  = _regime_scr.get("setores_favorecidos", [])
-        _prej_scr = _regime_scr.get("setores_prejudicados", [])
-        _lbl_scr  = _regime_scr.get("label", "neutro")
-        _pos_scr  = _regime_scr.get("posicionamento", "")
-        _scr_amb  = _regime_scr.get("score_ambiente", 50)
-        _cor_amb  = "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
 
-        _selic_val = _mc.get("selic")
-        # ipca_12m (% aa) vem do macro_cache; ipca do session_state é mensal — não usar.
-        _ipca_12m = _mc.get("ipca_12m")
-        if _ipca_12m is None:
-            try:
-                from database.db import get_all_macro_cache
-                _mc_cache = {r["indicator"]: r["value"] for r in (get_all_macro_cache() or [])}
-                _ipca_12m = _mc_cache.get("ipca_12m")
-                if _ipca_12m is not None:
-                    _ipca_12m = float(_ipca_12m)
-            except Exception:
-                _ipca_12m = None
-        # Fisher: selic_real = (1 + selic/100) / (1 + ipca_12m/100) - 1
-        if _selic_val and _ipca_12m:
-            _selic_r_scr = round(((1 + _selic_val / 100) / (1 + _ipca_12m / 100) - 1) * 100, 1)
-        else:
-            _selic_r_scr = None
-        _cor_selic_r = "var(--bear)" if (_selic_r_scr or 0) > 8 else ("var(--amber)" if (_selic_r_scr or 0) > 4 else "var(--bull)")
-
-        st.markdown(
-            f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);'
-            f'border-left:4px solid {_cor_amb};border-radius:6px;'
-            f'padding:12px 16px;margin-bottom:12px;font-family:var(--font-ui,sans-serif);">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
-            f'<div>'
-            f'<span style="color:var(--text-muted);font-size:0.78rem;text-transform:uppercase;">regime macro atual</span><br>'
-            f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
-            f'<span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;">score {_scr_amb}/100</span>'
-            f'</div>'
-            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">selic real</span><br>'
-               f'<span style="color:{_cor_selic_r};font-size:0.8rem;">'
-               f'{_selic_r_scr:+.1f}%aa</span></div>' if _selic_r_scr else '')
-            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores favorecidos</span><br>'
-               f'<span style="color:var(--bull);font-size:0.78rem;">{", ".join(_fav_scr[:3]) if _fav_scr else "—"}</span></div>'
-               if _fav_scr else '')
-            + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">setores em cautela</span><br>'
-               f'<span style="color:var(--bear);font-size:0.78rem;">{", ".join(_prej_scr[:3]) if _prej_scr else "—"}</span></div>'
-               if _prej_scr else '')
-            + f'<div style="color:var(--text-muted);font-size:0.78rem;max-width:280px;">{_pos_scr}</div>'
-            f'</div></div>',
-            unsafe_allow_html=True,
-        )
-    except Exception:
-        pass
-
-    # ── seleção de universo (tabs_pill) ─────────────────────────────────────
-    from utils.components import tabs_pill as _tabs_pill_disc, info_box as _info_box_disc
-    _univ_labels = [
-        f"🇧🇷 B3 ({len(SCREENER_B3)})",
-        f"🏢 FIIs ({len(FII_TODOS)})",
-        f"🇺🇸 EUA ({len(SCREENER_US)})",
-    ]
-    _univ_pick = _tabs_pill_disc(_univ_labels, key="screener_univ_pill", default=_univ_labels[0])
-    universo_sel = (
-        'b3'  if _univ_pick.startswith("🇧🇷")
-        else 'fii' if _univ_pick.startswith("🏢")
-        else 'us'
-    )
-
-    # ── drill-down do scorecard (F4-1): pode forçar universo + preselecionar setor ──
-    _forced_univ = st.session_state.pop("screener_univ_force", None)
-    if _forced_univ in ("b3", "fii", "us"):
-        universo_sel = _forced_univ
-    # setores (traduzidos) presentes no universo — opções do filtro de setor
-    _universo_tickers = (SCREENER_B3 if universo_sel == "b3"
-                         else FII_TODOS if universo_sel == "fii" else SCREENER_US)
-    _cache_setores = get_todos_fundamentos_cache()
-    _setor_opts = ["todos os setores"] + sorted({
-        _label_setor_scorecard(_sraw) for _t in _universo_tickers
-        for _sraw in [((_cache_setores.get(_t) or _cache_setores.get(mapear_ticker_base(_t)) or {}).get("setor"))]
-        if _sraw
-    })
-    # sanitiza preseleção do drill-down (setor pode não existir no universo atual)
-    if st.session_state.get("disc_setor_w") not in _setor_opts:
-        st.session_state["disc_setor_w"] = "todos os setores"
-    _info_box_disc(
-        tipo   = "info",
-        titulo = "como funciona",
-        texto  = (
-            "Os filtros usam os fundamentos disponíveis na última atualização. "
-            "health score integra técnico, fundamentos e macro."
-        ),
-        icone  = "ⓘ",
-    )
-
-    st.markdown("---")
-
-    # ══ BOTÕES DE PRESET E RESET ════════════════════════════════════════════
-    section_title("⚙️ filtros")
-
-    def _aplicar_preset(_univ=None, **vals):
-        # F4-3: zera todos os filtros, limpa setor e aplica os valores do preset;
-        # opcionalmente força o universo (reusa screener_univ_force do F4-1).
-        st.session_state.update({
-            "disc_pl_min_w": 0.0, "disc_pl_max_w": 0.0, "disc_roe_w": 0.0,
-            "disc_dy_w": 0.0, "disc_pvp_w": 0.0, "disc_score_w": 0,
-            "disc_mm_w": False, "disc_setor_w": "todos os setores",
+        # ── drill-down do scorecard (F4-1): pode forçar universo + preselecionar setor ──
+        # setores (traduzidos) presentes no universo — opções do filtro de setor
+        _universo_tickers = (SCREENER_B3 if universo_sel == "b3"
+                             else FII_TODOS if universo_sel == "fii" else SCREENER_US)
+        _cache_setores = get_todos_fundamentos_cache()
+        _setor_opts = ["todos os setores"] + sorted({
+            _label_setor_scorecard(_sraw) for _t in _universo_tickers
+            for _sraw in [((_cache_setores.get(_t) or _cache_setores.get(mapear_ticker_base(_t)) or {}).get("setor"))]
+            if _sraw
         })
-        if _univ:
-            st.session_state["screener_univ_force"] = _univ
-        st.session_state.update(vals)
-        st.rerun()
+        # sanitiza preseleção do drill-down (setor pode não existir no universo atual)
+        if st.session_state.get("disc_setor_w") not in _setor_opts:
+            st.session_state["disc_setor_w"] = "todos os setores"
+        st.caption("Fundamentos do último cache · score combina fundamento, técnico e macro · 0 desativa o limite.")
 
-    col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1, 1, 1.4, 1.4, 1.2])
-    with col_p1:
-        if st.button("Valor", key="btn_preset_valor", use_container_width=True,
-                     help="P/L ≤ 15 · ROE ≥ 12 · score ≥ 55"):
-            _aplicar_preset(disc_pl_max_w=15.0, disc_roe_w=12.0, disc_score_w=55)
-    with col_p2:
-        if st.button("Dividendo", key="btn_preset_div", use_container_width=True,
-                     help="DY ≥ 6 · score ≥ 45"):
-            _aplicar_preset(disc_dy_w=6.0, disc_score_w=45)
-    with col_p3:
-        if st.button("FIIs descontados", key="btn_preset_fii", use_container_width=True,
-                     help="universo FIIs · P/VP ≤ 0,95 · DY ≥ 7 · score ≥ 50"):
-            _aplicar_preset(_univ="fii", disc_pvp_w=0.95, disc_dy_w=7.0, disc_score_w=50)
-    with col_p4:
-        if st.button("Qualidade barata", key="btn_preset_qb", use_container_width=True,
-                     help="P/L ≤ 12 · ROE ≥ 15 · score ≥ 55"):
-            _aplicar_preset(disc_pl_max_w=12.0, disc_roe_w=15.0, disc_score_w=55)
-    with col_p5:
-        if st.button("Resetar", key="btn_reset_filtros", use_container_width=True):
-            for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w', 'disc_dy_w',
-                       'disc_score_w', 'disc_pvp_w', 'disc_mm_w', 'disc_setor_w']:
-                st.session_state.pop(_k, None)
+        # ══ BOTÕES DE PRESET E RESET ════════════════════════════════════════════
+        section_title("⚙️ filtros")
+
+        def _aplicar_preset(_univ=None, **vals):
+            # F4-3: zera todos os filtros, limpa setor e aplica os valores do preset;
+            # opcionalmente força o universo (reusa screener_univ_force do F4-1).
+            st.session_state.update({
+                "disc_pl_min_w": 0.0, "disc_pl_max_w": 0.0, "disc_roe_w": 0.0,
+                "disc_dy_w": 0.0, "disc_pvp_w": 0.0, "disc_score_w": 0,
+                "disc_mm_w": False, "disc_setor_w": "todos os setores",
+            })
+            if _univ:
+                st.session_state["screener_univ_force"] = _univ
+            st.session_state.update(vals)
             st.rerun()
 
-    # ══ WIDGETS DE FILTRO (com value= persistente via session_state) ════════
-    f1, f2, f3, f4 = st.columns(4)
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1, 1, 1.4, 1.4, 1.2])
+        with col_p1:
+            if st.button("Valor", key="btn_preset_valor", use_container_width=True,
+                         help="P/L ≤ 15 · ROE ≥ 12 · score ≥ 55"):
+                _aplicar_preset(disc_pl_max_w=15.0, disc_roe_w=12.0, disc_score_w=55)
+        with col_p2:
+            if st.button("Dividendo", key="btn_preset_div", use_container_width=True,
+                         help="DY ≥ 6 · score ≥ 45"):
+                _aplicar_preset(disc_dy_w=6.0, disc_score_w=45)
+        with col_p3:
+            if st.button("FIIs descontados", key="btn_preset_fii", use_container_width=True,
+                         help="universo FIIs · P/VP ≤ 0,95 · DY ≥ 7 · score ≥ 50"):
+                _aplicar_preset(_univ="fii", disc_pvp_w=0.95, disc_dy_w=7.0, disc_score_w=50)
+        with col_p4:
+            if st.button("Qualidade barata", key="btn_preset_qb", use_container_width=True,
+                         help="P/L ≤ 12 · ROE ≥ 15 · score ≥ 55"):
+                _aplicar_preset(disc_pl_max_w=12.0, disc_roe_w=15.0, disc_score_w=55)
+        with col_p5:
+            if st.button("Resetar", key="btn_reset_filtros", use_container_width=True):
+                for _k in ['disc_pl_min_w', 'disc_pl_max_w', 'disc_roe_w', 'disc_dy_w',
+                           'disc_score_w', 'disc_pvp_w', 'disc_mm_w', 'disc_setor_w']:
+                    st.session_state.pop(_k, None)
+                st.rerun()
 
-    with f1:
-        st.markdown(
-            '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); '
-            'text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">p/l (faixa)</div>',
-            unsafe_allow_html=True,
-        )
-        pl_col1, pl_col2 = st.columns(2)
-        with pl_col1:
+        # ══ WIDGETS DE FILTRO (com value= persistente via session_state) ════════
+        f1, f2, f3, f4 = st.columns(4)
+
+        with f1:
+            st.markdown(
+                '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); '
+                'text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">p/l (faixa)</div>',
+                unsafe_allow_html=True,
+            )
+            pl_col1, pl_col2 = st.columns(2)
+            with pl_col1:
+                st.number_input(
+                    "P/L mínimo", min_value=0.0, max_value=200.0,
+                    step=1.0, key="disc_pl_min_w",
+                    label_visibility="visible",
+                    value=st.session_state.get('disc_pl_min_w', 0.0),
+                )
+            with pl_col2:
+                st.number_input(
+                    "P/L máximo", min_value=0.0, max_value=500.0,
+                    step=1.0, key="disc_pl_max_w",
+                    label_visibility="visible",
+                    value=st.session_state.get('disc_pl_max_w', 15.0),
+                )
+            st.caption("0 = sem limite")
+
+        with f2:
             st.number_input(
-                "P/L mínimo", min_value=0.0, max_value=200.0,
-                step=1.0, key="disc_pl_min_w",
-                label_visibility="visible",
-                value=st.session_state.get('disc_pl_min_w', 0.0),
+                "p/vp máximo:", min_value=0.0, max_value=20.0,
+                step=0.1, format="%.1f",
+                key="disc_pvp_w", help="0 = sem filtro",
+                value=st.session_state.get('disc_pvp_w', 0.0),
             )
-        with pl_col2:
             st.number_input(
-                "P/L máximo", min_value=0.0, max_value=500.0,
-                step=1.0, key="disc_pl_max_w",
-                label_visibility="visible",
-                value=st.session_state.get('disc_pl_max_w', 15.0),
+                "roe mínimo (%):", min_value=0.0, max_value=100.0,
+                step=1.0, key="disc_roe_w",
+                value=st.session_state.get('disc_roe_w', 0.0),
             )
-        st.caption("0 = sem limite")
 
-    with f2:
-        st.number_input(
-            "p/vp máximo:", min_value=0.0, max_value=20.0,
-            step=0.1, format="%.1f",
-            key="disc_pvp_w", help="0 = sem filtro",
-            value=st.session_state.get('disc_pvp_w', 0.0),
-        )
-        st.number_input(
-            "roe mínimo (%):", min_value=0.0, max_value=100.0,
-            step=1.0, key="disc_roe_w",
-            value=st.session_state.get('disc_roe_w', 0.0),
-        )
-
-    with f3:
-        st.number_input(
-            "dividend yield mínimo (%):",
-            min_value=0.0, max_value=30.0,
-            step=0.5, format="%.1f",
-            key="disc_dy_w",
-            value=st.session_state.get('disc_dy_w', 0.0),
-        )
-        st.slider(
-            "health score mínimo:",
-            min_value=0, max_value=100,
-            step=5, key="disc_score_w",
-            value=st.session_state.get('disc_score_w', 50),
-        )
-
-    with f4:
-        st.checkbox(
-            "apenas acima da MM200",
-            key="disc_mm_w",
-            value=st.session_state.get('disc_mm_w', False),
-        )
-
-    # ── filtro de setor (drill-down do scorecard, F4-1) ──────────────────────
-    st.selectbox(
-        "setor:", _setor_opts, key="disc_setor_w",
-        help="filtra por setor — usado pelo botão '🔍 ver ativos' da rotação setorial.",
-    )
-    _setor_sel    = st.session_state.get("disc_setor_w", "todos os setores")
-    _setor_filtro = "" if _setor_sel == "todos os setores" else _setor_sel
-
-    # ══ LEITURA DOS VALORES (via session_state após render) ═══════════════════
-    pl_min    = st.session_state["disc_pl_min_w"]
-    pl_max    = st.session_state["disc_pl_max_w"]
-    pvp_max   = st.session_state["disc_pvp_w"]
-    roe_min   = st.session_state["disc_roe_w"]
-    dy_min    = st.session_state["disc_dy_w"]
-    score_min = st.session_state["disc_score_w"]
-    apenas_mm = st.session_state["disc_mm_w"]
-
-    # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
-    # auto-run quando chega via drill-down do scorecard (F4-1); senão, no botão
-    _auto_run_scr = st.session_state.pop("screener_auto_run", False)
-    _faixa_invalida = pl_max > 0 and pl_min > pl_max
-    if _faixa_invalida:
-        st.warning("O P/L mínimo deve ser menor ou igual ao máximo.")
-    st.caption("Ajuste os critérios e aplique os filtros para atualizar os resultados.")
-    if (st.button("Aplicar filtros", type="primary", use_container_width=True,
-                  key="btn_rodar", disabled=_faixa_invalida) or _auto_run_scr) and not _faixa_invalida:
-        with st.spinner("filtrando universo de ativos..."):
-            df_result = rodar_screener(
-                universo        = universo_sel,
-                pl_min          = pl_min,
-                pl_max          = pl_max,
-                pvp_max         = pvp_max,
-                roe_min         = roe_min,
-                dy_min          = dy_min,
-                score_min       = score_min,
-                piotroski_min   = 0,
-                apenas_acima_mm = apenas_mm,
-                setor_filtro    = _setor_filtro,
+        with f3:
+            st.number_input(
+                "dividend yield mínimo (%):",
+                min_value=0.0, max_value=30.0,
+                step=0.5, format="%.1f",
+                key="disc_dy_w",
+                value=st.session_state.get('disc_dy_w', 0.0),
             )
-        st.session_state["screener_resultado"] = df_result
-        st.session_state["screener_universo"]  = universo_sel
-
-    # ── resultados ───────────────────────────────────────────────────────────
-    if 'screener_resultado' in st.session_state:
-        df_res = st.session_state['screener_resultado']
-        univ   = st.session_state.get('screener_universo', 'b3')
-
-        st.markdown("---")
-
-        if df_res.empty:
-            empty_state(
-                "🎯",
-                "nenhum ativo encontrado",
-                "tente relaxar os filtros — reduza o ROE mínimo, "
-                "aumente o P/L máximo ou diminua o health score mínimo. "
-                "use o botão '↺ resetar filtros' para voltar aos defaults.",
+            st.slider(
+                "health score mínimo:",
+                min_value=0, max_value=100,
+                step=5, key="disc_score_w",
+                value=st.session_state.get('disc_score_w', 50),
             )
-        else:
-            col_r1, col_r2, col_r3 = st.columns([2, 2, 1])
-            with col_r1:
-                section_title(f"📋 {len(df_res)} ativos encontrados")
-            with col_r2:
-                ordenar_por = st.selectbox(
-                    "ordenar por:",
-                    options=['score', 'dy%', 'roe%', 'p/l', 'p/vp'],
-                    key="sc_ordem",
-                )
-                df_res = df_res.sort_values(
-                    ordenar_por,
-                    ascending=(ordenar_por in ['p/l', 'p/vp']),
-                    na_position='last',
-                )
-            with col_r3:
-                csv_scr = df_res.drop(
-                    columns=['_ticker_full', '_nao_calc', '_sem_dados'],
-                    errors='ignore',
-                ).to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "Exportar CSV",
-                    data=csv_scr,
-                    file_name=f"screener_{univ}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="sc_download",
-                )
 
-            # ── PROBLEMA 4: aviso cache incompleto ──────────────
-            ativos_sem_dados = int(df_res.get('_sem_dados', pd.Series(dtype=bool)).sum()) if '_sem_dados' in df_res.columns else 0
-            if ativos_sem_dados > len(df_res) * 0.3:
-                status_card(
-                    "⚠️ cache de fundamentos incompleto",
-                    f"{ativos_sem_dados} de {len(df_res)} ativos sem dados fundamentalistas. "
-                    f"clique em '🔄 sync cache eua' no topo da página para atualizar os dados "
-                    f"antes de rodar o screener.",
-                    tipo="amber",
+        with f4:
+            st.checkbox(
+                "apenas acima da MM200",
+                key="disc_mm_w",
+                value=st.session_state.get('disc_mm_w', False),
+            )
+
+        # ── filtro de setor (drill-down do scorecard, F4-1) ──────────────────────
+        st.selectbox(
+            "setor:", _setor_opts, key="disc_setor_w",
+            help="filtra por setor — usado pelo botão '🔍 ver ativos' da rotação setorial.",
+        )
+        _setor_sel    = st.session_state.get("disc_setor_w", "todos os setores")
+        _setor_filtro = "" if _setor_sel == "todos os setores" else _setor_sel
+
+        # ══ LEITURA DOS VALORES (via session_state após render) ═══════════════════
+        pl_min    = st.session_state["disc_pl_min_w"]
+        pl_max    = st.session_state["disc_pl_max_w"]
+        pvp_max   = st.session_state["disc_pvp_w"]
+        roe_min   = st.session_state["disc_roe_w"]
+        dy_min    = st.session_state["disc_dy_w"]
+        score_min = st.session_state["disc_score_w"]
+        apenas_mm = st.session_state["disc_mm_w"]
+
+        _criterios_scr = {"universo": universo_sel, "pl_min": pl_min, "pl_max": pl_max, "pvp_max": pvp_max,
+                          "roe_min": roe_min, "dy_min": dy_min, "score_min": score_min, "mm200": apenas_mm, "setor": _setor_filtro}
+
+        # ══ BOTÃO RODAR ══════════════════════════════════════════════════════════
+        # auto-run quando chega via drill-down do scorecard (F4-1); senão, no botão
+        _auto_run_scr = st.session_state.pop("screener_auto_run", False)
+        _faixa_invalida = pl_max > 0 and pl_min > pl_max
+        if _faixa_invalida:
+            st.warning("O P/L mínimo deve ser menor ou igual ao máximo.")
+        st.caption("Ajuste os critérios e aplique os filtros para atualizar os resultados.")
+        if (st.button("Aplicar filtros", type="primary", use_container_width=True,
+                      key="btn_rodar", disabled=_faixa_invalida) or _auto_run_scr) and not _faixa_invalida:
+            with st.spinner("filtrando universo de ativos..."):
+                df_result = rodar_screener(
+                    universo        = universo_sel,
+                    pl_min          = pl_min,
+                    pl_max          = pl_max,
+                    pvp_max         = pvp_max,
+                    roe_min         = roe_min,
+                    dy_min          = dy_min,
+                    score_min       = score_min,
+                    piotroski_min   = 0,
+                    apenas_acima_mm = apenas_mm,
+                    setor_filtro    = _setor_filtro,
                 )
+            st.session_state["screener_resultado"] = df_result
+            st.session_state["screener_universo"]  = universo_sel
+            st.session_state["screener_criterios"] = _criterios_scr.copy()
 
-            # ── Tabela principal ─────────────────────────────────
-            df_display = df_res[['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']].copy()
+    with _resultados_screener:
+        st.markdown('<span id="resultado-screener"></span>', unsafe_allow_html=True)
+        # ── resultados ───────────────────────────────────────────────────────────
+        if 'screener_resultado' in st.session_state:
+            df_res = st.session_state['screener_resultado']
+            univ   = st.session_state.get('screener_universo', 'b3')
+            _aplicados_scr = st.session_state.get('screener_criterios')
+            if _aplicados_scr and _aplicados_scr != _criterios_scr:
+                st.info("Os critérios foram alterados. Aplique os filtros para atualizar o resultado abaixo.")
+            st.caption(f"Resultado aplicado: {univ.upper()}" + (f" · {_aplicados_scr.get('setor') or 'todos os setores'} · score ≥ {_aplicados_scr.get('score_min', 0)}" if _aplicados_scr else ""))
 
-            for col in ['p/l', 'p/vp', 'roe%', 'dy%', 'margem%']:
-                if col in df_display.columns:
-                    df_display[col] = df_display[col].apply(
-                        lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
+            st.markdown("---")
+
+            if df_res.empty:
+                empty_state(
+                    "🎯",
+                    "nenhum ativo encontrado",
+                    "tente relaxar os filtros — reduza o ROE mínimo, "
+                    "aumente o P/L máximo ou diminua o health score mínimo. "
+                    "use o botão '↺ resetar filtros' para voltar aos defaults.",
+                )
+            else:
+                col_r1, col_r2, col_r3 = st.columns([2, 2, 1])
+                with col_r1:
+                    section_title(f"📋 {len(df_res)} ativos encontrados")
+                with col_r2:
+                    ordenar_por = st.selectbox(
+                        "ordenar por:",
+                        options=['score', 'dy%', 'roe%', 'p/l', 'p/vp'],
+                        key="sc_ordem",
+                    )
+                    df_res = df_res.sort_values(
+                        ordenar_por,
+                        ascending=(ordenar_por in ['p/l', 'p/vp']),
+                        na_position='last',
+                    )
+                with col_r3:
+                    csv_scr = df_res.drop(
+                        columns=['_ticker_full', '_nao_calc', '_sem_dados'],
+                        errors='ignore',
+                    ).to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "Exportar CSV",
+                        data=csv_scr,
+                        file_name=f"screener_{univ}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="sc_download",
                     )
 
-            def _health_bar_html(s) -> str:
-                """Barra CSS de progresso para o health score."""
-                try:
-                    s = int(s)
-                except (TypeError, ValueError):
-                    return '<span style="color:var(--text-muted);">— n/c</span>'
-                if s <= 0:
-                    return '<span style="color:var(--text-muted);">— n/c</span>'
-                _cor = ("#2ecc71" if s >= 65 else ("#f39c12" if s >= 40 else "#e74c3c"))
-                _pct = min(s, 100)
-                return (
-                    f'<div style="display:flex;align-items:center;gap:8px;min-width:140px;">'
-                    f'<div style="flex:1;background:var(--border-subtle,rgba(255,255,255,0.1));'
-                    f'border-radius:3px;height:6px;overflow:hidden;">'
-                    f'<div style="width:{_pct}%;height:100%;background:{_cor};border-radius:3px;"></div>'
-                    f'</div>'
-                    f'<span style="font-family:var(--font-mono,monospace);font-size:0.8rem;'
-                    f'color:{_cor};min-width:26px;">{s}</span>'
-                    f'</div>'
+                # ── PROBLEMA 4: aviso cache incompleto ──────────────
+                ativos_sem_dados = int(df_res.get('_sem_dados', pd.Series(dtype=bool)).sum()) if '_sem_dados' in df_res.columns else 0
+                if ativos_sem_dados > len(df_res) * 0.3:
+                    status_card(
+                        "⚠️ cache de fundamentos incompleto",
+                        f"{ativos_sem_dados} de {len(df_res)} ativos sem dados fundamentalistas. "
+                        f"clique em '🔄 sync cache eua' no topo da página para atualizar os dados "
+                        f"antes de rodar o screener.",
+                        tipo="amber",
+                    )
+
+                _vista_scr = section_selector(["Tabela", "Mapa de métricas"], key="discovery_screener_view")
+                _sc_ativos = df_res['_ticker_full'].tolist()
+                if _vista_scr == "Mapa de métricas":
+                    _sx, _sy = st.columns(2)
+                    _sc_metricas = {'P/L': 'p/l', 'P/VP': 'p/vp', 'ROE %': 'roe%', 'DY %': 'dy%', 'Margem %': 'margem%', 'Health score': 'score'}
+                    _sc_x_label = _sx.selectbox("Eixo horizontal", list(_sc_metricas), key="screener_mapa_x")
+                    _sc_y_label = _sy.selectbox("Eixo vertical", list(_sc_metricas), index=2, key="screener_mapa_y")
+                    _sc_x, _sc_y = _sc_metricas[_sc_x_label], _sc_metricas[_sc_y_label]
+                    _sc_plot = df_res.copy()
+                    for _col in {_sc_x, _sc_y, 'score'}:
+                        _sc_plot[_col] = pd.to_numeric(_sc_plot[_col], errors='coerce')
+                    _sc_plot.loc[_sc_plot.get('_nao_calc', pd.Series(False, index=_sc_plot.index)).fillna(False), 'score'] = float('nan')
+                    _sc_plot = _sc_plot.dropna(subset=[_sc_x, _sc_y])
+                    if not _sc_plot.empty:
+                        _cc_sc = _chart_cores()
+                        _fig_sc = go.Figure()
+                        _sc_plot['_score_label'] = _sc_plot['score'].apply(lambda v: f"{v:.0f}/100" if pd.notna(v) else "Não calculado")
+                        for _has_score in (True, False):
+                            _sc_group = _sc_plot.loc[_sc_plot['score'].notna() == _has_score]
+                            if _sc_group.empty:
+                                continue
+                            _sc_marker = dict(size=11, line=dict(width=1, color=_cc_sc['border']))
+                            if _has_score:
+                                _sc_marker.update(color=_sc_group['score'], cmin=0, cmax=100,
+                                    colorscale=[[0, _cc_sc['bear']], [0.5, _cc_sc['amber']], [1, _cc_sc['bull']]], colorbar=dict(title='Score'))
+                            else:
+                                _sc_marker.update(color=_cc_sc['muted'])
+                            _fig_sc.add_trace(go.Scatter(
+                                x=_sc_group[_sc_x], y=_sc_group[_sc_y], mode='markers',
+                                name='Score calculado' if _has_score else 'Score não calculado',
+                                showlegend=not _has_score,
+                                customdata=_sc_group[['_ticker_full', 'ticker', '_score_label']].to_numpy(),
+                                marker=_sc_marker,
+                                hovertemplate='<b>%{customdata[1]}</b><br>' + _sc_x_label + ': %{x:.2f}<br>' + _sc_y_label + ': %{y:.2f}<br>Score: %{customdata[2]}<extra></extra>',
+                            ))
+                        _layout_sc = base_layout(height=420)
+                        _layout_sc.update(xaxis_title=_sc_x_label, yaxis_title=_sc_y_label, hovermode='closest', clickmode='event+select', dragmode='pan')
+                        _fig_sc.update_layout(**_layout_sc)
+                        _evento_sc = st.plotly_chart(_fig_sc, use_container_width=True, theme=None, on_select='rerun', selection_mode='points', key='screener_mapa_plot', config={'responsive': True})
+                        _pontos_sc = _evento_sc.selection.points
+                        if _pontos_sc:
+                            _custom_sc = _pontos_sc[0].get('customdata', [])
+                            _ticker_sc = _custom_sc[0] if _custom_sc else None
+                            if _ticker_sc in _sc_ativos and _ticker_sc != st.session_state.get('_sc_mapa_ultimo_ticker'):
+                                st.session_state['sc_ativo_detalhe'] = _ticker_sc
+                                st.session_state['_sc_mapa_ultimo_ticker'] = _ticker_sc
+                        else:
+                            st.session_state.pop('_sc_mapa_ultimo_ticker', None)
+                        st.caption("Clique em um ponto para selecionar o ativo abaixo. Cinza identifica score não calculado; ativos sem valor em um dos eixos ficam fora do mapa.")
+                    else:
+                        st.info("Não há valores disponíveis nos dois eixos escolhidos. Experimente outras métricas.")
+                else:
+                    # ── Tabela principal ─────────────────────────────────
+                    df_display = df_res[['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']].copy()
+
+                    for col in ['p/l', 'p/vp', 'roe%', 'dy%', 'margem%']:
+                        if col in df_display.columns:
+                            df_display[col] = df_display[col].apply(
+                                lambda x: f"{x:.1f}" if pd.notna(x) and x is not None else "—"
+                            )
+
+                    def _health_bar_html(s) -> str:
+                        """Barra CSS de progresso para o health score."""
+                        try:
+                            s = int(s)
+                        except (TypeError, ValueError):
+                            return '<span style="color:var(--text-muted);">— n/c</span>'
+                        if s <= 0:
+                            return '<span style="color:var(--text-muted);">— n/c</span>'
+                        _cor = ("#2ecc71" if s >= 65 else ("#f39c12" if s >= 40 else "#e74c3c"))
+                        _pct = min(s, 100)
+                        return (
+                            f'<div style="display:flex;align-items:center;gap:8px;min-width:140px;">'
+                            f'<div style="flex:1;background:var(--border-subtle,rgba(255,255,255,0.1));'
+                            f'border-radius:3px;height:6px;overflow:hidden;">'
+                            f'<div style="width:{_pct}%;height:100%;background:{_cor};border-radius:3px;"></div>'
+                            f'</div>'
+                            f'<span style="font-family:var(--font-mono,monospace);font-size:0.8rem;'
+                            f'color:{_cor};min-width:26px;">{s}</span>'
+                            f'</div>'
+                        )
+
+                    # Tabela de resultado via html_table (F0-2): health como barra na célula.
+                    from utils.components import html_table as _html_table_scr
+                    _header_cols = ["Ticker", "Nome", "Health Score", "P/L", "P/VP", "ROE %", "DY %", "Margem %"]
+                    _data_cols   = ['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
+                    _rows_scr, _classes_scr = [], []
+                    for _, _row in df_display.iterrows():
+                        _tk_full  = df_res.loc[_row.name, '_ticker_full'] if _row.name in df_res.index else _row['ticker']
+                        _tk_label = _row['ticker']
+                        _cells = [
+                            f'<a href="{ticker_nav_url(_tk_full)}" '
+                            f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk_label}</a>'
+                        ]
+                        _cls = ["mono"]
+                        for col in _data_cols[1:]:
+                            _val = _row.get(col, "—")
+                            _cells.append(_health_bar_html(_val) if col == 'score' else str(_val))
+                            _cls.append("")
+                        _rows_scr.append(_cells); _classes_scr.append(_cls)
+                    _html_table_scr(
+                        _header_cols, _rows_scr, classes=_classes_scr,
+                        caption="Clique no ticker para abrir a análise do ativo.",
+                    )
+
+                if st.session_state.get('sc_ativo_detalhe') not in _sc_ativos:
+                    st.session_state['sc_ativo_detalhe'] = _sc_ativos[0]
+                _sc_sel_col, _sc_abrir_col = st.columns([4, 1])
+                _sc_ativo_detalhe = _sc_sel_col.selectbox("Ativo para aprofundar", _sc_ativos, key='sc_ativo_detalhe', format_func=lambda t: t.replace('.SA', ''))
+                with _sc_abrir_col:
+                    st.caption("Análise individual")
+                    if st.button("Abrir análise", key='sc_abrir_analise', use_container_width=True):
+                        st.session_state['research_ticker_externo'] = _sc_ativo_detalhe
+                        st.switch_page("pages/1_Research.py")
+
+                # ── adicionar à watchlist ────────────────────────────────────────
+                section_title("➕ adicionar à watchlist")
+
+                tickers_full = df_res['_ticker_full'].tolist()
+                tickers_sel  = st.multiselect(
+                    "Ativos para acompanhar ou comparar",
+                    options=tickers_full,
+                    format_func=lambda x: x.replace('.SA', ''),
+                    key="sc_add_wl",
                 )
 
-            # Tabela de resultado via html_table (F0-2): health como barra na célula.
-            from utils.components import html_table as _html_table_scr
-            _header_cols = ["Ticker", "Nome", "Health Score", "P/L", "P/VP", "ROE %", "DY %", "Margem %"]
-            _data_cols   = ['ticker', 'nome', 'score', 'p/l', 'p/vp', 'roe%', 'dy%', 'margem%']
-            _rows_scr, _classes_scr = [], []
-            for _, _row in df_display.iterrows():
-                _tk_full  = df_res.loc[_row.name, '_ticker_full'] if _row.name in df_res.index else _row['ticker']
-                _tk_label = _row['ticker']
-                _cells = [
-                    f'<a href="/Research?research_ticker={_tk_full}" target="_blank" '
-                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">{_tk_label}</a>'
-                ]
-                _cls = ["mono"]
-                for col in _data_cols[1:]:
-                    _val = _row.get(col, "—")
-                    _cells.append(_health_bar_html(_val) if col == 'score' else str(_val))
-                    _cls.append("")
-                _rows_scr.append(_cells); _classes_scr.append(_cls)
-            _html_table_scr(
-                _header_cols, _rows_scr, classes=_classes_scr,
-                caption="clique no ticker para abrir no research em nova aba ↗",
-            )
+                if len(tickers_sel) >= 2:
+                    if st.button(f"Comparar {len(tickers_sel)} ativos", key='sc_comparar_selecao'):
+                        st.session_state['comp_ativos_presel'] = tickers_sel
+                        st.session_state['research_modo'] = 'Comparativo (Múltiplos)'
+                        st.switch_page("pages/1_Research.py")
 
-            # ── adicionar à watchlist ────────────────────────────────────────
-            section_title("➕ adicionar à watchlist")
+                if tickers_sel:
+                    if st.button(
+                        f"Adicionar {len(tickers_sel)} ativo(s) à watchlist",
+                        type="primary", key="sc_btn_add_wl",
+                    ):
+                        _cache_scr = get_todos_fundamentos_cache()
+                        try:
+                            _wl_id = get_watchlist_padrao()
+                        except Exception:
+                            _wl_id = None
 
-            tickers_full = df_res['_ticker_full'].tolist()
-            tickers_sel  = st.multiselect(
-                "selecione ativos para adicionar:",
-                options=tickers_full,
-                format_func=lambda x: x.replace('.SA', ''),
-                key="sc_add_wl",
-            )
+                        adicionados = 0
+                        for t_add in tickers_sel:
+                            t_add_base = mapear_ticker_base(t_add)
+                            fund_t     = _cache_scr.get(t_add) or _cache_scr.get(t_add_base) or {}
+                            mercado    = 'Brasil (B3)' if t_add.endswith('.SA') else 'EUA'
+                            ok = adicionar_ativo(
+                                ticker       = t_add,
+                                nome         = fund_t.get('nome', t_add),
+                                mercado      = mercado,
+                                watchlist_id = _wl_id,
+                            )
+                            if ok:
+                                adicionados += 1
 
-            if tickers_sel:
-                if st.button(
-                    f"Adicionar {len(tickers_sel)} ativo(s) à watchlist",
-                    type="primary", key="sc_btn_add_wl",
-                ):
-                    _cache_scr = get_todos_fundamentos_cache()
-                    try:
-                        _wl_id = get_watchlist_padrao()
-                    except Exception:
-                        _wl_id = None
-
-                    adicionados = 0
-                    for t_add in tickers_sel:
-                        t_add_base = mapear_ticker_base(t_add)
-                        fund_t     = _cache_scr.get(t_add) or _cache_scr.get(t_add_base) or {}
-                        mercado    = 'Brasil (B3)' if t_add.endswith('.SA') else 'EUA'
-                        ok = adicionar_ativo(
-                            ticker       = t_add,
-                            nome         = fund_t.get('nome', t_add),
-                            mercado      = mercado,
-                            watchlist_id = _wl_id,
-                        )
-                        if ok:
-                            adicionados += 1
-
-                    if adicionados > 0:
-                        st.success(f"✅ {adicionados} ativo(s) adicionados à watchlist!")
-                        st.rerun()
+                        if adicionados > 0:
+                            st.success(f"✅ {adicionados} ativo(s) adicionados à watchlist!")
+                            st.rerun()
 
 if _secao_d == "🧠 ia: oportunidades do dia":
     section_title("🧠 ia: oportunidades do dia")
@@ -1193,48 +1333,6 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 'valuation', 'timing',
                 'rsi', '5d %', '3m %', 'topo %',
             ]
-
-            def _ia_table_html(df: "pd.DataFrame") -> None:
-                # Render via html_table (F0-2): coloração via classes centrais.
-                from utils.components import html_table as _ht_ia
-                _num_cols = ['score total','qualidade (hs)','valuation','timing','rsi','5d %','3m %','topo %']
-                _cols_ia = list(df.columns)
-                _aligns_ia = ["left" if c in ("ticker","nome","mercado") else "right" for c in _cols_ia]
-                _rows_ia, _classes_ia = [], []
-                for _, row in df.iterrows():
-                    cells, cls = [], []
-                    for col in _cols_ia:
-                        _v = row[col]
-                        if col == 'ticker':
-                            cell = (f'<a href="/Research?research_ticker={_v}" target="_blank" '
-                                    f'style="color:var(--accent);font-weight:600;text-decoration:none;">'
-                                    f'{str(_v).replace(".SA","")}</a>'); c = "mono"
-                        elif col == 'nome':
-                            cell = str(_v)[:18] if pd.notna(_v) else "—"; c = "muted"
-                        elif col == 'mercado':
-                            cell = str(_v); c = "muted"
-                        elif col == 'score total':
-                            try:
-                                _si = int(float(_v)); cell = str(_si)
-                                c = "mono strong " + ("bull" if _si >= 65 else "amber" if _si >= 45 else "bear")
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
-                        elif col in ('5d %','3m %'):
-                            try:
-                                _fv = float(_v); cell = f"{_fv:+.1f}%"
-                                c = "mono " + ("bull" if _fv > 0 else "bear" if _fv < 0 else "muted")
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
-                        elif col in _num_cols:
-                            try:
-                                cell = f"{float(_v):.0f}"; c = "mono"
-                            except (TypeError, ValueError):
-                                cell = "—"; c = "muted"
-                        else:
-                            cell = str(_v); c = ""
-                        cells.append(cell); cls.append(c)
-                    _rows_ia.append(cells); _classes_ia.append(cls)
-                _ht_ia(_cols_ia, _rows_ia, aligns=_aligns_ia, classes=_classes_ia)
 
             _ia_table_html(_df_ia)
 
@@ -1807,6 +1905,14 @@ if _secao_d == "🗺️ rotação setorial":
     if rs is None:
         st.info("RS indisponível — falha em yfinance ou dados insuficientes.")
     else:
+        _rs1, _rs2 = st.columns([1, 3])
+        _rs_periodo = _rs1.selectbox("Janela do gráfico", ['3 meses', '6 meses', '12 meses'], index=2, key='discovery_rs_periodo')
+        _rs_opcoes = list(rs.df_rs.columns)
+        if any(t not in _rs_opcoes for t in st.session_state.get('discovery_rs_setores', [])):
+            st.session_state.pop('discovery_rs_setores', None)
+        _rs_selecionados = _rs2.multiselect("Setores no gráfico", _rs_opcoes, default=_rs_opcoes[:5], max_selections=8, key='discovery_rs_setores')
+        _rs_df = rs.df_rs.loc[rs.df_rs.index >= pd.Timestamp(rs.df_rs.index.max()) - pd.DateOffset(months=int(_rs_periodo.split()[0]))]
+        _rs_df = _rs_df / _rs_df.iloc[0] * 100 if not _rs_df.empty else _rs_df
         _fig_rs = go.Figure()
         _cc_rs = _chart_cores()
         _cores_rs = [
@@ -1815,15 +1921,15 @@ if _secao_d == "🗺️ rotação setorial":
             "#8B5CF6", "#06B6D4", "#EC4899", "#A78BFA",
             "#34D399", "#F472B6",
         ]
-        for i, col in enumerate(rs.df_rs.columns):
+        for i, col in enumerate(_rs_selecionados):
             _fig_rs.add_trace(go.Scatter(
-                x=rs.df_rs.index, y=rs.df_rs[col],
+                x=_rs_df.index, y=_rs_df[col],
                 mode="lines", name=col,
                 line=dict(width=1.5, color=_cores_rs[i % len(_cores_rs)]),
                 hovertemplate=f"{col}<br>%{{x}}<br>RS: %{{y:.1f}}<extra></extra>",
             ))
         _fig_rs.add_hline(y=100, line_color=_cc_rs["border"], line_dash="dot", line_width=1)
-        _lay_rs = base_layout(height=420, title="RS lines — setores EUA vs SPY (base 100)")
+        _lay_rs = base_layout(height=420, title=f"RS · setores EUA × SPY · {_rs_periodo} · base 100")
         _lay_rs.update(
             yaxis=dict(title="RS (base 100)", gridcolor=_cc_rs["border"]),
             xaxis=dict(gridcolor=_cc_rs["border"]),
@@ -1954,7 +2060,7 @@ if _secao_d == "🗺️ rotação setorial":
 # ==========================================
 # tab 5 — radar de mercado
 # ==========================================
-if _secao_d == "🚀 momentum & radar":
+if _secao_d == "🚀 momentum & radar" and _foco_momentum == "Radar de assimetria":
     st.markdown("<hr style='margin:32px 0 8px;border:0;border-top:1px solid var(--border-subtle);'>", unsafe_allow_html=True)
     section_title("⚡ radar de mercado — oportunidades fora da sua watchlist")
     tooltip("score_assimetria")
@@ -2042,8 +2148,12 @@ if _secao_d == "🚀 momentum & radar":
                 )
                 st.session_state['radar_resultado'] = _resultado_radar
                 st.session_state['radar_modo_last'] = _modo_radar_disc
+                st.session_state['radar_universo_last'] = _univ_radar
 
         _resultado_radar = st.session_state.get('radar_resultado', [])
+        _radar_univ_last = st.session_state.get('radar_universo_last', _univ_radar)
+        if _radar_univ_last != _univ_radar or st.session_state.get('radar_modo_last') != _modo_radar_disc:
+            st.info("Universo ou foco alterado. Rode um novo scan; o resultado abaixo pertence ao último cálculo.")
 
         if not _resultado_radar:
             st.info(
@@ -2056,7 +2166,7 @@ if _secao_d == "🚀 momentum & radar":
                 f'<div style="font-family:var(--font-ui,sans-serif);'
                 f'font-size:0.72rem;color:var(--text-muted);margin-bottom:12px;">'
                 f'top {len(_resultado_radar)} ativos do universo '
-                f'{_univ_radar} no modo '
+                f'{_radar_univ_last} no modo '
                 f'{st.session_state.get("radar_modo_last","—")}'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -2124,6 +2234,6 @@ if _secao_d == "🚀 momentum & radar":
 
     else:
         st.info(
-            "clique em '▶ rodar scan' para analisar o "
+            "Clique em Rodar scan para analisar o "
             "universo completo de ativos."
         )

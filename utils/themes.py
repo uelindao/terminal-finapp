@@ -1,8 +1,8 @@
 """
-utils/themes.py — v3.0
-Sistema de temas visuais + tipografia personalizável do Finterminal.
+utils/themes.py — v4.0
+Paletas, perfis de leitura e tipografia personalizável do FinTerminal.
 
-Cada tema tem paleta de cores, par tipográfico padrão e personalidade visual.
+As paletas definem cores; os perfis definem composição, densidade e gráficos.
 O usuário pode sobrescrever fontes de títulos, interface e dados independentemente.
 """
 
@@ -24,6 +24,7 @@ FONTES_TITULO: dict[str, dict] = {
     "ibm_plex_sans":    {"nome": "IBM Plex Sans",     "css": "'IBM Plex Sans', 'Inter', sans-serif",         "gf": "IBM+Plex+Sans:wght@500;600;700"},
     "plus_jakarta":     {"nome": "Plus Jakarta Sans", "css": "'Plus Jakarta Sans', 'Inter', sans-serif",     "gf": "Plus+Jakarta+Sans:wght@500;600;700"},
     "dm_sans":          {"nome": "DM Sans",           "css": "'DM Sans', 'Inter', sans-serif",               "gf": "DM+Sans:wght@500;600;700"},
+    "source_serif":     {"nome": "Source Serif 4", "css": "'Source Serif 4', Georgia, serif", "gf": "Source+Serif+4:wght@500;600;700"},
     "outfit":           {"nome": "Outfit",            "css": "'Outfit', 'Inter', sans-serif",                "gf": "Outfit:wght@500;600;700"},
 }
 
@@ -113,7 +114,7 @@ TEMAS: dict[str, dict] = {
     # Intenção: estética terminal pro (Bloomberg/Refinitiv), navy profundo, cantos
     # discretamente arredondados. Refinos mantidos sutis pra preservar identidade.
     "navy": {
-        "nome":    "Bloomberg",
+        "nome":    "Azul profundo",
         "emoji":   "🔵",
         "desc":    "navy profundo · IBM Plex · laranja vivo",
         "sidebar": "#060A13",
@@ -271,7 +272,7 @@ TEMAS: dict[str, dict] = {
     # Intenção: clean profissional Koyfin/Apexify (ref 3) em modo claro. Sombras
     # presentes (não vai chapado). text-muted escurecido pra passar WCAG AA.
     "light": {
-        "nome":    "Koyfin",
+        "nome":    "Luz fria",
         "emoji":   "☀️",
         "desc":    "claro profissional · Inter · azul cobalto",
         "sidebar": "#E4E8F3",
@@ -514,9 +515,9 @@ TEMAS_META  = {k: {"nome": v["nome"], "emoji": v["emoji"], "desc": v["desc"]}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DESIGN TOKENS v2 — escala compartilhada (Fase 1)
-# Espaçamento, tipografia, motion são iguais em todos os temas.
-# Radius e cores vêm de cada tema (preserva identidade).
+# DESIGN TOKENS — base semântica e movimento
+# Perfis visuais sobrescrevem densidade, composição e proporções.
+# Paletas continuam independentes da composição.
 # ══════════════════════════════════════════════════════════════════════════════
 
 TOKENS_BASE: dict[str, str] = {
@@ -672,29 +673,49 @@ def _compute_derived(vars: dict, is_light: bool, tema_id: str) -> dict[str, str]
     return {**derived, **shadows, **chart_vars, "--ink-on-accent": "#FFFFFF" if is_light else "#11150E"}
 
 
+def _readable_text_tokens(colors: dict[str, str]) -> dict[str, str]:
+    """Mantém texto pequeno legível também nas paletas anteriores ao Carbon."""
+    def luminance(hex_color):
+        channels = [v / 255 for v in _hex_to_rgb(hex_color)]
+        linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in channels]
+        return sum(v * weight for v, weight in zip(linear, (.2126, .7152, .0722)))
+    def contrast(a, b):
+        lo, hi = sorted((luminance(a), luminance(b)))
+        return (hi + .05) / (lo + .05)
+    backgrounds = [colors["--bg-base"], colors["--bg-surface"]]
+    target = (255, 255, 255) if luminance(colors["--text-primary"]) > .5 else (0, 0, 0)
+    result = {}
+    for token in ("--text-secondary", "--text-muted"):
+        color = colors[token]
+        if min(contrast(color, bg) for bg in backgrounds) >= 4.5:
+            continue
+        original = _hex_to_rgb(color)
+        for step in range(1, 101):
+            mixed = tuple(round(a + (b - a) * step / 100) for a, b in zip(original, target))
+            candidate = "#" + "".join(f"{v:02X}" for v in mixed)
+            if min(contrast(candidate, bg) for bg in backgrounds) >= 4.5:
+                result[token] = candidate
+                break
+    return result
+
+
 def get_design_tokens() -> dict[str, str]:
-    """
-    Snapshot dos tokens efetivos do tema ativo
-    (base + tema + derivados + fontes ativas).
-    Útil para consumo Python — ex.: gerar cores de série pro Plotly.
-    """
+    """Snapshot efetivo: cores + perfil/densidade + fontes manuais opcionais."""
+    from utils.appearance import get_perfil_tokens
     tema_id = get_tema_ativo()
-    tema    = TEMAS.get(tema_id, TEMAS["dark"])
-    is_lt   = tema.get("is_light", False)
-    derived = _compute_derived(tema["vars"], is_lt, tema_id)
-
-    fontes   = get_fontes_ativas()
-    f_titulo = FONTES_TITULO.get(fontes["titulo"], FONTES_TITULO["space_grotesk"])
-    f_ui     = FONTES_UI.get(fontes["ui"],         FONTES_UI["inter"])
-    f_data   = FONTES_DATA.get(fontes["data"],      FONTES_DATA["jetbrains_mono"])
+    tema = TEMAS[tema_id]
+    colors = {**tema["vars"], **_readable_text_tokens(tema["vars"])}
+    derived = _compute_derived(colors, tema.get("is_light", False), tema_id)
+    fontes = get_fontes_ativas()
     font_vars = {
-        "--font-title": f_titulo["css"],
-        "--font-ui":    f_ui["css"],
-        "--font-data":  f_data["css"],
-        "--font-mono":  f_data["css"],  # alias de compat
+        "--font-title": FONTES_TITULO[fontes["titulo"]]["css"],
+        "--font-ui": FONTES_UI[fontes["ui"]]["css"],
+        "--font-data": FONTES_DATA[fontes["data"]]["css"],
+        "--font-mono": FONTES_DATA[fontes["data"]]["css"],
     }
-
-    return {**TOKENS_BASE, **tema["vars"], **derived, **font_vars}
+    profile_tokens = get_perfil_tokens()
+    derived["--chart-grid"] = _rgba(colors["--text-muted"], float(profile_tokens["--chart-grid-opacity"]))
+    return {**TOKENS_BASE, **colors, **derived, **profile_tokens, **font_vars}
 
 
 def get_chart_palette() -> list[str]:
@@ -711,7 +732,8 @@ def get_tema_ativo() -> str:
     qp = st.query_params.get("theme", None)
     if qp and qp in TEMAS:
         st.session_state["_theme"] = qp
-    return st.session_state.get("_theme", "dark")
+    ativo = st.session_state.get("_theme", "dark")
+    return ativo if isinstance(ativo, str) and ativo in TEMAS else "dark"
 
 
 def set_tema(tema_id: str) -> None:
@@ -730,11 +752,11 @@ def is_tema_claro() -> bool:
 
 
 def get_accent_color() -> str:
-    return TEMAS.get(get_tema_ativo(), TEMAS["dark"])["vars"]["--accent"]
+    return get_design_tokens()["--accent"]
 
 
 def get_chart_colors() -> dict:
-    t = TEMAS.get(get_tema_ativo(), TEMAS["dark"])["vars"]
+    t = get_design_tokens()
     return {
         "accent":   t["--accent"],
         "bull":     t["--bull"],
@@ -756,14 +778,30 @@ def get_chart_colors() -> dict:
 def get_fontes_ativas() -> dict[str, str]:
     """
     Retorna as chaves das fontes ativas para {titulo, ui, data}.
-    Prioridade: session_state (picker) > padrão do tema ativo.
+    Overrides persistentes da sessão > tipografia do perfil/paleta.
+    Chaves de widgets são migradas para chaves que sobrevivem à navegação.
     """
     tema_id  = get_tema_ativo()
-    defaults = TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+    from utils.appearance import PERFIS_VISUAIS, get_perfil_ativo
+    perfil = get_perfil_ativo()
+    # Mesa mantém os pares tipográficos das paletas existentes; os outros
+    # perfis têm uma linguagem própria, mesmo quando a paleta é trocada.
+    defaults = (TEMAS_FONTES_DEFAULT.get(tema_id, TEMAS_FONTES_DEFAULT["dark"])
+                if perfil == "mesa" else PERFIS_VISUAIS[perfil]["fontes"])
 
-    ft = st.session_state.get("_font_titulo", "")
-    fu = st.session_state.get("_font_ui",     "")
-    fd = st.session_state.get("_font_data",   "")
+    def override(parte: str, catalogo: dict) -> str:
+        backing_key = f"_appearance_font_{parte}"
+        valor = st.session_state.get(backing_key, "")
+        if not isinstance(valor, str) or valor not in catalogo:
+            valor = st.session_state.get(f"_font_{parte}", "")
+            if isinstance(valor, str) and valor in catalogo:
+                st.session_state[backing_key] = valor
+            else:
+                valor = ""
+        return valor
+    ft = override("titulo", FONTES_TITULO)
+    fu = override("ui", FONTES_UI)
+    fd = override("data", FONTES_DATA)
 
     return {
         "titulo": ft if ft in FONTES_TITULO else defaults["titulo"],
@@ -774,7 +812,8 @@ def get_fontes_ativas() -> dict[str, str]:
 
 def resetar_fontes() -> None:
     """Remove overrides de fonte, voltando ao padrão do tema ativo."""
-    for k in ("_font_titulo", "_font_ui", "_font_data"):
+    for k in ("_font_titulo", "_font_ui", "_font_data",
+              "_appearance_font_titulo", "_appearance_font_ui", "_appearance_font_data"):
         st.session_state.pop(k, None)
 
 
@@ -797,8 +836,7 @@ def _build_gf_import(f_titulo: dict, f_ui: dict, f_data: dict) -> str:
 
 def get_tema_css() -> str:
     """
-    Bloco <style> injetado APÓS o CSS principal — sobrescreve variáveis :root
-    com as cores do tema + as fontes escolhidas (ou padrões do tema).
+    Tokens efetivos e marcador do perfil; a folha de interface usa ambos.
     """
     tema_id    = get_tema_ativo()
     tema       = TEMAS.get(tema_id, TEMAS["dark"])
@@ -812,28 +850,12 @@ def get_tema_css() -> str:
 
     font_import = _build_gf_import(f_titulo, f_ui, f_data)
 
-    # Variáveis de fonte sobrescrevem o :root
-    # --font-mono é alias de compat para tabelas HTML em Discovery/Configuracoes/
-    # Backfill que usam var(--font-mono) (introduzido fora da Fase 3). Mantém
-    # o mesmo valor de --font-data sem precisar refatorar páginas.
-    font_vars = {
-        "--font-title": f_titulo["css"],
-        "--font-ui":    f_ui["css"],
-        "--font-data":  f_data["css"],
-        "--font-mono":  f_data["css"],
-    }
-
-    # Tokens derivados (gradient, glass, pills, sombras, chart-1..8)
-    is_light_t   = tema.get("is_light", False)
-    derived_vars = _compute_derived(tema["vars"], is_light_t, tema_id)
-
-    # Ordem: base (espaçamento/tipografia/motion) → tema (cores) → derivados → fontes
-    all_vars = {**TOKENS_BASE, **tema["vars"], **derived_vars, **font_vars}
+    all_vars = get_design_tokens()
     vars_str = "\n".join(f"        {k}: {v};" for k, v in all_vars.items())
 
     light_overrides = ""
     if tema.get("is_light"):
-        t = tema["vars"]
+        t = all_vars
         light_overrides = f"""
     /* ── Light mode: override seletores Streamlit que ficam escuros ── */
     html, body, .stApp,
@@ -909,7 +931,9 @@ def get_tema_css() -> str:
     }}
     """
 
-    return f"""<style>
+    from utils.appearance import get_perfil_ativo
+    perfil = get_perfil_ativo()
+    return f'''<style>
     {font_import}
     :root {{
 {vars_str}
@@ -919,7 +943,8 @@ def get_tema_css() -> str:
         background-color: {sidebar_bg} !important;
     }}
     {light_overrides}
-</style>"""
+</style>
+<div class="ft-appearance-marker ft-appearance-{perfil}" aria-hidden="true"></div>'''
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -927,15 +952,26 @@ def get_tema_css() -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_theme_switcher_sidebar() -> None:
-    """Preferências secundárias ficam recolhidas, mantendo a busca acessível."""
+    """Troca rápida de composição e paleta; ajustes finos ficam em Configurações."""
+    from utils.appearance import PERFIS_VISUAIS, PERFIS_ORDER, get_perfil_ativo, set_perfil
+    perfil = get_perfil_ativo()
     ativo = get_tema_ativo()
     with st.sidebar.expander("Aparência", expanded=False):
-        escolha = st.selectbox(
-            "Tema da interface", options=TEMAS_ORDER,
-            format_func=lambda tid: TEMAS[tid]["nome"] + (" · claro" if TEMAS[tid].get("is_light") else ""),
-            index=TEMAS_ORDER.index(ativo), key="_theme_selectbox",
+        profile_key = "_appearance_sidebar_profile"
+        palette_key = "_theme_selectbox"
+        if st.session_state.get(profile_key) != perfil:
+            st.session_state[profile_key] = perfil
+        if st.session_state.get(palette_key) != ativo:
+            st.session_state[palette_key] = ativo
+        st.selectbox(
+            "Perfil de leitura", options=PERFIS_ORDER, key=profile_key,
+            format_func=lambda pid: PERFIS_VISUAIS[pid]["nome"],
+            on_change=lambda: set_perfil(st.session_state[profile_key]),
         )
-        st.caption("Personalize as fontes em Configurações → Aparência.")
-        if escolha != ativo:
-            set_tema(escolha)
-            st.rerun()
+        st.selectbox(
+            "Paleta", options=TEMAS_ORDER, key=palette_key,
+            format_func=lambda tid: TEMAS[tid]["nome"] + (" · clara" if TEMAS[tid].get("is_light") else ""),
+            on_change=lambda: set_tema(st.session_state[palette_key]),
+        )
+        st.caption(PERFIS_VISUAIS[perfil]["uso"])
+        st.caption("Presets e ajustes em Configurações → Aparência.")
