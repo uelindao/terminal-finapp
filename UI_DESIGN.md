@@ -63,7 +63,7 @@ A seleção nativa de gráficos segue a [API de seleção do Streamlit](https://
 
 ## Validação desta rodada
 
-A suíte completa passou com 214 testes. Inclui regressões de estado, navegação, aparência, importação inválida, fontes entre páginas, dados ausentes, janelas comparáveis, alinhamento por data e preenchimento dos gráficos.
+A suíte completa passou com 217 testes. Inclui regressões de estado, navegação, aparência, importação inválida, fontes entre páginas, dados ausentes, janelas comparáveis, alinhamento por data e preenchimento dos gráficos.
 
 A inspeção no Chromium utilizou serviços externos isolados e dados ilustrativos. Foram verificadas as seis páginas, suas seções e estudos, configurações administrativas, login, os quatro perfis em 1440 × 1000 e 390 × 844, seleção de pontos, comparação de ativos, filtro do diário e histórico financeiro com apenas dois trimestres. Não houve transbordamento horizontal nos cenários verificados. A validação local não autentica uma conta real nem confirma a disponibilidade das APIs de produção.
 
@@ -73,4 +73,12 @@ python -m compileall -q Home.py pages utils
 streamlit run Home.py
 ```
 
-A entrada opcional `streamlit_app.py` mantém o roteamento centralizado. A dependência mínima permanece Streamlit 1.41.
+A entrada opcional `streamlit_app.py` mantém o roteamento centralizado. O ambiente publicado usa Streamlit 1.57.0, fixado em requirements.txt para reproduzir a versão validada.
+
+## Correção de layout no Community Cloud
+
+Tokens, marcador de perfil e interface são enviados juntos por st.html em cada renderização. Valores de segurança nas propriedades estruturais conservam alturas, margens e espaçamento mesmo quando faltam tokens. Cartões de métricas usam HTML nativo para que o espaço reservado corresponda à altura real. O padding dos gráficos fica no layout Plotly, evitando cortar legendas.
+
+A Home mostra seis sinais prioritários em uma grade de três colunas, duas quando a área disponível diminui e uma no celular. Os demais sinais continuam acessíveis em uma seção expansível. A chave de cache inclui os tickers da watchlist, evitando compartilhar avisos entre listas diferentes.
+
+Esta correção foi verificada nas páginas reais com uma watchlist de 21 ativos e nos quatro perfis em computador e celular. Também foi simulada a ausência dos tokens de tamanho. A alteração em requirements.txt requer reconstrução do ambiente no Cloud; o teste local não confirma a conclusão dessa publicação.

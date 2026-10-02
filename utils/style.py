@@ -11,7 +11,8 @@ def _interface_css() -> str:
 def aplicar_tema():
     """Aplica a interface a cada renderização, inclusive login e estados de erro."""
     from utils.themes import get_tema_css
-    st.markdown(get_tema_css(), unsafe_allow_html=True)
-    st.markdown(f"<style>{_interface_css()}</style>", unsafe_allow_html=True)
+    # st.html avoids Markdown parsing and sends tokens, profile marker and
+    # interface together. Re-emit on every rerun so presets apply immediately.
+    st.html(get_tema_css() + f"<style>{_interface_css()}</style>")
     from utils.charts import aplicar_template_ativo
     aplicar_template_ativo()

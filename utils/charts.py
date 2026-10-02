@@ -209,7 +209,7 @@ def base_layout(height: int | None = None, title: str = "") -> dict:
         font=dict(family=fu, color=c["muted"], size=style["font_size"]),
         dragmode="pan",
         modebar=dict(bgcolor="rgba(0,0,0,0)", color=c["muted"], activecolor=c["accent"]),
-        margin=dict(l=0, r=0, t=30 if title else 12, b=0),
+        margin=dict(l=8, r=12, t=46 if title else 28, b=6),
         hovermode=style["hovermode"],
         hoverlabel=dict(
             bgcolor=c["elevated"],

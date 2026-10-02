@@ -72,6 +72,60 @@ def section_title(titulo: str):
     st.markdown(f'<h2 class="ft-section-title">{_escape(_clean_label(titulo))}</h2>', unsafe_allow_html=True)
 
 
+
+def _attention_cards_html(itens: list[dict]) -> str:
+    """Cartões de sinais com links de análise e conteúdo escapado."""
+    categories = {"score": "Score", "tecnico": "Técnico", "evento": "Agenda", "divergencia": "Macro"}
+    cards = []
+    for item in itens:
+        tone = item.get("tom", "info")
+        if tone not in ("bull", "bear", "amber", "info"):
+            tone = "info"
+        category = categories.get(item.get("tipo"), "Sinal")
+        title = _escape(str(item.get("titulo", "Sinal de mercado")))
+        detail = _escape(str(item.get("detalhe", "")))
+        content = (
+            '<div class="ft-attention-card-top">'
+            f'<span class="ft-attention-type">{category}</span>'
+            + ('<span class="ft-attention-open" aria-hidden="true">↗</span>' if item.get("ticker") else '')
+            + '</div>'
+            f'<strong class="ft-attention-title">{title}</strong>'
+            f'<span class="ft-attention-detail">{detail}</span>'
+        )
+        attributes = f'class="ft-attention-card" style="--attention-tone:var(--{tone if tone != "info" else "accent"})"'
+        if item.get("ticker"):
+            href = _escape(ticker_nav_url(str(item["ticker"])), quote=True)
+            cards.append(f'<a {attributes} href="{href}" target="_self">{content}</a>')
+        else:
+            cards.append(f'<div {attributes}>{content}</div>')
+    return '<div class="ft-attention-grid">' + ''.join(cards) + '</div>'
+
+
+def attention_panel(itens: list[dict], *, limite: int = 6) -> None:
+    """Seis sinais prioritários num relance; o restante fica acessível recolhido.
+
+    A ordem vem do motor de sinais; a apresentação não altera seu ranking.
+    """
+    limit = max(1, int(limite))
+    visible, remaining = itens[:limit], itens[limit:]
+    total = len(itens)
+    count = f"{len(visible)} de {total} sinais" if remaining else ("1 sinal" if total == 1 else f"{total} sinais")
+    heading = (
+        '<div class="ft-attention-heading">'
+        '<h2>Atenção hoje</h2>'
+        + (f'<span class="ft-attention-count">{count}</span>' if total else '')
+        + '</div>'
+    )
+    body = _attention_cards_html(visible) if visible else (
+        '<div class="ft-attention-empty">Sem sinais novos na watchlist ou na agenda de hoje.</div>'
+    )
+    st.markdown('<section class="ft-attention-panel" aria-label="Sinais prioritários">' + heading + body + '</section>', unsafe_allow_html=True)
+    if remaining:
+        label = "Mais 1 sinal" if len(remaining) == 1 else f"Mais {len(remaining)} sinais"
+        with st.expander(label, expanded=False):
+            st.markdown(_attention_cards_html(remaining), unsafe_allow_html=True)
+
+
 def section_selector(secoes: list[str], key: str, *, label: str = "Seção",
                      default: str | None = None) -> str:
     """Uma seção sempre selecionada; rótulos visuais sem alterar as chaves antigas."""
@@ -113,12 +167,12 @@ def metric_card(label: str, valor: str, sublabel: str = "", cor_delta: str = "mu
     tone = cor_delta if cor_delta in ("bull", "bear", "amber", "info") else "muted"
     source = f'<span class="ft-source">{_escape(data_source)}</span>' if data_source else ''
     emphasis = ' ft-metric-highlight' if destaque else ''
-    st.markdown(
+    st.html(
         f'<div class="metric-card ft-metric{emphasis}">'
         f'<div class="ft-metric-label">{_escape(_clean_label(label))}{source}</div>'
         f'<div class="ft-metric-value">{_escape(str(valor))}</div>'
         + (f'<div class="ft-metric-sub color-{tone}">{_escape(sublabel)}</div>' if sublabel else '')
-        + '</div>', unsafe_allow_html=True,
+        + '</div>',
     )
 
 

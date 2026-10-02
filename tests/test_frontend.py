@@ -163,7 +163,7 @@ def test_headers_escape_user_supplied_text():
         page_header('<img src=x>', '<script>alert(1)</script>')
         metric_card('Label', '<img src=x>')
     ''')
-    rendered = "".join(item.value for item in at.markdown)
+    rendered = "".join(item.value for item in at.markdown) + "".join(item.proto.body for item in at.get("html"))
     assert "<script>" not in rendered
     assert "<img src=x>" not in rendered
     assert "&lt;img src=x&gt;" in rendered

@@ -38,7 +38,7 @@ from utils.components import (
     status_card, inject_keyboard_shortcuts, auto_refresh_indicator,
     tooltip, label_com_tooltip,
     handle_ticker_nav, ticker_nav_url,
-    info_box,
+    info_box, attention_panel,
     # Fase 6 — shell visual da Home
     topbar, side_panel,
     # Zona 1 — hero visual
@@ -392,11 +392,11 @@ def _calendario_macro_home():
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _coletar_atencao_home(_wl_tickers: tuple):
+def _coletar_atencao_home(wl_tickers: tuple):
     """Coleta cache-first os sinais de 'atenção hoje' para a watchlist."""
     from database.db import get_historico_score, get_all_price_cache
     hist = {}
-    for tk in _wl_tickers:
+    for tk in wl_tickers:
         try:
             h = get_historico_score(tk, dias=10)
             if h:
@@ -416,49 +416,22 @@ def _coletar_atencao_home(_wl_tickers: tuple):
     except Exception:
         _div_b = []
     return coletar_atencao_hoje(
-        watchlist=list(_wl_tickers),
+        watchlist=list(wl_tickers),
         historico_por_ticker=hist,
         price_cache=pc,
         eventos=_calendario_macro_home(),
         divergencias=_div_b,
+        limite=max(8, 2 * len(wl_tickers) + len(_calendario_macro_home()) + len(_div_b)),
     )
 
 
 def _render_atencao_hoje():
-    _tom_cor = {"bull": "var(--bull)", "bear": "var(--bear)",
-                "amber": "var(--amber)", "info": "var(--accent)"}
     try:
         _wl_at = [r["ticker"] for r in (listar_watchlist() or []) if r.get("ticker")]
     except Exception:
         _wl_at = []
     itens = _coletar_atencao_home(tuple(sorted(set(_wl_at))))
-
-    section_title("🔔 atenção hoje")
-    if not itens:
-        info_box("info", "Nenhum movimento de score, sinal técnico ou evento macro exige atenção agora.", titulo="Tudo em ordem por aqui")
-        return
-
-    linhas = []
-    for it in itens:
-        cor = _tom_cor.get(it.get("tom", "info"), "var(--accent)")
-        titulo = it.get("titulo", "")
-        href = ticker_nav_url(it["ticker"]) if it.get("ticker") else None
-        if href:
-            titulo = (f'<a href="{href}" target="_self" '
-                      f'style="color:var(--text-primary);text-decoration:none;">{titulo} ↗</a>')
-        linhas.append(
-            f'<div style="display:flex;align-items:center;gap:12px;padding:9px 14px;'
-            f'background:var(--bg-surface);border:1px solid var(--border-subtle);'
-            f'border-left:3px solid {cor};border-radius:var(--radius-sm);margin-bottom:6px;">'
-            f'<span style="font-size:1.05rem;line-height:1;">{it.get("icone","•")}</span>'
-            f'<div style="flex:1;min-width:0;">'
-            f'<div style="font-family:var(--font-ui);font-size:0.86rem;font-weight:600;'
-            f'color:var(--text-primary);">{titulo}</div>'
-            f'<div style="font-family:var(--font-ui);font-size:0.72rem;color:var(--text-muted);">'
-            f'{it.get("detalhe","")}</div>'
-            f'</div></div>'
-        )
-    st.markdown("".join(linhas), unsafe_allow_html=True)
+    attention_panel(itens, limite=6)
 
 
 _render_atencao_hoje()
