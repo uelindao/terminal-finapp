@@ -186,26 +186,19 @@ def puxar_historico_mestre():
             'Dolar':            1,
             'Desemprego':       24369,
             'Divida_Bruta_PIB': 13762,
-            'Result_Primario':  5793,
-            'Result_Nominal':   4192,
+            'Saldo_Primario_PIB': 5793,
+            'NFSP_Nominal_PIB': 5727,
+            'IBC_Br':          24364,
         }
+        from utils.bcb_series import buscar_serie_bcb
         dfs_br_dict = {}
         for nome, codigo in series_bcb.items():
             try:
-                df_temp = sgs.get({nome: codigo}, start=inicio_10a)
-                if not df_temp.empty:
-                    dfs_br_dict[nome] = df_temp[nome]
+                serie = buscar_serie_bcb(codigo, nome, inicio_10a.date(), hoje.date())
+                if not serie.empty:
+                    dfs_br_dict[nome] = -serie if codigo == 5793 else serie
             except Exception as e:
                 logger.error(f"[macro] BCB série '{nome}' (código {codigo}) falhou: {e}")
-
-        # Fallback Selic: série 432 → 439
-        if 'Selic' not in dfs_br_dict:
-            try:
-                _selic_fb = sgs.get({'Selic': 439}, start=inicio_10a)
-                if not _selic_fb.empty:
-                    dfs_br_dict['Selic'] = _selic_fb['Selic']
-            except Exception as e:
-                logger.error(f"[macro] BCB Selic fallback (série 439) falhou: {e}")
 
         df_br = pd.DataFrame(dfs_br_dict) if dfs_br_dict else pd.DataFrame()
 
@@ -221,6 +214,13 @@ def puxar_historico_mestre():
                 pass
 
         if not df_br.empty:
+            # Falha de uma série não apaga as demais. Nomes fiscais antigos
+            # continham sinal/unidade incompatíveis e não entram na mescla.
+            anterior = carregar_snapshot("bcb_br", max_age_days=36500)
+            if anterior is not None and not anterior.empty:
+                anterior = anterior.drop(columns=["Result_Primario", "Result_Nominal"], errors="ignore")
+                ausentes = anterior.columns.difference(df_br.columns)
+                df_br = pd.concat([df_br, anterior[ausentes]], axis=1).sort_index()
             salvar_snapshot("bcb_br", df_br)
             logger.info("[macro] BCB: dados ao vivo OK, snapshot Supabase atualizado.")
         else:
@@ -377,68 +377,8 @@ def tooltip_info(texto):
 
 
 def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
-    """
-    Avalia o risco fiscal brasileiro com base em dívida/PIB, tendência
-    e resultado primário. Retorna dict com status, cor e label.
-    """
-    resultado = {
-        'divida_pib':       None,
-        'result_primario':  None,
-        'tendencia_divida': None,
-        'status':           'neutro',
-        'cor':              'amber',
-        'label':            'INDEFINIDO',
-    }
-
-    try:
-        # --- Dívida/PIB atual e tendência (últimos 6 meses) ---
-        if 'Divida_Bruta_PIB' in df_br.columns:
-            serie_divida = df_br['Divida_Bruta_PIB'].dropna()
-            if len(serie_divida) >= 6:
-                divida_atual    = float(serie_divida.iloc[-1])
-                divida_6m_atras = float(serie_divida.iloc[-6])
-                tendencia       = divida_atual - divida_6m_atras
-                resultado['divida_pib']       = divida_atual
-                resultado['tendencia_divida'] = tendencia
-
-        # --- Resultado primário atual ---
-        if 'Result_Primario' in df_br.columns:
-            serie_result = df_br['Result_Primario'].dropna()
-            if not serie_result.empty:
-                resultado['result_primario'] = float(serie_result.iloc[-1])
-
-        # --- Pontuação de risco ---
-        divida   = resultado['divida_pib']
-        tendencia = resultado['tendencia_divida']
-        primario = resultado['result_primario']
-
-        pontos_risco = 0
-
-        if divida is not None:
-            if divida > 90:   pontos_risco += 3
-            elif divida > 80: pontos_risco += 2
-            elif divida > 70: pontos_risco += 1
-
-        if tendencia is not None:
-            if tendencia > 3:   pontos_risco += 2   # subindo rápido
-            elif tendencia > 1: pontos_risco += 1
-
-        if primario is not None:
-            if primario < -3:   pontos_risco += 2   # déficit primário alto
-            elif primario < -1: pontos_risco += 1
-
-        # --- Classificação ---
-        if pontos_risco >= 5:
-            resultado.update({'status': 'critico', 'cor': 'bear',  'label': 'FISCAL CRÍTICO'})
-        elif pontos_risco >= 3:
-            resultado.update({'status': 'alerta',  'cor': 'amber', 'label': 'ATENÇÃO FISCAL'})
-        else:
-            resultado.update({'status': 'saudavel', 'cor': 'bull', 'label': 'FISCAL ESTÁVEL'})
-
-    except Exception as e:
-        logger.warning(f"[macro] erro semáforo fiscal: {e}")
-
-    return resultado
+    from utils.fiscal import calcular_semaforo_fiscal as calcular
+    return calcular(df_br)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1396,14 +1336,14 @@ if _secao == "🌐 painel global":
                 {
                     "nome":     "resultado primário",
                     "valor":    f"{prim_val:+.2f}% pib" if prim_val is not None else "n/d",
-                    "sublabel": ("superávit" if (prim_val or 0) >= 0 else "déficit") if prim_val is not None else "sem dados BCB",
-                    "tone":     "bull" if (prim_val or -1) >= 0 else "bear",
+                    "sublabel": ("superávit" if prim_val > 0 else "déficit" if prim_val < 0 else "equilíbrio") if prim_val is not None else "sem dados BCB",
+                    "tone":     ("bull" if prim_val >= 0 else "bear") if prim_val is not None else "muted",
                     "icone":    "💰",
                 },
                 {
                     "nome":     "status fiscal",
                     "valor":    fiscal['label'],
-                    "sublabel": "leitura agregada do quadro",
+                    "sublabel": f"heurística descritiva · cobertura {fiscal['cobertura']:.0%}",
                     "tone":     cores_map.get(fiscal['cor'], "muted"),
                     "icone":    "🚦",
                 },
@@ -1416,39 +1356,32 @@ if _secao == "🌐 painel global":
                                                  "dívida bruta do governo geral (% pib)", _cc_div["bear"])
                 fig_divida.add_hline(
                     y=60, line_color=_cc_div["amber"], line_dash="dash", line_width=1,
-                    annotation_text="limite prudencial 60% pib",
+                    annotation_text="referência visual: 60% pib",
                     annotation_font=dict(color=_cc_div["amber"], size=10, family=_font_family_ui()),
                 )
                 st.plotly_chart(fig_divida, use_container_width=True, config={'responsive': True})
-                st.caption("dívida bruta do governo geral (% do pib). acima de ~80% e subindo eleva o prêmio de risco brasil, pressiona câmbio e juros longos. a tracejada marca o limite prudencial.")
+                st.caption("Dívida bruta do governo geral (% do PIB). A linha de 60% é uma referência visual; sustentabilidade depende também de juros, crescimento e saldo primário.")
             with gf2:
                 st.plotly_chart(
-                    criar_grafico_macro(df_br, 'Result_Primario',
+                    criar_grafico_macro(df_br, 'Saldo_Primario_PIB',
                                         "resultado primário do setor público (% pib)", "#00B0FF"),
                     use_container_width=True,
                     config={'responsive': True},
                 )
-                st.caption("resultado primário (receitas − despesas antes dos juros, % do pib). superávits estabilizam a dívida; déficits recorrentes a fazem crescer — chave da sustentabilidade fiscal.")
+                st.caption("Saldo primário consolidado em 12 meses (% do PIB): superávit positivo e déficit negativo. É o inverso da necessidade de financiamento primária do BCB (SGS 5793).")
 
             if fiscal['status'] == 'critico':
-                corpo_fiscal = (
-                    "trajetória fiscal insustentável detectada. "
-                    "dívida/pib acima de 90% com déficit primário elevado penaliza "
-                    "ativos de risco brasileiros. prefira ativos dolarizados ou renda fixa curta."
-                )
+                corpo_fiscal = "Pressão elevada nesta heurística de dívida, tendência e saldo primário. Compare a dinâmica de juros e crescimento antes de formular a tese."
                 tipo_fiscal = "bear"
             elif fiscal['status'] == 'alerta':
-                corpo_fiscal = (
-                    "fiscal em deterioração. monitore evolução da dívida/pib e aprovação "
-                    "de medidas de contenção de gastos. impacto moderado no câmbio e juros longos."
-                )
+                corpo_fiscal = "Os indicadores sugerem pressão fiscal. Acompanhe as referências dos dados, o saldo primário e o custo de financiamento."
                 tipo_fiscal = "amber"
-            else:
-                corpo_fiscal = (
-                    "fiscal sob controle. trajetória de dívida estável reduz prêmio "
-                    "de risco brasil e favorece ativos locais."
-                )
+            elif fiscal['status'] == 'saudavel':
+                corpo_fiscal = "Pressão baixa nos critérios desta heurística. Esse resultado descritivo não estima sustentabilidade nem prêmio de risco."
                 tipo_fiscal = "bull"
+            else:
+                corpo_fiscal = "Faltam dados para combinar dívida, variação em seis meses e saldo primário. A ausência de informação não significa estabilidade fiscal."
+                tipo_fiscal = "amber"
             status_card("interpretação fiscal", corpo_fiscal, tipo=tipo_fiscal)
 
         elif aba_sel == "🇺🇸 estados unidos":

@@ -21,6 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.bcb_series import buscar_serie_bcb as _buscar_serie_bcb
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
@@ -72,11 +73,11 @@ def _persistir_versionado(origem: str, df: pd.DataFrame):
         if serie.empty:
             continue
         mensal = origem in {"inflacao_br", "inflacao_us"} or coluna in {
-            "IPCA", "IPCA_12M", "Desemprego", "Divida_Bruta_PIB", "Result_Primario", "Result_Nominal", "IBC_Br",
+            "IPCA", "IPCA_12M", "Desemprego", "Divida_Bruta_PIB", "Saldo_Primario_PIB", "NFSP_Nominal_PIB", "IBC_Br",
             "CPIAUCSL", "CPI_YOY", "UNRATE", "FEDFUNDS", "INDPRO", "CP0000EZ19M086NEST", "LRHUTTTTEZM156S",
             "CHNCPIALLMINMEI", "GFDEGDQ188S", "MTSDS133FMS"}
         atraso = 45 if coluna in {"IBC_Br", "INDPRO", "Desemprego", "UNRATE"} else (20 if mensal else 1)
-        unidade = "indice" if coluna in {"IBC_Br", "INDPRO", "CPIAUCSL"} else ("%" if coluna in {"Selic", "IPCA", "IPCA_12M", "DGS10", "DGS2", "DGS3MO", "DFII10", "FEDFUNDS"} else "conforme_fonte")
+        unidade = "indice" if coluna in {"IBC_Br", "INDPRO", "CPIAUCSL"} else ("%" if coluna in {"Selic", "IPCA", "IPCA_12M", "DGS10", "DGS2", "DGS3MO", "DFII10", "FEDFUNDS", "Saldo_Primario_PIB", "NFSP_Nominal_PIB", "Divida_Bruta_PIB"} else "conforme_fonte")
         disponibilidade_base = "observada_na_coleta" if origem.startswith("expectativas_") else "atraso_conservador_assumido"
         resultado = salvar_observacoes_versionadas(f"{origem}:{coluna}", serie, fonte=origem,
             unidade=unidade, atraso_dias=atraso, mes_fechado=mensal, cliente=cliente,
@@ -99,6 +100,27 @@ def _get_sb_client():
     if not url or not key:
         raise ValueError("SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar definidas.")
     return create_client(url, key)
+
+
+def _carregar_snapshot_historico(origem: str) -> pd.DataFrame:
+    """Lê o cache anterior; falha de leitura não autoriza descartá-lo."""
+    from utils.macro_supabase import _json_to_df
+    response = (_get_sb_client().table("macro_snapshots").select("payload")
+                .eq("origem", origem).limit(1).execute())
+    if not response.data:
+        return pd.DataFrame()
+    return _json_to_df(response.data[0]["payload"])
+
+
+def _preservar_colunas_snapshot(origem: str, fresh: pd.DataFrame, *, descartar_legadas=()) -> pd.DataFrame:
+    """Preserva séries não recolhidas; buracos em séries retornadas permanecem."""
+    cache = _carregar_snapshot_historico(origem).drop(columns=list(descartar_legadas), errors="ignore")
+    if cache.empty:
+        return fresh
+    ausentes = cache.columns.difference(fresh.columns)
+    if ausentes.empty:
+        return fresh
+    return pd.concat([fresh, cache[ausentes]], axis=1).sort_index()
 
 
 def _salvar_snapshot_historico(origem: str, df: pd.DataFrame) -> bool:
@@ -148,99 +170,77 @@ def _salvar_snapshot_historico(origem: str, df: pd.DataFrame) -> bool:
 
 
 def fetch_bcb():
-    """
-    Busca indicadores do Brasil via BCB SGS.
-    1. Salva valores pontuais em macro_cache (para os cards de métricas)
-    2. Salva série histórica 10 anos em macro_snapshots (fallback para gráficos)
-    """
+    """Coleta SGS por série: uma indisponibilidade não interrompe as demais."""
+    hoje = dt.datetime.now(__import__("zoneinfo").ZoneInfo("America/Sao_Paulo")).date()
+    inicio_90d = hoje - dt.timedelta(days=90)
+    inicio_10a = (pd.Timestamp(hoje) - pd.DateOffset(years=10)).date()
+    series_hist = {
+        "Selic": 432, "IPCA": 433, "Dolar": 1, "Desemprego": 24369,
+        "Divida_Bruta_PIB": 13762, "Saldo_Primario_PIB": 5793,
+        # SGS5727: NFSP nominal consolidado em 12m, %PIB; SGS4192 é PIB em USD.
+        "NFSP_Nominal_PIB": 5727, "IBC_Br": 24364,
+    }
+    series_pontual = {
+        "selic": (432, "Meta Selic", "%aa"),
+        "selic_diaria": (11, "Selic Diária", "%ad"),
+        "ipca": (433, "IPCA Mensal", "%"),
+        "ipca_12m": (13522, "IPCA 12m", "%"),
+        "desemprego": (24369, "Taxa de Desemprego", "%"),
+        "divida_pib": (13762, "Dívida Bruta/PIB", "%"),
+        "result_primario": (5793, "Saldo primário (superávit+)", "%pib"),
+        "cambio": (1, "Dólar (BRL/USD)", "brl/usd"),
+        "igpm": (189, "IGP-M", "%"),
+    }
+    dados_por_codigo, dfs_hist = {}, {}
+    for nome, codigo in series_hist.items():
+        try:
+            serie = _buscar_serie_bcb(codigo, nome, inicio_10a, hoje)
+            if codigo == 432 and not serie.between(0, 50).all():
+                raise ValueError("Meta Selic fora da unidade %a.a. do SGS432")
+            if codigo == 433 and not serie.between(-10, 10).all():
+                raise ValueError("IPCA mensal fora da unidade % do SGS433")
+            dados_por_codigo[codigo] = serie
+            # NFSP5793 positiva é déficit; saldo primário usa superávit positivo.
+            dfs_hist[nome] = -serie if codigo == 5793 else serie
+            print(f"  [BCB hist] {nome} (SGS{codigo}): {len(serie)} pts")
+        except Exception as exc:
+            _registrar_falha(f"fetch_bcb_hist_{nome}_SGS{codigo}", exc)
+            print(f"  [BCB hist] {nome} (SGS{codigo}): {type(exc).__name__}")
+
+    for nome, (codigo, label, unit) in series_pontual.items():
+        try:
+            # Reutiliza o histórico obtido, evitando outra chamada para a série.
+            serie = dados_por_codigo.get(codigo)
+            if serie is None:
+                serie = _buscar_serie_bcb(codigo, nome, inicio_90d, hoje)
+            recentes = serie.loc[serie.index >= pd.Timestamp(inicio_90d)].dropna()
+            if recentes.empty:
+                raise ValueError("SGS sem observação recente em 90 dias")
+            valor = float(recentes.iloc[-1]) * (-1 if codigo == 5793 else 1)
+            if nome == "selic" and not 0 <= valor <= 50:
+                raise ValueError("Meta Selic fora da unidade %a.a. do SGS432")
+            if nome == "ipca" and not -10 <= valor <= 10:
+                raise ValueError("IPCA mensal fora da unidade % do SGS433")
+            upsert_macro(nome, round(valor, 4), label=label, unit=unit, source="bcb")
+            print(f"  [BCB] {nome} (SGS{codigo}) = {valor:.4f}")
+        except Exception as exc:
+            _registrar_falha(f"fetch_bcb_pontual_{nome}_SGS{codigo}", exc)
+            print(f"  [BCB] {nome} (SGS{codigo}): {type(exc).__name__}")
+
+    if not dfs_hist:
+        print("  [BCB hist] nenhum histórico válido; snapshot anterior preservado.")
+        return
     try:
-        from bcb import sgs
-
-        # ── séries para valores pontuais (macro_cache) ──────────────────────
-        series_pontual = {
-            "selic":           432,
-            "selic_diaria":    11,
-            "ipca":            433,
-            "ipca_12m":        13522,
-            "desemprego":      24369,
-            "divida_pib":      13762,
-            "result_primario": 5793,
-            "cambio":          1,
-            "igpm":            189,
-        }
-
-        inicio_90d = (dt.date.today() - dt.timedelta(days=90)).isoformat()
-        df_90d = sgs.get(series_pontual, start=inicio_90d)
-
-        if df_90d.empty:
-            print("  [BCB] dados pontuais vazios (90d)")
-        else:
-            for nome in series_pontual:
-                if nome in df_90d.columns:
-                    val = df_90d[nome].dropna()
-                    if not val.empty:
-                        v = float(val.iloc[-1])
-                        if not pd.notna(v) or not __import__("math").isfinite(v):
-                            continue
-                        if nome == "selic" and not 0 <= v <= 50:
-                            raise ValueError("Selic fora da unidade % a.a. informada pelo SGS432")
-                        if nome == "ipca" and not -10 <= v <= 10:
-                            raise ValueError("IPCA mensal fora da unidade % informada pelo SGS433")
-                        labels  = {"selic": "Selic Over", "selic_diaria": "Selic Diaria",
-                                   "ipca": "IPCA Mensal", "ipca_12m": "IPCA 12m",
-                                   "desemprego": "Taxa de Desemprego", "divida_pib": "Divida Bruta/PIB",
-                                   "result_primario": "Resultado Primario", "cambio": "Dolar (BRL/USD)",
-                                   "igpm": "IGP-M"}
-                        units   = {"selic": "%aa", "selic_diaria": "%", "ipca": "%", "ipca_12m": "%",
-                                   "desemprego": "%", "divida_pib": "%", "result_primario": "%pib",
-                                   "cambio": "brl/usd", "igpm": "%"}
-                        upsert_macro(nome, round(v, 4), label=labels.get(nome, nome),
-                                     unit=units.get(nome, ""), source="bcb")
-                        print(f"  [BCB] {nome} = {v:.4f}")
-
-        # ── séries históricas 10 anos → macro_snapshots ─────────────────────
-        print("  [BCB] buscando série histórica 10 anos...")
-        series_hist = {
-            "Selic":            432,
-            "IPCA":             433,
-            "Dolar":            1,
-            "Desemprego":       24369,
-            "Divida_Bruta_PIB": 13762,
-            "Result_Primario":  5793,
-            "Result_Nominal":   4192,
-            "IBC_Br":           24364,  # índice dessazonalizado, catálogo oficial BCB
-        }
-        inicio_10a = (dt.date.today() - dt.timedelta(days=365 * 10)).isoformat()
-        dfs_hist = {}
-        for nome, codigo in series_hist.items():
-            try:
-                _df = sgs.get({nome: codigo}, start=inicio_10a)
-                if not _df.empty:
-                    dfs_hist[nome] = _df[nome]
-                    print(f"  [BCB hist] {nome}: {len(_df)} pts")
-            except Exception as _e:
-                _registrar_falha("fetch_bcb", _e)
-                print(f"  [BCB hist] {nome}: {type(_e).__name__}")
-
-        if dfs_hist:
-            df_br_hist = pd.DataFrame(dfs_hist)
-            # Calcula IPCA_12M acumulado
-            if "IPCA" in df_br_hist.columns:
-                try:
-                    _ipca_raw = df_br_hist["IPCA"].resample("MS").last()
-                    _ipca_12m = ((1 + _ipca_raw / 100).rolling(12).apply(
-                        lambda x: x.prod(), raw=True) - 1) * 100
-                    df_br_hist["IPCA_12M"] = _ipca_12m
-                except Exception as e:
-                    _registrar_falha("fetch_bcb", e)
-                    logger.debug(f"falha ao calcular IPCA_12M acumulado: {type(e).__name__}")
-            _salvar_snapshot_historico("bcb_br", df_br_hist)
-        else:
-            print("  [BCB hist] nenhum dado histórico obtido.")
-
-    except Exception as e:
-        _registrar_falha("fetch_bcb", e)
-        print(f"  [BCB] ERRO: {type(e).__name__}")
+        df_br_hist = pd.DataFrame(dfs_hist)
+        if "IPCA" in dfs_hist:
+            # Calendário mensal completo: lacunas impedem um acumulado12m válido.
+            df_br_hist["IPCA_12M"] = _acumular_12m(dfs_hist["IPCA"])
+        df_br_hist = _preservar_colunas_snapshot("bcb_br", df_br_hist,
+            descartar_legadas=("Result_Primario", "Result_Nominal"))
+        _salvar_snapshot_historico("bcb_br", df_br_hist)
+    except Exception as exc:
+        _registrar_falha("fetch_bcb_snapshot", exc)
+        print(f"  [BCB snapshot] ERRO: {type(exc).__name__}")
 
 
 def fetch_fred():
@@ -696,14 +696,20 @@ def fetch_expectativas():
     """Expectativas/breakevens; somente gap12m correspondente, nunca falsa surpresa."""
     try:
         from bcb import sgs
-        from utils.macro_research_data import buscar_focus_publico
+        from utils.macro_research_data import buscar_focus_publico, mesclar_focus
         todas = buscar_focus_publico(dias=420)
         if todas is None or todas.empty:
             raise ValueError("Focus sem observações válidas")
         for aviso in todas.attrs.get("avisos", []):
             _ETL_AVISOS.append(str(aviso))
-        _salvar_snapshot_historico("focus_expectativas", todas.set_index("data"))
-        pontos = todas.loc[(todas["indicador"] == "IPCA") & (todas["horizonte"] == "12m")]
+        cache = _carregar_snapshot_historico("focus_expectativas")
+        if not cache.empty:
+            cache = cache.rename_axis("data").reset_index()
+        completo = mesclar_focus(cache, todas)
+        _salvar_snapshot_historico("focus_expectativas", completo.set_index("data"))
+        # O horizonte segue o contrato do normalizador compartilhado com a UI.
+        # O valor pontual deve vir da coleta atual, nunca de um cache preservado.
+        pontos = todas.loc[(todas["indicador"] == "IPCA") & (todas["horizonte"] == "12m móveis")]
         focus = pontos.set_index("data")["mediana"].sort_index().dropna()
         if focus.empty:
             raise ValueError("Focus12m sem mediana não suavizada")

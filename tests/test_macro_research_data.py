@@ -86,3 +86,52 @@ def test_workbench_partial_public_focus_retains_other_cached_horizon_and_warning
     assert set(result["focus"]["horizonte"]) == {"2027", "12m móveis"}
     assert "Focus anual indisponível nesta consulta." in result["avisos"]
     assert result["qualidade"][-1]["origem"] == "consulta pública + snapshot"
+
+
+def test_cache_first_joins_etl_breakeven_snapshot_with_its_own_reference_and_collection():
+    activity = pd.DataFrame({"INDPRO": [100.], "CPIAUCSL": [320.],
+                             "DGS10": [4.], "DFII10": [2.]},
+                            index=pd.to_datetime(["2026-09-01"]))
+    activity.attrs["coletado_em"] = "2026-10-02T10:00:00Z"
+    expectations = pd.DataFrame({"T10YIE": [2.1, float("nan"), 2.2]},
+                                index=pd.to_datetime(["2026-09-29", "2026-09-30", "2026-10-01"]))
+    expectations.attrs["coletado_em"] = "2026-10-03T12:00:00Z"
+    snapshots = {"fred_global": activity, "expectativas_us": expectations}
+    fn = getattr(carregar_bancada, "__wrapped__", carregar_bancada)
+    with patch("utils.macro_research_data._snapshot", side_effect=lambda name: snapshots.get(name, pd.DataFrame())), \
+         patch("utils.macro_research_data.requests.get") as get:
+        result = fn(False)
+    get.assert_not_called()
+    us = result["regioes"]["US"]["dados"]
+    assert us.loc["2026-10-01", "T10YIE"] == 2.2
+    assert pd.isna(us.loc["2026-09-30", "T10YIE"])
+    assert us.loc["2026-09-01", "INDPRO"] == 100.
+    assert pd.isna(us.loc["2026-10-01", "INDPRO"])
+    by_source = {row["fonte"]: row for row in result["qualidade"]}
+    assert by_source["FRED T10YIE"]["referência"] == "01/10/2026"
+    assert by_source["FRED T10YIE"]["coleta"] == "2026-10-03T12:00:00Z"
+    assert by_source["FRED T10YIE"]["origem"] == "snapshot · expectativas_us"
+    assert by_source["FRED DGS10"]["coleta"] == "2026-10-02T10:00:00Z"
+
+
+def test_partial_public_refresh_keeps_breakeven_collection_when_endpoint_omits_series():
+    activity = pd.DataFrame({"INDPRO": [100.], "CPIAUCSL": [320.], "DGS10": [4.]},
+                            index=pd.to_datetime(["2026-09-01"]))
+    activity.attrs["coletado_em"] = "2026-10-02T10:00:00Z"
+    expectations = pd.DataFrame({"T10YIE": [2.2]}, index=pd.to_datetime(["2026-10-01"]))
+    expectations.attrs["coletado_em"] = "2026-10-03T12:00:00Z"
+    fresh = pd.DataFrame({"DGS10": [4.1]}, index=pd.to_datetime(["2026-10-02"]))
+    snapshots = {"fred_global": activity, "expectativas_us": expectations}
+    fn = getattr(carregar_bancada, "__wrapped__", carregar_bancada)
+    with patch("utils.macro_research_data._snapshot", side_effect=lambda name: snapshots.get(name, pd.DataFrame())), \
+         patch("utils.macro_research_data._bcb", return_value=pd.Series(dtype=float)), \
+         patch("utils.macro_research_data._fred", return_value=fresh), \
+         patch("utils.macro_research_data.buscar_focus_publico", return_value=pd.DataFrame()):
+        result = fn(True)
+    us = result["regioes"]["US"]["dados"]
+    assert us.loc["2026-10-01", "T10YIE"] == 2.2
+    by_source = {row["fonte"]: row for row in result["qualidade"]}
+    assert by_source["FRED T10YIE"]["coleta"] == "2026-10-03T12:00:00Z"
+    assert by_source["FRED T10YIE"]["origem"] == "snapshot · expectativas_us"
+    assert by_source["FRED DGS10"]["origem"] == "consulta pública · FRED"
+    assert by_source["FRED DGS10"]["referência"] == "02/10/2026"

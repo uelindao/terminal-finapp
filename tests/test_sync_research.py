@@ -55,8 +55,17 @@ def test_gap_sem_vintage_conhecida_na_epoca_ausente():
 def test_focus_normalizado_todos_horizontes_salvos(monkeypatch):
     from utils import macro_research_data as d
     from bcb import sgs
-    df = pd.DataFrame({"data": pd.to_datetime(["2026-10-02"]*2), "indicador": ["IPCA", "Selic"],
-        "horizonte": ["12m", "2027"], "mediana": [4.5, 12.], "respondentes": [90, 80], "base_calculo": [0, 0]})
+    from utils.macro_research import normalizar_focus
+    df = pd.concat([
+        normalizar_focus([
+            {"Data": "2026-10-02", "Indicador": "IPCA", "Mediana": 4.5,
+             "Suavizada": "N", "numeroRespondentes": 90, "baseCalculo": 0},
+            {"Data": "2026-10-02", "Indicador": "IPCA", "Mediana": 8.,
+             "Suavizada": "S", "numeroRespondentes": 90, "baseCalculo": 0}], tipo="12m"),
+        normalizar_focus([
+            {"Data": "2026-10-02", "Indicador": "Selic", "Mediana": 12.,
+             "DataReferencia": "2027", "numeroRespondentes": 80, "baseCalculo": 0}], tipo="anual")],
+        ignore_index=True)
     snapshots, pontuais = [], []
     monkeypatch.setattr(d, "buscar_focus_publico", lambda dias: df)
     monkeypatch.setattr(m, "_salvar_snapshot_historico", lambda origem, dados: snapshots.append((origem, dados.copy())))
@@ -65,10 +74,11 @@ def test_focus_normalizado_todos_horizontes_salvos(monkeypatch):
     from utils import macro_supabase as ms
     monkeypatch.setattr(ms, "carregar_observacoes_versionadas", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(m, "_get_sb_client", lambda: object())
+    monkeypatch.setattr(m, "_carregar_snapshot_historico", lambda origem: pd.DataFrame())
     monkeypatch.setattr(m, "FRED_API_KEY", "")
     m.fetch_expectativas()
     assert [a[0] for a in snapshots] == ["focus_expectativas", "expectativas_br"]
-    assert snapshots[0][1]["horizonte"].tolist() == ["12m", "2027"]
+    assert snapshots[0][1]["horizonte"].tolist() == ["12m móveis", "2027"]
     assert pontuais[0][:2] == ("br_focus_ipca_12m", 4.5)
     assert all(a[0] != "br_gap_expectativa_12m" for a in pontuais)
 
@@ -89,3 +99,36 @@ def test_modo_proxies_nao_dispara_universo_de_acoes():
     assert proxies == sorted(set([t for t in p.BENCHMARKS if not t.startswith("^")] + p.PROXIES_ROTACAO))
     assert len(proxies) == 26 and len(completo) > len(proxies) * 3
     assert set(proxies) <= set(completo)
+
+
+def test_snapshot_parcial_preserva_serie_ausente_sem_preencher_buracos(monkeypatch):
+    idx = pd.date_range("2026-07-01", periods=3, freq="MS")
+    cache = pd.DataFrame({"IPCA": [1., 2., 3.], "IBC_Br": [100., 101., 102.]}, index=idx)
+    fresh = pd.DataFrame({"IPCA": [1.1, np.nan, 3.1]}, index=idx)
+    monkeypatch.setattr(m, "_carregar_snapshot_historico", lambda origem: cache)
+    resultado = m._preservar_colunas_snapshot("bcb_br", fresh)
+    assert resultado["IBC_Br"].equals(cache["IBC_Br"])
+    assert pd.isna(resultado.loc[idx[1], "IPCA"])
+    assert resultado.loc[idx[2], "IPCA"] == 3.1
+
+
+def test_focus_parcial_preserva_anos_sem_reciclar_proxy_atual(monkeypatch):
+    from utils import macro_research_data as d
+    from utils.macro_research import normalizar_focus
+    cache = normalizar_focus([
+        {"Data": "2026-10-01", "Indicador": "IPCA", "Mediana": 4.5,
+         "baseCalculo": 0, "Suavizada": "N"}], tipo="12m").set_index("data")
+    fresh = normalizar_focus([
+        {"Data": "2026-10-02", "Indicador": "Selic", "Mediana": 12.,
+         "DataReferencia": "2027", "baseCalculo": 0}], tipo="anual")
+    snapshots, pontuais = [], []
+    monkeypatch.setattr(d, "buscar_focus_publico", lambda dias: fresh)
+    monkeypatch.setattr(m, "_carregar_snapshot_historico", lambda origem: cache)
+    monkeypatch.setattr(m, "_salvar_snapshot_historico", lambda origem, dados: snapshots.append((origem, dados.copy())))
+    monkeypatch.setattr(m, "upsert_macro", lambda *a, **k: pontuais.append(a))
+    monkeypatch.setattr(m, "FRED_API_KEY", "")
+    monkeypatch.setattr(m, "_ETL_FALHAS", [])
+    m.fetch_expectativas()
+    assert set(snapshots[0][1]["horizonte"]) == {"12m móveis", "2027"}
+    assert pontuais == []
+    assert m._ETL_FALHAS == ["expectativas_bcb: ValueError"]

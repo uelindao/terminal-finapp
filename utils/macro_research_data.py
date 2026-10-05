@@ -136,6 +136,21 @@ def _snapshot(source: str) -> pd.DataFrame:
 @st.cache_data(ttl=3600, show_spinner=False)
 def carregar_bancada(permitir_rede: bool = False) -> dict:
     br, us, focus = _snapshot("bcb_br"), _snapshot("fred_global"), _snapshot("focus_expectativas")
+    expectations_us = _snapshot("expectativas_us")
+    # The ETL stores breakevens separately from the activity/yield snapshot.
+    # Keep collection metadata attached to the series that actually supplied it.
+    us_metadata = {column: {"origem": "snapshot · fred_global",
+                           "coletado_em": us.attrs.get("coletado_em", us.attrs.get("updated_at", "não informada"))}
+                   for column in us.columns}
+    if "T10YIE" in expectations_us and not expectations_us["T10YIE"].dropna().empty:
+        original_attrs = dict(us.attrs)
+        index = us.index.union(expectations_us.index).sort_values()
+        us = us.reindex(index)
+        us["T10YIE"] = pd.to_numeric(expectations_us["T10YIE"], errors="coerce").reindex(index)
+        us.attrs.update(original_attrs)
+        us_metadata["T10YIE"] = {"origem": "snapshot · expectativas_us",
+                                "coletado_em": expectations_us.attrs.get("coletado_em", expectations_us.attrs.get("updated_at", "não informada"))}
+    us.attrs["metadados_series"] = us_metadata
     origins = {"BR": "snapshot", "US": "snapshot", "Focus": "snapshot"}
     warnings = []
     if not focus.empty:
@@ -172,8 +187,14 @@ def carregar_bancada(permitir_rede: bool = False) -> dict:
                             br = fresh.combine_first(br)
                             br.attrs.update(fresh.attrs)
                         elif name == "US":
+                            metadata = dict(us.attrs.get("metadados_series", {}))
+                            for column in fresh:
+                                if not fresh[column].dropna().empty:
+                                    metadata[column] = {"origem": "consulta pública · FRED",
+                                                        "coletado_em": fresh.attrs["coletado_em"]}
                             us = fresh.combine_first(us)
                             us.attrs.update(fresh.attrs)
+                            us.attrs["metadados_series"] = metadata
                         else:
                             # A failing endpoint cannot erase the other horizon
                             # already available in the snapshot.
@@ -202,6 +223,15 @@ def carregar_bancada(permitir_rede: bool = False) -> dict:
                             "referência": s.index[-1].strftime("%d/%m/%Y") if not s.empty else "ausente",
                             "coleta": frame.attrs.get("updated_at", frame.attrs.get("coletado_em", "não informada")),
                             "origem": origins[name], "observações": len(s)})
+    for column, display, source in [("DGS10", "Treasury nominal · 10 anos", "FRED DGS10"),
+                                     ("DFII10", "Treasury real TIPS · 10 anos", "FRED DFII10"),
+                                     ("T10YIE", "Compensação de inflação · 10 anos", "FRED T10YIE")]:
+        series = us.get(column, pd.Series(dtype=float)).dropna()
+        metadata = us.attrs.get("metadados_series", {}).get(column, {})
+        quality.append({"região": "US", "série": display, "fonte": source,
+                        "referência": series.index[-1].strftime("%d/%m/%Y") if not series.empty else "ausente",
+                        "coleta": metadata.get("coletado_em", "não informada"),
+                        "origem": metadata.get("origem", origins["US"]), "observações": len(series)})
     if focus.empty:
         warnings.append("Expectativas Focus ainda sem snapshot. Atualize as séries para consultar a fonte pública.")
     else:
