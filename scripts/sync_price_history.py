@@ -5,7 +5,8 @@ Fonte única: yfinance (gratuito, sem chave)
 Para cada ticker:
   - Consulta data da última barra já em price_history
   - Se vazio:        baixa period="10y" (cold start)
-  - Se atualizado:   baixa apenas dias novos (sync incremental)
+  - Se atualizado: revisa90dias de barras; eventos novos de split/dividendo
+    recalibram todos os10anos. Primeiro domingo do mês reconcilia10anos também.
 
 Execucao:
   SUPABASE_URL=... SUPABASE_SERVICE_KEY=... python scripts/sync_price_history.py
@@ -15,6 +16,7 @@ por ticker), cold-start inicial é pesado (~2.500 barras por ticker, ~1M linhas
 ao todo) e leva ~15-20 min.
 """
 
+import argparse
 import os
 import sys
 import time
@@ -34,7 +36,10 @@ from scripts.supabase_helper import (
 from utils.tickers import SCREENER_B3, BR_INDICES, SCREENER_US
 
 # Benchmarks adicionais que precisamos para cálculos (beta, RS, fatores)
-BENCHMARKS = ["^BVSP", "^GSPC", "^VIX", "SPY", "BOVA11.SA"]
+BENCHMARKS = ["^BVSP", "^GSPC", "^VIX", "SPY", "BOVA11.SA", "BOVV11.SA", "BRL=X"]
+PROXIES_ROTACAO = ["LFTS11.SA", "IRFM11.SA", "B5P211.SA", "IMAB11.SA", "GOLD11.SA", "XFIX11.SA",
+    "IEF", "TIP", "LQD", "HYG", "GLD", "XLC", "XLY", "XLP", "XLE", "XLF", "XLRE",
+    "XLI", "XLB", "XLV", "XLK", "XLU"]
 
 
 def _yf_history_to_rows(ticker: str, hist) -> list[dict]:
@@ -47,6 +52,7 @@ def _yf_history_to_rows(ticker: str, hist) -> list[dict]:
     """
     if hist is None or hist.empty:
         return []
+    import math
     rows = []
     for idx, row in hist.iterrows():
         # idx é Timestamp
@@ -62,7 +68,7 @@ def _yf_history_to_rows(ticker: str, hist) -> list[dict]:
             v = int(row["Volume"]) if "Volume" in row and row["Volume"] == row["Volume"] else None
         except (ValueError, TypeError):
             continue
-        if c is None:
+        if c is None or not math.isfinite(c) or c <= 0:
             continue
         rows.append({
             "ticker": ticker,
@@ -76,58 +82,77 @@ def _yf_history_to_rows(ticker: str, hist) -> list[dict]:
     return rows
 
 
-def sync_ticker(yf_module, ticker: str) -> tuple[int, str]:
-    """
-    Sincroniza histórico de um único ticker. Retorna (n_linhas_upsert, modo).
-    modo: 'cold-start', 'incremental' ou 'skip-uptodate'.
+def _tem_evento_corporativo_novo(hist, ultima: str) -> bool:
+    """Eventos posteriores à barra armazenada exigem ajuste dos preços antigos."""
+    import pandas as pd
+    if hist is None or hist.empty:
+        return False
+    datas = pd.to_datetime(hist.index, utc=True).tz_convert(None)
+    novas = hist.loc[datas.normalize() > pd.Timestamp(ultima)]
+    return any(coluna in novas and pd.to_numeric(novas[coluna], errors="coerce").fillna(0).ne(0).any()
+               for coluna in ("Dividends", "Stock Splits", "Capital Gains"))
+
+
+def sync_ticker(yf_module, ticker: str, *, reconciliar_completo: bool | None = None,
+                janela_revisao_dias: int = 90) -> tuple[int, str]:
+    """Revisão90d, reconciliação10a após evento e no primeiro domingo mensal.
+
+    Revisar só dias novos conserva a antiga base ajustada quando ocorre um
+    dividendo/split; por isso eventos novos desencadeiam recarga histórica.
+    A reconciliação mensal também cobre correções tardias do fornecedor.
     """
     ultima = get_last_price_history_date(ticker)
     hoje = date.today()
-
-    if ultima is None:
-        # Cold start: baixa 10 anos
+    if reconciliar_completo is None:
+        reconciliar_completo = hoje.weekday() == 6 and hoje.day <= 7
+    acao = yf_module.Ticker(ticker)
+    if ultima is None or reconciliar_completo:
         try:
-            hist = yf_module.Ticker(ticker).history(period="10y", auto_adjust=True)
+            hist = acao.history(period="10y", auto_adjust=True, actions=True)
         except Exception as e:
-            logger.warning(f"[ph] {ticker} cold-start falhou: {e}")
+            logger.warning(f"[ph] {ticker} histórico falhou: {type(e).__name__}")
             return 0, "erro"
         rows = _yf_history_to_rows(ticker, hist)
         if not rows:
             return 0, "vazio"
-        upsert_price_history_batch(rows)
-        return len(rows), "cold-start"
-
-    # Incremental: do dia seguinte ao último em diante
+        n = upsert_price_history_batch(rows)
+        return n, "cold-start" if ultima is None else "reconciliacao-mensal"
     try:
         ultima_dt = datetime.strptime(ultima, "%Y-%m-%d").date()
     except Exception:
         return 0, "erro-parse"
-    inicio = ultima_dt + timedelta(days=1)
-    if inicio > hoje:
-        return 0, "skip-uptodate"
-
+    inicio = ultima_dt - timedelta(days=max(1, int(janela_revisao_dias)))
     try:
-        hist = yf_module.Ticker(ticker).history(
-            start=inicio.isoformat(),
-            end=(hoje + timedelta(days=1)).isoformat(),
-            auto_adjust=True,
-        )
+        hist = acao.history(start=inicio.isoformat(), end=(hoje + timedelta(days=1)).isoformat(),
+                            auto_adjust=True, actions=True)
+        evento = _tem_evento_corporativo_novo(hist, ultima)
+        if evento:
+            hist = acao.history(period="10y", auto_adjust=True, actions=True)
     except Exception as e:
-        logger.warning(f"[ph] {ticker} incremental falhou: {e}")
+        logger.warning(f"[ph] {ticker} revisão falhou: {type(e).__name__}")
         return 0, "erro"
-
     rows = _yf_history_to_rows(ticker, hist)
     if not rows:
-        return 0, "skip-uptodate"
-    upsert_price_history_batch(rows)
-    return len(rows), "incremental"
+        return 0, "vazio"
+    n = upsert_price_history_batch(rows)
+    return n, "reconciliacao-evento" if evento else "revisao90d"
 
 
-def main():
+def universo_tickers(apenas_proxies: bool = False) -> list[str]:
+    base = [t for t in BENCHMARKS if not t.startswith("^")] + PROXIES_ROTACAO if apenas_proxies else BENCHMARKS + PROXIES_ROTACAO
+    if not apenas_proxies:
+        base += SCREENER_B3 + BR_INDICES + SCREENER_US
+    return sorted(set(base))
+
+
+def main(argv=None):
     import yfinance as yf
-
-    tickers = sorted(set(SCREENER_B3 + BR_INDICES + SCREENER_US + BENCHMARKS))
-    print(f"[ph] inicio — {len(tickers)} tickers")
+    parser = argparse.ArgumentParser(description="Atualiza preços ajustados no cache histórico.")
+    parser.add_argument("--proxies-only", action="store_true",
+        help="apenas benchmarks, classes, ETFs setoriais e câmbio; sem atualizar o universo de ações")
+    args = parser.parse_args(argv)
+    tickers = universo_tickers(apenas_proxies=args.proxies_only)
+    print(f"[ph] inicio — {len(tickers)} tickers; modo={'proxies' if args.proxies_only else 'universo completo'}")
 
     log_id = log_etl_start("sync_price_history")
 
@@ -142,20 +167,28 @@ def main():
             n, modo = sync_ticker(yf, ticker)
             stats[modo] = stats.get(modo, 0) + 1
             total_linhas += n
-            ok += 1
+            if modo.startswith("erro") or modo == "vazio":
+                fail += 1
+            else:
+                ok += 1
             if i % 20 == 0:
                 elapsed = time.time() - t0
                 print(f"  [{i}/{len(tickers)}] {ticker} {modo} +{n} | "
                       f"acum {total_linhas} linhas em {elapsed:.0f}s")
             time.sleep(0.3)  # gentle com yfinance
         except Exception as e:
-            print(f"  [ph] ERRO {ticker}: {e}")
+            print(f"  [ph] ERRO {ticker}: {type(e).__name__}")
             fail += 1
 
-    log_etl_finish(log_id, ok=ok, fail=fail)
+    cobertura = ok / max(1, ok + fail)
+    erro = f"{fail} tickers sem sincronização; cobertura={cobertura:.1%}" if fail else ""
+    log_etl_finish(log_id, ok=ok, fail=fail, error_msg=erro)
     print(f"\n[ph] fim — ok {ok}, fail {fail}, total {total_linhas} linhas")
-    print(f"     stats: {stats}")
+    print(f"     stats: {stats}; cobertura={cobertura:.1%}")
+    # Falhas parciais constam no log; abaixo90% interrompe a cadeia semanal.
+    # Cobertura setorial mínima é validada novamente pelo backtest.
+    return 1 if cobertura < 0.90 else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

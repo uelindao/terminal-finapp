@@ -1,177 +1,190 @@
-"""
-utils/regime_classifier.py
-Classificador automático de regime macro: expansão / pico / contração / vale.
+"""Sinais macro de stress e recuperação; concordância não é probabilidade.
 
-Lógica: 4 sinais binários (yield curve invertida, VIX alto, CPI acelerando,
-momentum negativo). Soma → fase. Probabilidade é heurística.
-
-Não substitui análise discricionária — é um termômetro top-down auxiliar.
+A fase é uma leitura heurística, não uma datação de recessões. Sinais ausentes
+ficam desconhecidos. Stress elevado, isoladamente, nunca identifica um vale.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from math import isfinite
 from typing import Optional
 
 from utils.logger import get_logger
+from utils.indicators import momentum_12_1 as _momentum_12_1
 
 logger = get_logger(__name__)
 
 
+def numero_finito(valor) -> Optional[float]:
+    """Preserva zero; não converte ausência, booleano ou infinito em observação."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    try:
+        numero = float(valor)
+        return numero if isfinite(numero) else None
+    except (TypeError, ValueError):
+        return None
+
+
+
+def valor_observado(contexto: dict, chave: str, *aliases) -> Optional[float]:
+    """Ignora valores fallback quando a camada de dados informa a proveniência."""
+    qualidade = contexto.get("qualidade") or {}
+    for nome in (chave, *aliases):
+        dado = numero_finito(contexto.get(nome))
+        meta = qualidade.get(nome) or qualidade.get(chave) or {}
+        if dado is not None and meta.get("observado") is not False:
+            return dado
+    return None
+
+def recuperacao_persistente(serie) -> Optional[bool]:
+    """Duas altas mensais após duas quedas; só aceita cinco leituras contíguas.
+
+    O chamador deve fornecer uma série mensal de atividade. Não preencher lacunas
+    nem transformar preços de ações em atividade. A regra é evidência descritiva,
+    não uma probabilidade estimada de recuperação.
+    """
+    if serie is None:
+        return None
+    indice = getattr(serie, "index", None)
+    if indice is not None and hasattr(indice, "to_period") and len(indice) >= 5:
+        meses = indice[-5:].to_period("M").asi8
+        if any(meses[i + 1] - meses[i] != 1 for i in range(4)):
+            return None
+    valores = list(serie)
+    if len(valores) < 5:
+        return None
+    ultimos = [numero_finito(v) for v in valores[-5:]]
+    if any(v is None for v in ultimos):
+        return None
+    a, b, c, d, e = ultimos
+    return bool(a > b > c and c < d < e)
+
+
 @dataclass
 class RegimeResult:
-    fase: str            # "expansao" | "pico" | "contracao" | "vale"
-    probabilidade: float  # 0.0-1.0
-    score_sinais: int     # 0-4
-    sinais: dict          # {"yield_invertida": True, ...}
-    leitura: str          # texto curto explicativo
+    fase: str
+    concordancia: float
+    score_sinais: int
+    sinais: dict
+    leitura: str
+    intensidade_stress: float = 0.0
+    cobertura: float = 0.0
+    sinais_validos: int = 0
+    recuperacao_confirmada: bool = False
 
-
-# Momentum 12-1 consolidado em utils/indicators (era duplicado aqui e no
-# health_engine). Recebe ~13 meses de dados diários (~252 pregões).
-from utils.indicators import momentum_12_1 as _momentum_12_1
+    @property
+    def probabilidade(self) -> float:
+        """Alias legado de concordância; NÃO representa probabilidade estatística."""
+        return self.concordancia
 
 
 def classificar_regime(
-    t10y: Optional[float],
-    t2y: Optional[float],
-    vix: Optional[float],
-    cpi_yoy_serie: Optional[list[float]],  # últimos 3+ valores mensais
-    spy_serie: Optional[list[float]],       # ~252 dias
-    ibov_serie: Optional[list[float]],      # ~252 dias
+    t10y: Optional[float], t2y: Optional[float], vix: Optional[float],
+    cpi_yoy_serie: Optional[list[float]], spy_serie: Optional[list[float]],
+    ibov_serie: Optional[list[float]], *, slope_10y_2y: Optional[float] = None,
+    atividade_serie=None,
 ) -> RegimeResult:
+    """Classifica sinais válidos; menos de três dos quatro = indefinido.
+
+    A curva é 10y−2y de verdade. O argumento slope permite usar o par alinhado do
+    snapshot, sem misturar datas de yields. Um vale exige recuperação persistente
+    na atividade mensal além de stress. Percentuais descrevem os sinais observados.
     """
-    Recebe leituras macro atuais + séries curtas para classificar a fase do ciclo.
-
-    Tolera entradas None — sinais com input None contam como False mas a
-    probabilidade é descontada.
-    """
-    sinais: dict[str, Optional[bool]] = {}
-
-    # S1: yield curve invertida (T10Y - T2Y < 0)
-    if t10y is not None and t2y is not None:
-        sinais["yield_invertida"] = (t10y - t2y) < 0.0
-    else:
-        sinais["yield_invertida"] = None
-
-    # S2: VIX alto (> 20)
-    sinais["vix_alto"] = (vix is not None and vix > 20.0)
-
-    # S3: CPI YoY acelerando últimos 3 valores
-    if cpi_yoy_serie and len(cpi_yoy_serie) >= 3:
-        a, b, c = cpi_yoy_serie[-3], cpi_yoy_serie[-2], cpi_yoy_serie[-1]
-        sinais["cpi_acelerando"] = (c > b > a)
-    else:
-        sinais["cpi_acelerando"] = None
-
-    # S4: momentum 12-1 SPY E IBOV ambos negativos
-    mom_spy = _momentum_12_1(spy_serie or [])
-    mom_ibov = _momentum_12_1(ibov_serie or [])
-    if mom_spy is not None and mom_ibov is not None:
-        sinais["momentum_negativo"] = (mom_spy < 0) and (mom_ibov < 0)
-    else:
-        sinais["momentum_negativo"] = None
-
-    # Score: True = 1, False = 0, None = 0 (não conta)
-    score = sum(1 for v in sinais.values() if v is True)
-    sinais_validos = sum(1 for v in sinais.values() if v is not None)
-
-    # Classificação
-    if score <= 1:
-        fase = "expansao"
-    elif score == 2:
-        fase = "pico"
-    elif score == 3:
-        fase = "contracao"
-    else:
-        fase = "vale"
-
-    # Probabilidade heurística: base 0.55, +0.10 por sinal ativo, desconto por None
-    prob = 0.55 + 0.10 * score
-    if sinais_validos < 4:
-        prob -= 0.05 * (4 - sinais_validos)
-    prob = max(0.40, min(0.95, prob))
-
-    leitura_map = {
-        "expansao":  "Sinais consistentes com expansão. Risco-on tende a performar.",
-        "pico":      "Sinais mistos. Atenção: cíclicos podem estar precificando próximos meses ruins.",
-        "contracao": "Maioria dos sinais negativos. Posicionamento defensivo prudente.",
-        "vale":      "Todos os sinais negativos. Final de ciclo provável — montagem gradual de cíclicos pode fazer sentido para horizonte longo.",
+    t10y, t2y, vix = map(numero_finito, (t10y, t2y, vix))
+    slope = numero_finito(slope_10y_2y)
+    if slope is None and t10y is not None and t2y is not None:
+        slope = t10y - t2y
+    sinais = {
+        "yield_invertida": None if slope is None else bool(slope < 0),
+        "vix_alto": None if vix is None else bool(vix > 20),
+        "cpi_acelerando": None,
+        "momentum_negativo": None,
     }
+    cpi = list(cpi_yoy_serie) if cpi_yoy_serie is not None else []
+    if len(cpi) >= 3:
+        a, b, c = [numero_finito(v) for v in cpi[-3:]]
+        if all(v is not None for v in (a, b, c)):
+            sinais["cpi_acelerando"] = bool(c > b > a)
+    spy = list(spy_serie) if spy_serie is not None else []
+    ibov = list(ibov_serie) if ibov_serie is not None else []
+    # Não retirar pontos ausentes: isso mudaria o horizonte do momentum.
+    mom_spy = _momentum_12_1(spy) if all(numero_finito(v) is not None and float(v) > 0 for v in spy) else None
+    mom_ibov = _momentum_12_1(ibov) if all(numero_finito(v) is not None and float(v) > 0 for v in ibov) else None
+    if mom_spy is not None and mom_ibov is not None:
+        sinais["momentum_negativo"] = bool(mom_spy < 0 and mom_ibov < 0)
+    score = sum(v is True for v in sinais.values())
+    validos = sum(v is not None for v in sinais.values())
+    stress = score / validos if validos else 0.0
+    recuperacao = recuperacao_persistente(atividade_serie) is True
+    if validos < 3:
+        fase = "indefinido"
+    elif score >= 2 and recuperacao:
+        fase = "vale"
+    elif stress >= 0.75:
+        fase = "contracao"
+    elif stress >= 0.5:
+        fase = "pico"
+    else:
+        fase = "expansao"
+    concordancia = max(stress, 1 - stress) if validos else 0.0
+    leitura = {
+        "indefinido": "Cobertura insuficiente para classificar o ciclo; dados ausentes não são sinais favoráveis.",
+        "expansao": "Predominam sinais sem stress. Isso não confirma crescimento acima do potencial.",
+        "pico": "Sinais financeiros mistos; acompanhar a direção da atividade e da inflação.",
+        "contracao": "Predominam sinais de stress. A intensidade negativa não identifica um fundo do ciclo.",
+        "vale": "A atividade mensal caiu e apresentou duas altas consecutivas; indício de recuperação, sujeito a revisão.",
+    }[fase]
+    return RegimeResult(fase, round(concordancia, 4), score, sinais, leitura,
+                        round(stress, 4), validos / 4, validos, recuperacao)
 
-    return RegimeResult(
-        fase=fase,
-        probabilidade=round(prob, 2),
-        score_sinais=score,
-        sinais=sinais,
-        leitura=leitura_map[fase],
-    )
+
+def ler_curva_10y_2y() -> dict:
+    """Último par DGS10/DGS2 na mesma data; ausência não usa ^IRX como 2 anos."""
+    try:
+        from utils.macro_supabase import buscar_slope_curva
+        df = buscar_slope_curva()
+        if df is not None and not df.empty and {"t10y", "t2y"}.issubset(df.columns):
+            pares = df.dropna(subset=["t10y", "t2y"])
+            if not pares.empty:
+                row = pares.iloc[-1]
+                t10, t2 = numero_finito(row["t10y"]), numero_finito(row["t2y"])
+                if t10 is not None and t2 is not None:
+                    return {"t10y": t10, "t2y": t2, "slope": t10 - t2,
+                            "data": str(row.get("data", pares.index[-1])), "fonte": "FRED DGS10/DGS2"}
+    except Exception:
+        logger.debug("curva 10y−2y indisponível", exc_info=True)
+    return {"t10y": None, "t2y": None, "slope": None, "data": None, "fonte": None}
 
 
-def classificar_regime_do_macro_context() -> RegimeResult:
-    """
-    Wrapper: busca os inputs do macro_context + yfinance e classifica.
-
-    Fonte de T2Y: yfinance ^IRX (13-week Treasury bill, proxy já usada em
-    ciclo_economico.py). T10Y via ^TNX. VIX via ^VIX. CPI YoY via FRED
-    (CPIAUCSL) com fallback a snapshot Supabase. SPY/IBOV via yfinance.
-    """
+def classificar_regime_do_macro_context(macro_context=None) -> RegimeResult:
+    """Snapshot macro e séries de preço; nenhuma proxy falsa de Treasury 2y."""
     import yfinance as yf
-
-    # T10Y e VIX do macro_context
-    try:
-        from utils.macro_context import _fetch_macro_rapido
-        macro = _fetch_macro_rapido()
-    except Exception:
-        logger.error("falha ao buscar macro rápido", exc_info=True)
-        macro = {}
-
-    t10y = macro.get("treasury_10y") or macro.get("t10y")
-    vix = macro.get("vix")
-
-    # T2Y: yfinance ^IRX (13-week) — proxy consistente com ciclo_economico.py
-    t2y = None
-    try:
-        hist_irx = yf.Ticker("^IRX").history(period="5d")
-        if hist_irx is not None and not hist_irx.empty:
-            t2y = float(hist_irx["Close"].dropna().iloc[-1])
-    except Exception:
-        logger.warning("falha ao buscar T2Y via ^IRX", exc_info=True)
-
-    # CPI YoY: tenta FRED snapshot, senão calcula de CPIAUCSL via yfinance
-    cpi_serie = None
+    if macro_context is None:
+        try:
+            from utils.macro_context import _fetch_macro_rapido
+            macro_context = _fetch_macro_rapido()
+        except Exception:
+            macro_context = {}
+    macro = macro_context or {}
+    curva = ler_curva_10y_2y()
+    cpi, atividade = None, None
     try:
         from utils.macro_supabase import carregar_snapshot
-        df_global = carregar_snapshot("fred_global", max_age_days=7)
-        if (
-            df_global is not None
-            and not df_global.empty
-            and "CPI_YOY" in df_global.columns
-        ):
-            cpi_yoy = df_global["CPI_YOY"].dropna()
-            if len(cpi_yoy) >= 3:
-                cpi_serie = cpi_yoy.tail(6).tolist()
+        df = carregar_snapshot("fred_global", max_age_days=7)
+        if df is not None and not df.empty:
+            if "CPI_YOY" in df:
+                cpi = df["CPI_YOY"].dropna().resample("MS").last().tail(6).tolist()
+            # Apenas quando o ETL realmente coletou atividade mensal.
+            if "INDPRO" in df:
+                atividade = df["INDPRO"].dropna().resample("MS").last().tail(5).tolist()
     except Exception:
-        logger.debug("CPI YoY indisponível via snapshot", exc_info=True)
-
-    # Nota: removido fallback de yf.Ticker("CPIAUCSL") — CPIAUCSL é série FRED,
-    # não ticker yfinance; chamada nunca retornaria dado. Se snapshot estiver
-    # vazio o sinal cpi_acelerando vira None e a probabilidade do regime já
-    # se ajusta (desconto por sinal indisponível).
-
-    # SPY e IBOV séries (~14 meses para momentum 12-1)
-    spy = None
-    try:
-        spy_hist = yf.Ticker("SPY").history(period="14mo")
-        if spy_hist is not None and not spy_hist.empty:
-            spy = spy_hist["Close"].dropna().tolist()
-    except Exception:
-        logger.warning("falha ao buscar SPY", exc_info=True)
-
-    ibov = None
-    try:
-        ibov_hist = yf.Ticker("^BVSP").history(period="14mo")
-        if ibov_hist is not None and not ibov_hist.empty:
-            ibov = ibov_hist["Close"].dropna().tolist()
-    except Exception:
-        logger.warning("falha ao buscar IBOV", exc_info=True)
-
-    return classificar_regime(t10y, t2y, vix, cpi_serie, spy, ibov)
+        logger.debug("atividade/CPI indisponíveis no snapshot", exc_info=True)
+    series = []
+    for ticker in ("SPY", "^BVSP"):
+        try:
+            hist = yf.Ticker(ticker).history(period="14mo")
+            series.append(hist["Close"].tolist() if hist is not None and not hist.empty else None)
+        except Exception:
+            series.append(None)
+    return classificar_regime(curva["t10y"], curva["t2y"], valor_observado(macro, "vix"),
+                              cpi, *series, slope_10y_2y=curva["slope"], atividade_serie=atividade)

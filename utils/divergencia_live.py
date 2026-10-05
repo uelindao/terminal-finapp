@@ -48,10 +48,19 @@ def estatistica_divergencias_br() -> dict:
         row = get_ai_analysis(tipo="backtest_div_v1", ticker=None,
                               user_id=None, modo=None)
         if row and row.get("conteudo"):
-            return json.loads(row["conteudo"]) or {}
+            payload = json.loads(row["conteudo"]) or {}
+            return payload if metodologia_historica_valida(payload) else {}
     except Exception:
         pass
     return {}
+
+
+def metodologia_historica_valida(payload: dict) -> bool:
+    """Resultados anteriores à confirmação causal precisam ser recalculados."""
+    method = (payload or {}).get("metodologia") or {}
+    return (method.get("versao") == 2 and method.get("entrada") == "apos_confirmacao"
+            and method.get("tipo") == "estudo_descritivo_retrospectivo"
+            and method.get("fora_da_amostra") is False)
 
 
 def divergencias_atuais_br(macro_context: dict) -> list[dict]:

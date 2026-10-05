@@ -42,7 +42,7 @@ def bloco_regime() -> str:
 <div style="border-left:4px solid {cor}; padding:12px 16px;
             background:#f6f6f8; border-radius:4px; margin-bottom:18px;">
   <strong style="color:{cor}; font-size:1.1rem; text-transform:uppercase;">
-    {_html.escape(r.fase)} · prob {int(r.probabilidade*100)}%
+    {_html.escape(r.fase)} · concordância {int(r.concordancia*100)}% · cobertura {int(r.cobertura*100)}%
   </strong><br>
   <span style="color:#555; font-size:0.9rem;">{_html.escape(r.leitura)}</span>
 </div>

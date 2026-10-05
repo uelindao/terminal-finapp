@@ -1,17 +1,8 @@
-"""
-utils/ciclo_economico.py
-Classificação quantitativa do ciclo econômico.
+"""Leitura heurística do ciclo BR/EUA com dados e cobertura explícitos.
 
-Metodologia:
-- Leading indicators BR e EUA para determinar fase do ciclo
-- Score composto de 0-100 por fase (expansão/pico/contração/vale)
-- Recomendações setoriais baseadas em Fama-French e MSCI
-- Atualização automática via yfinance e BCB
-
-Fontes acadêmicas:
-- Hamilton (1989): Markov Switching
-- Fama & French (1989): Business conditions and expected returns
-- NBER: Business Cycle Dating Committee methodology
+Pontos relativos das quatro fases não são probabilidades calibradas. A descrição
+setorial das fases é uma hipótese educacional de transmissão econômica. Este
+módulo não estima Markov Switching nem reproduz a datação de recessões do NBER.
 """
 from __future__ import annotations
 import streamlit as st
@@ -168,10 +159,9 @@ FASES_CICLO = {
         "cor":      "#00B0FF",
         "icone":    "🔄",
         "descricao": (
-            "crescimento no mínimo ou começando a se recuperar. "
-            "banco central cortou juros agressivamente. ativos de "
-            "risco extremamente descontados. melhor janela histórica "
-            "para acumular cíclicos de qualidade."
+            "indícios persistentes de recuperação da atividade após queda. "
+            "A leitura depende dos dados publicados e pode ser revisada; "
+            "não implica ativos baratos nem uma janela garantida de retorno."
         ),
         "leading_signals": [
             "yield curve normalizando (10y voltando > 2y)",
@@ -208,564 +198,311 @@ FASES_CICLO = {
 }
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def calcular_indicadores_ciclo_br() -> dict:
-    """
-    Calcula leading indicators do ciclo econômico brasileiro.
 
-    Indicadores:
-    1. Curva de juros BR (DI Jan26 vs DI Jan27 via proxy)
-    2. IPCA acumulado 12m (proxy de pressão inflacionária)
-    3. Selic real ex-ante (Selic - expectativa IPCA)
-    4. Momentum do IBOV (proxy de confiança do mercado)
-    5. Câmbio (USD/BRL) como proxy de aversão a risco
-    6. Commodities (CRB Index via PDBC ou CL=F + GC=F)
+from utils.regime_classifier import (
+    numero_finito, valor_observado, recuperacao_persistente, ler_curva_10y_2y,
+)
 
-    Retorna dict com scores e valores dos indicadores.
-    """
 
-    resultado = {
-        'indicadores': {},
-        'score_expansao':   0,
-        'score_pico':       0,
-        'score_contracao':  0,
-        'score_vale':       0,
-        'fase_provavel':    'expansao',
-        'confianca':        0,
-        'alertas':          [],
-    }
-
-    scores = {
-        'expansao':  0,
-        'pico':      0,
-        'contracao': 0,
-        'vale':      0,
-    }
-    n_ind = 0
-
+def _serie_valida(serie):
+    """Não comprime lacunas internas ou troca o horizonte dos retornos."""
+    if serie is None:
+        return pd.Series(dtype=float)
     try:
-        macro = st.session_state.get('macro_context', {})
-        selic = float(macro.get('selic', 10.75))
-        # 'ipca'/'ipca_12m' já são o acumulado 12m (% a.a.) — ver contrato em
-        # utils/macro_context.py. 'ipca_mensal' é o print do mês (não usar aqui).
-        ipca_12m = float(macro.get('ipca_12m') or macro.get('ipca', 4.5))
+        s = pd.Series(serie, dtype=float)
+    except (TypeError, ValueError):
+        return pd.Series(dtype=float)
+    if s.empty or not np.isfinite(s.to_numpy()).all() or (s <= 0).any():
+        return pd.Series(dtype=float)
+    return s
 
-        # ── 1. Selic real (Selic - IPCA esperado) ────────────────────────
-        # Selic real alta → aperto monetário → contração/pico
-        # Selic real baixa → estímulo → vale/expansão
-        _selic_real = selic - ipca_12m
 
-        resultado['indicadores']['selic_real'] = round(_selic_real, 2)
+def _retorno(serie, periodos):
+    if len(serie) <= periodos:
+        return None
+    return float((serie.iloc[-1] / serie.iloc[-1 - periodos] - 1) * 100)
 
-        if _selic_real > 8.0:
-            # Juro real muito alto — BC apertando forte
-            scores['contracao'] += 25
-            scores['pico']      += 15
-            resultado['alertas'].append(
-                f"⚠️ juro real muito alto ({_selic_real:.1f}%) — "
-                f"aperto monetário severo"
-            )
-        elif _selic_real > 5.0:
-            scores['pico']      += 20
-            scores['contracao'] += 10
-        elif _selic_real > 2.0:
-            scores['expansao']  += 20
-            scores['pico']      += 10
-        elif _selic_real >= 0:
-            scores['expansao']  += 25
-            scores['vale']      += 15
+
+def _juro_real(nominal, inflacao):
+    if nominal is None or inflacao is None or inflacao <= -100:
+        return None
+    return ((1 + nominal / 100) / (1 + inflacao / 100) - 1) * 100
+
+
+def _finalizar(scores, indicadores, alertas, n_ind, total, recuperacao):
+    # Pontos de estímulo ou uma queda forte no preço não identificam um fundo.
+    if not recuperacao:
+        scores['contracao'] += scores['vale']
+        scores['vale'] = 0
+    soma = sum(scores.values())
+    normalizados = {k: round(v / soma * 100) if soma else 0 for k, v in scores.items()}
+    fase = max(normalizados, key=normalizados.get) if soma and n_ind >= 3 else 'indefinido'
+    ordenados = sorted(normalizados.values())
+    diferenca = ordenados[-1] - ordenados[-2] if soma and fase != 'indefinido' else 0
+    if n_ind < total:
+        alertas.append(f'Cobertura {n_ind}/{total}: leituras ausentes não contam como favoráveis.')
+    return {
+        'indicadores': indicadores, 'alertas': alertas,
+        **{f'score_{k}': v for k, v in normalizados.items()},
+        'fase_provavel': fase, 'confianca': diferenca,
+        'diferenca_pontos': diferenca, 'n_indicadores': n_ind,
+        'cobertura': n_ind / total, 'recuperacao_confirmada': bool(recuperacao),
+        'qualidade': {'status': 'suficiente' if n_ind == total else ('parcial' if n_ind >= 3 else 'insuficiente'),
+                     'observados': n_ind, 'esperados': total},
+        'metodologia': 'Pontos relativos por fase; não são probabilidades. Diferença em pontos percentuais.',
+    }
+
+
+def calcular_ciclo_br_dados(macro, series=None, atividade=None, expectativa_ipca=None):
+    """Motor puro BR: os wrappers fazem o I/O e os testes injetam dados."""
+    series = series or {}
+    scores = dict.fromkeys(('expansao', 'pico', 'contracao', 'vale'), 0)
+    indicadores, alertas, n_ind = {}, [], 0
+    selic = valor_observado(macro, 'selic')
+    ipca = valor_observado(macro, 'ipca_12m', 'ipca')
+    real = _juro_real(selic, ipca)
+    if real is not None:
+        indicadores['selic_real'] = indicadores['selic_real_ex_post'] = round(real, 2)
+        if real > 8:
+            scores['contracao'] += 25; scores['pico'] += 15
+            alertas.append(f'Juro real ex post elevado ({real:.1f}% Fisher); usa inflação já realizada.')
+        elif real > 5:
+            scores['pico'] += 20; scores['contracao'] += 10
+        elif real > 2:
+            scores['expansao'] += 20; scores['pico'] += 10
+        elif real >= 0:
+            scores['expansao'] += 25
         else:
-            # Juro real negativo — estímulo máximo
-            scores['vale']      += 25
-            scores['expansao']  += 10
-            resultado['alertas'].append(
-                f"💡 juro real negativo ({_selic_real:.1f}%) — "
-                f"política monetária estimulativa"
-            )
+            scores['expansao'] += 10
+            alertas.append('Juro real ex post negativo não confirma recuperação da atividade.')
+        n_ind += 1
+    esperado = numero_finito(expectativa_ipca)
+    ex_ante = _juro_real(selic, esperado)
+    if ex_ante is not None:
+        indicadores['selic_real_ex_ante_proxy'] = round(ex_ante, 2)
+        alertas.append('Proxy ex ante: Selic atual constante versus inflação esperada em 12 meses; não é taxa real forward negociada.')
+
+    imab = _serie_valida(series.get('IMAB11.SA'))
+    b5 = _serie_valida(series.get('B5P211.SA'))
+    if len(imab) > 20 and len(b5) > 20:
+        # Diferença de retornos de ETFs não é inclinação da curva de taxas.
+        indicadores['retorno_relativo_etfs_br'] = round(_retorno(imab, 20) - _retorno(b5, 20), 2)
+
+    ibov = _serie_valida(series.get('^BVSP'))
+    if len(ibov) >= 200:
+        ret = _retorno(ibov, 126)
+        acima = bool(ibov.iloc[-1] > ibov.tail(200).mean())
+        indicadores.update(ibov_ret_6m=round(ret, 1), ibov_acima_mm200=acima)
+        if ret > 15 and acima:
+            scores['expansao'] += 20
+        elif ret > 5 and acima:
+            scores['expansao'] += 12; scores['pico'] += 8
+        elif ret > 0:
+            scores['pico'] += 10; scores['contracao'] += 10
+        else:
+            scores['contracao'] += 20
         n_ind += 1
 
-        # ── 2. Inclinação da curva IBOV (proxy yield curve BR) ────────────
-        # Usa diferença entre ETFs de prazo diferente como proxy
-        # IMA-B 5 (curto) vs IMA-B 5+ (longo) via IMAB11 e B5P211
+    brl = _serie_valida(series.get('BRL=X'))
+    if len(brl) >= 60:
+        desvio = float((brl.iloc[-1] / brl.tail(60).mean() - 1) * 100)
+        indicadores.update(usd_brl=round(float(brl.iloc[-1]), 2), usd_brl_vs_media=round(desvio, 1))
+        if desvio > 10:
+            scores['contracao'] += 15
+        elif desvio > 3:
+            scores['pico'] += 10; scores['contracao'] += 5
+        elif desvio < -5:
+            scores['expansao'] += 10
+        n_ind += 1
+
+    commodities = [_retorno(_serie_valida(series.get(t)), 63) for t in ('CL=F', 'TIO=F')]
+    commodities = [v for v in commodities if v is not None]
+    if commodities:
+        ret = sum(commodities) / len(commodities)
+        indicadores['commodities_ret_3m'] = round(ret, 1)
+        if ret > 10:
+            scores['expansao'] += 15; scores['pico'] += 5
+        elif ret > 0:
+            scores['expansao'] += 8
+        elif ret > -10:
+            scores['contracao'] += 8
+        else:
+            scores['contracao'] += 15
+        n_ind += 1
+
+    ibc = _serie_valida(atividade)
+    recuperacao = False
+    if len(ibc) >= 13:
+        yoy, ret3 = _retorno(ibc, 12), _retorno(ibc, 3)
+        recuperacao = bool(yoy < 0 and recuperacao_persistente(ibc) is True)
+        indicadores.update(ibc_br_yoy=round(yoy, 2), ibc_br_3m=round(ret3, 2))
+        if recuperacao:
+            scores['vale'] += 50
+            alertas.append('IBC-Br abaixo de um ano atrás, com duas altas mensais após duas quedas: indício persistente de recuperação.')
+        elif yoy > 2.5 and ret3 > 0.3:
+            scores['expansao'] += 25
+        elif yoy > 1:
+            scores['expansao'] += 15; scores['pico'] += 8
+        elif yoy > 0 and ret3 > 0:
+            scores['expansao'] += 10
+        elif yoy < 0:
+            scores['contracao'] += 20
+        else:
+            scores['pico'] += 10; scores['contracao'] += 5
+        n_ind += 1
+    return _finalizar(scores, indicadores, alertas, n_ind, 5, recuperacao)
+
+
+def calcular_ciclo_us_dados(macro, series=None, curva=None, atividade=None):
+    """Motor puro EUA; curva de yields observada e nenhuma taxa neutra inventada."""
+    scores = dict.fromkeys(('expansao', 'pico', 'contracao', 'vale'), 0)
+    indicadores, alertas, n_ind = {}, [], 0
+    series, curva = series or {}, curva or {}
+    slope = numero_finito(curva.get('slope'))
+    if slope is not None:
+        indicadores['yield_curve_spread'] = round(slope, 2)
+        if slope > 1.5:
+            scores['expansao'] += 25
+        elif slope > 0.5:
+            scores['expansao'] += 18; scores['pico'] += 7
+        elif slope > 0:
+            scores['pico'] += 15; scores['contracao'] += 10
+        else:
+            scores['contracao'] += 25
+            alertas.append('Curva 10y−2y invertida: sinal financeiro de risco, sem datação automática de recessão.')
+        n_ind += 1
+
+    sp = _serie_valida(series.get('^GSPC'))
+    if len(sp) >= 200:
+        ret = _retorno(sp, 126)
+        acima = bool(sp.iloc[-1] > sp.tail(200).mean())
+        indicadores.update(sp500_ret_6m=round(ret, 1), sp500_acima_mm200=acima)
+        if ret > 15 and acima:
+            scores['expansao'] += 20
+        elif ret > 5 and acima:
+            scores['expansao'] += 12; scores['pico'] += 8
+        elif ret > 0:
+            scores['pico'] += 10; scores['contracao'] += 10
+        else:
+            scores['contracao'] += 20
+        n_ind += 1
+
+    hyg, ief = _serie_valida(series.get('HYG')), _serie_valida(series.get('IEF'))
+    if len(hyg) > 63 and len(ief) > 63:
+        comuns = hyg.index.intersection(ief.index)
+        ratio = (hyg.reindex(comuns) / ief.reindex(comuns)).dropna()
+        ret = _retorno(ratio, 63)
+        if ret is not None:
+            indicadores['hyg_ief_ret_relativo_3m'] = round(ret, 2)
+            alertas.append('HYG/IEF é retorno relativo entre ETFs com duration distinta; não mede diretamente spread de crédito.')
+            if ret > 2:
+                scores['expansao'] += 15
+            elif ret > 0:
+                scores['expansao'] += 8
+            elif ret > -2:
+                scores['pico'] += 10; scores['contracao'] += 5
+            else:
+                scores['contracao'] += 15
+            n_ind += 1
+
+    ff = valor_observado(macro, 'fed_funds')
+    neutro = valor_observado(macro, 'fed_neutral_nominal')
+    if ff is not None:
+        indicadores['fed_funds'] = ff
+    if ff is not None and neutro is not None:
+        gap = ff - neutro
+        indicadores['fed_funds_gap'] = round(gap, 2)
+        if gap > 2.5:
+            scores['contracao'] += 20; scores['pico'] += 10
+        elif gap > 0.5:
+            scores['pico'] += 15; scores['contracao'] += 5
+        elif gap >= -0.5:
+            scores['expansao'] += 10; scores['pico'] += 10
+        else:
+            scores['expansao'] += 15
+        n_ind += 1
+
+    vix = valor_observado(macro, 'vix')
+    if vix is not None:
+        indicadores['vix'] = vix
+        if vix < 15:
+            scores['expansao'] += 10
+        elif vix < 20:
+            scores['expansao'] += 5; scores['pico'] += 5
+        else:
+            scores['contracao'] += 15
+        n_ind += 1
+
+    atividade = _serie_valida(atividade)
+    recuperacao = False
+    if len(atividade) >= 13:
+        yoy, ret3 = _retorno(atividade, 12), _retorno(atividade, 3)
+        recuperacao = bool(yoy < 0 and recuperacao_persistente(atividade) is True)
+        indicadores.update(producao_industrial_yoy=round(yoy, 2), producao_industrial_3m=round(ret3, 2))
+        if recuperacao:
+            scores['vale'] += 50
+        elif yoy < 0:
+            scores['contracao'] += 25
+        else:
+            scores['expansao'] += 25 if ret3 > 0 else 10
+        n_ind += 1
+    return _finalizar(scores, indicadores, alertas, n_ind, 6, recuperacao)
+
+
+def _precos(tickers):
+    resultado = {}
+    for ticker in tickers:
         try:
-            _imab = close_series('IMAB11.SA', '3mo')
-            _imab5p = close_series('B5P211.SA', '3mo')
-
-            if len(_imab) >= 20 and len(_imab5p) >= 20:
-                _ret_longo = float(
-                    _imab5p.iloc[-1] / _imab5p.iloc[-21] - 1
-                ) * 100
-                _ret_curto = float(
-                    _imab.iloc[-1] / _imab.iloc[-21] - 1
-                ) * 100
-                _spread_curva = _ret_longo - _ret_curto
-
-                resultado['indicadores']['spread_curva_br'] = (
-                    round(_spread_curva, 2)
-                )
-
-                if _spread_curva > 1.0:
-                    # Curva inclinada — mercado espera crescimento
-                    scores['expansao'] += 20
-                    scores['vale']     += 10
-                elif _spread_curva > 0:
-                    scores['expansao'] += 10
-                    scores['pico']     += 10
-                elif _spread_curva > -1.0:
-                    scores['pico']      += 15
-                    scores['contracao'] += 10
-                else:
-                    # Curva invertida — sinal recessivo
-                    scores['contracao'] += 20
-                    resultado['alertas'].append(
-                        "🚨 curva de juros BR invertida — "
-                        "sinal historicamente recessivo"
-                    )
-                n_ind += 1
+            resultado[ticker] = close_series(ticker, '1y')
         except Exception:
-            pass
-
-        # ── 3. Momentum do IBOV (proxy atividade econômica) ──────────────
-        try:
-            _ibov = close_series('^BVSP', '1y')
-
-            if len(_ibov) >= 252:
-                _ibov_at   = float(_ibov.iloc[-1])
-                _ibov_6m   = float(_ibov.iloc[-126])
-                _ibov_mm200 = float(_ibov.rolling(200).mean().iloc[-1])
-                _ret_6m    = (_ibov_at / _ibov_6m - 1) * 100
-
-                resultado['indicadores']['ibov_ret_6m'] = (
-                    round(_ret_6m, 1)
-                )
-                resultado['indicadores']['ibov_acima_mm200'] = (
-                    _ibov_at > _ibov_mm200
-                )
-
-                if _ret_6m > 15 and _ibov_at > _ibov_mm200:
-                    scores['expansao'] += 20
-                elif _ret_6m > 5 and _ibov_at > _ibov_mm200:
-                    scores['expansao'] += 12
-                    scores['pico']     += 8
-                elif _ret_6m > 0:
-                    scores['pico']      += 10
-                    scores['contracao'] += 10
-                elif _ret_6m > -15:
-                    scores['contracao'] += 15
-                    scores['vale']      += 10
-                else:
-                    scores['contracao'] += 10
-                    scores['vale']      += 20
-                    resultado['alertas'].append(
-                        f"📉 ibov caiu {_ret_6m:.1f}% em 6 meses — "
-                        f"possível contração"
-                    )
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 4. Câmbio USD/BRL (proxy aversão a risco emergente) ──────────
-        try:
-            _brl = close_series('BRL=X', '6mo')
-
-            if len(_brl) >= 60:
-                _brl_at   = float(_brl.iloc[-1])
-                _brl_med  = float(_brl.rolling(60).mean().iloc[-1])
-                _brl_desvio = (_brl_at / _brl_med - 1) * 100
-
-                resultado['indicadores']['usd_brl'] = round(_brl_at, 2)
-                resultado['indicadores']['usd_brl_vs_media'] = (
-                    round(_brl_desvio, 1)
-                )
-
-                if _brl_desvio > 10:
-                    # Dólar muito acima da média — stress/fuga de capital
-                    scores['contracao'] += 15
-                    resultado['alertas'].append(
-                        f"⚠️ dólar {_brl_desvio:.1f}% acima da média "
-                        f"— aversão a risco elevada"
-                    )
-                elif _brl_desvio > 3:
-                    scores['pico']      += 10
-                    scores['contracao'] += 5
-                elif _brl_desvio < -5:
-                    # Real apreciando — fluxo positivo
-                    scores['expansao'] += 10
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 5. Commodities (proxy demanda global + termos de troca BR) ───
-        try:
-            _oil = close_series('CL=F', '6mo')
-            _iron = close_series('TIO=F', '6mo')
-
-            _comm_score = 0
-            _n_comm = 0
-
-            for _ch, _cn in [(_oil, 'petróleo'), (_iron, 'minério')]:
-                if len(_ch) >= 60:
-                    _ret_c = float(_ch.iloc[-1] / _ch.iloc[-63] - 1) * 100
-                    if _ret_c > 10:
-                        _comm_score += 15
-                    elif _ret_c > 0:
-                        _comm_score += 8
-                    elif _ret_c > -10:
-                        _comm_score -= 5
-                    else:
-                        _comm_score -= 12
-                    _n_comm += 1
-
-            if _n_comm > 0:
-                _avg_comm = _comm_score / _n_comm
-                if _avg_comm > 10:
-                    scores['expansao'] += 15
-                    scores['pico']     += 5
-                elif _avg_comm > 0:
-                    scores['expansao'] += 8
-                elif _avg_comm > -8:
-                    scores['contracao'] += 8
-                else:
-                    scores['contracao'] += 15
-                    scores['vale']      += 5
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 6. IBC-Br — proxy MENSAL de atividade/PIB (BCB SGS 24364, dessaz) ──
-        # Antes o ciclo BR só tinha proxies de MERCADO (IBOV/câmbio/IMAB/commodities).
-        # O IBC-Br é o indicador de ATIVIDADE REAL que faltava — o mais próximo de um
-        # PIB mensal, publicado pelo BCB. Dá base "hard data" à classificação da fase.
-        try:
-            from bcb import sgs as _sgs
-            import datetime as _dt_ibc
-            _ini_ibc = (_dt_ibc.datetime.today() - _dt_ibc.timedelta(days=500)).strftime('%Y-%m-%d')
-            _df_ibc = _sgs.get({'ibc': 24364}, start=_ini_ibc)
-            _s_ibc = _df_ibc['ibc'].dropna() if (_df_ibc is not None and 'ibc' in _df_ibc.columns) else None
-            if _s_ibc is not None and len(_s_ibc) >= 13:
-                _ibc_yoy = float(_s_ibc.iloc[-1] / _s_ibc.iloc[-13] - 1) * 100
-                _ibc_3m = float(_s_ibc.iloc[-1] / _s_ibc.iloc[-4] - 1) * 100  # var 3m (dessaz)
-                resultado['indicadores']['ibc_br_yoy'] = round(_ibc_yoy, 2)
-                resultado['indicadores']['ibc_br_3m'] = round(_ibc_3m, 2)
-
-                if _ibc_yoy > 2.5 and _ibc_3m > 0.3:
-                    scores['expansao'] += 25          # atividade forte e acelerando
-                elif _ibc_yoy > 1.0:
-                    scores['expansao'] += 15
-                    scores['pico']     += 8
-                elif _ibc_yoy > 0 and _ibc_3m > 0:
-                    scores['expansao'] += 10
-                    scores['vale']     += 8
-                elif _ibc_yoy < 0 and _ibc_3m > 0.3:
-                    scores['vale']      += 18          # fundo virando — recuperação
-                    scores['contracao'] += 5
-                    resultado['alertas'].append(
-                        f"🔄 ibc-br recuperando (3m {_ibc_3m:+.1f}%) apesar do yoy "
-                        f"{_ibc_yoy:+.1f}% — possível vale do ciclo (early recovery)."
-                    )
-                elif _ibc_yoy < 0:
-                    scores['contracao'] += 20
-                    resultado['alertas'].append(
-                        f"📉 atividade econômica em contração (ibc-br yoy {_ibc_yoy:+.1f}%)."
-                    )
-                else:
-                    scores['pico']      += 10
-                    scores['contracao'] += 5
-                n_ind += 1
-        except Exception as e:
-            logger.debug(f"[ciclo_br] ibc-br indisponível: {e}")
-
-    except Exception as e:
-        logger.warning(f"[ciclo_br] erro: {e}")
-
-    if n_ind == 0:
-        resultado['fase_provavel'] = 'expansao'
-        resultado['confianca']     = 0
-        return resultado
-
-    # Normaliza scores
-    total_scores = sum(scores.values()) or 1
-    for k in scores:
-        scores[k] = round(scores[k] / total_scores * 100)
-
-    # Fase com maior score
-    fase_max = max(scores, key=lambda k: scores[k])
-    confianca = scores[fase_max] - sorted(scores.values())[-2]
-
-    resultado.update({
-        'score_expansao':   scores['expansao'],
-        'score_pico':       scores['pico'],
-        'score_contracao':  scores['contracao'],
-        'score_vale':       scores['vale'],
-        'fase_provavel':    fase_max,
-        'confianca':        confianca,
-        'n_indicadores':    n_ind,
-    })
-
+            resultado[ticker] = None
     return resultado
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def calcular_indicadores_ciclo_us() -> dict:
-    """
-    Calcula leading indicators do ciclo econômico dos EUA.
-
-    Indicadores usados (baseados em NBER e Conference Board LEI):
-    1. Yield curve 10y-2y (inversão histórica = recessão em 6-18m)
-    2. ISM Manufacturing PMI (via proxy — dados mensais)
-    3. Fed Funds vs Neutro (r* de Taylor)
-    4. S&P500 momentum (6 meses)
-    5. Credit spreads (HYG vs IEF como proxy)
-    6. Desemprego trend
-    """
-
-    resultado = {
-        'indicadores': {},
-        'score_expansao':   0,
-        'score_pico':       0,
-        'score_contracao':  0,
-        'score_vale':       0,
-        'fase_provavel':    'expansao',
-        'confianca':        0,
-        'alertas':          [],
-    }
-
-    scores = {
-        'expansao':  0,
-        'pico':      0,
-        'contracao': 0,
-        'vale':      0,
-    }
-    n_ind = 0
-
+def calcular_indicadores_ciclo_br(macro_context: dict | None = None) -> dict:
+    """BR: juros ex post, preços e IBC-Br. Pontos relativos, não probabilidades."""
+    macro = dict(macro_context if macro_context is not None else (st.session_state.get('macro_context', {}) or {}))
+    atividade = None
     try:
-        macro = st.session_state.get('macro_context', {})
-        treasury_10y = float(macro.get('treasury_10y', 4.5))
+        from bcb import sgs
+        import datetime as dt
+        inicio = (dt.date.today() - dt.timedelta(days=500)).isoformat()
+        df = sgs.get({'ibc': 24364}, start=inicio)
+        if df is not None and 'ibc' in df:
+            atividade = df['ibc'].dropna().resample('MS').last()
+    except Exception:
+        logger.debug('IBC-Br indisponível', exc_info=True)
+    expectativa = None
+    try:
+        from database.db import get_macro_cache
+        expectativa = get_macro_cache('br_focus_ipca_12m')
+    except Exception:
+        pass
+    precos = _precos(('IMAB11.SA', 'B5P211.SA', '^BVSP', 'BRL=X', 'CL=F', 'TIO=F'))
+    return calcular_ciclo_br_dados(macro, precos, atividade, expectativa)
 
-        # ── 1. Yield Curve 10y-2y (melhor predictor de recessão EUA) ────
-        try:
-            _t2y = close_series('^IRX', '2d')
-            if not _t2y.empty:
-                _yield_2y = float(_t2y.iloc[-1]) / 100
-                _spread_ycurve = treasury_10y - (_yield_2y * 100)
 
-                resultado['indicadores']['yield_curve_spread'] = (
-                    round(_spread_ycurve, 2)
-                )
-
-                if _spread_ycurve > 1.5:
-                    # Curva íngreme — expansão/vale
-                    scores['expansao'] += 25
-                    scores['vale']     += 15
-                elif _spread_ycurve > 0.5:
-                    scores['expansao'] += 18
-                    scores['pico']     += 7
-                elif _spread_ycurve > 0:
-                    scores['pico']      += 15
-                    scores['contracao'] += 10
-                elif _spread_ycurve > -0.5:
-                    scores['contracao'] += 20
-                    resultado['alertas'].append(
-                        "⚠️ yield curve eua achatada — "
-                        "historicamente precede recessão em 6-18 meses"
-                    )
-                else:
-                    scores['contracao'] += 25
-                    resultado['alertas'].append(
-                        f"🚨 yield curve eua invertida "
-                        f"({_spread_ycurve:.2f}pp) — "
-                        f"sinal recessivo forte (nber: 8/8 recessões "
-                        f"foram precedidas por inversão)"
-                    )
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 2. S&P500 Momentum (6 meses) ─────────────────────────────────
-        try:
-            _sp500 = close_series('^GSPC', '1y')
-
-            if len(_sp500) >= 126:
-                _sp_at   = float(_sp500.iloc[-1])
-                _sp_6m   = float(_sp500.iloc[-126])
-                _sp_mm200 = float(_sp500.rolling(200).mean().iloc[-1])
-                _ret_sp  = (_sp_at / _sp_6m - 1) * 100
-
-                resultado['indicadores']['sp500_ret_6m'] = (
-                    round(_ret_sp, 1)
-                )
-                resultado['indicadores']['sp500_acima_mm200'] = (
-                    _sp_at > _sp_mm200
-                )
-
-                if _ret_sp > 15 and _sp_at > _sp_mm200:
-                    scores['expansao'] += 20
-                elif _ret_sp > 5 and _sp_at > _sp_mm200:
-                    scores['expansao'] += 12
-                    scores['pico']     += 8
-                elif _ret_sp > 0:
-                    scores['pico']      += 10
-                    scores['contracao'] += 10
-                elif _ret_sp > -15:
-                    scores['contracao'] += 15
-                    scores['vale']      += 10
-                else:
-                    scores['vale']      += 20
-                    scores['contracao'] += 10
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 3. Credit Spreads (HYG vs IEF) ───────────────────────────────
-        # HYG = High Yield bonds, IEF = Investment Grade Treasuries
-        # Spread abrindo = stress de crédito = recessão
-        try:
-            _hyg = close_series('HYG', '6mo')
-            _ief = close_series('IEF', '6mo')
-
-            if len(_hyg) >= 60 and len(_ief) >= 60:
-                # Ratio HYG/IEF — caindo = spreads abrindo = stress
-                _ratio_at   = float(_hyg.iloc[-1]) / float(_ief.iloc[-1])
-                _ratio_3m   = float(_hyg.iloc[-63]) / float(_ief.iloc[-63]) if len(_hyg) >= 63 else _ratio_at
-                _ratio_mud  = (_ratio_at / _ratio_3m - 1) * 100
-
-                resultado['indicadores']['credit_spread_trend'] = (
-                    round(_ratio_mud, 2)
-                )
-
-                if _ratio_mud > 2:
-                    # Spreads fechando — risk-on
-                    scores['expansao'] += 15
-                    scores['vale']     += 10
-                elif _ratio_mud > 0:
-                    scores['expansao'] += 8
-                elif _ratio_mud > -2:
-                    scores['pico']      += 10
-                    scores['contracao'] += 5
-                else:
-                    # Spreads abrindo — stress de crédito
-                    scores['contracao'] += 15
-                    resultado['alertas'].append(
-                        "⚠️ spreads de crédito abrindo — "
-                        "stress financeiro em formação"
-                    )
-                n_ind += 1
-        except Exception:
-            pass
-
-        # ── 4. Fed Funds vs Neutro (r* Taylor Rule) ──────────────────────
-        # r* estimado ≈ RPGAP (FRED) ou 2.5% (longo prazo)
-        # Fed acima do neutro = aperto = favorece contração/pico
-        try:
-            _ff_rate = float(
-                macro.get('fed_funds', 5.25)
-                if 'fed_funds' in macro
-                else 5.25
-            )
-            # r* estimado: 2.5% (Laubach-Williams, Fed NY)
-            _r_star = 2.5
-            _gap_politica = _ff_rate - _r_star
-
-            resultado['indicadores']['fed_funds_gap'] = (
-                round(_gap_politica, 2)
-            )
-
-            if _gap_politica > 2.5:
-                # BC muito restritivo
-                scores['contracao'] += 20
-                scores['pico']      += 10
-                resultado['alertas'].append(
-                    f"⚠️ fed funds {_gap_politica:.1f}pp acima do "
-                    f"neutro — aperto monetário intenso"
-                )
-            elif _gap_politica > 0.5:
-                scores['pico']      += 15
-                scores['contracao'] += 5
-            elif _gap_politica > -0.5:
-                scores['expansao']  += 10
-                scores['pico']      += 10
-            else:
-                # BC estimulativo
-                scores['expansao']  += 15
-                scores['vale']      += 10
-            n_ind += 1
-        except Exception:
-            pass
-
-        # ── 5. VIX (aversão a risco) ──────────────────────────────────────
-        try:
-            _vix = float(macro.get('vix', 15.0))
-            resultado['indicadores']['vix'] = _vix
-
-            if _vix < 15:
-                scores['expansao'] += 10
-            elif _vix < 20:
-                scores['expansao'] += 5
-                scores['pico']     += 5
-            elif _vix < 30:
-                scores['contracao'] += 10
-            else:
-                scores['contracao'] += 15
-                scores['vale']      += 5
-                resultado['alertas'].append(
-                    f"🚨 vix {_vix:.1f} — stress de mercado elevado"
-                )
-            n_ind += 1
-        except Exception:
-            pass
-
-    except Exception as e:
-        logger.warning(f"[ciclo_us] erro: {e}")
-
-    if n_ind == 0:
-        resultado['fase_provavel'] = 'expansao'
-        resultado['confianca']     = 0
-        return resultado
-
-    total_scores = sum(scores.values()) or 1
-    for k in scores:
-        scores[k] = round(scores[k] / total_scores * 100)
-
-    fase_max  = max(scores, key=lambda k: scores[k])
-    confianca = scores[fase_max] - sorted(scores.values())[-2]
-
-    resultado.update({
-        'score_expansao':   scores['expansao'],
-        'score_pico':       scores['pico'],
-        'score_contracao':  scores['contracao'],
-        'score_vale':       scores['vale'],
-        'fase_provavel':    fase_max,
-        'confianca':        confianca,
-        'n_indicadores':    n_ind,
-    })
-
-    return resultado
+@st.cache_data(ttl=3600, show_spinner=False)
+def calcular_indicadores_ciclo_us(macro_context: dict | None = None) -> dict:
+    """EUA: yields observados e sinais financeiros; sem preenchimento fictício."""
+    macro = dict(macro_context if macro_context is not None else (st.session_state.get('macro_context', {}) or {}))
+    atividade = None
+    try:
+        from utils.macro_supabase import carregar_snapshot
+        df = carregar_snapshot('fred_global', max_age_days=30)
+        if df is not None and 'INDPRO' in df:
+            atividade = df['INDPRO'].dropna().resample('MS').last()
+    except Exception:
+        pass
+    return calcular_ciclo_us_dados(macro, _precos(('^GSPC', 'HYG', 'IEF')), ler_curva_10y_2y(), atividade)
 
 
 def get_alocacao_sugerida(fase_br: str, fase_us: str) -> dict:
-    """
-    Combina fase BR e EUA para gerar alocação sugerida ponderada.
-    BR: 60% do peso (investidor brasileiro)
-    EUA: 40% do peso
-    """
-    alloc_br = FASES_CICLO.get(fase_br, FASES_CICLO['expansao'])[
-        'alocacao_sugerida'
-    ]
-    alloc_us = FASES_CICLO.get(fase_us, FASES_CICLO['expansao'])[
-        'alocacao_sugerida'
-    ]
-
-    resultado = {}
-    for classe in alloc_br:
-        resultado[classe] = round(
-            alloc_br.get(classe, 0) * 0.60
-            + alloc_us.get(classe, 0) * 0.40
-        )
-
-    # Normaliza para 100%
+    """Exemplo educacional fixo BR60/US40; somente para fases determinadas."""
+    if fase_br not in FASES_CICLO or fase_us not in FASES_CICLO:
+        return {}
+    alloc_br, alloc_us = FASES_CICLO[fase_br]['alocacao_sugerida'], FASES_CICLO[fase_us]['alocacao_sugerida']
+    resultado = {classe: round(alloc_br.get(classe, 0) * 0.60 + alloc_us.get(classe, 0) * 0.40) for classe in alloc_br}
     total = sum(resultado.values())
-    if total > 0:
-        for k in resultado:
-            resultado[k] = round(resultado[k] / total * 100)
-
-    return resultado
+    return {classe: round(peso / total * 100) for classe, peso in resultado.items()} if total else {}

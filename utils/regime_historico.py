@@ -1,23 +1,13 @@
-"""
-utils/regime_historico.py — reconstrução histórica de regime e tilt (PLANO_MACRO M0-2).
+"""Reconstrução retrospectiva semanal de regime e tilt.
 
-Constrói o "deveria ser" no tempo. Como `classificar_regime` e `tilt_setor` são
-funções PURAS que aceitam os parâmetros macro explicitamente, dá para reconstituir
-o regime e o tilt setorial de CADA semana do passado alimentando com os valores
-macro DA ÉPOCA (Selic, IPCA 12m, VIX, Treasury 10y) — reconstrução fiel, não
-aproximada.
-
-Núcleo puro (`reconstruir_regime_tilt`) por injeção das funções de regime/tilt →
-testável sem Streamlit. O loader (`carregar_inputs_macro_semanais`) faz o I/O
-(SGS do BCB + yfinance) e é best-effort (tolera falha de API).
-
-Nota: a reconstrução usa o mapa de tilt ATUAL sobre dados passados — ou seja,
-"como a estratégia de hoje teria classificado o passado". É exatamente o que um
-backtest de estratégia precisa (evita look-ahead de mudanças futuras no motor).
+Usa o mapa atual sobre a vintage hoje disponível, com atrasos de divulgação
+assumidos e explícitos. Não equivale a um backtest point-in-time: revisões e
+calibração posterior do próprio mapa não são removidas por esta reconstrução.
 """
 from __future__ import annotations
 
 from typing import Callable, Optional
+import numpy as np
 
 import pandas as pd
 
@@ -28,8 +18,6 @@ SETORES_TILT = [
     "tecnologia", "utilities",
 ]
 
-_IPCA_FALLBACK = 4.5
-_T10_FALLBACK = 4.3
 
 
 def _f(v) -> Optional[float]:
@@ -39,7 +27,7 @@ def _f(v) -> Optional[float]:
         x = float(v)
     except (TypeError, ValueError):
         return None
-    return None if x != x else x   # NaN → None
+    return x if np.isfinite(x) else None
 
 
 def reconstruir_regime_tilt(
@@ -75,11 +63,10 @@ def reconstruir_regime_tilt(
             continue
         ipca = _f(row.get("ipca_12m"))
         t10 = _f(row.get("treasury_10y"))
-        _ipca = ipca if ipca is not None else _IPCA_FALLBACK
-        _t10 = t10 if t10 is not None else _T10_FALLBACK
-
-        reg = fn_regime(selic=selic, vix=vix, ipca=_ipca, treasury_10y=_t10) or {}
-        ctx = {"selic": selic, "vix": vix, "treasury_10y": _t10}
+        if ipca is None or t10 is None:
+            continue  # ausência não vira um cenário macro inventado
+        reg = fn_regime(selic=selic, vix=vix, ipca=ipca, treasury_10y=t10) or {}
+        ctx = {"selic": selic, "vix": vix, "treasury_10y": t10}
         d = {
             "data": dt,
             "regime_label": reg.get("label"),
@@ -94,55 +81,98 @@ def reconstruir_regime_tilt(
                 d[f"tilt_{s}"] = 0
         linhas.append(d)
 
-    if not linhas:
-        return pd.DataFrame()
-    return pd.DataFrame(linhas).set_index("data")
+    result = pd.DataFrame(linhas).set_index("data") if linhas else pd.DataFrame()
+    result.attrs.update(inputs.attrs)
+    result.attrs["linhas_excluidas_sem_inputs"] = len(inputs) - len(result)
+    result.attrs.setdefault("metodologia", {"tipo": "retrospectiva", "point_in_time": False,
+        "vintage": "informada pelo chamador; disponibilidade não comprovada"})
+    return result
 
 
 # ── loader (I/O best-effort — fora do núcleo puro/testes) ─────────────────────
 
-def carregar_inputs_macro_semanais(anos: int = 8) -> pd.DataFrame:
+def alinhar_serie_disponivel(serie: pd.Series, indice: pd.DatetimeIndex, *,
+    atraso_dias: int = 0, mes_fechado: bool = False, publicado_em: pd.Series | None = None
+) -> pd.DataFrame:
+    """Último valor divulgado até cada corte, sem antecipar a referência mensal.
+
+    Quando não há calendário real, usa atraso conservador ASSUMIDO. O valor é
+    da vintage fornecida; atrasar seu uso não corrige revisões ex post.
     """
-    Puxa Selic (SGS 432), IPCA 12m (SGS 13522), VIX (^VIX) e Treasury 10y (^TNX/10),
-    reamostra em base SEMANAL (sexta, último valor, ffill). Best-effort: cada fonte
-    falha em silêncio e sai como coluna ausente. Retorna DataFrame p/ reconstruir.
+    if serie is None or serie.empty:
+        return pd.DataFrame(index=indice, columns=["valor", "referencia_em", "disponivel_em"])
+    valores = pd.to_numeric(serie, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().copy()
+    valores.index = pd.to_datetime(valores.index, utc=True).tz_convert(None)
+    referencia = valores.index
+    if publicado_em is not None:
+        disponivel = pd.to_datetime(publicado_em.reindex(serie.index), utc=True).dt.tz_convert(None)
+        disponivel.index = pd.to_datetime(disponivel.index, utc=True).tz_convert(None)
+        disponibilidade = pd.DatetimeIndex(disponivel.reindex(referencia))
+    else:
+        base = referencia + pd.offsets.MonthEnd(0) if mes_fechado else referencia
+        disponibilidade = base + pd.Timedelta(days=atraso_dias)
+    dados = pd.DataFrame({"valor": valores.to_numpy(), "referencia_em": referencia,
+                          "disponivel_em": disponibilidade}).dropna(subset=["disponivel_em"])
+    dados = dados.sort_values(["disponivel_em", "referencia_em"]).drop_duplicates("disponivel_em", keep="last")
+    dados = dados.set_index("disponivel_em", drop=False)
+    corte = pd.to_datetime(indice, utc=True).tz_convert(None)
+    # Valores financeiros conhecidos apenas no dia seguinte: escolha explícita
+    # de fechamento conservador, sem pressupor o horário real de publicação.
+    result = dados.reindex(corte, method="ffill") if not dados.empty else pd.DataFrame(index=corte, columns=["valor", "referencia_em", "disponivel_em"])
+    result.index = indice
+    result.attrs["disponibilidade_base"] = "divulgacao_informada" if publicado_em is not None else "atraso_conservador_assumido"
+    return result
+
+
+def carregar_inputs_macro_semanais(anos: int = 8) -> pd.DataFrame:
+    """BCB/Yahoo, vintage atual; IPCA após mês fechado +20d, diárias +1d.
+
+    Atrasos são suposições explícitas, não datas oficiais de divulgação. As
+    séries armazenadas append-only permitem auditoria prospectiva a partir da
+    coleta, mas não inventam vintages anteriores à implantação.
     """
     from datetime import date, timedelta
-    inicio = (date.today() - timedelta(days=int(anos * 365.25)))
+    inicio = date.today() - timedelta(days=int(anos * 365.25))
     idx = pd.date_range(inicio, date.today(), freq="W-FRI")
     out = pd.DataFrame(index=idx)
+    metodos = {}
 
     def _sgs(cod, nome):
         try:
             from bcb import sgs
-            s = sgs.get({nome: cod}, start=inicio.isoformat())[nome]
-            s.index = pd.to_datetime(s.index)
-            return s.reindex(idx, method="ffill")
+            return sgs.get({nome: cod}, start=(inicio - timedelta(days=70)).isoformat())[nome]
         except Exception:
             return None
 
-    def _yf_close(tk, div=1.0):
+    def _yf_close(tk):
         try:
             import yfinance as yf
-            df = yf.download(tk, start=inicio.isoformat(), progress=False,
+            df = yf.download(tk, start=(inicio - timedelta(days=7)).isoformat(), progress=False,
                              auto_adjust=False)
             close = df["Close"]
-            if hasattr(close, "columns"):     # MultiIndex → 1ª coluna
+            if hasattr(close, "columns"):
                 close = close.iloc[:, 0]
-            close.index = pd.to_datetime(close.index)
-            return (close / div).reindex(idx, method="ffill")
+            return close
         except Exception:
             return None
 
-    for col, s in (
-        ("selic", _sgs(432, "selic")),
-        ("ipca_12m", _sgs(13522, "ipca_12m")),
-        ("vix", _yf_close("^VIX")),
-        ("treasury_10y", _yf_close("^TNX", div=10.0)),
+    for col, serie, fonte, atraso, mensal in (
+        ("selic", _sgs(432, "selic"), "BCB SGS432", 1, False),
+        ("ipca_12m", _sgs(13522, "ipca_12m"), "BCB SGS13522", 20, True),
+        ("vix", _yf_close("^VIX"), "Yahoo ^VIX", 1, False),
+        ("treasury_10y", _yf_close("^TNX"), "Yahoo ^TNX (%)", 1, False),
     ):
-        if s is not None:
-            out[col] = s
-    return out.dropna(subset=[c for c in ("selic", "vix") if c in out.columns])
+        if serie is not None:
+            alinhada = alinhar_serie_disponivel(serie, idx, atraso_dias=atraso, mes_fechado=mensal)
+            idade = pd.Series(idx, index=idx) - pd.to_datetime(alinhada["disponivel_em"])
+            max_idade = 75 if mensal else 7
+            out[col] = alinhada["valor"].where(idade <= pd.Timedelta(days=max_idade))
+            metodos[col] = {"fonte": fonte, "atraso_dias": atraso, "mes_fechado": mensal,
+                            "disponibilidade_base": "atraso_conservador_assumido", "max_idade_dias": max_idade}
+    out.attrs["metodologia"] = {"tipo": "reconstrucao_retrospectiva", "point_in_time": False,
+        "vintage": "mais recente disponível; revisões históricas não removidas", "series": metodos,
+        "mapa_tilt": "atual aplicado ao passado; calibração ex post possível"}
+    return out
 
 
 def reconstruir_regime_tilt_br(anos: int = 8) -> pd.DataFrame:

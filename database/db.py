@@ -990,6 +990,43 @@ def listar_decisoes(ticker=None):
     return query.execute().data
 
 
+def listar_teses_macro():
+    """Histórico completo do usuário autenticado, paginado por identidade/tipo.
+
+    Mantém o contrato do diário de negociações em ``listar_decisoes``. Uma falha
+    em qualquer página é propagada, em vez de simular histórico vazio ou parcial.
+    """
+    from utils.auth import get_current_user
+    user_id = get_user_id()
+    usuario = get_current_user()
+    autor = usuario.get('user_id') if usuario else None
+    if (isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0
+            or isinstance(autor, bool) or not isinstance(autor, int) or autor != user_id):
+        raise ValueError('Sessão autenticada necessária para carregar teses macro.')
+    sb = get_supabase()
+    registros, offset, ultimo_id = [], 0, None
+    while True:
+        pagina = (sb.table('decision_log').select('*')
+                  .eq('user_id', user_id).eq('tipo', 'tese_macro')
+                  .order('id').range(offset, offset + 499).execute().data)
+        if not isinstance(pagina, list):
+            raise RuntimeError('Resposta inválida ao carregar o histórico de teses.')
+        if not pagina:
+            return registros
+        for registro in pagina:
+            if (not isinstance(registro, dict) or registro.get('user_id') != user_id
+                    or registro.get('tipo') != 'tese_macro'):
+                raise RuntimeError('Resposta de teses incompatível com a conta autenticada.')
+            ident = registro.get('id')
+            if (isinstance(ident, bool) or not isinstance(ident, int)
+                    or (ultimo_id is not None and ident <= ultimo_id)):
+                raise RuntimeError('Paginação do histórico de teses inconsistente.')
+            ultimo_id = ident
+        registros.extend(pagina)
+        # Avança pelo que o servidor entregou: seu limite pode ser menor que 500.
+        offset += len(pagina)
+
+
 def atualizar_resultado(id_decisao, resultado):
     sb = get_supabase()
     data_res = datetime.today().strftime('%Y-%m-%d') if resultado else None

@@ -75,3 +75,22 @@ def test_integracao_fidelidade_regime_e_tilt():
     assert df.iloc[0]["tilt_imobiliario"] == 0
     # linha 1 tem vix 60 (stress) → imobiliário vulnerável (tilt < 0 vem do stress)
     assert df.iloc[1]["tilt_imobiliario"] < 0
+
+
+def test_ausencia_ipca_ou_treasury_nao_vira_fallback():
+    inp = _inputs()
+    inp.loc[inp.index[0], "ipca_12m"] = np.nan
+    inp.loc[inp.index[1], "treasury_10y"] = np.nan
+    result = reconstruir_regime_tilt(inp)
+    assert len(result) == 2
+    assert result.attrs["linhas_excluidas_sem_inputs"] == 2
+
+
+def test_ipca_so_disponivel_apos_fechamento_e_atraso():
+    from utils.regime_historico import alinhar_serie_disponivel
+    idx = pd.to_datetime(["2026-01-30", "2026-02-19", "2026-02-20", "2026-03-19"])
+    serie = pd.Series([4., 5.], index=pd.to_datetime(["2026-01-01", "2026-02-01"]))
+    resultado = alinhar_serie_disponivel(serie, idx, atraso_dias=20, mes_fechado=True)
+    assert resultado["valor"].isna().iloc[:2].all()
+    assert resultado["valor"].iloc[2:].tolist() == [4., 4.]
+    assert resultado.attrs["disponibilidade_base"] == "atraso_conservador_assumido"

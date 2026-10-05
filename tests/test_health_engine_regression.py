@@ -180,6 +180,8 @@ def test_regressao_score(fixture_path):
     m = build_mocks_from_fixture(data)
 
     with (
+        patch("utils.inflation_sectoral._carregar_inflacao_df", return_value=None),
+        patch("database.db.get_macro_cache", return_value=None),
         patch("utils.health_engine.get_health_scores", return_value=[]),
         patch("utils.health_engine.get_todos_fundamentos_cache",
               return_value={ticker: m["dados_base"]}),
@@ -222,6 +224,8 @@ def _calibrar_fixture(fixture_path: pathlib.Path):
     m = build_mocks_from_fixture(data)
 
     with (
+        patch("utils.inflation_sectoral._carregar_inflacao_df", return_value=None),
+        patch("database.db.get_macro_cache", return_value=None),
         patch("utils.health_engine.get_health_scores", return_value=[]),
         patch("utils.health_engine.get_todos_fundamentos_cache",
               return_value={ticker: m["dados_base"]}),

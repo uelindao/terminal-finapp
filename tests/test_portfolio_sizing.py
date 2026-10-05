@@ -4,6 +4,7 @@ Puro — sem rede.
 """
 import numpy as np
 import pandas as pd
+import pytest
 
 from utils.portfolio_sizing import (
     sugerir_sizing, exposicao_macro_book, vol_anual_por_ticker,
@@ -100,3 +101,9 @@ def test_exposicao_macro_entra_no_prompt_da_ia():
         posicoes_enriched=[], metricas={}, macro={"selic": 14.75, "ipca": 5.0, "vix": 16.5},
     )
     assert "exposição macro do book" not in ctx2
+
+
+@pytest.fixture(autouse=True)
+def sem_dados_reais(monkeypatch):
+    monkeypatch.setattr("utils.inflation_sectoral._carregar_inflacao_df", lambda *a, **k: None)
+    monkeypatch.setattr("database.db.get_macro_cache", lambda *a, **k: None)

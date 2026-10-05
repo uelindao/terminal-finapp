@@ -58,9 +58,8 @@ def test_contracao():
     assert r.score_sinais == 3
 
 
-def test_vale():
-    """Score 4: todos os sinais negativos — yield invertida, VIX alto,
-    CPI acelerando, momentum negativo (SPY e IBOV caindo)."""
+def test_stress_extremo_nao_identifica_vale():
+    """Quatro sinais negativos indicam stress, sem prova de recuperação."""
     r = classificar_regime(
         t10y=3.8,
         t2y=4.2,
@@ -69,7 +68,7 @@ def test_vale():
         spy_serie=_serie_caindo(),
         ibov_serie=_serie_caindo(),
     )
-    assert r.fase == "vale"
+    assert r.fase == "contracao"
     assert r.score_sinais == 4
 
 
@@ -97,7 +96,7 @@ def test_momentum_12_1_dados_insuficientes():
 
 
 def test_entradas_none():
-    """Sinais com input None contam como False, probabilidade descontada."""
+    """Ausência não vira expansão, VIX baixo ou probabilidade simulada."""
     r = classificar_regime(
         t10y=None,
         t2y=None,
@@ -106,6 +105,8 @@ def test_entradas_none():
         spy_serie=None,
         ibov_serie=None,
     )
-    assert r.fase == "expansao"
+    assert r.fase == "indefinido"
     assert r.score_sinais == 0
-    assert r.probabilidade < 0.55  # desconto por dados faltando
+    assert r.concordancia == r.cobertura == 0
+    assert r.sinais_validos == 0
+    assert all(v is None for v in r.sinais.values())

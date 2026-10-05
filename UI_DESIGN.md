@@ -82,3 +82,9 @@ Tokens, marcador de perfil e interface são enviados juntos por st.html em cada 
 A Home mostra seis sinais prioritários em uma grade de três colunas, duas quando a área disponível diminui e uma no celular. Os demais sinais continuam acessíveis em uma seção expansível. A chave de cache inclui os tickers da watchlist, evitando compartilhar avisos entre listas diferentes.
 
 Esta correção foi verificada nas páginas reais com uma watchlist de 21 ativos e nos quatro perfis em computador e celular. Também foi simulada a ausência dos tokens de tamanho. A alteração em requirements.txt requer reconstrução do ambiente no Cloud; o teste local não confirma a conclusão dessa publicação.
+
+## Bancada macro
+
+Cinco estudos com navegação que permite voltar à comparação sem recarregar universos: Transições (mapa/ritmos/evidências), Expectativas (ano/12m/juros), Rotação (janela/moeda/universo), Laboratório (pesos/patrimônio/execuções/cobertura) e Teses (formulário/versionamento/exportação). Gráficos e métricas usam os tokens do perfil de leitura. Em telas estreitas, controles e indicadores empilham e seletores quebram em linhas; tabelas mantêm rolagem local. As etiquetas de instrumentos selecionados usam `--ink-on-accent` para conservar contraste em cada paleta.
+
+Dados ausentes aparecem como n/d; um cálculo que depende deles é suspenso. Datas de referência, de coleta e disponibilidade assumida têm significados distintos. O usuário pode inspecionar um mês histórico, mas o contexto enviado à matriz é o mês comum mais recente, claramente identificado. Estudos de preços têm janelas, moedas e fontes próprias. O diário confirma a gravação e conserva rascunho se a confirmação for interrompida.

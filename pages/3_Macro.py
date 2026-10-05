@@ -60,92 +60,93 @@ topbar(
 )
 page_header("Cenário macro", "Juros, inflação, atividade e risco — explore séries, regimes e relações entre ativos.")
 
-_SECOES_MACRO = ["🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
+_SECOES_MACRO = ["🧭 bancada de rotação", "🌐 painel global", "🔄 ciclo econômico", "📅 calendário de eventos",
                  "🔭 overlay macro × preços", "🧠 sentimento", "🔗 correlações"]
 _secao = section_selector(_SECOES_MACRO, key="macro_secao")
 
 
-with st.expander("Contexto macro · regime, ciclos e juro real", expanded=False):
-    # Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
-    try:
-        from utils.macro_state import render_cockpit_macro
-        render_cockpit_macro("BR")
-    except Exception:
-        pass
+if _secao != "🧭 bancada de rotação":
+    with st.expander("Contexto macro · regime, ciclos e juro real", expanded=False):
+        # Cockpit macro — fonte única (regime, juro real, núcleo/serviços, vix)
+        try:
+            from utils.macro_state import render_cockpit_macro
+            render_cockpit_macro("BR")
+        except Exception:
+            pass
 
-    if "FRED_API_KEY" not in st.secrets:
-        info_box(
-            tipo   = "amber",
-            titulo = "Dados dos EUA indisponíveis",
-            texto  = "chave da api do FRED não foi encontrada em secrets.toml. sem ela, dados dos EUA e risco global ficarão indisponíveis.",
-            icone  = "⚠",
-        )
+        if "FRED_API_KEY" not in st.secrets:
+            info_box(
+                tipo   = "amber",
+                titulo = "Dados dos EUA indisponíveis",
+                texto  = "chave da api do FRED não foi encontrada em secrets.toml. sem ela, dados dos EUA e risco global ficarão indisponíveis.",
+                icone  = "⚠",
+            )
 
-    # ── Regime Macro — leitura CONSOLIDADA (fonte única: macro_state) ────────────
-    # Antes havia 3 leituras concorrentes do regime (este hero + aba ciclo + setores
-    # do macro_regime). Agora o hero é a síntese dos 3 motores via macro_state, com
-    # o campo de CONSENSO. A aba ciclo continua como o deep-dive detalhado.
-    section_title("Regime consolidado")
+        # ── Regime Macro — leitura CONSOLIDADA (fonte única: macro_state) ────────────
+        # Antes havia 3 leituras concorrentes do regime (este hero + aba ciclo + setores
+        # do macro_regime). Agora o hero é a síntese dos 3 motores via macro_state, com
+        # o campo de CONSENSO. A aba ciclo continua como o deep-dive detalhado.
+        section_title("Regime consolidado")
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _macro_state_cached():
-        """
-        Estado macro CANÔNICO consolidando os 3 motores de regime: selic×vix
-        (macro_regime), curva/vix/cpi/momentum (regime_classifier) e leading
-        indicators BR/US (ciclo_economico) — com campo de consenso. Cache 1h:
-        faz várias chamadas yfinance (compartilhadas via close_series).
-        """
-        from utils.macro_state import get_macro_state
-        return get_macro_state()
-
-
-    def _fase_tom(fase: str) -> str:
-        return {"expansao": "bull", "vale": "bull",
-                "pico": "amber", "contracao": "bear"}.get(fase, "amber")
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _macro_state_cached():
+            """
+            Estado macro CANÔNICO consolidando os 3 motores de regime: selic×vix
+            (macro_regime), curva/vix/cpi/momentum (regime_classifier) e leading
+            indicators BR/US (ciclo_economico) — com campo de consenso. Cache 1h:
+            faz várias chamadas yfinance (compartilhadas via close_series).
+            """
+            from utils.macro_state import get_macro_state
+            return get_macro_state()
 
 
-    try:
-        _ms = _macro_state_cached()
-        _tom_regime = {
-            "alinhado_risk_on":  "bull",
-            "alinhado_risk_off": "bear",
-            "divergente":        "amber",
-        }.get(_ms.consenso, "amber")
+        def _fase_tom(fase: str) -> str:
+            return {"expansao": "bull", "vale": "bull",
+                    "pico": "amber", "contracao": "bear"}.get(fase, "amber")
 
-        _sr_tom = "bear" if _ms.selic_real > 7 else ("amber" if _ms.selic_real > 4 else "bull")
-        _sinais_lst = [
-            ("ciclo (curva/vix/cpi/mom)", _ms.fase_ciclo, _fase_tom(_ms.fase_ciclo), f"{int(_ms.fase_prob*100)}%"),
-            ("ciclo br (leading)",        _ms.fase_br,    _fase_tom(_ms.fase_br),    "🇧🇷"),
-            ("ciclo us (leading)",        _ms.fase_us,    _fase_tom(_ms.fase_us),    "🇺🇸"),
-            ("regime juro×risco",         _ms.regime_label, _tom_regime,            f"{_ms.score_ambiente}/100"),
-            ("juro real (fisher)",        f"{_ms.selic_real:+.1f}%", _sr_tom,        "selic"),
-        ]
-        if _ms.curve_slope_10y_2y is not None:
-            _cs_tom = "bear" if _ms.curve_slope_10y_2y < 0 else "bull"
-            _sinais_lst.append(("curva us 10y-2y", f"{_ms.curve_slope_10y_2y:+.2f}pp", _cs_tom, "slope"))
 
-        hero_macro(
-            score     = int(_ms.fase_prob * 100),
-            label     = f"{_ms.fase_ciclo.upper()} · {_ms.regime_label}",
-            descricao = _ms.consenso_nota,
-            tom       = _tom_regime,
-            sinais    = _sinais_lst,
-        )
-    except Exception as e:
-        info_box(
-            tipo   = "amber",
-            titulo = "leitura de regime indisponível",
-            texto  = str(e),
-            icone  = "⚠",
-        )
+        try:
+            _ms = _macro_state_cached()
+            _tom_regime = {
+                "alinhado_risk_on":  "bull",
+                "alinhado_risk_off": "bear",
+                "divergente":        "amber",
+            }.get(_ms.consenso, "amber")
 
-    # Handoff do funil: do REGIME para a ROTAÇÃO SETORIAL (próximo passo do analista —
-    # "onde olhar" dado o regime). Torna a navegação macro → discovery explícita.
-    try:
-        st.page_link("pages/2_Discovery.py",
-                     label="Explorar rotação setorial")
-    except Exception:
-        pass
+            _sr_tom = "amber" if _ms.selic_real is None else ("bear" if _ms.selic_real > 7 else ("amber" if _ms.selic_real > 4 else "bull"))
+            _sinais_lst = [
+                ("concordância (curva/vix/cpi/mom)", _ms.fase_ciclo, _fase_tom(_ms.fase_ciclo), f"{int(_ms.fase_concordancia*100)}%"),
+                ("ciclo BR (heurística)",        _ms.fase_br,    _fase_tom(_ms.fase_br),    "🇧🇷"),
+                ("ciclo EUA (heurística)",        _ms.fase_us,    _fase_tom(_ms.fase_us),    "🇺🇸"),
+                ("regime juro×risco",         _ms.regime_label, _tom_regime,            f"{_ms.score_ambiente}/100" if _ms.score_ambiente is not None else "n/d"),
+                ("juro real ex post (Fisher)", f"{_ms.selic_real:+.1f}%" if _ms.selic_real is not None else "n/d", _sr_tom, "realizado"),
+            ]
+            if _ms.curve_slope_10y_2y is not None:
+                _cs_tom = "bear" if _ms.curve_slope_10y_2y < 0 else "bull"
+                _sinais_lst.append(("curva us 10y-2y", f"{_ms.curve_slope_10y_2y:+.2f}pp", _cs_tom, "slope"))
+
+            hero_macro(
+                score     = int(_ms.fase_concordancia * 100),
+                label     = f"{_ms.fase_ciclo.upper()} · {_ms.regime_label}",
+                descricao = _ms.consenso_nota + f" · Cobertura dos sinais: {_ms.fase_cobertura:.0%}. Concordância não é probabilidade.",
+                tom       = _tom_regime,
+                sinais    = _sinais_lst,
+            )
+        except Exception as e:
+            info_box(
+                tipo   = "amber",
+                titulo = "leitura de regime indisponível",
+                texto  = str(e),
+                icone  = "⚠",
+            )
+
+        # Handoff do funil: do REGIME para a ROTAÇÃO SETORIAL (próximo passo do analista —
+        # "onde olhar" dado o regime). Torna a navegação macro → discovery explícita.
+        try:
+            st.page_link("pages/2_Discovery.py",
+                         label="Explorar rotação setorial")
+        except Exception:
+            pass
 
 # ==========================================
 # funções globais de cache e apoio
@@ -211,10 +212,11 @@ def puxar_historico_mestre():
         # Calcula IPCA acumulado 12m
         if not df_br.empty and 'IPCA' in df_br.columns:
             try:
-                _ipca_raw = df_br['IPCA'].dropna()
-                df_br['IPCA_12M'] = ((1 + _ipca_raw / 100)
-                                     .rolling(12)
-                                     .apply(lambda x: x.prod(), raw=True) - 1) * 100
+                from utils.macro_research import mensal
+                _ipca_raw = mensal(df_br['IPCA'])
+                _annual = ((1 + _ipca_raw / 100).where(_ipca_raw > -100)
+                           .rolling(12, min_periods=12).apply(lambda x: x.prod(), raw=True) - 1) * 100
+                df_br['IPCA_12M'] = df_br.index.map(lambda d: _annual.get(pd.Timestamp(d).to_period('M').to_timestamp('M'), float('nan')))
             except Exception:
                 pass
 
@@ -263,7 +265,7 @@ def puxar_historico_mestre():
 
             series_fred = {
                 'FEDFUNDS': 'FEDFUNDS', 'CPIAUCSL': 'CPIAUCSL', 'UNRATE': 'UNRATE',
-                'DGS10': 'DGS10', 'DGS2': 'DGS2', 'DGS3MO': 'DGS3MO', 'VIXCLS': 'VIXCLS',
+                'DGS10': 'DGS10', 'DFII10': 'DFII10', 'INDPRO': 'INDPRO', 'DGS2': 'DGS2', 'DGS3MO': 'DGS3MO', 'VIXCLS': 'VIXCLS',
                 'ECBDFR': 'ECBDFR', 'IRLTLT01EZM156N': 'IRLTLT01EZM156N',
                 'IRLTLT01JPM156N': 'IRLTLT01JPM156N',
                 'T10Y2Y': 'T10Y2Y', 'BAMLH0A0HYM2': 'BAMLH0A0HYM2',
@@ -373,186 +375,6 @@ def tooltip_info(texto):
     _texto_escaped = texto.replace('"', '&quot;')
     return f"""<span style="cursor:help; border-bottom:1px dashed var(--text-muted); font-size:0.85em; color:var(--text-muted);" title="{_texto_escaped}">&#9432;</span>"""
 
-
-# ── Calendário COPOM oficial (atualizar anualmente) ───────────────────────────
-_COPOM_CALENDAR = {
-    # 2025 — datas publicadas pelo BCB
-    "1/2025": datetime.date(2025, 1, 29),
-    "2/2025": datetime.date(2025, 3, 19),
-    "3/2025": datetime.date(2025, 5,  7),
-    "4/2025": datetime.date(2025, 6, 18),
-    "5/2025": datetime.date(2025, 7, 30),
-    "6/2025": datetime.date(2025, 9, 17),
-    "7/2025": datetime.date(2025, 10, 29),
-    "8/2025": datetime.date(2025, 12, 10),
-    # 2026 — datas OFICIAIS publicadas pelo BCB (decisão = 2º dia, quarta-feira)
-    "1/2026": datetime.date(2026, 1, 28),
-    "2/2026": datetime.date(2026, 3, 18),
-    "3/2026": datetime.date(2026, 4, 29),
-    "4/2026": datetime.date(2026, 6, 17),
-    "5/2026": datetime.date(2026, 8,  5),
-    "6/2026": datetime.date(2026, 9, 16),
-    "7/2026": datetime.date(2026, 11, 4),
-    "8/2026": datetime.date(2026, 12,  9),
-    # 2027 — estimados pela cadência histórica (~6-8 semanas). Necessários para a
-    # curva DI ter horizonte >12m: o Focus projeta reuniões de 2027/2028 e sem
-    # estas datas os pontos além de dez/2026 são descartados.
-    "1/2027": datetime.date(2027, 1, 27),
-    "2/2027": datetime.date(2027, 3, 17),
-    "3/2027": datetime.date(2027, 5,  5),
-    "4/2027": datetime.date(2027, 6, 16),
-    "5/2027": datetime.date(2027, 7, 28),
-    "6/2027": datetime.date(2027, 9, 15),
-    "7/2027": datetime.date(2027, 10, 27),
-    "8/2027": datetime.date(2027, 12,  8),
-}
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def puxar_curva_di():
-    """
-    Constrói a curva DI brasileira (implied forward SELIC) via Focus/BCB.
-
-    Abordagem 1 (preferida): ExpectativasMercadoSelic por reunião COPOM
-      → cada ponto da curva = expectativa de SELIC na reunião N do COPOM
-      → mapeia o número da reunião para a data aproximada via _COPOM_CALENDAR
-      → retorna a curva com a granularidade de cada decisão do BCB
-
-    Abordagem 2 (fallback): ExpectativasMercadoAnuais
-      → pontos anuais (dez/2025, dez/2026...) via consensus do Focus
-
-    Retorna:
-      (df_curve, tipo, df_historico) onde:
-        df_curve: DataFrame com [tenor_dias, tenor_label, selic_mediana, selic_media]
-        tipo: 'copom' | 'anual' | None
-        df_historico: DataFrame com curvas históricas [data, tenor_label, selic_mediana]
-    """
-    try:
-        from bcb import Expectativas
-
-        em      = Expectativas()
-        hoje    = datetime.date.today()
-        cutoff  = (hoje - datetime.timedelta(days=10)).isoformat()
-        cutoff_hist = (hoje - datetime.timedelta(days=180)).isoformat()
-
-        def _norm_reuniao(v) -> str:
-            """Normaliza o campo de reunião do BCB para casar com _COPOM_CALENDAR.
-            A API entrega coluna 'Reuniao' (R maiúsculo) com valores 'R4/2026';
-            o calendário usa '4/2026'. Sem isto o lookup falhava e a curva sempre
-            caía no fallback anual."""
-            s = str(v or '').strip()
-            return s[1:] if s[:1].upper() == 'R' else s
-
-        # ── Abordagem 1: por reunião COPOM ────────────────────────────────
-        try:
-            ep_sel = em.get_endpoint('ExpectativasMercadoSelic')
-            df_sel = (
-                ep_sel.query()
-                .filter(ep_sel.baseCalculo == 0)   # % ao ano
-                .filter(ep_sel.Data >= cutoff)
-                .collect()
-            )
-            if df_sel is not None and not df_sel.empty:
-                latest_date = df_sel['Data'].max()
-                df_latest   = df_sel[df_sel['Data'] == latest_date].copy()
-
-                # Curva do dia mais recente
-                pontos = []
-                for _, row in df_latest.iterrows():
-                    reuniao = _norm_reuniao(row.get('Reuniao', row.get('reuniao')))
-                    if reuniao in _COPOM_CALENDAR:
-                        dt_cop = _COPOM_CALENDAR[reuniao]
-                        dias   = (dt_cop - hoje).days
-                        if dias > 0:
-                            pontos.append({
-                                'tenor_dias':    dias,
-                                'tenor_label':   reuniao,
-                                'selic_mediana': row.get('Mediana'),
-                                'selic_media':   row.get('Media'),
-                                'n_respondentes': row.get('numeroRespondentes', 0),
-                            })
-
-                if len(pontos) < 3:
-                    logger.warning(
-                        f"[curva_di] só {len(pontos)} pontos casaram com _COPOM_CALENDAR "
-                        f"(reuniões vistas: {sorted(set(_norm_reuniao(r) for r in df_latest.get('Reuniao', df_latest.get('reuniao', [])) ))[:8]}) "
-                        "— caindo para expectativas anuais. verifique _COPOM_CALENDAR."
-                    )
-                if len(pontos) >= 3:
-                    df_curve = pd.DataFrame(pontos).sort_values('tenor_dias').reset_index(drop=True)
-
-                    # Histórico: curvas de 30d e 90d atrás para comparação
-                    df_hist_list = []
-                    for lookback_days, lbl in [(30, "30d atrás"), (90, "90d atrás")]:
-                        _dt = (hoje - datetime.timedelta(days=lookback_days)).isoformat()
-                        _dt_from = (hoje - datetime.timedelta(days=lookback_days + 10)).isoformat()
-                        try:
-                            _df_lb = (
-                                ep_sel.query()
-                                .filter(ep_sel.baseCalculo == 0)
-                                .filter(ep_sel.Data >= _dt_from)
-                                .filter(ep_sel.Data <= _dt)
-                                .collect()
-                            )
-                            if _df_lb is not None and not _df_lb.empty:
-                                _ld = _df_lb['Data'].max()
-                                _df_lb = _df_lb[_df_lb['Data'] == _ld]
-                                for _, _r in _df_lb.iterrows():
-                                    _reun = _norm_reuniao(_r.get('Reuniao', _r.get('reuniao')))
-                                    if _reun in _COPOM_CALENDAR:
-                                        _dt_c = _COPOM_CALENDAR[_reun]
-                                        _d = (hoje - _dt_c).days  # dias desde então
-                                        df_hist_list.append({
-                                            'curva':         lbl,
-                                            'tenor_label':   _reun,
-                                            'selic_mediana': _r.get('Mediana'),
-                                            'tenor_dias_orig': (_dt_c - hoje).days,
-                                        })
-                        except Exception:
-                            pass
-
-                    df_historico = pd.DataFrame(df_hist_list) if df_hist_list else pd.DataFrame()
-                    return df_curve, 'copom', df_historico
-
-        except Exception as _e:
-            logger.warning(f"[curva_di] ExpectativasMercadoSelic falhou: {_e}")
-
-        # ── Abordagem 2: expectativas anuais ──────────────────────────────
-        ep_anual = em.get_endpoint('ExpectativasMercadoAnuais')
-        df_anual = (
-            ep_anual.query()
-            .filter(ep_anual.Indicador == 'Selic')
-            .filter(ep_anual.Data >= cutoff)
-            .collect()
-        )
-        if df_anual is not None and not df_anual.empty:
-            latest_date = df_anual['Data'].max()
-            df_l = df_anual[df_anual['Data'] == latest_date].sort_values('DataReferencia').copy()
-            pontos = []
-            for _, row in df_l.iterrows():
-                try:
-                    ano = int(str(row.get('DataReferencia', ''))[:4])
-                    dt_ref = datetime.date(ano, 12, 31)
-                    dias = (dt_ref - hoje).days
-                    if dias > 0:
-                        pontos.append({
-                            'tenor_dias':    dias,
-                            'tenor_label':   f"dez/{ano}",
-                            'selic_mediana': row.get('Mediana'),
-                            'selic_media':   row.get('Media'),
-                            'n_respondentes': row.get('numeroRespondentes', 0),
-                        })
-                except Exception:
-                    pass
-            if len(pontos) >= 2:
-                df_curve = pd.DataFrame(pontos).sort_values('tenor_dias').reset_index(drop=True)
-                return df_curve, 'anual', pd.DataFrame()
-
-        return None, None, pd.DataFrame()
-
-    except Exception as e:
-        logger.error(f"[curva_di] Erro geral: {e}")
-        return None, None, pd.DataFrame()
 
 def calcular_semaforo_fiscal(df_br: pd.DataFrame) -> dict:
     """
@@ -1180,6 +1002,10 @@ def buscar_earnings_calendario(tickers_tuple: tuple | None = None, data_fim_str:
 # renderiza SÓ a seção ativa (os blocos `with tab_X:` viraram `if _secao == ...`).
 
 
+if _secao == "🧭 bancada de rotação":
+    from utils.macro_research_view import render_bancada_macro
+    render_bancada_macro(st.session_state.get("macro_context", {}) or {})
+
 if _secao == "🌐 painel global":
     aba_sel = section_selector(
         ["🇧🇷 brasil", "🇺🇸 estados unidos", "🌍 europa/ásia", "🌐 risco", "🛢️ commodities", "📰 macro news"],
@@ -1230,52 +1056,10 @@ if _secao == "🌐 painel global":
         _vix_ss      = valor_atual_seguro(df_global, 'VIXCLS')
         _t10y_ss     = valor_atual_seguro(df_global, 'DGS10')
 
-        if _selic_ss is not None or _vix_ss is not None:
-            _ctx_prev  = st.session_state.get("macro_context", {})
-            _selic_val = float(_selic_ss) if _selic_ss is not None else _ctx_prev.get("selic", 10.75)
-            # Sanidade: série 432/439 = % anual. Se < 1, veio como decimal
-            if 0 < _selic_val < 1:
-                _selic_val = _selic_val * 100
-            elif _selic_val > 50:
-                _selic_val = 10.75
-            # IPCA acumulado 12m (anual) — chave canônica para Fisher / yield real
-            _ipca12_val = (
-                float(_ipca12_ss) if _ipca12_ss is not None
-                else (_ctx_prev.get("ipca_12m") or _ctx_prev.get("ipca", 4.5))
-            )
-            if not (0 < _ipca12_val < 50):       # sanidade: 0–50% a.a.
-                _ipca12_val = 4.5
-            # IPCA mensal (print do mês) — exibição / cálculos mensais
-            _ipca_mes_val = (
-                float(_ipca_mes_ss) if _ipca_mes_ss is not None
-                else _ctx_prev.get("ipca_mensal", 0.45)
-            )
-            if abs(_ipca_mes_val) > 5:           # >5% no mês = erro
-                _ipca_mes_val = 0.45
-            _vix_val  = float(_vix_ss)  if _vix_ss  is not None else _ctx_prev.get("vix", 15.0)
-            _t10y_val = float(_t10y_ss) if _t10y_ss is not None else _ctx_prev.get("treasury_10y", 4.5)
-
-            _juros_altos = _selic_val > 10.0
-            _risco_alto  = _vix_val   > 20.0
-
-            if _juros_altos and not _risco_alto:
-                _regime_label = "juros altos / risco controlado"
-            elif _juros_altos and _risco_alto:
-                _regime_label = "juros altos / stress global"
-            elif not _juros_altos and _risco_alto:
-                _regime_label = "juros baixos / stress global"
-            else:
-                _regime_label = "juros baixos / risco controlado"
-
-            st.session_state["macro_context"] = {
-                "selic":        round(_selic_val, 2),
-                "ipca":         round(_ipca12_val, 2),     # canônico: 12m (% a.a.)
-                "ipca_12m":     round(_ipca12_val, 2),     # alias explícito
-                "ipca_mensal":  round(_ipca_mes_val, 2),   # print do mês
-                "vix":          round(_vix_val, 1),
-                "treasury_10y": round(_t10y_val, 2),
-                "label":        _regime_label,
-            }
+        from utils.macro_context import atualizar_contexto_series
+        st.session_state["macro_context"] = atualizar_contexto_series(
+            st.session_state.get("macro_context", {}), df_br, df_global
+        )
 
         with st.expander("Síntese do cenário com IA", expanded=False):
             section_title("Síntese do cenário")
@@ -1328,14 +1112,17 @@ if _secao == "🌐 painel global":
             # Calcula IPCA acumulado 12 meses
             _ipca_12m = None
             if 'IPCA' in df_br.columns:
-                _ipca_mensal = df_br['IPCA'].dropna() / 100
-                _ipca_roll = (1 + _ipca_mensal).rolling(12).apply(lambda x: x.prod() - 1, raw=True) * 100
-                df_br['IPCA_12M'] = _ipca_roll
+                from utils.macro_research import mensal
+                _ipca_mensal = mensal(df_br['IPCA']) / 100
+                _ipca_roll = ((1 + _ipca_mensal).where(_ipca_mensal > -1)
+                              .rolling(12, min_periods=12).apply(lambda x: x.prod() - 1, raw=True) * 100)
+                _ipca_by_month = _ipca_roll.to_dict()
+                df_br['IPCA_12M'] = [ _ipca_by_month.get(pd.Timestamp(d).to_period('M').to_timestamp('M'), float('nan')) for d in df_br.index ]
                 _ipca_12m = valor_atual_seguro(df_br, 'IPCA_12M')
 
             # KPIs Brasil (design system v5)
             from utils.components import portfolio_kpis as _pf_kpis_br
-            _ipca_val = _ipca_12m or v_ipca_m
+            _ipca_val = _ipca_12m
             _selic_tone = (
                 "bear" if (v_selic and v_selic > 13)
                 else "amber" if (v_selic and v_selic > 10)
@@ -1388,13 +1175,14 @@ if _secao == "🌐 painel global":
             # ── SELIC REAL (ex-post) ──────────────────────────────────────────
             _selic_real = None
             if v_selic is not None and _ipca_12m is not None:
-                _sr = float(v_selic) - float(_ipca_12m)
-                if abs(_sr) < 30:
-                    _selic_real = round(_sr, 2)
+                from utils.macro_research import fisher
+                _sr = fisher(v_selic, _ipca_12m)
+                _selic_real = round(_sr, 2) if _sr is not None else None
 
             # Adiciona coluna de SELIC real no df para uso nos gráficos
             if 'Selic' in df_br.columns and 'IPCA_12M' in df_br.columns:
-                df_br['Selic_Real'] = (df_br['Selic'] - df_br['IPCA_12M']).clip(-10, 25)
+                df_br['Selic_Real'] = ((1 + df_br['Selic'] / 100) /
+                                      (1 + df_br['IPCA_12M'] / 100).where(df_br['IPCA_12M'] > -100) - 1) * 100
 
             # Linha extra de métricas
             m1, m2, m3 = st.columns(3)
@@ -1403,7 +1191,7 @@ if _secao == "🌐 painel global":
                     metric_card(
                         "selic real (ex-post)",
                         fmt_pct(_selic_real, sinal=True),
-                        "selic − ipca 12m acum.",
+                        "Fisher · inflação realizada em 12m",
                         "bear" if _selic_real > 8 else "amber" if _selic_real > 5 else "bull",
                     )
                 else:
@@ -1436,16 +1224,15 @@ if _secao == "🌐 painel global":
                 st.caption(
                     "selic é a taxa básica de juros definida pelo copom (banco central do brasil). "
                     "impacta diretamente o custo do crédito, a rentabilidade da renda fixa e o "
-                    "valuation das ações. quando a selic real (selic − ipca) supera 8%, os múltiplos "
-                    "p/l do ibovespa tendem a comprimir — renda fixa concorre com equities. "
-                    "leitura: a trajetória importa mais do que o nível absoluto — ciclo de corte = "
-                    "vento favorável para bolsa; ciclo de alta = rotação para crédito e renda fixa."
+                    "valuation das ações. O juro real ex post usa a relação de Fisher com inflação realizada. "
+                    "A trajetória de juros, as expectativas já incorporadas aos preços e os lucros "
+                    "precisam ser avaliados em conjunto; cortes não garantem valorização."
                 )
             with g2:
                 if 'IPCA_12M' in df_br.columns and not df_br['IPCA_12M'].dropna().empty:
                     _fig_ipca = go.Figure()
                     _fig_ipca.add_trace(go.Scatter(
-                        x=df_br.index, y=df_br['IPCA_12M'].dropna(),
+                        x=df_br['IPCA_12M'].dropna().index, y=df_br['IPCA_12M'].dropna(),
                         name='IPCA acum. 12m',
                         line=dict(color='#00B0FF', width=2),
                         hovertemplate='%{x}<br>IPCA 12m: %{y:.2f}%<extra></extra>',
@@ -1461,193 +1248,24 @@ if _secao == "🌐 painel global":
                 else:
                     st.plotly_chart(criar_grafico_macro(df_br, 'IPCA', "inflação mensal ipca (%)", "#00B0FF"), use_container_width=True, config={'responsive': True})
                     st.caption("inflação mensal do ipca (print do mês). a versão acumulada 12m acima é a leitura relevante para o juro real; esta mostra o dado mais recente do mês.")
-            # ── CURVA DI BRASILEIRA ───────────────────────────────────────────
             st.markdown("---")
-            section_title("📈 curva di — expectativas de selic pelo mercado (focus/bcb)")
-
-            with st.spinner("carregando expectativas de selic..."):
-                _di_curve, _di_tipo, _di_hist = puxar_curva_di()
-
-            if _di_curve is not None and not _di_curve.empty and v_selic is not None:
-                # ── métricas da curva ─────────────────────────────────────────
-                _di_spot       = float(v_selic)
-                _di_ultimo     = float(_di_curve['selic_mediana'].dropna().iloc[-1])
-                _di_primeiro   = float(_di_curve['selic_mediana'].dropna().iloc[0])
-                _di_slope      = _di_ultimo - _di_spot   # inclinação total curva
-                _di_next       = float(_di_curve['selic_mediana'].dropna().iloc[0])
-                _di_next_lbl   = _di_curve['tenor_label'].iloc[0]
-
-                _implied_move  = _di_next - _di_spot
-                _move_str      = f"{_implied_move:+.2f}pp" if abs(_implied_move) > 0.05 else "sem movimento esperado"
-                _move_cor      = "bear" if _implied_move > 0.1 else "bull" if _implied_move < -0.1 else "amber"
-
-                _shape = (
-                    "📉 curva inclinada p/ baixo — mercado precifica ciclo de cortes"
-                    if _di_slope < -0.5
-                    else "📈 curva inclinada p/ cima — mercado precifica aperto monetário"
-                    if _di_slope > 0.5
-                    else "➡️ curva flat — selic esperada estável no horizonte"
-                )
-                _shape_cor = "bull" if _di_slope < -0.5 else "bear" if _di_slope > 0.5 else "amber"
-
-                _cd1, _cd2, _cd3, _cd4 = st.columns(4)
-                with _cd1: metric_card("selic spot", fmt_pct(_di_spot), "taxa atual")
-                with _cd2: metric_card(
-                    f"próxima reunião ({_di_next_lbl})",
-                    fmt_pct(_di_next),
-                    _move_str, _move_cor,
-                )
-                with _cd3: metric_card(
-                    "selic terminal (curva)",
-                    fmt_pct(_di_ultimo),
-                    f"último nó da curva · inclinação {_di_slope:+.2f}pp",
-                    _shape_cor,
-                )
-                with _cd4: metric_card(
-                    "formato da curva",
-                    "cortes" if _di_slope < -0.5 else "altas" if _di_slope > 0.5 else "flat",
-                    _shape, _shape_cor,
-                )
-
-                # ── gráfico da curva ──────────────────────────────────────────
-                _fig_di = go.Figure()
-
-                # Spot SELIC (ponto zero)
-                _fig_di.add_trace(go.Scatter(
-                    x=[0], y=[_di_spot],
-                    mode='markers',
-                    name='selic spot',
-                    marker=dict(color='#FF6B35', size=12, symbol='diamond'),
-                    hovertemplate=f'spot: {_di_spot:.2f}%<extra></extra>',
-                ))
-
-                # Curva atual — mediana Focus
-                _x_cur = _di_curve['tenor_dias'].tolist()
-                _y_med = _di_curve['selic_mediana'].tolist()
-                _y_med_avg = _di_curve['selic_media'].tolist()
-                _lbl_cur = _di_curve['tenor_label'].tolist()
-
-                _fig_di.add_trace(go.Scatter(
-                    x=[0] + _x_cur,
-                    y=[_di_spot] + _y_med,
-                    mode='lines+markers',
-                    name='curva di (mediana)',
-                    line=dict(color='#00E5FF', width=2.5),
-                    marker=dict(size=7, color='#00E5FF'),
-                    hovertemplate='%{text}<br>selic mediana: %{y:.2f}%<extra></extra>',
-                    text=['spot'] + _lbl_cur,
-                ))
-
-                # Média Focus (linha suave por baixo)
-                if any(v is not None for v in _y_med_avg):
-                    _fig_di.add_trace(go.Scatter(
-                        x=[0] + _x_cur,
-                        y=[_di_spot] + _y_med_avg,
-                        mode='lines',
-                        name='curva di (média)',
-                        line=dict(color='#00E5FF', width=1, dash='dot'),
-                        opacity=0.4,
-                        hovertemplate='%{text}<br>selic média: %{y:.2f}%<extra></extra>',
-                        text=['spot'] + _lbl_cur,
-                    ))
-
-                # Curvas históricas — 30d e 90d atrás
-                if _di_hist is not None and not _di_hist.empty:
-                    _hist_cores = {"30d atrás": "#FFAA00", "90d atrás": "#888888"}
-                    for _lbl_h in _di_hist['curva'].unique():
-                        _dh = _di_hist[_di_hist['curva'] == _lbl_h].sort_values('tenor_dias_orig')
-                        if not _dh.empty:
-                            _fig_di.add_trace(go.Scatter(
-                                x=_dh['tenor_dias_orig'].tolist(),
-                                y=_dh['selic_mediana'].tolist(),
-                                mode='lines',
-                                name=_lbl_h,
-                                line=dict(color=_hist_cores.get(_lbl_h, '#666'), width=1.5, dash='dot'),
-                                opacity=0.6,
-                                hovertemplate=f"{_lbl_h}: %{{y:.2f}}%<extra></extra>",
-                            ))
-
-                # Linha horizontal — taxa neutra nominal (IPCA meta 4.5% + neutro real 4.5%)
-                _taxa_neutra = 9.0
-                _cc_di = _chart_cores()
-                _fig_di.add_hline(
-                    y=_taxa_neutra, line_color=_cc_di["bull"], line_dash='dash', line_width=1,
-                    annotation_text=f'taxa neutra ~{_taxa_neutra:.0f}%',
-                    annotation_font_color=_cc_di["bull"], annotation_font_size=9,
-                )
-
-                _fig_di.update_layout(**base_layout(
-                    height=320,
-                    title=f"curva di implícita — expectativas de selic por reunião copom (focus/bcb · {_di_tipo})"
-                ))
-                _fig_di.update_xaxes(
-                    title_text="dias corridos",
-                    tickvals=[0, 90, 180, 270, 365, 540, 730],
-                    ticktext=['spot', '3m', '6m', '9m', '1a', '18m', '2a'],
-                )
-                _fig_di.update_yaxes(title_text="selic implícita (% ao ano)")
-
-                st.plotly_chart(_fig_di, use_container_width=True, config={'responsive': True})
-
-                # ── caption analítico dinâmico ────────────────────────────────
-                if _di_slope < -1.0:
-                    _di_caption_regime = (
-                        "curva fortemente inclinada p/ baixo: o mercado precifica ciclo de cortes "
-                        f"de {abs(_di_slope):.1f}pp da selic no horizonte da curva. "
-                        "ambiente favorável para: ações domésticas (consumo, construção, finanças), "
-                        "fundos imobiliários de papel (high yield), duration longa em renda fixa. "
-                        "risco: surpresa altista de inflação pode reprecificar a curva."
-                    )
-                elif _di_slope < -0.25:
-                    _di_caption_regime = (
-                        "curva levemente inclinada p/ baixo: mercado espera cortes graduais de selic. "
-                        f"recuo esperado de ~{abs(_di_slope):.1f}pp no horizonte. "
-                        "ambiente moderadamente favorável para equities e renda fixa de duration média."
-                    )
-                elif _di_slope > 1.0:
-                    _di_caption_regime = (
-                        "curva inclinada p/ cima: mercado precifica aperto monetário adicional de "
-                        f"+{_di_slope:.1f}pp. "
-                        "ambiente desfavorável para ações domésticas — renda fixa é mais competitiva. "
-                        "favorece: exportadoras, bancos (spread maior), setores defensivos."
-                    )
-                elif _di_slope > 0.25:
-                    _di_caption_regime = (
-                        "curva levemente ascendente: mercado antecipa possível alta de selic. "
-                        "posicionamento defensivo em equities recomendado — preferência por empresas "
-                        "com baixa alavancagem e geração de caixa robusta."
-                    )
-                else:
-                    _di_caption_regime = (
-                        "curva flat: mercado não vê movimento relevante de selic no horizonte. "
-                        "selic estrutural (terminal rate) próxima ao nível atual. "
-                        "ambiente neutro — foco em seleção setorial, não na direcionalidade de juros."
-                    )
-
-                st.caption(
-                    f"curva di implícita (focus/bcb · fonte: {_di_tipo}): cada ponto representa a "
-                    "mediana das expectativas do mercado para a selic ao final de cada reunião copom. "
-                    f"taxa neutra nominal estimada: ~9% (ipca meta 4.5% + neutro real ~4.5%). "
-                    f"{_di_caption_regime}"
-                )
-
-                # Tipo de dado mostrado
-                _fonte_str = (
-                    "📍 fonte: bcb focus — expectativas por reunião copom (granularidade máxima)"
-                    if _di_tipo == 'copom'
-                    else "📍 fonte: bcb focus — expectativas anuais (projeções dez/ano)"
-                )
-                st.caption(_fonte_str)
-
-            else:
-                st.info(
-                    "curva di: dados do focus bcb temporariamente indisponíveis. "
-                    "verifique a conexão com a api do banco central."
-                )
+            section_title("Expectativas de Selic · pesquisa Focus")
+            from utils.macro_research_data import carregar_bancada
+            from utils.macro_research_view import render_expectativas
+            _expectation_bundle = carregar_bancada(False)
+            if st.button("Consultar expectativas públicas", key="macro_br_focus_refresh"):
+                with st.spinner("Consultando pesquisa Focus…"):
+                    from utils.macro_research_data import buscar_focus_publico
+                    st.session_state["_macro_br_focus"] = buscar_focus_publico()
+            if "_macro_br_focus" in st.session_state:
+                _expectation_bundle = dict(_expectation_bundle, focus=st.session_state["_macro_br_focus"])
+            render_expectativas(_expectation_bundle, st.session_state.get("macro_context", {}), key_prefix="macro_br_focus")
+            st.caption("Projeções de fim de ano e revisões da pesquisa Focus. A curva DI negociada na B3 "
+                       "exige cotações dos contratos e inclui prêmios de risco; não é inferida dessas medianas.")
 
             # ── 🌉 PONTE 2: P/L JUSTO PELO CICLO DE JUROS ────────────────────
             st.markdown("---")
-            section_title("📐 p/l justo — valuation do ibovespa pelo regime de juros reais")
+            section_title("Sensibilidade ilustrativa de múltiplos · Brasil")
 
             # Formula: P/L_justo = 1 / (selic_real + ERP)
             # ERP histórico para Brasil ≈ 5% (equity risk premium)
@@ -1664,25 +1282,26 @@ if _secao == "🌐 painel global":
             if 'Selic_Real' in df_br.columns:
                 try:
                     _sr_hist = df_br['Selic_Real'].dropna() / 100
-                    _pl_hist = (1 / (_sr_hist + _ERP_BR)).clip(4, 25)
+                    _denom_br = _sr_hist + _ERP_BR
+                    _pl_hist = (1 / _denom_br.where(_denom_br > 0)).dropna()
                     _pl_hist.name = 'pl_teorico'
                 except Exception:
                     pass
 
             _pj1, _pj2, _pj3, _pj4 = st.columns(4)
             with _pj1:
-                metric_card("p/l teórico ibov", f"{_pl_justo_atual:.1f}x" if _pl_justo_atual else "n/d", "1 / (selic real + erp 5%)", "bear" if (_pl_justo_atual or 99) < 8 else "amber" if (_pl_justo_atual or 99) < 11 else "bull")
+                metric_card("Múltiplo ilustrativo", f"{_pl_justo_atual:.1f}x" if _pl_justo_atual else "n/d", "1 / (selic real + erp 5%)", "bear" if (_pl_justo_atual or 99) < 8 else "amber" if (_pl_justo_atual or 99) < 11 else "bull")
             with _pj2:
                 _erp_str = f"selic real {_selic_real:.1f}% + erp {_ERP_BR*100:.0f}% = {((_selic_real or 0)/100+_ERP_BR)*100:.0f}% custo equity" if _selic_real else "n/d"
-                metric_card("custo de equity br", f"{((_selic_real or 0)/100 + _ERP_BR)*100:.1f}%" if _selic_real else "n/d", _erp_str, "bear")
+                metric_card("Taxa usada na hipótese", f"{((_selic_real or 0)/100 + _ERP_BR)*100:.1f}%" if _selic_real else "n/d", _erp_str, "bear")
             with _pj3:
                 # P/L justo com SELIC real a 4% (cenário de alívio)
                 _pl_cenario_bull = round(1 / (0.04 + _ERP_BR), 1)
-                metric_card("p/l se selic real = 4%", f"{_pl_cenario_bull:.1f}x", "cenário de alívio monetário", "bull")
+                metric_card("p/l se selic real = 4%", f"{_pl_cenario_bull:.1f}x", "Hipótese editável em estudos de cenário", "info")
             with _pj4:
                 if _pl_justo_atual:
                     _upside = ((_pl_cenario_bull / _pl_justo_atual) - 1) * 100
-                    metric_card("upside teórico de múltiplo", f"+{_upside:.0f}%", "expansão p/l se selic real cair para 4%", "bull" if _upside > 20 else "amber")
+                    metric_card("Variação na ilustração", f"{_upside:+.0f}%", "expansão p/l se selic real cair para 4%", "bull" if _upside > 20 else "amber")
 
             if _pl_hist is not None and not _pl_hist.empty:
                 _fig_pl = go.Figure()
@@ -1708,18 +1327,15 @@ if _secao == "🌐 painel global":
                         hovertemplate=f'atual: {_pl_justo_atual:.1f}x<extra></extra>',
                     ))
                 _fig_pl.update_layout(**base_layout(height=280, title="p/l teórico ibovespa pelo regime de juros reais (modelo gordon simplificado)"))
-                _fig_pl.update_yaxes(title_text="p/l teórico (x)", range=[3, 22])
+                _fig_pl.update_yaxes(title_text="Múltiplo ilustrativo (x)")
                 st.plotly_chart(_fig_pl, use_container_width=True, config={'responsive': True})
                 st.caption(
-                    "p/l teórico = 1 / (selic real + erp). "
-                    "equidade risk premium (erp) estimado em 5% para o brasil (média histórica). "
-                    "quando a selic real cai, o p/l justo SOBE — expansão de múltiplos. "
-                    "quando sobe, o p/l justo CAI — compressão. "
-                    "este modelo de gordon simplificado ignora crescimento de lucros, mas captura "
-                    "o efeito da taxa de desconto de forma direta. "
-                    "leitura: ibovespa negociando ABAIXO do p/l teórico = desconto raro (compra). "
-                    "acima = múltiplo esticado dado o regime de juros atual. "
-                    "nota: p/l real do ibovespa varia conforme earnings realizados — use como referência, não como alvo exato."
+                    "Ilustração: 1 / (Selic real ex post + prêmio assumido de 5%). "
+                    "O prêmio é uma hipótese fixa, não uma estimativa atual. A Selic real usa inflação "
+                    "realizada e não representa a curva real longa nem o custo de capital das empresas. "
+                    "A conta omite crescimento, distribuição de lucros, risco e composição do índice. "
+                    "Não estima valor justo, retorno esperado ou ponto de compra; mostra apenas sensibilidade "
+                    "matemática à taxa escolhida. Denominadores não positivos permanecem indisponíveis."
                 )
 
             st.markdown("---")
@@ -1731,8 +1347,7 @@ if _secao == "🌐 painel global":
                     "dólar ptax: taxa de câmbio oficial calculada pelo bcb. "
                     "dólar forte = pressão inflacionária via importados e combustíveis, mas "
                     "beneficia exportadoras (VALE3, PETR3, agro, papel&celulose). "
-                    "r$5.50-r$6.00 é a zona de equilíbrio no cenário atual; acima de r$6.50 "
-                    "o bcb tende a postura mais hawkish para conter passthrough para o ipca. "
+                    "Não há faixa fixa de equilíbrio ou reação automática do BCB a um nível de câmbio. "
                     "leitura: dólar subindo + commodities subindo = proteção para carteiras "
                     "com exportadoras. dólar subindo isolado = risco de recessão global."
                 )
@@ -2051,23 +1666,23 @@ if _secao == "🌐 painel global":
 
             # ── 📐 P/L JUSTO — EUA (Gordon simplificado) ───────────────────────
             st.markdown("---")
-            section_title("📐 p/l justo — valuation do s&p 500 pelo regime de juros reais (eua)")
+            section_title("📐 Sensibilidade do múltiplo aos juros reais — EUA")
             _ERP_US = 0.03
             _real_yield_us = None
-            if v_dgs10 is not None and _cpi_yoy_val is not None:
-                _real_yield_us = v_dgs10 - _cpi_yoy_val
+            _real_yield_us = valor_atual_seguro(df_global, 'DFII10')
             _pl_justo_us = None
             if _real_yield_us is not None:
                 _ry_dec = _real_yield_us / 100
                 if _ry_dec + _ERP_US > 0:
                     _pl_justo_us = round(1 / (_ry_dec + _ERP_US), 1)
 
-            # Série histórica do P/L teórico (a partir de DGS10 − CPI_YOY)
+            # Sensitivity illustration using the observed TIPS real yield (DFII10).
             _pl_hist_us = None
-            if 'DGS10' in df_global.columns and 'CPI_YOY' in df_global.columns:
+            if 'DFII10' in df_global.columns:
                 try:
-                    _ry_hist = (df_global['DGS10'] - df_global['CPI_YOY']).dropna()
-                    _pl_hist_us = (1 / (_ry_hist / 100 + _ERP_US)).clip(10, 40)
+                    _ry_hist = df_global['DFII10'].dropna()
+                    _denom_us = _ry_hist / 100 + _ERP_US
+                    _pl_hist_us = (1 / _denom_us.where(_denom_us > 0)).dropna()
                     _pl_hist_us.name = 'pl_teorico_us'
                 except Exception:
                     pass
@@ -2089,14 +1704,14 @@ if _secao == "🌐 painel global":
             _pj1, _pj2, _pj3, _pj4 = st.columns(4)
             with _pj1:
                 metric_card(
-                    "p/l teórico s&p 500", f"{_pl_justo_us:.1f}x" if _pl_justo_us else "n/d",
+                    "Múltiplo ilustrativo", f"{_pl_justo_us:.1f}x" if _pl_justo_us else "n/d",
                     "1 / (real yield 10y + erp 3%)",
                     "bear" if (_pl_justo_us or 99) < 14 else "amber" if (_pl_justo_us or 99) < 18 else "bull"
                 )
             with _pj2:
                 _custo_eq = ((_real_yield_us or 0) / 100 + _ERP_US) * 100 if _real_yield_us is not None else None
                 metric_card(
-                    "custo de equity us", f"{_custo_eq:.1f}%" if _custo_eq else "n/d",
+                    "Taxa real + prêmio assumido", f"{_custo_eq:.1f}%" if _custo_eq else "n/d",
                     f"10y real {_real_yield_us:.1f}% + erp {_ERP_US*100:.0f}%" if _real_yield_us is not None else "dados insuficientes",
                     "bear"
                 )
@@ -2104,7 +1719,7 @@ if _secao == "🌐 painel global":
                 _pl_cenario_bull_us = round(1 / (0.01 + _ERP_US), 1)
                 metric_card(
                     "p/l se real yield = 1%", f"{_pl_cenario_bull_us:.1f}x",
-                    "cenário de corte do fed (real yield baixo)", "bull"
+                    "hipótese de taxa real; trajetória do Fed não determina este nível", "bull"
                 )
             with _pj4:
                 if _pl_justo_us and _pl_real_spx:
@@ -2149,14 +1764,11 @@ if _secao == "🌐 painel global":
                 _fig_pl_us.update_yaxes(title_text="p/l teórico (x)", range=[8, 38])
                 st.plotly_chart(_fig_pl_us, use_container_width=True, config={'responsive': True})
                 st.caption(
-                    "p/l teórico = 1 / (real yield 10y + erp). "
-                    "equity risk premium (erp) estimado em 3% para eua (mercado maduro). "
-                    "real yield = treasury 10y − cpi yoy. "
-                    "quando o fed corta juros, a real yield cai → p/l justo SOBE. "
-                    "quando o fed aperta, sobe → p/l justo CAI. "
-                    "leitura: s&p 500 acima do p/l teórico = valuation esticado; "
-                    "abaixo = desconto relativo ao regime de juros. "
-                    "use como referência de regime, não como timing tool."
+                    "Ilustração 1 / (taxa real de dez anos + prêmio assumido de 3%), sem crescimento. "
+                    "Taxa real observada: TIPS DFII10. O prêmio é uma hipótese fixa, não uma estimativa "
+                    "atual; este múltiplo não é valor justo nem previsão. Mudanças na taxa do Fed não "
+                    "determinam automaticamente a taxa real longa. Valuation exige lucros, crescimento "
+                    "e prêmio de risco compatíveis com o horizonte."
                 )
 
             # ── FISCAL EUA ──────────────────────────────────────────────────────
@@ -3246,10 +2858,16 @@ if _secao == "🔄 ciclo econômico":
         _ciclo_br = calcular_indicadores_ciclo_br()
         _ciclo_us = calcular_indicadores_ciclo_us()
 
-    _fase_br = _ciclo_br.get('fase_provavel', 'expansao')
-    _fase_us = _ciclo_us.get('fase_provavel', 'expansao')
-    _dados_fase_br = FASES_CICLO.get(_fase_br, FASES_CICLO['expansao'])
-    _dados_fase_us = FASES_CICLO.get(_fase_us, FASES_CICLO['expansao'])
+    _fase_br = _ciclo_br.get('fase_provavel', 'indefinido')
+    _fase_us = _ciclo_us.get('fase_provavel', 'indefinido')
+    _fase_sem_dados = {
+        "label": "dados insuficientes", "cor": _chart_cores()["muted"], "icone": "◌",
+        "descricao": "Cobertura insuficiente para identificar a fase. Examine as fontes e os indicadores disponíveis.",
+        "setores_br": {"favorecidos": [], "evitar": []},
+        "setores_us": {"favorecidos": [], "evitar": []},
+    }
+    _dados_fase_br = FASES_CICLO.get(_fase_br, _fase_sem_dados)
+    _dados_fase_us = FASES_CICLO.get(_fase_us, _fase_sem_dados)
 
     _ciclo_visao = section_selector(
         ["Diagnóstico", "Indicadores", "Setores e alocação"], key="macro_ciclo_visao", label="Detalhe do ciclo",
@@ -3261,9 +2879,9 @@ if _secao == "🔄 ciclo econômico":
     if _ciclo_visao != "Diagnóstico":
         _c_br, _c_us = st.columns(2)
         with _c_br:
-            metric_card("Ciclo Brasil", _dados_fase_br['label'], f"Confiança {_ciclo_br.get('confianca', 0):.0f}%", "info")
+            metric_card("Ciclo Brasil", _dados_fase_br['label'], f"Separação {_ciclo_br.get('confianca', 0):.0f} pp · cobertura {_ciclo_br.get('cobertura', 0):.0%}", "info")
         with _c_us:
-            metric_card("Ciclo EUA", _dados_fase_us['label'], f"Confiança {_ciclo_us.get('confianca', 0):.0f}%", "info")
+            metric_card("Ciclo EUA", _dados_fase_us['label'], f"Separação {_ciclo_us.get('confianca', 0):.0f} pp · cobertura {_ciclo_us.get('cobertura', 0):.0%}", "info")
 
     if _ciclo_visao == "Diagnóstico":
         # ── Cards de fase BR e EUA ────────────────────────────────────────
@@ -3311,7 +2929,7 @@ if _secao == "🔄 ciclo econômico":
 
                     f'<div style="text-align:center;">'
                     f'<div style="font-size:0.78rem;color:var(--text-muted);'
-                    f'text-transform:uppercase;">confiança</div>'
+                    f'text-transform:uppercase;">separação</div>'
                     f'<div style="font-family:var(--font-data,monospace);'
                     f'color:{_cor_f};font-weight:600;">'
                     f'{_conf:.0f}pp</div>'
@@ -3332,7 +2950,8 @@ if _secao == "🔄 ciclo econômico":
                 tooltip(f"ciclo_{_fase_atual}")
 
                 # Scores das 4 fases como mini barras
-                section_title("probabilidade por fase")
+                section_title("Pontuação heurística por fase")
+                st.caption("As barras mostram pontos relativos do modelo, sem probabilidade estatística calibrada.")
                 for _fn, _fk in [
                     ("expansão",  "score_expansao"),
                     ("pico",      "score_pico"),
@@ -3402,8 +3021,8 @@ if _secao == "🔄 ciclo econômico":
         _map_labels_br = {
             'ibc_br_yoy':           ('IBC-Br atividade (YoY)', '%'),
             'ibc_br_3m':            ('IBC-Br momentum (3m dessaz)', '%'),
-            'selic_real':           ('Selic Real (Selic - IPCA 12m)', '%'),
-            'spread_curva_br':      ('Spread Curva BR (IMA-B 5+ vs 5)', 'pp'),
+            'selic_real':           ('Juro real ex post (Fisher)', '%'),
+            'retorno_relativo_etfs_br':      ('Retorno relativo ETFs IMA-B (não é curva de taxas)', 'pp'),
             'ibov_ret_6m':          ('Retorno IBOV 6 meses', '%'),
             'ibov_acima_mm200':     ('IBOV acima da MM200', ''),
             'usd_brl':              ('USD/BRL atual', 'R$'),
@@ -3413,8 +3032,10 @@ if _secao == "🔄 ciclo econômico":
             'yield_curve_spread':   ('Yield Curve 10y-2y', 'pp'),
             'sp500_ret_6m':         ('Retorno S&P500 6 meses', '%'),
             'sp500_acima_mm200':    ('S&P500 acima da MM200', ''),
-            'credit_spread_trend':  ('Credit Spreads HYG/IEF (3m)', '%'),
-            'fed_funds_gap':        ('Fed Funds vs Neutro (r*)', 'pp'),
+            'hyg_ief_ret_relativo_3m': ('Retorno relativo HYG/IEF 3m (proxy de preço)', 'pp'),
+            'producao_industrial_yoy': ('Produção industrial YoY', '%'),
+            'producao_industrial_3m': ('Produção industrial 3m', '%'),
+            'commodities_ret_3m': ('Retorno commodities 3m', '%'),
             'vix':                  ('VIX', 'pts'),
         }
 
@@ -3529,11 +3150,13 @@ if _secao == "🔄 ciclo econômico":
 
         # ── Alocação sugerida ─────────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        section_title("💼 alocação sugerida para o ciclo atual")
+        section_title("💼 Exemplo educacional de alocação por fase")
 
         _alloc = get_alocacao_sugerida(_fase_br, _fase_us)
 
-        _alloc_cols = st.columns(len(_alloc))
+        _alloc_cols = st.columns(max(1, len(_alloc)))
+        if not _alloc:
+            st.info("Alocação ilustrativa suspensa: cobertura insuficiente para identificar as duas fases.")
         _alloc_cores = {
             'ações br':   '#FF9900',
             'ações eua':  '#00B0FF',
@@ -3548,7 +3171,7 @@ if _secao == "🔄 ciclo econômico":
                 metric_card(
                     _classe,
                     f"{_pct}%",
-                    "sugestão pelo ciclo",
+                    "hipótese fixa do modelo",
                     cor_delta="amber",
                 )
 
@@ -3582,10 +3205,10 @@ if _secao == "🔄 ciclo econômico":
         _prompt_ciclo = (
             f"análise do ciclo econômico atual:\n\n"
             f"brasil — fase: {_fase_br} "
-            f"(confiança: {_ciclo_br.get('confianca',0):.0f}pp)\n"
+            f"(separação heurística: {_ciclo_br.get('confianca',0):.0f}pp)\n"
             f"indicadores br:\n{_ind_br_txt}\n\n"
             f"eua — fase: {_fase_us} "
-            f"(confiança: {_ciclo_us.get('confianca',0):.0f}pp)\n"
+            f"(separação heurística: {_ciclo_us.get('confianca',0):.0f}pp)\n"
             f"indicadores eua:\n{_ind_us_txt}\n\n"
             f"alertas dos indicadores:\n{_alertas_txt}\n\n"
             f"alocação sugerida pelo modelo: "
@@ -3611,7 +3234,7 @@ if _secao == "🔄 ciclo econômico":
             "você é um economista especializado em ciclos "
             "econômicos e alocação de ativos. use fama-french, "
             "nber methodology e exemplos históricos. "
-            "seja preciso, use dados fornecidos. minúsculas."
+            "seja preciso, use dados fornecidos. Separe regras heurísticas de observações e não invente probabilidades, indicadores ausentes ou preços já antecipados. minúsculas."
         )
         _us_ciclo = st.session_state.get('user_settings', {})
         chamar_ia(

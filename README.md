@@ -142,3 +142,7 @@ from database.db_sqlite_legacy import ...
 ├── logs/                           # Logs runtime (ignorados pelo git)
 └── requirements.txt
 ```
+
+## Pesquisa macro e rotação
+
+A bancada de Cenário macro reúne transições, revisões Focus, matriz de classes/setores, laboratório retrospectivo e diário de teses. Carteira inclui cenários manuais de preços e câmbio. Consulte [MACRO_RESEARCH.md](MACRO_RESEARCH.md) para hipóteses, cobertura, fontes e atualização no Community Cloud.

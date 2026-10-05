@@ -413,3 +413,13 @@ a.ft-attention-card:hover { background: var(--bg-hover); border-color: var(--acc
 @container (max-width: 800px) { .ft-attention-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 480px) { .ft-attention-grid { grid-template-columns: 1fr; } }
 @media (max-width: 768px) { .ft-attention-grid { grid-template-columns: 1fr; } }
+
+/* Selected instruments need the same contrast as primary controls. */
+[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+    background: var(--accent) !important;
+    color: var(--ink-on-accent) !important;
+}
+[data-testid="stMultiSelect"] [data-baseweb="tag"] span,
+[data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
+    color: var(--ink-on-accent) !important;
+}

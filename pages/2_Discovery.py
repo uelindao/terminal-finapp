@@ -742,36 +742,25 @@ if _secao_d == "🔍 screener quantitativo":
         page_jump_links([("Resultado", "resultado-screener"), ("Critérios", "criterios-screener")])
     _resultados_screener = st.container()
 
-    with st.expander("Regime macro e setores favorecidos", expanded=False):
+    with st.expander("Regime macro e sensibilidade dos setores", expanded=False):
+        st.caption("Regra heurística baseada em Selic e VIX. Sensibilidades setoriais não incorporam preços, valuation ou revisões de lucros; o score não é probabilidade.")
         # ── 🌉 PONTE 4: CONTEXTO MACRO PARA O SCREENER ───────────────────────────
         try:
             from utils.macro_regime import classificar_regime
             _mc = st.session_state.get("macro_context", {})
-            _regime_scr = classificar_regime(
-                selic=_mc.get("selic"), vix=_mc.get("vix"),
-                ipca=_mc.get("ipca"), treasury_10y=_mc.get("treasury_10y"),
-            )
+            _regime_scr = classificar_regime(macro_context=_mc)
             _fav_scr  = _regime_scr.get("setores_favorecidos", [])
             _prej_scr = _regime_scr.get("setores_prejudicados", [])
             _lbl_scr  = _regime_scr.get("label", "neutro")
             _pos_scr  = _regime_scr.get("posicionamento", "")
-            _scr_amb  = _regime_scr.get("score_ambiente", 50)
-            _cor_amb  = "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
+            _scr_amb  = _regime_scr.get("score_ambiente")
+            _cor_amb  = "var(--text-muted)" if _scr_amb is None else "var(--bull)" if _scr_amb >= 60 else ("var(--amber)" if _scr_amb >= 35 else "var(--bear)")
 
-            _selic_val = _mc.get("selic")
-            # ipca_12m (% aa) vem do macro_cache; ipca do session_state é mensal — não usar.
-            _ipca_12m = _mc.get("ipca_12m")
-            if _ipca_12m is None:
-                try:
-                    from database.db import get_all_macro_cache
-                    _mc_cache = {r["indicator"]: r["value"] for r in (get_all_macro_cache() or [])}
-                    _ipca_12m = _mc_cache.get("ipca_12m")
-                    if _ipca_12m is not None:
-                        _ipca_12m = float(_ipca_12m)
-                except Exception:
-                    _ipca_12m = None
+            from utils.regime_classifier import valor_observado
+            _selic_val = valor_observado(_mc, "selic")
+            _ipca_12m = valor_observado(_mc, "ipca_12m", "ipca")
             # Fisher: selic_real = (1 + selic/100) / (1 + ipca_12m/100) - 1
-            if _selic_val and _ipca_12m:
+            if _selic_val is not None and _ipca_12m is not None and _ipca_12m > -100:
                 _selic_r_scr = round(((1 + _selic_val / 100) / (1 + _ipca_12m / 100) - 1) * 100, 1)
             else:
                 _selic_r_scr = None
@@ -785,7 +774,7 @@ if _secao_d == "🔍 screener quantitativo":
                 f'<div>'
                 f'<span style="color:var(--text-muted);font-size:0.78rem;text-transform:uppercase;">regime macro atual</span><br>'
                 f'<span style="color:{_cor_amb};font-size:0.85rem;font-weight:bold;">{_lbl_scr}</span>'
-                f'<span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;">score {_scr_amb}/100</span>'
+                f'<span style="color:var(--text-muted);font-size:0.78rem;margin-left:8px;">score {_scr_amb if _scr_amb is not None else "n/d"}/100</span>'
                 f'</div>'
                 + (f'<div><span style="color:var(--text-muted);font-size:0.78rem;">selic real</span><br>'
                    f'<span style="color:{_cor_selic_r};font-size:0.8rem;">'
@@ -1556,8 +1545,8 @@ if _secao_d == "🗺️ rotação setorial":
     st.markdown(
         '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; '
         'color:var(--text-muted); margin:-4px 0 12px 0; line-height:1.55;">'
-        'nota composta que cruza qualidade (health médio), força relativa '
-        '(momentum 12m vs universo) e vento macro (regime + inflação setorial). '
+        'nota composta que cruza qualidade e valuation do cache, posição de momentum '
+        '(12m entre setores) e vento macro (regime + inflação setorial). '
         'overweight ≥ 62 · neutro 48–61 · underweight &lt; 48.'
         '</div>',
         unsafe_allow_html=True,
@@ -1574,6 +1563,8 @@ if _secao_d == "🗺️ rotação setorial":
             "setor":      r["label"],
             "composto":   r["composto"],
             "fundamento": r["fundamento"],
+            "cobertura fundamento (%)": round(r.get("cobertura_fundamento", 0)),
+            "cobertura técnico (%)": round(r.get("cobertura_tecnico", 0)),
             "técnico":    r["tecnico"],
             "macro":      r["macro"],
             "veredicto":  r["veredicto"],
@@ -1582,7 +1573,7 @@ if _secao_d == "🗺️ rotação setorial":
         _colcfg = {
             "composto":   st.column_config.ProgressColumn("composto", min_value=0, max_value=100, format="%.0f"),
             "fundamento": st.column_config.ProgressColumn("fundamento", min_value=0, max_value=100, format="%.0f"),
-            "técnico":    st.column_config.ProgressColumn("técnico (RS 12m)", min_value=0, max_value=100, format="%.0f"),
+            "técnico":    st.column_config.ProgressColumn("Momentum entre setores", min_value=0, max_value=100, format="%.0f"),
             "macro":      st.column_config.ProgressColumn("macro (regime+infl.)", min_value=0, max_value=100, format="%.0f"),
         }
         try:
@@ -1590,6 +1581,7 @@ if _secao_d == "🗺️ rotação setorial":
         except Exception:
             st.dataframe(_df_sc, use_container_width=True, hide_index=True)
 
+        st.caption("Notas ausentes ficam em branco. O composto exige os três pilares; cobertura baixa limita a leitura. O técnico é posição entre setores do universo, sem medir retorno contra um benchmark.")
         _ow = [r["label"] for r in _scorecard if r["veredicto"] == "overweight"]
         _uw = [r["label"] for r in _scorecard if r["veredicto"] == "underweight"]
         st.markdown(
@@ -1746,17 +1738,18 @@ if _secao_d == "🗺️ rotação setorial":
         _regime_disc = classificar_regime()
         _regime_label = _regime_disc.get("label", "neutro")
         _regime_desc = _regime_disc.get("descricao", "")
-        _score_amb = _regime_disc.get("score_ambiente", 50)
+        _score_amb = _regime_disc.get("score_ambiente")
         _fav_setores = _regime_disc.get("setores_favorecidos", [])
         _prej_setores = _regime_disc.get("setores_prejudicados", [])
         _posicionamento = _regime_disc.get("posicionamento", "")
 
         _cor_regime = (
+            "var(--text-muted)" if _score_amb is None else
             "var(--bear)" if "stress" in _regime_label
             else "var(--amber)" if "altos" in _regime_label
             else "var(--bull)"
         )
-        _cor_score = "var(--bull)" if _score_amb >= 60 else ("var(--amber)" if _score_amb >= 35 else "var(--bear)")
+        _cor_score = "var(--text-muted)" if _score_amb is None else "var(--bull)" if _score_amb >= 60 else ("var(--amber)" if _score_amb >= 35 else "var(--bear)")
 
         _html_parts = [
             f'<div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-left:3px solid {_cor_regime};border-radius:6px;padding:10px 16px;margin-bottom:16px;">',
@@ -1765,7 +1758,7 @@ if _secao_d == "🗺️ rotação setorial":
             f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_regime};">{_regime_label}</span>',
             f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.72rem;color:var(--text-muted);">{_regime_desc[:60]}</span>',
             f'<span style="font-family:var(--font-ui,sans-serif);font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;">score amb.</span>',
-            f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb}/100</span>',
+            f'<span style="font-family:var(--font-data,monospace);font-size:0.82rem;font-weight:600;color:{_cor_score};">{_score_amb if _score_amb is not None else "n/d"}/100</span>',
             '</div>',
         ]
 

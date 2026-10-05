@@ -28,25 +28,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
+from utils.regime_classifier import valor_observado, numero_finito, ler_curva_10y_2y
 
 from utils.st_fallback import st, ST_AVAILABLE as _ST
 
 from utils.logger import get_logger
-from utils.macro_context import (
-    SELIC_FALLBACK, VIX_FALLBACK, IPCA_12M_FALLBACK, TREASURY_10Y_FALLBACK,
-)
 
 logger = get_logger(__name__)
 
 
 # ── Fisher: selic real = (1+selic)/(1+ipca) - 1 ──────────────────────────────
 
-def selic_real_fisher(selic: float, ipca_12m: float) -> float:
-    """Taxa de juro real ex-post via Fisher, em % a.a. ipca_12m = anual."""
-    try:
-        return ((1 + float(selic) / 100) / (1 + float(ipca_12m) / 100) - 1) * 100
-    except (TypeError, ValueError, ZeroDivisionError):
-        return 0.0
+def selic_real_fisher(selic: float, ipca_12m: float) -> Optional[float]:
+    """Juro real ex post de Fisher; ausência nunca vira zero observado."""
+    nominal, inflacao = numero_finito(selic), numero_finito(ipca_12m)
+    if nominal is None or inflacao is None or inflacao <= -100:
+        return None
+    return ((1 + nominal / 100) / (1 + inflacao / 100) - 1) * 100
 
 
 # ── Normalização de fases entre os motores ───────────────────────────────────
@@ -100,11 +98,11 @@ _TILT_STRESS = {
 class MacroState:
     """Estado macro consolidado — uma só fonte de verdade."""
     # núcleo de valores (todos anuais onde aplicável)
-    selic: float
-    ipca_12m: float
-    selic_real: float
-    vix: float
-    treasury_10y: float
+    selic: Optional[float]
+    ipca_12m: Optional[float]
+    selic_real: Optional[float]
+    vix: Optional[float]
+    treasury_10y: Optional[float]
     curve_slope_10y_2y: Optional[float]   # pp — invertida (<0) = sinal recessivo
 
     # regime 6-estados (Selic × VIX) — macro_regime
@@ -113,11 +111,11 @@ class MacroState:
     setores_favorecidos: list[str]
     setores_prejudicados: list[str]
     posicionamento: str
-    score_ambiente: int
+    score_ambiente: Optional[int]
 
     # ciclo 4-fases — regime_classifier (curva/VIX/CPI/momentum)
     fase_ciclo: str
-    fase_prob: float
+    fase_prob: float  # alias legado de concordância; NÃO probabilidade
     fase_sinais: dict
 
     # ciclo 4-fases — ciclo_economico (leading indicators BR/US)
@@ -131,30 +129,26 @@ class MacroState:
     consenso_nota: str
 
     fonte: dict = field(default_factory=dict)
+    fase_concordancia: float = 0.0
+    fase_intensidade_stress: float = 0.0
+    fase_cobertura: float = 0.0
+    fase_sinais_validos: int = 0
+    selic_real_ex_ante_proxy: Optional[float] = None
+    qualidade: dict = field(default_factory=dict)
 
 
 def _consolidar_consenso(fase_ciclo: str, fase_br: str, fase_us: str) -> tuple[str, str]:
-    """Compara as fases dos 3 ângulos e classifica o consenso."""
-    fases = [f for f in (fase_ciclo, fase_br, fase_us) if f]
-    if not fases:
-        return "indefinido", "sem leitura de fase disponível."
-    risk_on  = sum(1 for f in fases if f in _FASE_RISK_ON)
-    risk_off = sum(1 for f in fases if f in _FASE_RISK_OFF)
+    """Compara apenas fases determinadas, sem tratar motores como independentes."""
+    fases = [f for f in (fase_ciclo, fase_br, fase_us) if f in _FASE_RISK_ON | _FASE_RISK_OFF]
     total = len(fases)
+    if total < 2:
+        return "indefinido", f"Cobertura {total}/3: insuficiente para formar consenso entre leituras."
+    risk_on = sum(f in _FASE_RISK_ON for f in fases)
     if risk_on == total:
-        return "alinhado_risk_on", (
-            f"os {total} motores de ciclo apontam janela pró-risco — "
-            "convicção alta para cíclicos."
-        )
-    if risk_off == total:
-        return "alinhado_risk_off", (
-            f"os {total} motores de ciclo apontam janela defensiva — "
-            "convicção alta para preservação de capital."
-        )
-    return "divergente", (
-        f"motores de ciclo divergem (risk-on {risk_on} × risk-off {risk_off}) — "
-        "reduzir convicção direcional e priorizar seleção bottom-up."
-    )
+        return "alinhado_risk_on", f"{total}/3 leituras apontam sinais pró-risco; compartilham indicadores e não são confirmações independentes."
+    if risk_on == 0:
+        return "alinhado_risk_off", f"{total}/3 leituras apontam sinais defensivos; concordância não é probabilidade de recessão."
+    return "divergente", f"{total}/3 leituras disponíveis divergem; examinar direção da atividade, inflação e condições financeiras."
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -174,39 +168,53 @@ def get_macro_state(macro_context: dict | None = None) -> MacroState:
         except Exception:
             macro_context = st.session_state.get("macro_context", {}) or {}
 
-    selic        = float(macro_context.get("selic", SELIC_FALLBACK) or SELIC_FALLBACK)
-    ipca_12m     = float(macro_context.get("ipca_12m") or macro_context.get("ipca", IPCA_12M_FALLBACK))
-    vix          = float(macro_context.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
-    treasury_10y = float(macro_context.get("treasury_10y", TREASURY_10Y_FALLBACK) or TREASURY_10Y_FALLBACK)
-    selic_r      = selic_real_fisher(selic, ipca_12m)
+    selic = valor_observado(macro_context, "selic")
+    ipca_12m = valor_observado(macro_context, "ipca_12m", "ipca")
+    vix = valor_observado(macro_context, "vix")
+    treasury_10y = valor_observado(macro_context, "treasury_10y")
+    selic_r = selic_real_fisher(selic, ipca_12m)
+    curva = ler_curva_10y_2y()
+    curve_slope = curva["slope"]
+    expectativa = valor_observado(macro_context, "br_focus_ipca_12m")
+    if expectativa is None:
+        try:
+            from database.db import get_macro_cache
+            expectativa = numero_finito(get_macro_cache("br_focus_ipca_12m"))
+        except Exception:
+            pass
+    ex_ante = selic_real_fisher(selic, expectativa)
+    qualidade = {nome: {"observado": valor is not None,
+                        "status": "observado" if valor is not None else "ausente"}
+                 for nome, valor in (("selic", selic), ("ipca_12m", ipca_12m),
+                                     ("vix", vix), ("treasury_10y", treasury_10y))}
+    for nome, meta in (macro_context.get("qualidade") or {}).items():
+        if nome in qualidade:
+            qualidade[nome].update(meta)
 
-    # ── inclinação da curva US (10y-2y) — melhor leitura de ciclo global ────
-    curve_slope = None
-    try:
-        from utils.macro_supabase import buscar_slope_curva
-        _df_slope = buscar_slope_curva()
-        if _df_slope is not None and not _df_slope.empty and "slope_10y_2y" in _df_slope.columns:
-            _s = _df_slope["slope_10y_2y"].dropna()
-            if not _s.empty:
-                curve_slope = round(float(_s.iloc[-1]), 2)
-    except Exception as e:
-        logger.debug(f"[macro_state] slope da curva indisponível: {e}")
+    qualidade["curva_10y_2y"] = {"observado": curve_slope is not None,
+                                     "referencia_em": curva.get("data"),
+                                     "fonte": curva.get("fonte")}
 
     # ── regime 6-estados (Selic × VIX) ─────────────────────────────────────
     regime = {}
     try:
         from utils.macro_regime import classificar_regime
-        regime = classificar_regime(selic=selic, vix=vix, ipca=ipca_12m, treasury_10y=treasury_10y)
+        if all(v is not None for v in (selic, vix, ipca_12m, treasury_10y)):
+            regime = classificar_regime(selic=selic, vix=vix, ipca=ipca_12m, treasury_10y=treasury_10y)
     except Exception as e:
         logger.warning(f"[macro_state] classificar_regime falhou: {e}")
 
     # ── ciclo 4-fases (curva/VIX/CPI/momentum) ─────────────────────────────
     fase_ciclo, fase_prob, fase_sinais = "", 0.0, {}
+    fase_intensidade, fase_cobertura, fase_validos = 0.0, 0.0, 0
     try:
         from utils.regime_classifier import classificar_regime_do_macro_context
-        _rc = classificar_regime_do_macro_context()
+        _rc = classificar_regime_do_macro_context(macro_context)
         fase_ciclo  = _rc.fase
-        fase_prob   = _rc.probabilidade
+        fase_prob   = _rc.concordancia
+        fase_intensidade = _rc.intensidade_stress
+        fase_cobertura = _rc.cobertura
+        fase_validos = _rc.sinais_validos
         fase_sinais = _rc.sinais
     except Exception as e:
         logger.warning(f"[macro_state] regime_classifier falhou: {e}")
@@ -217,8 +225,8 @@ def get_macro_state(macro_context: dict | None = None) -> MacroState:
         from utils.ciclo_economico import (
             calcular_indicadores_ciclo_br, calcular_indicadores_ciclo_us,
         )
-        _cb = calcular_indicadores_ciclo_br()
-        _cu = calcular_indicadores_ciclo_us()
+        _cb = calcular_indicadores_ciclo_br(macro_context)
+        _cu = calcular_indicadores_ciclo_us(macro_context)
         fase_br = _cb.get("fase_provavel", "")
         fase_us = _cu.get("fase_provavel", "")
         conf_br = int(_cb.get("confianca", 0) or 0)
@@ -229,18 +237,18 @@ def get_macro_state(macro_context: dict | None = None) -> MacroState:
     consenso, consenso_nota = _consolidar_consenso(fase_ciclo, fase_br, fase_us)
 
     return MacroState(
-        selic=round(selic, 2),
-        ipca_12m=round(ipca_12m, 2),
-        selic_real=round(selic_r, 2),
-        vix=round(vix, 1),
-        treasury_10y=round(treasury_10y, 2),
+        selic=round(selic, 2) if selic is not None else None,
+        ipca_12m=round(ipca_12m, 2) if ipca_12m is not None else None,
+        selic_real=round(selic_r, 2) if selic_r is not None else None,
+        vix=round(vix, 1) if vix is not None else None,
+        treasury_10y=round(treasury_10y, 2) if treasury_10y is not None else None,
         curve_slope_10y_2y=curve_slope,
         regime_key=regime.get("regime_key", "indefinido"),
         regime_label=regime.get("label", "n/d"),
         setores_favorecidos=regime.get("setores_favorecidos", []),
         setores_prejudicados=regime.get("setores_prejudicados", []),
         posicionamento=regime.get("posicionamento", ""),
-        score_ambiente=int(regime.get("score_ambiente", 50)),
+        score_ambiente=int(regime["score_ambiente"]) if regime.get("score_ambiente") is not None else None,
         fase_ciclo=fase_ciclo or "indefinido",
         fase_prob=fase_prob,
         fase_sinais=fase_sinais,
@@ -250,6 +258,12 @@ def get_macro_state(macro_context: dict | None = None) -> MacroState:
         confianca_us=conf_us,
         consenso=consenso,
         consenso_nota=consenso_nota,
+        fase_concordancia=fase_prob,
+        fase_intensidade_stress=fase_intensidade,
+        fase_cobertura=fase_cobertura,
+        fase_sinais_validos=fase_validos,
+        selic_real_ex_ante_proxy=round(ex_ante, 2) if ex_ante is not None else None,
+        qualidade=qualidade,
         fonte={
             "regime": "macro_regime (selic×vix)",
             "ciclo":  "regime_classifier (curva/vix/cpi/momentum)",
@@ -282,51 +296,35 @@ def tilt_setor(setor: str, macro_context: dict | None = None,
     motivos: list[str] = []
     canon = normalizar_setor(setor)
 
-    try:
-        _vix = float(macro_context.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
-        _t10 = float(macro_context.get("treasury_10y", TREASURY_10Y_FALLBACK) or TREASURY_10Y_FALLBACK)
-        _selic = float(macro_context.get("selic", SELIC_FALLBACK) or SELIC_FALLBACK)
-
-        # Eixo juro consciente de mercado.
-        if str(market).upper() == "US":
-            if _t10 >= 5.5:
-                juro_w, juro_tag = 1.0, f"juro US alto ({_t10:.1f}% 10y)"
-            elif _t10 >= 4.0:
-                juro_w, juro_tag = 0.6, f"juro US elevado ({_t10:.1f}% 10y)"
-            else:
-                juro_w, juro_tag = 0.0, ""
+    _vix = valor_observado(macro_context, "vix")
+    is_us = str(market).upper() == "US"
+    chave_juro = "treasury_10y" if is_us else "selic"
+    juro = valor_observado(macro_context, chave_juro)
+    ausentes = [nome for nome, valor in ((chave_juro, juro), ("vix", _vix)) if valor is None]
+    raw = 0.0
+    if juro is not None:
+        if is_us:
+            juro_w = 1.0 if juro >= 5.5 else (0.6 if juro >= 4.0 else 0.0)
+            juro_tag = f"Treasury 10y {juro:.1f}%"
         else:
-            if _selic >= 13.0:
-                juro_w, juro_tag = 1.0, f"juro muito alto (selic {_selic:.1f}%)"
-            elif _selic > 10.0:
-                juro_w, juro_tag = 0.7, f"juro alto (selic {_selic:.1f}%)"
-            else:
-                juro_w, juro_tag = 0.0, ""
-
-        raw = juro_w * _TILT_JURO_ALTO.get(canon, 0)
+            juro_w = 1.0 if juro >= 13 else (0.7 if juro > 10 else 0.0)
+            juro_tag = f"Selic {juro:.1f}%"
+        raw += juro_w * _TILT_JURO_ALTO.get(canon, 0)
         if juro_w and _TILT_JURO_ALTO.get(canon):
-            _dir = "favorece" if _TILT_JURO_ALTO[canon] > 0 else "pressiona"
-            motivos.append(f"{juro_tag} {_dir} {canon or 'setor'}")
-
-        if _vix > 20.0:
-            _s = _TILT_STRESS.get(canon, 0)
-            raw += _s
-            if _s:
-                _dir = "defensivo no" if _s > 0 else "vulnerável ao"
-                motivos.append(f"{_dir} stress global (vix {_vix:.0f})")
-
-        pontos = int(max(-4, min(4, round(raw))))
-        if pontos > 0:
-            impacto = "favoravel"
-        elif pontos < 0:
-            impacto = "desfavoravel"
-        else:
-            impacto = "neutro"
-    except Exception as e:
-        logger.debug(f"[macro_state] tilt_setor falhou para '{setor}': {e}")
-        impacto, pontos = "neutro", 0
-
-    return {"impacto": impacto, "pontos": pontos, "motivos": motivos, "setor_canon": canon}
+            direcao = "favorece" if _TILT_JURO_ALTO[canon] > 0 else "pressiona"
+            motivos.append(f"{juro_tag}: hipótese de transmissão que {direcao} {canon}")
+    if _vix is not None and _vix > 20:
+        stress = _TILT_STRESS.get(canon, 0)
+        raw += stress
+        if stress:
+            motivos.append(f"Stress global observado (VIX {_vix:.0f}): contribuição {stress:+d}")
+    if ausentes:
+        motivos.append("Eixos ausentes: " + ", ".join(ausentes) + "; não preenchidos por fallback.")
+    pontos = int(max(-4, min(4, round(raw))))
+    impacto = "favoravel" if pontos > 0 else ("desfavoravel" if pontos < 0 else "neutro")
+    return {"impacto": impacto, "pontos": pontos, "motivos": motivos, "setor_canon": canon,
+            "cobertura": (2 - len(ausentes)) / 2, "ausentes": ausentes,
+            "qualidade": "completa" if not ausentes else ("parcial" if len(ausentes) == 1 else "ausente")}
 
 
 # ── Cockpit macro (faixa persistente — fonte única no topo das páginas) ──────
@@ -346,10 +344,11 @@ def render_cockpit_macro(market: str = "BR") -> None:
         mc = st.session_state.get("macro_context", {}) or {}
 
     try:
-        selic = float(mc.get("selic", SELIC_FALLBACK) or SELIC_FALLBACK)
-        ipca  = float(mc.get("ipca_12m") or mc.get("ipca", IPCA_12M_FALLBACK))
-        vix   = float(mc.get("vix", VIX_FALLBACK) or VIX_FALLBACK)
+        selic = valor_observado(mc, "selic")
+        ipca = valor_observado(mc, "ipca_12m", "ipca")
+        vix = valor_observado(mc, "vix")
         sreal = selic_real_fisher(selic, ipca)
+        treasury = valor_observado(mc, "treasury_10y")
 
         # regime label (puro, sem rede)
         regime_label = "n/d"
@@ -357,8 +356,8 @@ def render_cockpit_macro(market: str = "BR") -> None:
             from utils.macro_regime import classificar_regime
             regime_label = classificar_regime(
                 selic=selic, vix=vix, ipca=ipca,
-                treasury_10y=mc.get("treasury_10y", TREASURY_10Y_FALLBACK),
-            ).get("label", "n/d")
+                treasury_10y=treasury,
+            ).get("label", "n/d") if all(v is not None for v in (selic, vix, ipca, treasury)) else "n/d"
         except Exception:
             pass
 
@@ -413,8 +412,8 @@ def render_cockpit_macro(market: str = "BR") -> None:
         except Exception:
             pass
 
-        _cor_juro = "var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)")
-        _cor_vix  = "var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)")
+        _cor_juro = "var(--text-muted)" if selic is None else ("var(--bear)" if selic > 13 else ("var(--amber)" if selic > 10 else "var(--bull)"))
+        _cor_vix = "var(--text-muted)" if vix is None else ("var(--bear)" if vix > 25 else ("var(--amber)" if vix > 20 else "var(--bull)"))
 
         def _kpi(lbl, val, cor="var(--text-secondary)"):
             return (
@@ -426,9 +425,9 @@ def render_cockpit_macro(market: str = "BR") -> None:
 
         partes = [
             _kpi("regime", regime_label, "var(--accent)"),
-            _kpi("selic", f"{selic:.2f}%", _cor_juro),
-            _kpi("juro real (fisher)", f"{sreal:+.1f}%", _cor_juro),
-            _kpi("ipca 12m", f"{ipca:.1f}%"),
+            _kpi("selic", f"{selic:.2f}%" if selic is not None else "n/d", _cor_juro),
+            _kpi("juro real ex post", f"{sreal:+.1f}%" if sreal is not None else "n/d", _cor_juro),
+            _kpi("ipca 12m", f"{ipca:.1f}%" if ipca is not None else "n/d"),
         ]
         def _mom(v3, v12):
             """Seta + cor pela aceleração (3m vs 12m). Subindo = ruim p/ juro (bear)."""
@@ -453,15 +452,15 @@ def render_cockpit_macro(market: str = "BR") -> None:
             _cg = "var(--bear)" if gap_m > 0.5 else ("var(--bull)" if gap_m < -0.5 else "var(--amber)")
             partes.append(_kpi("margem prod−cons", f"{gap_m:+.1f}pp", _cg))
         if surp_m is not None:
-            # surpresa > 0 = inflação acima do precificado → hawkish (bear duration)
+            # Gap entre inflação passada e expectativa futura, não surpresa de divulgação.
             _cs = "var(--bear)" if surp_m > 0.3 else ("var(--bull)" if surp_m < -0.3 else "var(--amber)")
-            partes.append(_kpi("surpresa infl.", f"{surp_m:+.1f}pp", _cs))
+            partes.append(_kpi("realizado−expectativa", f"{surp_m:+.1f}pp", _cs))
         if dif_m is not None:
             # difusão alta = inflação ampla/disseminada (bear)
             _pa = dif_m["pct_acima_meta"]
             _cd = "var(--bear)" if _pa >= 60 else ("var(--amber)" if _pa >= 35 else "var(--bull)")
             partes.append(_kpi("difusão >meta", f"{_pa}% ({dif_m['acima']}/{dif_m['total']})", _cd))
-        partes.append(_kpi("vix", f"{vix:.0f}", _cor_vix))
+        partes.append(_kpi("vix", f"{vix:.0f}" if vix is not None else "n/d", _cor_vix))
 
         primary = partes[:4] + partes[-1:]
         details = partes[4:-1]

@@ -151,28 +151,33 @@ def gap_margem(market: str = "BR", horizonte: str | None = None) -> dict | None:
     return {"gap": round(prod - cons, 2), "produtor": prod, "consumidor": cons}
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def surpresa_inflacao(market: str = "BR") -> dict | None:
+    """Deprecated: old cache keys mixed realized and future inflation horizons.
+
+    A release surprise requires consensus collected before that exact release.
+    No such dataset exists yet; legacy cached values must never be presented as
+    market pricing or used as a release surprise.
     """
-    Surpresa de inflação = REALIZADA − ESPERADA (Focus 12m BR / Michigan 1y US).
-    Positivo = inflação acima do que o mercado precifica → surpresa HAWKISH (ruim
-    p/ duration); negativo = dovish. É o sinal de "o que já está no preço".
-    Lê do macro_cache (populado pelo ETL fetch_expectativas). None se indisponível.
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def gap_expectativa_realizada(market: str = "BR") -> dict | None:
+    """Forecast error for a matched 12m period, prepared by the ETL.
+
+    This compares a past rolling expectation with the subsequent realization.
+    It is not a release surprise or a measure of market pricing.
     """
-    try:
-        from database.db import get_macro_cache
-    except Exception:
+    if str(market).upper() != "BR":
         return None
-    pref = "br" if str(market).upper() == "BR" else "us"
     try:
-        surp = get_macro_cache(f"{pref}_surpresa_inflacao")
-        if surp is None:
+        import math
+        from database.db import get_macro_cache
+        gap = get_macro_cache("br_gap_expectativa_12m")
+        if gap is None or not math.isfinite(float(gap)):
             return None
-        esp = get_macro_cache("br_focus_ipca_12m" if pref == "br" else "us_mich")
-        return {
-            "surpresa": round(float(surp), 2),
-            "esperada": round(float(esp), 2) if esp is not None else None,
-        }
+        return {"gap": round(float(gap), 2), "horizonte": "12m",
+                "metodologia": "realizado menos expectativa anterior do período correspondente"}
     except Exception:
         return None
 

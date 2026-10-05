@@ -25,11 +25,69 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 from scripts.supabase_helper import (
-    upsert_macro, log_etl_start, log_etl_finish,
+    upsert_macro as _upsert_macro_db, log_etl_start, log_etl_finish,
 )
 # upsert_macro é usado abaixo para slopes da curva de juros
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+
+_ETL_GRAVACOES = 0
+_ETL_FALHAS = []
+_ETL_AVISOS = []
+
+
+def _registrar_falha(fonte: str, erro):
+    item = f"{fonte}: {type(erro).__name__}"
+    if item not in _ETL_FALHAS:
+        _ETL_FALHAS.append(item)
+
+
+def upsert_macro(*args, **kwargs):
+    """Confirmação de gravações reais; funções de coleta mantêm a mesma API."""
+    global _ETL_GRAVACOES
+    try:
+        _upsert_macro_db(*args, **kwargs)
+        _ETL_GRAVACOES += 1
+    except Exception as exc:
+        _registrar_falha("persistencia_macro", exc)
+        raise
+
+
+def _persistir_versionado(origem: str, df: pd.DataFrame):
+    """Inicializa auditoria prospectiva; ausência da migration é aviso explícito."""
+    from utils.macro_supabase import salvar_observacoes_versionadas
+    cliente = _get_sb_client()
+    if origem == "focus_expectativas":
+        for (indicador, horizonte), grupo in df.groupby(["indicador", "horizonte"]):
+            resultado = salvar_observacoes_versionadas(f"{origem}:{indicador}:{horizonte}",
+                pd.to_numeric(grupo["mediana"], errors="coerce"), fonte="BCB Focus",
+                unidade="mediana conforme indicador", disponibilidade_base="observada_na_coleta", cliente=cliente)
+            if not resultado["ok"]:
+                aviso = f"historico_versionado: {resultado['motivo']}"
+                if aviso not in _ETL_AVISOS:
+                    _ETL_AVISOS.append(aviso)
+        return
+    for coluna in df.columns:
+        serie = df[coluna].dropna()
+        if serie.empty:
+            continue
+        mensal = origem in {"inflacao_br", "inflacao_us"} or coluna in {
+            "IPCA", "IPCA_12M", "Desemprego", "Divida_Bruta_PIB", "Result_Primario", "Result_Nominal", "IBC_Br",
+            "CPIAUCSL", "CPI_YOY", "UNRATE", "FEDFUNDS", "INDPRO", "CP0000EZ19M086NEST", "LRHUTTTTEZM156S",
+            "CHNCPIALLMINMEI", "GFDEGDQ188S", "MTSDS133FMS"}
+        atraso = 45 if coluna in {"IBC_Br", "INDPRO", "Desemprego", "UNRATE"} else (20 if mensal else 1)
+        unidade = "indice" if coluna in {"IBC_Br", "INDPRO", "CPIAUCSL"} else ("%" if coluna in {"Selic", "IPCA", "IPCA_12M", "DGS10", "DGS2", "DGS3MO", "DFII10", "FEDFUNDS"} else "conforme_fonte")
+        disponibilidade_base = "observada_na_coleta" if origem.startswith("expectativas_") else "atraso_conservador_assumido"
+        resultado = salvar_observacoes_versionadas(f"{origem}:{coluna}", serie, fonte=origem,
+            unidade=unidade, atraso_dias=atraso, mes_fechado=mensal, cliente=cliente,
+            disponibilidade_base=disponibilidade_base)
+        if not resultado["ok"]:
+            aviso = f"historico_versionado: {resultado['motivo']}"
+            if aviso not in _ETL_AVISOS:
+                _ETL_AVISOS.append(aviso)
+            if "migration" in resultado["motivo"]:
+                break  # uma chamada basta para indicar tabela ainda não instalada
+
 
 # ── helper de serialização / upsert de snapshots históricos ──────────────────
 
@@ -68,14 +126,24 @@ def _salvar_snapshot_historico(origem: str, df: pd.DataFrame) -> bool:
                 "n_colunas":   df.shape[1],
                 "data_inicio": str(df.index.min().date()) if not df.empty else None,
                 "data_fim":    str(df.index.max().date()) if not df.empty else None,
-                "updated_at":  dt.datetime.utcnow().isoformat(),
+                "updated_at":  dt.datetime.now(timezone.utc).isoformat(),
             },
             on_conflict="origem",
         ).execute()
+        global _ETL_GRAVACOES
+        _ETL_GRAVACOES += 1
         print(f"  [snapshot] {origem}: {len(df)} linhas salvas em macro_snapshots.")
+        try:
+            _persistir_versionado(origem, df)
+        except Exception as exc:
+            # Compatibilidade: a auditoria nova não derruba o cache vigente.
+            aviso = f"historico_versionado: {type(exc).__name__}"
+            if aviso not in _ETL_AVISOS:
+                _ETL_AVISOS.append(aviso)
         return True
     except Exception as e:
-        print(f"  [snapshot] {origem}: ERRO ao salvar — {e}")
+        _registrar_falha("_salvar_snapshot_historico", e)
+        print(f"  [snapshot] {origem}: ERRO ao salvar — {type(e).__name__}")
         return False
 
 
@@ -112,11 +180,12 @@ def fetch_bcb():
                     val = df_90d[nome].dropna()
                     if not val.empty:
                         v = float(val.iloc[-1])
-                        if nome == "selic":
-                            if v < 1: v = v * 100
-                            if v > 50: v = 14.75
-                        if nome == "ipca":
-                            if v > 5: v = v / 100
+                        if not pd.notna(v) or not __import__("math").isfinite(v):
+                            continue
+                        if nome == "selic" and not 0 <= v <= 50:
+                            raise ValueError("Selic fora da unidade % a.a. informada pelo SGS432")
+                        if nome == "ipca" and not -10 <= v <= 10:
+                            raise ValueError("IPCA mensal fora da unidade % informada pelo SGS433")
                         labels  = {"selic": "Selic Over", "selic_diaria": "Selic Diaria",
                                    "ipca": "IPCA Mensal", "ipca_12m": "IPCA 12m",
                                    "desemprego": "Taxa de Desemprego", "divida_pib": "Divida Bruta/PIB",
@@ -139,6 +208,7 @@ def fetch_bcb():
             "Divida_Bruta_PIB": 13762,
             "Result_Primario":  5793,
             "Result_Nominal":   4192,
+            "IBC_Br":           24364,  # índice dessazonalizado, catálogo oficial BCB
         }
         inicio_10a = (dt.date.today() - dt.timedelta(days=365 * 10)).isoformat()
         dfs_hist = {}
@@ -149,25 +219,28 @@ def fetch_bcb():
                     dfs_hist[nome] = _df[nome]
                     print(f"  [BCB hist] {nome}: {len(_df)} pts")
             except Exception as _e:
-                print(f"  [BCB hist] {nome}: {_e}")
+                _registrar_falha("fetch_bcb", _e)
+                print(f"  [BCB hist] {nome}: {type(_e).__name__}")
 
         if dfs_hist:
             df_br_hist = pd.DataFrame(dfs_hist)
             # Calcula IPCA_12M acumulado
             if "IPCA" in df_br_hist.columns:
                 try:
-                    _ipca_raw = df_br_hist["IPCA"].dropna()
+                    _ipca_raw = df_br_hist["IPCA"].resample("MS").last()
                     _ipca_12m = ((1 + _ipca_raw / 100).rolling(12).apply(
                         lambda x: x.prod(), raw=True) - 1) * 100
                     df_br_hist["IPCA_12M"] = _ipca_12m
                 except Exception as e:
-                    logger.debug(f"falha ao calcular IPCA_12M acumulado: {e}")
+                    _registrar_falha("fetch_bcb", e)
+                    logger.debug(f"falha ao calcular IPCA_12M acumulado: {type(e).__name__}")
             _salvar_snapshot_historico("bcb_br", df_br_hist)
         else:
             print("  [BCB hist] nenhum dado histórico obtido.")
 
     except Exception as e:
-        print(f"  [BCB] ERRO: {e}")
+        _registrar_falha("fetch_bcb", e)
+        print(f"  [BCB] ERRO: {type(e).__name__}")
 
 
 def fetch_fred():
@@ -206,13 +279,15 @@ def fetch_fred():
                     upsert_macro(nome, round(v, 4), label=label, unit=unit, source=source)
                     print(f"  [FRED] {nome} ({code}) = {v:.4f}")
             except Exception as e:
-                print(f"  [FRED] {nome} ({code}): {e}")
+                _registrar_falha("fetch_fred", e)
+                print(f"  [FRED] {nome} ({code}): {type(e).__name__}")
 
         # ── séries históricas 10 anos → macro_snapshots ─────────────────────
         print("  [FRED] buscando série histórica 10 anos...")
         series_hist = {
             "FEDFUNDS": "FEDFUNDS", "CPIAUCSL": "CPIAUCSL", "UNRATE": "UNRATE",
             "DGS10": "DGS10", "DGS2": "DGS2", "DGS3MO": "DGS3MO", "VIXCLS": "VIXCLS",
+            "INDPRO": "INDPRO", "DFII10": "DFII10",
             "ECBDFR": "ECBDFR", "IRLTLT01EZM156N": "IRLTLT01EZM156N",
             "IRLTLT01JPM156N": "IRLTLT01JPM156N",
             "T10Y2Y": "T10Y2Y", "BAMLH0A0HYM2": "BAMLH0A0HYM2",
@@ -230,7 +305,8 @@ def fetch_fred():
                     dfs_fred[nome] = _s
                     print(f"  [FRED hist] {nome}: {len(_s)} pts")
             except Exception as _e:
-                print(f"  [FRED hist] {nome}: {_e}")
+                _registrar_falha("fetch_fred", _e)
+                print(f"  [FRED hist] {nome}: {type(_e).__name__}")
 
         if dfs_fred:
             df_global_hist = pd.DataFrame(dfs_fred)
@@ -239,36 +315,36 @@ def fetch_fred():
             # Sem dropna, pct_change(12) desloca 12 LINHAS e dá NaN quase sempre.
             if "CPIAUCSL" in df_global_hist.columns:
                 try:
-                    _cpi_m = df_global_hist["CPIAUCSL"].dropna()
+                    _cpi_m = df_global_hist["CPIAUCSL"].resample("MS").last()
                     if len(_cpi_m) >= 13:
                         _yoy = _cpi_m.pct_change(12, fill_method=None) * 100
                         df_global_hist["CPI_YOY"] = _yoy.reindex(df_global_hist.index)
                 except Exception as e:
-                    logger.debug(f"falha ao calcular CPI_YOY: {e}")
+                    _registrar_falha("fetch_fred", e)
+                    logger.debug(f"falha ao calcular CPI_YOY: {type(e).__name__}")
             _salvar_snapshot_historico("fred_global", df_global_hist)
 
             # ── slopes da curva de juros → macro_cache ────────────────────────
             try:
-                _t10_last = df_global_hist["DGS10"].dropna().iloc[-1] if "DGS10" in df_global_hist.columns else None
-                _t2_last  = df_global_hist["DGS2"].dropna().iloc[-1]  if "DGS2"  in df_global_hist.columns else None
-                _t3m_last = df_global_hist["DGS3MO"].dropna().iloc[-1] if "DGS3MO" in df_global_hist.columns else None
-                if _t10_last is not None and _t2_last is not None:
-                    _slope_10y2y = round(float(_t10_last) - float(_t2_last), 4)
-                    upsert_macro("slope_10y_2y_pp", _slope_10y2y,
-                                 label="US Treasury 10Y-2Y Slope", unit="pp", source="fred")
-                    print(f"  [FRED] slope_10y_2y_pp = {_slope_10y2y:.4f}")
-                if _t10_last is not None and _t3m_last is not None:
-                    _slope_10y3m = round(float(_t10_last) - float(_t3m_last), 4)
-                    upsert_macro("slope_10y_3m_pp", _slope_10y3m,
-                                 label="US Treasury 10Y-3M Slope", unit="pp", source="fred")
-                    print(f"  [FRED] slope_10y_3m_pp = {_slope_10y3m:.4f}")
+                for curto, chave, descricao in (("DGS2", "slope_10y_2y_pp", "US Treasury 10Y-2Y Slope"),
+                                              ("DGS3MO", "slope_10y_3m_pp", "US Treasury 10Y-3M Slope")):
+                    if "DGS10" not in df_global_hist or curto not in df_global_hist:
+                        continue
+                    par = df_global_hist[["DGS10", curto]].dropna()
+                    if par.empty:
+                        continue
+                    slope = round(float(par["DGS10"].iloc[-1] - par[curto].iloc[-1]), 4)
+                    upsert_macro(chave, slope, label=descricao, unit="pp", source="fred")
+                    print(f"  [FRED] {chave} = {slope:.4f}; mesma data {par.index[-1].date()}")
             except Exception as _e_slope:
-                print(f"  [FRED] slope calc: {_e_slope}")
+                _registrar_falha("fetch_fred", _e_slope)
+                print(f"  [FRED] slope calc: {type(_e_slope).__name__}")
         else:
             print("  [FRED hist] nenhum dado histórico obtido.")
 
     except Exception as e:
-        print(f"  [FRED] ERRO: {e}")
+        _registrar_falha("fetch_fred", e)
+        print(f"  [FRED] ERRO: {type(e).__name__}")
 
 
 def fetch_yfinance_macro():
@@ -285,6 +361,10 @@ def fetch_yfinance_macro():
                 if hist.empty:
                     continue
                 v = float(hist["Close"].dropna().iloc[-1])
+                if not __import__("math").isfinite(v) or v <= 0:
+                    raise ValueError("Valor Yahoo não finito/positivo")
+                if t == "^TNX" and v > 20:
+                    raise ValueError("Treasury Yahoo fora da unidade percentual esperada")
 
                 name_map = {
                     "^VIX": "vix",
@@ -308,10 +388,12 @@ def fetch_yfinance_macro():
                              label=label_map[t], unit=unit_map[t], source="yfinance")
                 print(f"  [yfinance] {key} = {v:.4f}")
             except Exception as e:
-                print(f"  [yfinance] {t}: {e}")
+                _registrar_falha("fetch_yfinance_macro", e)
+                print(f"  [yfinance] {t}: {type(e).__name__}")
 
     except Exception as e:
-        print(f"  [yfinance] ERRO: {e}")
+        _registrar_falha("fetch_yfinance_macro", e)
+        print(f"  [yfinance] ERRO: {type(e).__name__}")
 
 
 # ── Inflação SETORIAL (decomposição IPCA/CPI) ────────────────────────────────
@@ -370,7 +452,7 @@ _CPI_NUCLEOS_US = {
 
 def _acumular_12m(serie: pd.Series) -> pd.Series:
     """Acumula uma série de variação mensal (%) em janela de 12 meses (composto)."""
-    s = serie.dropna()
+    s = pd.to_numeric(serie, errors="coerce").resample("MS").last()
     return ((1 + s / 100).rolling(12).apply(lambda x: x.prod(), raw=True) - 1) * 100
 
 
@@ -380,14 +462,14 @@ def _acumular_anualizado(serie_mensal: pd.Series, meses: int) -> pd.Series:
     `meses` e anualiza: ((Π(1+m/100))^(12/meses) − 1)·100. Capta a inflexão que
     o YoY/12m esconde (ex.: administrados a 11% anualizado em 3m vs 5.8% no 12m).
     """
-    s = serie_mensal.dropna()
+    s = pd.to_numeric(serie_mensal, errors="coerce").resample("MS").last()
     prod = (1 + s / 100).rolling(meses).apply(lambda x: x.prod(), raw=True)
     return (prod ** (12.0 / meses) - 1) * 100
 
 
 def _runrate_indice(serie_indice: pd.Series, meses: int) -> pd.Series:
     """Run-rate ANUALIZADO de uma série de ÍNDICE (CPI): (idx_t/idx_{t-meses})^(12/meses)−1."""
-    s = serie_indice.dropna()
+    s = pd.to_numeric(serie_indice, errors="coerce").resample("MS").last()
     return ((s / s.shift(meses)) ** (12.0 / meses) - 1) * 100
 
 
@@ -416,7 +498,8 @@ def fetch_inflacao_setorial():
                     cols[nome] = _df[nome]
                     print(f"  [infl BR] {nome} ({codigo}): {len(_df)} pts")
             except Exception as _e:
-                print(f"  [infl BR] {nome} ({codigo}): {_e}")
+                _registrar_falha("fetch_inflacao_setorial", _e)
+                print(f"  [infl BR] {nome} ({codigo}): {type(_e).__name__}")
 
         if cols:
             df_infl_br = pd.DataFrame(cols)
@@ -428,7 +511,8 @@ def fetch_inflacao_setorial():
                     df_infl_br[f"{nome}_3m"]  = _acumular_anualizado(df_infl_br[nome], 3).reindex(df_infl_br.index)
                     df_infl_br[f"{nome}_6m"]  = _acumular_anualizado(df_infl_br[nome], 6).reindex(df_infl_br.index)
                 except Exception as e:
-                    logger.debug(f"falha run-rate {nome}: {e}")
+                    _registrar_falha("fetch_inflacao_setorial", e)
+                    logger.debug(f"falha run-rate {nome}: {type(e).__name__}")
             _salvar_snapshot_historico("inflacao_br", df_infl_br)
 
             def _last(nome, suf):
@@ -468,7 +552,8 @@ def fetch_inflacao_setorial():
                                  label=f"Gap margem BR (IGP-M−IPCA) {_lbl_suf}", unit="pp", source="bcb")
                     print(f"  [infl BR] br_gap_margem_{_suf} = {_gap}")
     except Exception as e:
-        print(f"  [infl BR] ERRO: {e}")
+        _registrar_falha("fetch_inflacao_setorial", e)
+        print(f"  [infl BR] ERRO: {type(e).__name__}")
 
     # ── EUA ───────────────────────────────────────────────────────────────────
     if not FRED_API_KEY:
@@ -487,14 +572,15 @@ def fetch_inflacao_setorial():
                         cols_us[nome] = _s
                         print(f"  [infl US] {nome} ({serie_id}): {len(_s)} pts")
                 except Exception as _e:
-                    print(f"  [infl US] {nome} ({serie_id}): {_e}")
+                    _registrar_falha("fetch_inflacao_setorial", _e)
+                    print(f"  [infl US] {nome} ({serie_id}): {type(_e).__name__}")
 
             if cols_us:
                 df_infl_us = pd.DataFrame(cols_us)
                 # Componentes são ÍNDICES → YoY (nível) + run-rates anualizados 3m/6m.
                 for nome in list(df_infl_us.columns):
                     try:
-                        _m = df_infl_us[nome].dropna()
+                        _m = df_infl_us[nome].resample("MS").last()
                         if len(_m) >= 13:
                             df_infl_us[f"{nome}_yoy"] = (
                                 _m.pct_change(12, fill_method=None) * 100
@@ -504,7 +590,8 @@ def fetch_inflacao_setorial():
                         if len(_m) >= 4:
                             df_infl_us[f"{nome}_3m"] = _runrate_indice(_m, 3).reindex(df_infl_us.index)
                     except Exception as e:
-                        logger.debug(f"falha run-rate us {nome}: {e}")
+                        _registrar_falha("fetch_inflacao_setorial", e)
+                        logger.debug(f"falha run-rate us {nome}: {type(e).__name__}")
 
                 # Núcleos Cleveland (median / trimmed-mean) — já vêm em % ANUALIZADO
                 # mensal; guarda o nível e a média móvel 3m (suaviza o ruído mensal).
@@ -516,7 +603,8 @@ def fetch_inflacao_setorial():
                             df_infl_us[f"{nome}_3m"] = _s.rolling(3).mean().reindex(df_infl_us.index)
                             print(f"  [infl US] {nome} ({serie_id}): {len(_s)} pts")
                     except Exception as _e:
-                        print(f"  [infl US] {nome} ({serie_id}): {_e}")
+                        _registrar_falha("fetch_inflacao_setorial", _e)
+                        print(f"  [infl US] {nome} ({serie_id}): {type(_e).__name__}")
 
                 _salvar_snapshot_historico("inflacao_us", df_infl_us)
 
@@ -555,104 +643,149 @@ def fetch_inflacao_setorial():
                                      label=f"Gap margem US (PPI−core CPI) {_suf}", unit="pp", source="fred")
                         print(f"  [infl US] us_gap_margem_{_suf} = {_gap}")
         except Exception as e:
-            print(f"  [infl US] ERRO: {e}")
+            _registrar_falha("fetch_inflacao_setorial", e)
+            print(f"  [infl US] ERRO: {type(e).__name__}")
+
+
+def gap_focus_mesmo_horizonte(realizado: pd.Series, focus_12m: pd.Series, *, conhecido_em: pd.Series | None = None) -> dict | None:
+    """Gap de previsão de 12m, usando previsão anterior ao MESMO período realizado.
+
+    NÃO é surpresa de divulgação. Sem observação do Focus no fechamento da
+    janela anterior (tolerância5d), não calcula nem recicla uma previsão atual.
+    As datas do histórico Focus vêm da fonte; sua coleta atual não demonstra
+    vintages anteriores do terminal, e esse limite acompanha o resultado.
+    """
+    if realizado is None or focus_12m is None or conhecido_em is None or realizado.dropna().empty or focus_12m.dropna().empty:
+        return None
+    r = realizado.dropna().sort_index()
+    f = focus_12m.dropna().sort_index().copy()
+    f.index = pd.to_datetime(f.index).tz_localize(None)
+    referencia = pd.Timestamp(r.index[-1]).tz_localize(None) + pd.offsets.MonthEnd(0)
+    inicio = referencia - pd.DateOffset(years=1)
+    anterior = f[f.index <= inicio]
+    if anterior.empty or (inicio - anterior.index[-1]).days > 5:
+        return None
+    conhecimento = conhecido_em.copy()
+    conhecimento.index = pd.to_datetime(conhecimento.index).tz_localize(None)
+    conhecido = conhecimento.get(anterior.index[-1])
+    if conhecido is None or pd.isna(conhecido):
+        return None
+    conhecido = pd.Timestamp(conhecido)
+    conhecido = conhecido.tz_convert(None) if conhecido.tzinfo else conhecido
+    if conhecido > inicio:
+        return None
+    return {"valor": round(float(r.iloc[-1]) - float(anterior.iloc[-1]), 2),
+        "realizado": float(r.iloc[-1]), "esperado": float(anterior.iloc[-1]),
+        "referencia_fim": referencia.strftime("%Y-%m-%d"),
+        "previsao_referencia": anterior.index[-1].strftime("%Y-%m-%d"),
+        "tipo": "gap_previsao_mesmo_horizonte_12m", "surpresa_divulgacao": False,
+        "previsao_conhecida_em": conhecido.isoformat(),
+        "vintage": "previsao comprovada no historico prospectivo do terminal"}
+
+
+def _remover_proxies_surpresa_legados():
+    """Retira chaves inválidas do cache no próximo ETL; não remove observações auditadas."""
+    try:
+        _get_sb_client().table("macro_cache").delete().in_("indicator",
+            ["br_surpresa_inflacao", "us_surpresa_inflacao", "br_gap_expectativa_12m"]).execute()
+    except Exception as exc:
+        _registrar_falha("limpeza_proxies_legados", exc)
 
 
 def fetch_expectativas():
-    """
-    Expectativas de inflação + a SURPRESA (realizado − esperado) — o sinal de
-    "o que já está precificado". Surpresa positiva = inflação acima do esperado
-    → hawkish → ruim para duration; negativa = dovish.
-
-    BR: Focus 12m à frente (API Olinda do BCB, sem chave).
-    EUA: survey Michigan 1y (MICH) + breakevens (5y, 5y5y, 10y) via FRED.
-    """
-    # ── BR: Focus 12 meses (Olinda) ────────────────────────────────────────────
+    """Expectativas/breakevens; somente gap12m correspondente, nunca falsa surpresa."""
     try:
-        import requests
         from bcb import sgs
-        url = ("https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/"
-               "odata/ExpectativasMercadoInflacao12Meses?$top=1&$orderby=Data%20desc"
-               "&$format=json&$filter=Indicador%20eq%20'IPCA'%20and%20"
-               "Suavizada%20eq%20'S'%20and%20baseCalculo%20eq%200")
-        focus = None
-        r = requests.get(url, timeout=12)
-        if r.status_code == 200:
-            vals = r.json().get("value", [])
-            if vals and vals[0].get("Mediana") is not None:
-                focus = round(float(vals[0]["Mediana"]), 2)
-        if focus is not None:
-            upsert_macro("br_focus_ipca_12m", focus,
-                         label="Focus IPCA 12m à frente", unit="%", source="bcb")
-            _ipca12 = sgs.get({"x": 13522}, last=1)["x"].dropna()
-            if not _ipca12.empty:
-                _real = round(float(_ipca12.iloc[-1]), 2)
-                _surp = round(_real - focus, 2)
-                upsert_macro("br_surpresa_inflacao", _surp,
-                             label="Surpresa inflação BR (realizado−Focus)",
-                             unit="pp", source="bcb")
-                print(f"  [exp BR] focus={focus} realizado={_real} surpresa={_surp:+.2f}")
-    except Exception as e:
-        print(f"  [exp BR] ERRO: {e}")
+        from utils.macro_research_data import buscar_focus_publico
+        todas = buscar_focus_publico(dias=420)
+        if todas is None or todas.empty:
+            raise ValueError("Focus sem observações válidas")
+        for aviso in todas.attrs.get("avisos", []):
+            _ETL_AVISOS.append(str(aviso))
+        _salvar_snapshot_historico("focus_expectativas", todas.set_index("data"))
+        pontos = todas.loc[(todas["indicador"] == "IPCA") & (todas["horizonte"] == "12m")]
+        focus = pontos.set_index("data")["mediana"].sort_index().dropna()
+        if focus.empty:
+            raise ValueError("Focus12m sem mediana não suavizada")
+        upsert_macro("br_focus_ipca_12m", round(float(focus.iloc[-1]), 2),
+                     label="Focus IPCA próximos 12m", unit="%", source="bcb")
+        _salvar_snapshot_historico("expectativas_br", focus.to_frame("Focus_IPCA_12m"))
+        realizado = sgs.get({"x": 13522}, last=1)["x"].dropna()
+        from utils.macro_supabase import carregar_observacoes_versionadas
+        limite_previsao = (pd.Timestamp(realizado.index[-1]) + pd.offsets.MonthEnd(0) - pd.DateOffset(years=1)) if not realizado.empty else None
+        conhecidas = carregar_observacoes_versionadas("expectativas_br:Focus_IPCA_12m",
+            as_of=limite_previsao, cliente=_get_sb_client()) if limite_previsao is not None else pd.DataFrame()
+        if conhecidas.empty:
+            gap = None
+        else:
+            # Usar a versão de previsão realmente conhecida à época, não o
+            # valor hoje retornado pela API para aquela referência antiga.
+            historico_focus = conhecidas.set_index("referencia_em")["valor"]
+            conhecimento = conhecidas.set_index("referencia_em")["coletado_em"]
+            gap = gap_focus_mesmo_horizonte(realizado, historico_focus, conhecido_em=conhecimento)
+        if gap is not None:
+            upsert_macro("br_gap_expectativa_12m", gap["valor"],
+                label=f"Gap previsão 12m BR (Focus {gap['previsao_referencia']}; fim {gap['referencia_fim']})",
+                unit="pp", source="bcb")
+    except Exception as exc:
+        _registrar_falha("expectativas_bcb", exc)
+        print(f"  [exp BR] indisponível: {type(exc).__name__}")
 
-    # ── EUA: Michigan 1y + breakevens (FRED) ───────────────────────────────────
     if not FRED_API_KEY:
-        print("  [exp US] FRED_API_KEY ausente, pulando")
+        print("  [exp US] FRED_API_KEY ausente, etapa não configurada")
         return
     try:
         from fredapi import Fred
         fred = Fred(api_key=FRED_API_KEY)
-        _vals = {}
-        for nome, sid, lbl in [
-            ("mich",    "MICH",   "Michigan 1y inflation expectation"),
-            ("be_5y",   "T5YIE",  "5y breakeven"),
-            ("be_5y5y", "T5YIFR", "5y5y forward breakeven"),
-            ("be_10y",  "T10YIE", "10y breakeven"),
+        series = {}
+        for nome, sid, label in [
+            ("mich", "MICH", "Michigan expectativa 1 ano"),
+            ("be_5y", "T5YIE", "Breakeven 5 anos"),
+            ("be_5y5y", "T5YIFR", "Breakeven forward 5y5y"),
+            ("be_10y", "T10YIE", "Breakeven 10 anos"),
         ]:
             try:
-                _s = fred.get_series(sid)
-                if _s is not None and not _s.dropna().empty:
-                    _vals[nome] = round(float(_s.dropna().iloc[-1]), 2)
-                    upsert_macro(f"us_{nome}", _vals[nome], label=f"US {lbl}", unit="%", source="fred")
-                    print(f"  [exp US] {nome} ({sid}) = {_vals[nome]}")
-            except Exception as _e:
-                print(f"  [exp US] {nome} ({sid}): {_e}")
-        # surpresa = core CPI YoY − Michigan 1y
-        if "mich" in _vals:
-            _core = fred.get_series("CPILFESL").dropna()
-            if len(_core) >= 13:
-                _yoy = round(float((_core.iloc[-1] / _core.iloc[-13] - 1) * 100), 2)
-                _surp = round(_yoy - _vals["mich"], 2)
-                upsert_macro("us_surpresa_inflacao", _surp,
-                             label="Surpresa inflação US (core−Michigan)",
-                             unit="pp", source="fred")
-                print(f"  [exp US] core={_yoy} mich={_vals['mich']} surpresa={_surp:+.2f}")
-    except Exception as e:
-        print(f"  [exp US] ERRO: {e}")
+                serie = fred.get_series(sid, observation_start=(dt.date.today() - dt.timedelta(days=365 * 10)))
+                if serie is None or serie.dropna().empty:
+                    raise ValueError("Série de expectativa vazia")
+                series[sid] = serie
+                upsert_macro(f"us_{nome}", round(float(serie.dropna().iloc[-1]), 2),
+                    label=label, unit="%", source="fred")
+            except Exception as exc:
+                _registrar_falha(f"expectativas_fred_{sid}", exc)
+        if series:
+            _salvar_snapshot_historico("expectativas_us", pd.DataFrame(series))
+    except Exception as exc:
+        _registrar_falha("expectativas_fred", exc)
 
 
 def main():
+    global _ETL_GRAVACOES
+    _ETL_GRAVACOES = 0
+    _ETL_FALHAS.clear()
+    _ETL_AVISOS.clear()
     print("[sync_macro] inicio")
     log_id = log_etl_start("sync_macro")
-
-    print("[sync_macro] BCB SGS...")
-    fetch_bcb()
-
-    print("[sync_macro] FRED...")
-    fetch_fred()
-
-    print("[sync_macro] inflação setorial (IPCA/CPI)...")
-    fetch_inflacao_setorial()
-
-    print("[sync_macro] expectativas / surpresa (Focus + breakevens)...")
-    fetch_expectativas()
-
-    print("[sync_macro] yfinance...")
-    fetch_yfinance_macro()
-
-    log_etl_finish(log_id, ok=1, fail=0)
-    print("[sync_macro] fim")
+    _remover_proxies_surpresa_legados()
+    for nome, coletar in [("BCB", fetch_bcb), ("FRED", fetch_fred),
+        ("inflacao_setorial", fetch_inflacao_setorial), ("expectativas", fetch_expectativas),
+        ("yfinance", fetch_yfinance_macro)]:
+        antes = _ETL_GRAVACOES
+        print(f"[sync_macro] {nome}...")
+        try:
+            coletar()
+        except Exception as exc:
+            _registrar_falha(nome, exc)
+        if _ETL_GRAVACOES == antes and (nome != "FRED" or FRED_API_KEY):
+            if not any(nome.lower() in erro.lower() for erro in _ETL_FALHAS):
+                _ETL_FALHAS.append(f"{nome}: nenhuma gravação confirmada")
+    erro = "; ".join(_ETL_FALHAS)
+    log_etl_finish(log_id, ok=_ETL_GRAVACOES, fail=len(_ETL_FALHAS), error_msg=erro)
+    print(f"[sync_macro] fim: gravacoes={_ETL_GRAVACOES}, falhas={len(_ETL_FALHAS)}")
+    for aviso in _ETL_AVISOS:
+        print(f"[sync_macro] aviso: {aviso}; snapshots atuais preservados")
+    return 1 if _ETL_FALHAS else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

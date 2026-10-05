@@ -26,7 +26,7 @@ import pandas as pd  # noqa: E402
 
 from utils.setor_series import carregar_retornos_setoriais_br  # noqa: E402
 from utils.regime_historico import reconstruir_regime_tilt_br  # noqa: E402
-from utils.backtest_divergencia import rodar_backtest          # noqa: E402
+from utils.backtest_divergencia import rodar_backtest, retornos_semanais          # noqa: E402
 from utils.divergencia_setorial import (                        # noqa: E402
     DIVERG_A, DIVERG_B, CONFIRMA_BULL, CONFIRMA_BEAR, CATCH_UP, NEUTRO,
 )
@@ -50,7 +50,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--anos", type=int, default=8)
     ap.add_argument("--min-persist", type=int, default=2,
-                    help="comprimento minimo do episodio (semanas) p/ entrar na stat")
+                    help="numero de semanas observadas antes da confirmacao/entrada")
     ap.add_argument("--janela-rs", type=int, default=13)
     ap.add_argument("--save", action="store_true",
                     help="persiste a estatistica no Supabase p/ a UI ler (rapido/robusto)")
@@ -60,20 +60,20 @@ def main():
     ret_diario = carregar_retornos_setoriais_br(dias=int(args.anos * 260))
     if ret_diario.empty:
         _p("  ERRO: sem retornos setoriais (price_history vazio?). Abortando.")
-        return
-    ret_sem = (1 + ret_diario.fillna(0.0)).resample("W-FRI").prod() - 1.0
+        return 1
+    ret_sem = retornos_semanais(ret_diario, min_cobertura=1.0)
     _p(f"  {ret_sem.shape[1]} setores, {len(ret_sem)} semanas.")
 
     _p("[2/3] reconstruindo regime/tilt historico (SGS + yfinance)...")
     tilt = reconstruir_regime_tilt_br(anos=args.anos)
     if tilt.empty:
         _p("  ERRO: reconstrucao de tilt vazia (APIs macro?). Abortando.")
-        return
-    _p(f"  {len(tilt)} semanas de tilt reconstruido.")
+        return 1
+    _p(f"  {len(tilt)} semanas de tilt reconstruido (vintage atual, atrasos assumidos).")
 
     _p("[3/3] rodando backtest por episodio...")
     out = rodar_backtest(
-        ret_sem, tilt, janela_rs=args.janela_rs, horizontes=(4, 13, 26),
+        ret_sem, tilt, janela_rs=args.janela_rs, horizontes=(4, 13, 26, 52),
         min_persistencia=args.min_persist,
     )
     stats = out["estatistica"]
@@ -84,14 +84,16 @@ def main():
        f"janela_rs={out['janela_rs']}s, min_persist={args.min_persist}s)")
     _p("=" * 72)
     _p("  forward RS = quanto o setor bateu a mediana do universo DEPOIS do sinal")
-    _p("  (positivo = superou; por EPISODIO, nao por semana)")
+    _p("  (positivo = superou; apos confirmacao, uma entrada por EPISODIO)")
+    _p("  DESCRITIVO: vintage atual; sem custos; horizontes podem se sobrepor;")
+    _p("  nao representa desempenho de carteira executavel nem teste fora da amostra.")
     _p("-" * 72)
     _p(f"  {'quadrante':<36} {'horiz':>5} {'n':>4} {'media':>8} {'mediana':>8} {'hit':>6}")
     _p("-" * 72)
     for q in _ORDEM:
         if q not in stats:
             continue
-        for h in (4, 13, 26):
+        for h in (4, 13, 26, 52):
             if h not in stats[q]:
                 continue
             s = stats[q][h]
@@ -101,9 +103,9 @@ def main():
         _p("-" * 72)
 
     _p("")
-    _p("  LEITURA: divergencia B com fwd RS >0 e hit >50% sustenta a tese de")
-    _p("  antecipacao de virada; divergencia A idem para catch-up. n<10 = baixa")
-    _p("  confianca (mostrar o numero, rebaixar a certeza na UI). Vies: survivorship")
+    _p("  LEITURA: forward RS e hit-rate descrevem episodios observados; nao")
+    _p("  demonstram causalidade ou retorno esperado. n<10 merece leitura cautelosa.")
+    _p("  Periodos/setores nao sao amostras independentes. Vies: survivorship")
     _p("  (price_history so tem tickers atuais) e equal-weight BR.")
 
     if args.save:
@@ -114,11 +116,15 @@ def main():
             payload = dict(out)
             payload["gerado_em"] = date.today().isoformat()
             payload["min_persist"] = args.min_persist
-            save_ai_analysis(
+            payload["inputs_macro"] = tilt.attrs.get("metodologia", {})
+            payload["data_ultima_observacao"] = ret_sem.index.max().date().isoformat()
+            salvo = save_ai_analysis(
                 tipo="backtest_div_v1", conteudo=json.dumps(payload),
                 ticker=None, user_id=None, modelo="backtest",
                 ttl_horas=24 * 120,   # 120 dias — re-rodar o script atualiza
             )
+            if salvo is False:
+                raise RuntimeError("Gravacao do resultado nao confirmada")
             _p("")
             _p("  [save] estatistica persistida no Supabase (backtest_div_v1) — a UI")
             _p("         (Discovery > divergencias) e a IA vao LER isto, sem recomputar.")
@@ -130,21 +136,26 @@ def main():
             _rs = rs_setorial_atual(ret_diario, janela=63)          # RS ~3 meses
             _bd_serie = breadth_setorial(ret_diario, janela_mm=50).dropna()   # MM ~10 semanas
             _snap = {
-                "data": date.today().isoformat(),
+                "data": ret_diario.index.max().date().isoformat(),
+                "gerado_em": date.today().isoformat(),
                 "rs": {k: round(float(v), 6) for k, v in (_rs or {}).items()},
                 "breadth": (round(float(_bd_serie.iloc[-1]), 2) if len(_bd_serie) else None),
                 "janela_rs_dias": 63,
             }
-            save_ai_analysis(
+            snapshot_salvo = save_ai_analysis(
                 tipo="divergencia_rs_v1", conteudo=json.dumps(_snap),
                 ticker=None, user_id=None, modelo="snapshot",
                 ttl_horas=24 * 30,
             )
+            if snapshot_salvo is False:
+                raise RuntimeError("Gravacao do snapshot setorial nao confirmada")
             _p(f"  [save] snapshot RS+breadth persistido (divergencia_rs_v1): "
                f"{len(_snap['rs'])} setores, breadth={_snap['breadth']}")
         except Exception as e:
-            _p(f"  [save] FALHA ao persistir: {e}")
+            _p(f"  [save] FALHA ao persistir: {type(e).__name__}")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

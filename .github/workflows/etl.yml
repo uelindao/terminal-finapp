@@ -16,9 +16,19 @@ on:
     - cron: '0 */2 * * *'
     # Domingo 03:00 UTC — historico OHLCV semanal (incremental)
     - cron: '0 3 * * 0'
-    # Domingo 05:00 UTC — backtest de divergencias macro x setor (apos o price_history)
-    - cron: '0 5 * * 0'
-  workflow_dispatch:  # permite execucao manual
+    # Backtest semanal depende do sucesso do OHLCV acima; mesma cadeia no manual.
+  workflow_dispatch:
+    inputs:
+      escopo:
+        description: 'Pesquisa: macro + proxies + estudo histórico. Tudo inclui fundamentos BR/EUA.'
+        required: true
+        default: pesquisa
+        type: choice
+        options:
+          - pesquisa
+          - macro
+          - precos
+          - tudo
 
 concurrency:
   group: etl-${{ github.ref }}
@@ -40,7 +50,7 @@ jobs:
     # em memória global do processo) acontece no 1º ticker; depois fica
     # cacheado in-memory para os demais. timeout 60min cobre folga.
     timeout-minutes: 60
-    if: github.event.schedule == '0 6 * * *' || github.event.schedule == '0 12 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 6 * * *' || github.event.schedule == '0 12 * * *' || (github.event_name == 'workflow_dispatch' && inputs.escopo == 'tudo')
 
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     # Roda apenas às 00:00 UTC (após fechamento EUA) — evita estouro de quota FMP
     # 233 tickers × 2 calls = 466 req/run. 2 keys × 250/dia = 500 req/dia → só 1 run/dia
-    if: github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 0 * * *' || (github.event_name == 'workflow_dispatch' && inputs.escopo == 'tudo')
 
     steps:
       - uses: actions/checkout@v4
@@ -109,10 +119,13 @@ jobs:
   sync-price-history:
     name: Sincronizar Historico OHLCV (semanal)
     runs-on: ubuntu-latest
-    # Roda domingo 03:00 UTC ou manualmente.
-    # Cold-start inicial leva ~20min; runs incrementais ~5min.
-    if: github.event.schedule == '0 3 * * 0' || github.event_name == 'workflow_dispatch'
+    # Push na main inicializa somente26proxies de pesquisa, sem universo de ações.
+    # Domingo/manualprecos/tudo atualiza todo universo. Pesquisamanual usa proxies.
+    # Backtest completo permanece semanal/manual, sem leitura pesada em cada push.
+    if: github.event.schedule == '0 3 * * 0' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.escopo == 'pesquisa' || inputs.escopo == 'precos' || inputs.escopo == 'tudo'))
     timeout-minutes: 90
+    outputs:
+      price_ready: ${{ steps.price.outcome == 'success' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +139,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install requests supabase yfinance pandas numpy
+          pip install -r requirements.txt
 
       - name: Verificar Supabase
         id: check
@@ -134,8 +147,9 @@ jobs:
         run: python scripts/check_supabase.py
 
       - name: Executar sync_price_history
+        id: price
         if: steps.check.outcome == 'success'
-        run: python scripts/sync_price_history.py
+        run: python scripts/sync_price_history.py ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.escopo == 'pesquisa')) && '--proxies-only' || '' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -143,9 +157,9 @@ jobs:
   backtest-divergencias:
     name: Backtest de Divergencias Macro x Setor (semanal)
     runs-on: ubuntu-latest
-    # Domingo 05:00 UTC (apos o price_history semanal das 03:00) ou manualmente.
-    # Recalcula e PERSISTE a estatistica por quadrante (fwd RS/hit/n) que a UI le.
-    if: github.event.schedule == '0 5 * * 0' || github.event_name == 'workflow_dispatch'
+    # Mesma execução semanal/manual, iniciada somente após OHLCV confirmado.
+    needs: sync-price-history
+    if: needs.sync-price-history.result == 'success' && needs.sync-price-history.outputs.price_ready == 'true' && (github.event.schedule == '0 3 * * 0' || (github.event_name == 'workflow_dispatch' && (inputs.escopo == 'pesquisa' || inputs.escopo == 'precos' || inputs.escopo == 'tudo')))
     timeout-minutes: 45
 
     steps:
@@ -160,7 +174,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install supabase yfinance pandas numpy python-bcb
+          pip install -r requirements.txt
 
       # Preenche o setor de tickers novos/faltantes ANTES do backtest (incremental:
       # pula quem ja tem setor -> rapido). continue-on-error: um soluco do yfinance
@@ -171,7 +185,7 @@ jobs:
         run: python scripts/check_supabase.py
 
       - name: Backfill de setores (incremental)
-        if: steps.check.outcome == 'success'
+        if: steps.check.outcome == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.escopo == 'pesquisa')
         continue-on-error: true
         run: python scripts/backfill_setores.py --sleep 0.3
         env:
@@ -188,7 +202,7 @@ jobs:
   sync-macro:
     name: Sincronizar Dados Macro
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */2 * * *' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.escopo == 'pesquisa' || inputs.escopo == 'macro' || inputs.escopo == 'tudo'))
 
     steps:
       - uses: actions/checkout@v4
@@ -202,7 +216,7 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install --upgrade pip
-          pip install requests supabase yfinance pandas numpy python-bcb fredapi
+          pip install requests supabase yfinance pandas numpy python-bcb fredapi streamlit
 
       - name: Verificar Supabase
         id: check

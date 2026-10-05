@@ -80,7 +80,7 @@ SYSTEM_MACRO_V2 = (
     "regras: "
     "1) referencia números fornecidos com interpretação (selic real 9.3% via Fisher); "
     "2) identifica regime e implicações por setor; "
-    "3) menciona o que está precificado e o que é surpresa; "
+    "3) só afirma precificação ou surpresa quando houver medida correspondente e consenso anterior à divulgação; "
     "4) sugere posicionamento concreto (overweight/underweight setor); "
     "5) minúsculas, sem emojis, direto."
 )
@@ -358,7 +358,7 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
     try:
         from utils.inflation_sectoral import (
             get_inflacao_atual, pressao_inflacao_setor, gap_margem,
-            surpresa_inflacao, diffusion_inflacao,
+            gap_expectativa_realizada, diffusion_inflacao,
         )
         from utils.setores import normalizar_setor
     except Exception:
@@ -424,17 +424,10 @@ def bloco_inflacao_setorial(setor: str, market: str = "BR") -> str:
     except Exception:
         pass
     try:
-        _sp = surpresa_inflacao(market)
-        if _sp and _sp.get("surpresa") is not None:
-            _s = _sp["surpresa"]
-            if _s > 0.2:
-                _dir = "acima do precificado → surpresa hawkish (pressão p/ juro alto, ruim p/ duration)"
-            elif _s < -0.2:
-                _dir = "abaixo do precificado → surpresa dovish (espaço p/ corte)"
-            else:
-                _dir = "em linha com o precificado (sem surpresa)"
-            _esp = f" vs esperado {_sp['esperada']:.1f}%" if _sp.get("esperada") is not None else ""
-            txt += f"surpresa de inflação (realizado − esperado): {_s:+.1f}pp{_esp} → {_dir}\n"
+        _sp = gap_expectativa_realizada(market)
+        if _sp and _sp.get("gap") is not None:
+            txt += (f"erro da expectativa anterior de inflação para período correspondente de 12m: "
+                    f"{_sp['gap']:+.1f}pp. Este gap não mede surpresa de divulgação ou preço de mercado.\n")
     except Exception:
         pass
     try:

@@ -66,15 +66,34 @@ def test_estatistica_agrega_por_quadrante_e_horizonte():
     assert s["hit_rate"] == 0.5                # 1 de 2 positivos
 
 
-def test_estatistica_filtra_min_persistencia():
-    idx = pd.date_range("2026-01-01", periods=2, freq="W-FRI")
+def test_estatistica_entra_na_confirmacao_e_nao_no_inicio():
+    idx = pd.date_range("2026-01-01", periods=8, freq="W-FRI")
     eps = [
-        {"setor": "a", "data": idx[0], "quadrante": DIVERG_A, "comprimento": 1},
-        {"setor": "b", "data": idx[0], "quadrante": DIVERG_A, "comprimento": 4},
+        {"setor": "a", "data": idx[0], "quadrante": DIVERG_A, "comprimento": 1, "datas": [idx[0]]},
+        {"setor": "b", "data": idx[0], "quadrante": DIVERG_A, "comprimento": 4, "datas": list(idx[:4])},
     ]
-    fwd = {13: pd.DataFrame({"a": [0.05, np.nan], "b": [0.05, np.nan]}, index=idx)}
+    fwd = {13: pd.DataFrame({"a": [0.9] * 8, "b": [0.9, .8, .7, -.05, 0, 0, 0, 0]}, index=idx)}
     stats = estatistica_por_quadrante(eps, fwd, min_persistencia=4)
-    assert stats[DIVERG_A][13]["n"] == 1       # só o episódio com comprimento>=4
+    assert stats[DIVERG_A][13]["n"] == 1
+    assert stats[DIVERG_A][13]["media"] == -.05  # valor da4ªsemana, nunca .9 do início
+    longo = [dict(eps[1], comprimento=8, datas=list(idx))]
+    assert estatistica_por_quadrante(longo, fwd, min_persistencia=4) == stats
+
+
+def test_forward_comeca_depois_confirmacao_e_rejeita_gap():
+    idx = pd.date_range("2025-01-03", periods=6, freq="W-FRI")
+    retornos = pd.DataFrame({"a": [0, .9, .8, .1, .2, 0]}, index=idx)
+    assert np.isclose(forward_ret(retornos, 2).loc[idx[2], "a"], .32)
+    retornos.loc[idx[3], "a"] = np.nan
+    assert pd.isna(forward_ret(retornos, 2).loc[idx[2], "a"])
+
+
+def test_gap_interrompe_persistencia():
+    idx = pd.date_range("2025-01-03", periods=5, freq="W-FRI")
+    eps = extrair_episodios(pd.DataFrame({"a": [DIVERG_A, DIVERG_A, None, DIVERG_A, DIVERG_A]}, index=idx))
+    assert [e["comprimento"] for e in eps] == [2, 2]
+    fwd = {4: pd.DataFrame({"a": .1}, index=idx)}
+    assert estatistica_por_quadrante(eps, fwd, min_persistencia=3) == {}
 
 
 def test_rodar_backtest_pipeline_completo():
@@ -96,3 +115,9 @@ def test_vazio_nao_quebra():
     assert matriz_quadrantes(pd.DataFrame(), pd.DataFrame()).empty
     assert extrair_episodios(pd.DataFrame()) == []
     assert estatistica_por_quadrante([], {}) == {}
+
+
+def test_semana_ausente_no_indice_interrompe_episodio():
+    idx = pd.date_range("2025-01-03", periods=5, freq="W-FRI").delete(2)
+    eps = extrair_episodios(pd.DataFrame({"a": DIVERG_A}, index=idx))
+    assert [e["comprimento"] for e in eps] == [2, 2]

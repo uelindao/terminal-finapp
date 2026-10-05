@@ -1,118 +1,137 @@
+"""Lightweight macro context with provenance and an hourly session refresh.
+
+Legacy numeric fallbacks remain for callers that need a contingency value.
+Models must check quality before interpreting those values as observations.
 """
-utils/macro_context.py
-Fetch leve do contexto macro atual para uso em qualquer página.
-Garante que o session_state["macro_context"] esteja sempre atualizado.
-"""
+import datetime
+import math
+import time
+
 import streamlit as st
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Valores de fallback (usados quando APIs estão indisponíveis)
-#
-# CONTRATO DE UNIDADE DO IPCA (importante — origem de bug histórico):
-#   - 'ipca' / 'ipca_12m' → IPCA acumulado 12 meses (% a.a.). CHAVE CANÔNICA.
-#     Use SEMPRE este valor em Fisher, selic real e yield real (FII/NTN-B).
-#   - 'ipca_mensal'       → print do mês (série 433, % m). Apenas exibição /
-#     cálculos mensais. NUNCA usar em fórmula anual.
-SELIC_FALLBACK        = 14.75   # % a.a. — atualizar quando COPOM mudar
-IPCA_FALLBACK         =  4.5    # % a.a. (acumulado 12m) — chave canônica anual
-IPCA_12M_FALLBACK     =  4.5    # % a.a. — alias explícito de IPCA_FALLBACK
-IPCA_MENSAL_FALLBACK  =  0.45   # % mês — print mensal (série 433)
-VIX_FALLBACK          = 15.0    # pontos
-TREASURY_10Y_FALLBACK =  4.5    # % a.a.
+SELIC_FALLBACK = 14.75
+IPCA_FALLBACK = IPCA_12M_FALLBACK = 4.5
+IPCA_MENSAL_FALLBACK = 0.45
+VIX_FALLBACK = 15.0
+TREASURY_10Y_FALLBACK = 4.5
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_macro_rapido() -> dict:
-    """
-    Busca Selic, IPCA e VIX em paralelo.
-    Cache de 1 hora — chamada barata (~300ms).
-    Retorna dict com valores atuais e label de regime.
-    """
-    selic       = SELIC_FALLBACK
-    ipca_12m    = IPCA_12M_FALLBACK      # acumulado 12m (anual) — chave canônica
-    ipca_mensal = IPCA_MENSAL_FALLBACK   # print do mês (série 433)
-    vix         = VIX_FALLBACK
+    values = {"selic": SELIC_FALLBACK, "ipca_12m": IPCA_12M_FALLBACK,
+              "ipca_mensal": IPCA_MENSAL_FALLBACK, "vix": VIX_FALLBACK,
+              "treasury_10y": TREASURY_10Y_FALLBACK}
+    collected = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    sources = {"selic": "BCB SGS 432", "ipca_12m": "BCB SGS 13522",
+               "ipca_mensal": "BCB SGS 433", "vix": "Yahoo ^VIX",
+               "treasury_10y": "Yahoo ^TNX"}
+    quality = {k: {"observado": False, "status": "fallback", "fonte": source,
+                   "referencia_em": None, "coletado_em": collected}
+               for k, source in sources.items()}
 
-    # Selic e IPCA via BCB SGS
-    # 432 = Selic meta (% a.a.) | 433 = IPCA mês (%) | 13522 = IPCA acum. 12m (% a.a.)
+    def accept(key, series, low, high):
+        s = series.dropna()
+        if s.empty:
+            return
+        value = float(s.iloc[-1])
+        if math.isfinite(value) and low <= value <= high:
+            values[key] = value
+            reference = s.index[-1]
+            quality[key].update(observado=True, status="observado",
+                                referencia_em=str(reference.isoformat()
+                                                  if hasattr(reference, "isoformat") else reference))
+
     try:
         from bcb import sgs
-        import datetime
-        inicio = (datetime.datetime.today() - datetime.timedelta(days=120)).strftime('%Y-%m-%d')
-        df_bcb = sgs.get({'selic': 432, 'ipca_mensal': 433, 'ipca_12m': 13522}, start=inicio)
-        if 'selic' in df_bcb.columns and not df_bcb['selic'].dropna().empty:
-            selic = float(df_bcb['selic'].dropna().iloc[-1])
-            # Série 432 = % anual (ex: 14.75). Sanidade:
-            if 0 < selic < 1:
-                selic = selic * 100        # veio como decimal
-            elif selic > 50:
-                selic = SELIC_FALLBACK     # erro — fallback seguro
-        # IPCA acumulado 12m (anual) — usado em Fisher / selic real / yield real
-        if 'ipca_12m' in df_bcb.columns and not df_bcb['ipca_12m'].dropna().empty:
-            _v12 = float(df_bcb['ipca_12m'].dropna().iloc[-1])
-            if 0 < _v12 < 50:              # sanidade: 0–50% a.a.
-                ipca_12m = _v12
-        # IPCA mensal (print do mês) — exibição / cálculos mensais
-        if 'ipca_mensal' in df_bcb.columns and not df_bcb['ipca_mensal'].dropna().empty:
-            _vm = float(df_bcb['ipca_mensal'].dropna().iloc[-1])
-            if abs(_vm) <= 5:              # >5% no mês = erro/hiperinflação
-                ipca_mensal = _vm
-    except Exception as e:
-        logger.warning(f"[macro_context] falha BCB: {e}")
+        start = (datetime.date.today() - datetime.timedelta(days=120)).isoformat()
+        frame = sgs.get({"selic": 432, "ipca_mensal": 433, "ipca_12m": 13522}, start=start)
+        for key, bounds in {"selic": (0, 50), "ipca_mensal": (-5, 5),
+                            "ipca_12m": (-10, 50)}.items():
+            if key in frame:
+                accept(key, frame[key], *bounds)
+    except Exception as exc:
+        logger.warning("[macro_context] BCB indisponível: %s", exc)
 
-    # VIX via yfinance
     try:
         import yfinance as yf
-        hist_vix = yf.Ticker("^VIX").history(period="2d")
-        if not hist_vix.empty:
-            vix = float(hist_vix['Close'].dropna().iloc[-1])
-    except Exception as e:
-        logger.warning(f"[macro_context] falha VIX: {e}")
+        for key, ticker, bounds in [("vix", "^VIX", (0.01, 200)),
+                                    ("treasury_10y", "^TNX", (0, 20))]:
+            try:
+                frame = yf.Ticker(ticker).history(period="5d")
+                if "Close" in frame:
+                    # ^TNX is a percentage, not an index scaled by ten.
+                    accept(key, frame["Close"], *bounds)
+            except Exception as exc:
+                logger.warning("[macro_context] %s indisponível: %s", ticker, exc)
+    except ImportError:
+        pass
 
-    # Treasury 10y via yfinance (^TNX = yield em percentual direto)
-    treasury_10y = TREASURY_10Y_FALLBACK
-    try:
-        hist_tnx = yf.Ticker("^TNX").history(period="2d")
-        if not hist_tnx.empty:
-            treasury_10y = float(hist_tnx['Close'].dropna().iloc[-1])
-            if treasury_10y > 20:
-                treasury_10y = treasury_10y / 100
-    except Exception as e:
-        logger.warning(f"[macro_context] falha TNX: {e}")
-
-    # Classificação de regime
-    juros_altos = selic > 10.0
-    risco_alto = vix > 20.0
-
-    if juros_altos and not risco_alto:
-        label = "juros altos / risco controlado"
-    elif juros_altos and risco_alto:
-        label = "juros altos / stress global"
-    elif not juros_altos and risco_alto:
-        label = "juros baixos / stress global"
+    observed = quality["selic"]["observado"] and quality["vix"]["observado"]
+    if not observed:
+        label = "contexto incompleto · valores de contingência"
     else:
-        label = "juros baixos / risco controlado"
-
-    return {
-        "selic":        round(selic, 2),
-        "ipca":         round(ipca_12m, 2),     # canônico: acumulado 12m (% a.a.)
-        "ipca_12m":     round(ipca_12m, 2),     # alias explícito
-        "ipca_mensal":  round(ipca_mensal, 2),  # print do mês (série 433)
-        "vix":          round(vix, 1),
-        "treasury_10y": round(treasury_10y, 2),
-        "label":        label,
-    }
+        rate = "juros altos" if values["selic"] > 10 else "juros baixos"
+        risk = "stress global" if values["vix"] > 20 else "risco controlado"
+        label = f"{rate} / {risk}"
+    quality["ipca"] = dict(quality["ipca_12m"])
+    return {**{k: round(v, 2) for k, v in values.items()},
+            "ipca": round(values["ipca_12m"], 2), "label": label,
+            "qualidade": quality, "coletado_em": collected}
 
 
 def garantir_macro_context() -> dict:
-    """
-    Garante que st.session_state["macro_context"] existe e está atualizado.
-    Chame no início de qualquer página que precise de contexto macro.
-    Retorna o dict atual.
-    """
-    if "macro_context" not in st.session_state:
-        ctx = _fetch_macro_rapido()
-        st.session_state["macro_context"] = ctx
+    """Refresh long-running sessions too; injected contexts stay intact for an hour."""
+    now = time.time()
+    previous = st.session_state.get("_macro_context_carregado_em")
+    if "macro_context" not in st.session_state or (previous is not None and now - previous >= 3600):
+        st.session_state["macro_context"] = _fetch_macro_rapido()
+        st.session_state["_macro_context_carregado_em"] = now
+    elif previous is None:
+        st.session_state["_macro_context_carregado_em"] = now
     return st.session_state["macro_context"]
+
+
+def atualizar_contexto_series(contexto: dict, brasil, global_) -> dict:
+    """Merge dated observations without discarding quality or reviving fallbacks."""
+    import pandas as pd
+    result = dict(contexto or {})
+    quality = {k: dict(v) for k, v in result.get("qualidade", {}).items()}
+    fields = [(brasil, "Selic", "selic", (0, 50), "BCB SGS 432"),
+              (brasil, "IPCA_12M", "ipca_12m", (-10, 50), "BCB SGS 433 · composição 12m"),
+              (brasil, "IPCA", "ipca_mensal", (-5, 5), "BCB SGS 433"),
+              (global_, "VIXCLS", "vix", (0.01, 200), "FRED VIXCLS"),
+              (global_, "DGS10", "treasury_10y", (0, 20), "FRED DGS10")]
+    for frame, column, key, bounds, source in fields:
+        quality.setdefault(key, {"observado": False, "status": "não observado",
+                                 "fonte": source, "referencia_em": None, "coletado_em": None})
+        if frame is None or column not in frame:
+            continue
+        series = pd.to_numeric(frame[column], errors="coerce").dropna()
+        if series.empty:
+            continue
+        value = float(series.iloc[-1])
+        if not math.isfinite(value) or not bounds[0] <= value <= bounds[1]:
+            continue
+        reference = pd.to_datetime(series.index[-1], utc=True, errors="coerce")
+        if pd.isna(reference):
+            continue
+        old_reference = pd.to_datetime(quality[key].get("referencia_em"), utc=True, errors="coerce")
+        if not pd.isna(old_reference) and old_reference > reference:
+            continue
+        result[key] = round(value, 2)
+        quality[key] = {"observado": True, "status": "observado", "fonte": source,
+                        "referencia_em": reference.isoformat(),
+                        "coletado_em": frame.attrs.get("coletado_em")}
+    if "ipca_12m" in result:
+        result["ipca"] = result["ipca_12m"]
+        quality["ipca"] = dict(quality["ipca_12m"])
+    if quality["selic"]["observado"] and quality["vix"]["observado"]:
+        rate = "juros altos" if result["selic"] > 10 else "juros baixos"
+        risk = "stress global" if result["vix"] > 20 else "risco controlado"
+        result["label"] = f"{rate} / {risk}"
+    else:
+        result["label"] = "contexto incompleto · valores de contingência"
+    result["qualidade"] = quality
+    return result

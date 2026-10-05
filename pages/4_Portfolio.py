@@ -15,7 +15,7 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 from utils.auth import require_auth, render_user_badge, get_current_user
 from utils.style import aplicar_tema
 from utils.tickers import BRASIL_TODOS, XSTOCKS_TODOS, BR_INDICES, get_opcoes_selectbox, ticker_from_label, mapear_ticker_base
-from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
+from database.db import registrar_decisao, listar_decisoes, atualizar_resultado, get_pesos, listar_watchlist, salvar_peso, get_health_scores, listar_watchlists, criar_portfolio, listar_portfolios, get_portfolio_padrao, definir_portfolio_padrao, deletar_portfolio, salvar_peso_alvo, get_pesos_alvo, deletar_peso_alvo, get_todos_fundamentos_cache, get_all_price_cache, salvar_mensagem_chat, get_historico_chat, limpar_historico_chat
 
 # componentes do design system
 from utils.components import (
@@ -1050,7 +1050,7 @@ if _portfolio_workspace == "Análises":
         "📊 composição":  ["📊 concentração"],
         "📐 risco":       ["📐 risco", "⚡ stress test"],
         "📈 performance": ["📊 backtesting"],
-        "📋 gestão & ia": ["📝 diário de decisões", "🧾 imposto de renda", "💬 chat ia"],
+        "📋 gestão & ia": ["📝 diário de decisões", "🧠 teses macro", "🧾 imposto de renda", "💬 chat ia"],
     }
     _grupos_keys = list(_GRUPOS_PF.keys())
     _grupo_pf = section_selector(_grupos_keys, key="portfolio_grupo", label="análise")
@@ -2850,20 +2850,31 @@ if _secao_pf == "📊 concentração":
 if _secao_pf == "📐 risco":
     section_title("Risco da carteira")
     _moedas_risco = {'BRL' if mapear_ticker_base(t).endswith('.SA') else 'USD' for t in ativos_alocados}
-    if len(_moedas_risco) > 1:
-        st.info("Carteira mista: os modelos de risco usam pesos e retornos na moeda de origem, sem variação cambial. Valores monetários destes estudos não correspondem ao patrimônio consolidado em BRL.")
     _estudo_risco = section_selector(
-        ["VaR e CVaR", "Macro e sizing", "Atribuição Brinson", "Fatores", "Proventos"],
+        ["Cenários macro", "VaR e CVaR", "Macro e sizing", "Atribuição Brinson", "Fatores", "Proventos"],
         key="portfolio_estudo_risco", label="Estudo de risco",
     )
 
-    if not ativos_alocados:
+    if _estudo_risco == "Cenários macro":
+        from utils.macro_portfolio_view import render_cenarios_macro
+        try:
+            from utils.macro_context import garantir_macro_context
+            _ctx_cenario_macro = garantir_macro_context()
+        except Exception:
+            _ctx_cenario_macro = st.session_state.get("macro_context", {}) or {}
+        render_cenarios_macro(
+            ativos_alocados, get_all_price_cache() or {}, get_todos_fundamentos_cache() or {},
+            _ctx_cenario_macro, portfolio_id=portfolio_id_ativo,
+        )
+    elif not ativos_alocados:
         empty_state(
             "💼",
             "sem posições para analisar",
             "adicione posições na aba 'posições & p&l' antes de calcular risco.",
         )
     else:
+        if len(_moedas_risco) > 1:
+            st.info("Carteira mista: estes modelos legados usam pesos e retornos na moeda de origem, sem variação cambial. Para premissas em BRL com FX explícito, escolha Cenários macro.")
         # Constrói carteira a partir das posições da aba principal.
         # ativos_alocados[t] = {'quantidade', 'preco_medio', 'peso'}; live_data[t] = preço atual.
         _pesos_carteira: dict[str, float] = {}
@@ -4738,7 +4749,9 @@ if _secao_pf == "📝 diário de decisões":
                     st.success("✅ decisão registrada com sucesso no seu diário de bordo!")
                     st.rerun()
 
-    decisoes = listar_decisoes()
+    from utils.macro_theses import eh_tese_macro
+    # Teses macro não são operações e não participam de retornos/taxa de acerto.
+    decisoes = [d for d in (listar_decisoes() or []) if not eh_tese_macro(d)]
     if not decisoes:
         empty_state("📝", "diário vazio", "o seu diário de decisões está vazio. registre sua primeira operação acima.")
     else:
@@ -4883,6 +4896,17 @@ if _secao_pf == "📝 diário de decisões":
                     )
                 except Exception as e:
                     st.error(f"falha ao conectar com o mentor de ia: {e}")
+
+if _secao_pf == "🧠 teses macro":
+    from utils.macro_theses_view import render_teses_macro
+    try:
+        from utils.macro_context import garantir_macro_context
+        _ctx_teses_macro_pf = garantir_macro_context()
+    except Exception:
+        _ctx_teses_macro_pf = st.session_state.get("macro_context", {}) or {}
+    render_teses_macro(macro_context=_ctx_teses_macro_pf, portfolio_id=portfolio_id_ativo,
+                       key_prefix="portfolio_theses")
+
 
 # ==========================================
 # tab 5: imposto de renda
@@ -5284,18 +5308,20 @@ if _secao_pf == "💬 chat ia":
 
         macro = st.session_state.get("macro_context", {})
         if macro:
-            try:
-                from utils.macro_state import selic_real_fisher
-                _sel = float(macro.get('selic', 10.75))
-                _ip = float(macro.get('ipca_12m') or macro.get('ipca', 4.5))
-                _jr = f" | juro real (fisher): {selic_real_fisher(_sel, _ip):+.1f}%"
-            except Exception:
-                _ip, _jr = float(macro.get('ipca_12m') or macro.get('ipca', 4.5)), ""
+            from utils.macro_research import fisher
+            from utils.regime_classifier import valor_observado
+            _sel = valor_observado(macro, 'selic')
+            _ip = valor_observado(macro, 'ipca_12m', 'ipca')
+            _vix_chat = valor_observado(macro, 'vix')
+            _real_fisher_chat = fisher(_sel, _ip)
+            def _macro_chat_fmt(value, suffix='%'):
+                return 'n/d' if value is None else f'{value:.2f}{suffix}'
             linhas.append(
-                f"\nambiente macro atual:\n"
-                f"- selic: {macro.get('selic', 10.75):.2f}% | ipca 12m: {_ip:.1f}%{_jr}\n"
-                f"- vix: {macro.get('vix', 15.0):.1f}\n"
-                f"- ambiente: {macro.get('label', 'neutro')}"
+                f"\núltimas observações macro carregadas (dados ausentes são n/d):\n"
+                f"- selic: {_macro_chat_fmt(_sel)} | ipca 12m: {_macro_chat_fmt(_ip)}\n"
+                f"- juro real ex post (Fisher): {_macro_chat_fmt(_real_fisher_chat)}\n"
+                f"- vix: {_macro_chat_fmt(_vix_chat, '')}\n"
+                f"- ambiente: {macro.get('label', 'incompleto')}"
             )
 
         # exposição macro do book (regime + inflação setorial)

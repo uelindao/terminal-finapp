@@ -2,8 +2,15 @@
 Teste do bloco de inflação setorial nos prompts de IA (utils/ai_prompts).
 """
 from unittest.mock import patch
+import pytest
 
 from utils.ai_prompts import bloco_inflacao_setorial, _mom_label
+
+
+@pytest.fixture(autouse=True)
+def no_live_macro(monkeypatch):
+    monkeypatch.setattr("utils.inflation_sectoral._carregar_inflacao_df", lambda *a, **kw: None)
+    monkeypatch.setattr("database.db.get_macro_cache", lambda *a, **kw: None)
 
 
 def test_mom_label():
@@ -84,7 +91,7 @@ def test_surpresa_inflacao():
            if hasattr(ins.surpresa_inflacao, "__wrapped__") else ins.surpresa_inflacao)
     with patch("database.db.get_macro_cache", side_effect=_cache):
         sp = _fn("BR")
-    assert sp["surpresa"] == 0.9 and sp["esperada"] == 4.1
+    assert sp is None  # Legacy horizon mismatch must be ignored, even if cached.
     with patch("database.db.get_macro_cache", return_value=None):
         assert _fn("BR") is None
 
@@ -103,3 +110,15 @@ def test_gap_margem():
     # sem dados → None
     with patch("utils.inflation_sectoral.get_inflacao_atual", return_value={}):
         assert gap_margem("BR") is None
+
+
+def test_gap_expectativa_realizada_ignora_legado_e_nao_chama_precificacao():
+    import utils.inflation_sectoral as ins
+    fn = getattr(ins.gap_expectativa_realizada, "__wrapped__", ins.gap_expectativa_realizada)
+    with patch("database.db.get_macro_cache", side_effect=lambda k: {"br_gap_expectativa_12m": 0.7}.get(k)):
+        result = fn("BR")
+        assert result["gap"] == 0.7
+        assert result["horizonte"] == "12m"
+        assert fn("US") is None
+    with patch("database.db.get_macro_cache", return_value=float("nan")):
+        assert fn("BR") is None
