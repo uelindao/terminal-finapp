@@ -1210,7 +1210,12 @@ if _secao_d == "🧠 ia: oportunidades do dia":
         unsafe_allow_html=True,
     )
 
-    # Universo + modo (chip_filter_row compacto, design system v5)
+    from utils.discovery_universe import (
+        UNIVERSOS_IA, tickers_oportunidades_ia,
+        chaves_cache_oportunidades_ia, filtrar_resultados_oportunidades_ia,
+    )
+
+    # Universos por classe: ações e FIIs nunca concorrem no mesmo ranking.
     st.markdown(
         '<div style="font-family:var(--font-ui);font-size:0.78rem;'
         'color:var(--text-muted);text-transform:uppercase;'
@@ -1219,16 +1224,14 @@ if _secao_d == "🧠 ia: oportunidades do dia":
         unsafe_allow_html=True,
     )
     _univ_ia_raw = chip_filter_row(
-        ["🇧🇷 brasil (b3 + fiis)", "🇺🇸 eua (s&p500)", "🌍 todos"],
-        key="radio_univ_ia_disc_v2",
-        default="🇧🇷 brasil (b3 + fiis)",
+        list(UNIVERSOS_IA.values()),
+        key="radio_univ_ia_disc_v3",
+        default=UNIVERSOS_IA["BR_ACOES"],
         max_chip_cols=10,
     )
-    _univ_ia = (
-        "BR" if _univ_ia_raw.startswith("🇧🇷")
-        else "US" if _univ_ia_raw.startswith("🇺🇸")
-        else "AMBOS"
-    )
+    _univ_ia = next(k for k, label in UNIVERSOS_IA.items() if label == _univ_ia_raw)
+    _tickers_ia = tickers_oportunidades_ia(_univ_ia)
+    st.caption(f"{_univ_ia_raw} · {len(_tickers_ia)} ativos no universo. Ranking e análise de IA seguem esta seleção.")
 
     st.markdown(
         '<div style="font-family:var(--font-ui);font-size:0.78rem;'
@@ -1256,7 +1259,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
         key="btn_ia_disc_rodar",
     )
 
-    _cache_key_ia = f"ia_disc_{_univ_ia}_{_modo_ia}"
+    _cache_key_ia, _modo_cache_ia = chaves_cache_oportunidades_ia(_univ_ia, _modo_ia)
 
     if _btn_rodar_ia:
         st.session_state.pop(_cache_key_ia, None)
@@ -1270,13 +1273,6 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 "(pode levar 30-60 segundos)"
             ):
                 from utils.radar import calcular_oportunidades_watchlist
-
-                if _univ_ia == "BR":
-                    _tickers_ia = SCREENER_B3 + FII_TODOS
-                elif _univ_ia == "US":
-                    _tickers_ia = SCREENER_US
-                else:
-                    _tickers_ia = SCREENER_B3 + FII_TODOS + SCREENER_US
 
                 _hs_ia = {
                     h['ticker']: float(h.get('score', 0) or 0)
@@ -1294,7 +1290,9 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 )
                 st.session_state[_cache_key_ia] = _resultados_ia
 
-        _resultados_ia = st.session_state.get(_cache_key_ia, [])
+        _resultados_ia = filtrar_resultados_oportunidades_ia(
+            st.session_state.get(_cache_key_ia, []), _univ_ia,
+        )
 
         if not _resultados_ia:
             st.warning(
@@ -1305,7 +1303,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
         else:
             st.markdown("<br>", unsafe_allow_html=True)
             section_title(
-                f"📊 top {len(_resultados_ia)} ativos — "
+                f"📊 top {len(_resultados_ia)} {'FIIs' if _univ_ia == 'FII' else 'ações'} — "
                 f"score quantitativo"
             )
 
@@ -1316,6 +1314,8 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                 'score_val', 'score_timing',
                 'rsi', 'ret_5d', 'ret_3m', 'dist_top',
             ]]
+            if _univ_ia == "FII":
+                _df_ia['mercado'] = "FII"
             _df_ia.columns = [
                 'ticker', 'nome', 'mercado',
                 'score total', 'qualidade (hs)',
@@ -1338,7 +1338,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                         tipo="discovery",
                         ticker=None,
                         user_id=None,
-                        modo=f"{_univ_ia}_{_modo_ia}",
+                        modo=_modo_cache_ia,
                     )
                     if _db_cache_disc:
                         st.session_state[_cache_key_analise] = _db_cache_disc['conteudo']
@@ -1400,7 +1400,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                         _top_payload.append({
                             'ticker':       _tk,
                             'nome':         _r.get('nome', ''),
-                            'mercado':      _r.get('mercado', ''),
+                            'mercado':      'FII' if _univ_ia == 'FII' else _r.get('mercado', ''),
                             'setor':        _fd.get('setor', 'n/d'),
                             'score':        _r.get('score_assim', 0),
                             'q_score':      _r.get('score_hs', 0),
@@ -1445,7 +1445,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                                 tipo="discovery",
                                 ticker=None,
                                 user_id=None,
-                                modo=f"{_univ_ia}_{_modo_ia}",
+                                modo=_modo_cache_ia,
                                 conteudo=_resposta_ia_disc,
                                 modelo="auto",
                                 ttl_horas=24,

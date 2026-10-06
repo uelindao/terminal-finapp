@@ -621,11 +621,15 @@ def build_discovery_prompt(
         )
 
     macro_block = bloco_macro(macro_context)
+    from utils.discovery_universe import UNIVERSOS_IA
+    universo_desc = UNIVERSOS_IA.get(universo, universo)
+    classe = "FIIs" if universo == "FII" else "ações" if universo in {"BR_ACOES", "US_ACOES", "ACOES"} else "ativos"
 
     prompt = (
         f"análise comparativa — discovery screener\n"
         f"modo: {modo_desc}\n"
-        f"universo: {universo}\n"
+        f"universo: {universo_desc}\n"
+        f"classe desta análise: {classe}. Considere exclusivamente os candidatos fornecidos, sem misturar ações e FIIs.\n"
         f"{macro_block}\n"
         f"top {len(top_ativos)} ativos por score quantitativo:\n"
         + "\n".join(linhas)
