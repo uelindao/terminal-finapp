@@ -207,3 +207,27 @@ def test_momentum_pontua_com_a_janela_do_etl():
     precos = 10 * np.cumprod(np.full(494, 1.0012))
     pontos, _, _ = calcular_momentum(pd.DataFrame({"Close": precos}))
     assert pontos > 0
+
+
+def test_cache_do_streamlit_nao_congela_leituras_no_etl():
+    """Fora do app, cada chamada precisa ver o que acabou de ser gravado."""
+    from database.db import _st_cache
+
+    chamadas = []
+
+    @_st_cache(ttl=1800)
+    def ler():
+        chamadas.append(1)
+        return len(chamadas)
+
+    assert ler() == 1
+    assert ler() == 2
+    ler.clear()
+
+
+def test_fundamentos_gravados_aparecem_na_mesma_execucao(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+    from database import db
+    assert db.get_todos_fundamentos_cache() == {}
+    db.salvar_fundamento_cache("A", {"preco": 1})
+    assert db.get_todos_fundamentos_cache()["A"]["preco"] == 1

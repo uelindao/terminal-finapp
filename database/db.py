@@ -6,6 +6,7 @@ do Supabase; o schema está em database/schema.sql e é aplicado automaticamente
 import json
 import sqlite3 as _sqlite3
 from datetime import datetime
+from functools import wraps
 import hashlib
 try:
     import streamlit as st
@@ -14,12 +15,31 @@ except ImportError:
     st = None
     _ST_AVAILABLE = False
 
+def _em_app_streamlit() -> bool:
+    try:
+        from streamlit.runtime import exists
+        return exists()
+    except ImportError:
+        return False
+
+
 def _st_cache(ttl=3600, show_spinner=False):
-    """Decorador condicional — no-op quando streamlit não está instalado (CI/scripts)."""
+    """Cacheia só dentro do app. No ETL lê sempre o banco.
+
+    st.cache_data também funciona em script comum: o sync_br leria os fundamentos
+    antes de gravá-los e os scores usariam esse retrato vazio por 30 minutos.
+    """
     def _wrap(fn):
-        if _ST_AVAILABLE and st is not None:
-            return st.cache_data(ttl=ttl, show_spinner=show_spinner)(fn)
-        return fn
+        if not _ST_AVAILABLE or st is None:
+            return fn
+        cacheada = st.cache_data(ttl=ttl, show_spinner=show_spinner)(fn)
+
+        @wraps(fn)
+        def _despacho(*args, **kwargs):
+            return cacheada(*args, **kwargs) if _em_app_streamlit() else fn(*args, **kwargs)
+
+        _despacho.clear = cacheada.clear
+        return _despacho
     return _wrap
 
 from database.local_db import db_path, get_connection

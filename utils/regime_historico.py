@@ -11,6 +11,10 @@ import numpy as np
 
 import pandas as pd
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # 11 setores canônicos que têm tilt de regime (keys de _TILT_JURO_ALTO/_TILT_STRESS)
 SETORES_TILT = [
     "comunicacao", "consumo_ciclico", "consumo_defensivo", "energia",
@@ -139,9 +143,10 @@ def carregar_inputs_macro_semanais(anos: int = 8) -> pd.DataFrame:
 
     def _sgs(cod, nome):
         try:
-            from bcb import sgs
-            return sgs.get({nome: cod}, start=(inicio - timedelta(days=70)).isoformat())[nome]
-        except Exception:
+            from utils.bcb_series import buscar_serie_bcb
+            return buscar_serie_bcb(cod, nome, inicio - timedelta(days=70), date.today())
+        except Exception as exc:
+            logger.warning(f"[regime_historico] SGS{cod} indisponível: {type(exc).__name__}: {exc}")
             return None
 
     def _yf_close(tk):
