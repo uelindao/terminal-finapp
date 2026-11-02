@@ -35,21 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _get_client():
-    """Client Supabase a partir de env (ETL) ou secrets.toml do repo principal."""
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY", "")
-    if not (url and key):
-        import tomllib
-        for p in (".streamlit/secrets.toml",
-                  os.path.join(os.path.dirname(__file__), "..", ".streamlit", "secrets.toml")):
-            if os.path.exists(p):
-                with open(p, "rb") as f:
-                    s = tomllib.load(f)
-                url = url or s.get("SUPABASE_URL", "")
-                key = key or s.get("SUPABASE_SERVICE_KEY") or s.get("SUPABASE_KEY", "")
-                break
-    from supabase import create_client
-    return create_client(url, key)
+    from database.local_db import get_client
+    return get_client()
 
 
 def _paginate(query_fn, page: int = 1000, cap: int = 2_000_000):

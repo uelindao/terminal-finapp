@@ -1,11 +1,10 @@
 streamlit==1.57.0
-yfinance
-pandas
+yfinance==1.3.0
+pandas==2.3.3
 numpy
 plotly
 fredapi
 python-bcb
-supabase>=2.3.0
 openai>=1.30.0
 reportlab>=4.0.0
 cryptography>=41.0.0

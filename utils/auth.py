@@ -14,7 +14,7 @@ _SESSION_HOURS = 24
 
 
 def _login_por_sessao(token: str) -> bool:
-    """Valida token no Supabase e preenche session_state. Retorna True se OK."""
+    """Valida token na base local e preenche session_state. Retorna True se OK."""
     user = validar_sessao(token)
     if not user:
         return False
@@ -57,7 +57,7 @@ def get_current_user() -> dict | None:
 
 
 def logout():
-    """Revoga o token no Supabase, remove da URL e limpa a sessão."""
+    """Revoga o token na base local, remove da URL e limpa a sessão."""
     token = st.session_state.get('session_token')
     if token:
         revogar_sessao(token)

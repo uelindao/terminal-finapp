@@ -24,8 +24,9 @@ from database.db import (
     get_earnings_dates, salvar_earnings_date,
     listar_tags_watchlist, atualizar_tag_ativo,
     get_user_settings,
-    get_all_macro_cache, get_all_price_cache,
+    get_all_macro_cache, get_all_price_cache, get_execucoes_etl,
 )
+from utils.data_quality import avaliar_frescor_etl
 from utils.email_sender import enviar_relatorio_semanal
 from utils.health_engine import calcular_health_score, _is_fii
 from utils.earnings_scraper import buscar_resultados
@@ -74,7 +75,7 @@ def buscar_cotacoes_lote(tickers_tuple: tuple) -> dict:
     if not tickers:
         return resultado
 
-    # 1. Tenta cache do Supabase (mais rápido, sem chamada externa)
+    # 1. Tenta cache da base local (mais rápido, sem chamada externa)
     try:
         cache_pc = get_all_price_cache()
         for t in tickers:
@@ -274,25 +275,29 @@ if not st.session_state.get("_finterm_router"):
 
 aplicar_tema()
 
-# 1.5 CONECTA AO BANCO. Se estiver fora/restrito (ex.: cota do Supabase), mostra
+# 1.5 CONECTA AO BANCO. Se estiver fora/restrito (ex.: cota da base local), mostra
 # uma tela clara em vez de derrubar o app com traceback.
 if not init_db():
     page_header("Seu terminal está temporariamente indisponível", "Não foi possível conectar ao serviço de dados.")
-    empty_state("↻", "Conexão indisponível", "Tente novamente em alguns instantes. Se o problema persistir, verifique o status e a cota do projeto no Supabase.")
+    empty_state("↻", "Base local indisponível", "Não foi possível abrir o arquivo do banco em data/. Veja o log no terminal onde o app foi iniciado.")
     if st.button("Tentar novamente", type="primary", key="retry_database"):
         st.rerun()
     st.stop()
-popular_watchlist_inicial()
 
 # 2. barreira de segurança multi-usuário
 if not require_auth():
     st.stop()
+popular_watchlist_inicial()
 
 # 3. renderizações pós-login
 render_user_badge()
 aplicar_tema()
 inject_keyboard_shortcuts()
 handle_ticker_nav()  # navega para Research quando ticker é clicado em qualquer lista
+
+_aviso_etl = avaliar_frescor_etl(get_execucoes_etl())
+if _aviso_etl:
+    st.warning(_aviso_etl, icon=":material/schedule:")
 
 # Tema switcher na sidebar (após autenticação)
 try:
@@ -1716,7 +1721,7 @@ else:
         if i.get('ticker')
     ))
 
-    # 1. Tenta pegar do cache Supabase primeiro (1 round-trip para N tickers)
+    # 1. Tenta pegar do cache local primeiro (1 round-trip para N tickers)
     _earnings_cache: dict = get_earnings_dates(_tickers_base_wl)
 
     # 2. Para tickers sem cache, busca via scraper e persiste
@@ -1729,7 +1734,7 @@ else:
                 try:
                     _earn_d = buscar_resultados(_tb)
                     _prox   = _earn_d.get('proxima_data')
-                    # Persiste no Supabase (ignora erro se tabela não existir)
+                    # Persiste na base local (ignora erro se tabela não existir)
                     try:
                         salvar_earnings_date(_tb, _prox, _earn_d.get('fonte', ''))
                     except Exception:

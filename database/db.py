@@ -1,14 +1,10 @@
 """
-FinTerminal — camada de acesso a dados via Supabase (PostgreSQL).
-Mantém EXATAMENTE as mesmas assinaturas de função que o db_sqlite_legacy.py,
-incluindo aliases de compatibilidade nas colunas renomeadas.
-
-Schema: execute database/migrations/001_initial_schema.sql no Supabase Dashboard
-antes do primeiro uso.
+FinTerminal — camada de acesso a dados sobre a base local (SQLite).
+`get_supabase()` devolve o client de database/local_db.py, que mantém a API fluente
+do Supabase; o schema está em database/schema.sql e é aplicado automaticamente.
 """
 import json
 import sqlite3 as _sqlite3
-import os as _os
 from datetime import datetime
 import hashlib
 try:
@@ -26,6 +22,7 @@ def _st_cache(ttl=3600, show_spinner=False):
         return fn
     return _wrap
 
+from database.local_db import db_path, get_connection
 from database.supabase_client import get_supabase
 from utils.logger import get_logger
 
@@ -276,6 +273,7 @@ def deletar_usuario(user_id: int) -> None:
     tabelas = [
         'watchlist_items', 'alerts', 'portfolio_positions', 'decision_log',
         'saved_comparisons', 'watchlists', 'portfolios', 'report_history',
+        'user_settings', 'alert_config', 'alert_log',
     ]
     for tabela in tabelas:
         try:
@@ -332,56 +330,21 @@ def _criar_admin_padrao():
 # INICIALIZAÇÃO DA BASE DE DADOS
 # ==========================================
 
-def banco_indisponivel(erro) -> bool:
-    """True se o erro indica banco fora do ar / projeto restrito por cota
-    (402 exceed_egress_quota, indisponibilidade de rede) — e não um bug nosso."""
-    m = str(erro).lower()
-    return any(t in m for t in (
-        "egress", "quota", "402", "restricted", "timeout",
-        "connection", "unavailable", "service for this project",
-    ))
-
-
 def init_db() -> bool:
     """
-    Verifica a conexão com Supabase e garante o admin padrão.
+    Abre a base local (criando o schema se preciso) e garante o admin padrão.
     Retorna True se o banco está operacional, False caso contrário.
 
-    NÃO levanta exceção: o chamador (UI) decide como degradar — mostrar uma tela
-    amigável é melhor que derrubar o app inteiro com traceback quando o projeto
-    Supabase está restrito por cota ou fora do ar.
-
-    O schema NÃO é criado automaticamente aqui — execute antes:
-        database/migrations/001_initial_schema.sql
-    no Supabase Dashboard → SQL Editor.
+    NÃO levanta exceção: o chamador (UI) decide como degradar — uma tela amigável
+    é melhor que derrubar o app inteiro com traceback.
     """
     try:
-        sb = get_supabase()
-        sb.table('users').select('id').limit(1).execute()
-        logger.info("[db] Supabase conectado e schema validado.")
+        get_supabase().table('users').select('id').limit(1).execute()
         _criar_admin_padrao()
-        _migrar_watchlist_para_default()
-        _migrar_portfolio_para_default()
         return True
     except Exception as e:
-        if banco_indisponivel(e):
-            logger.error(f"[db] Supabase indisponível/restrito: {e}")
-        else:
-            logger.error(
-                f"[db] falha na inicialização do Supabase: {e}. "
-                "Execute database/migrations/001_initial_schema.sql no Supabase Dashboard."
-            )
+        logger.error(f"[db] falha ao abrir a base local: {e}", exc_info=True)
         return False
-
-
-def _migrar_watchlist_para_default():
-    """No-op: o schema Supabase já nasce com estrutura correta."""
-    pass
-
-
-def _migrar_portfolio_para_default():
-    """No-op: o schema Supabase já nasce com estrutura correta."""
-    pass
 
 
 # ==========================================
@@ -426,51 +389,22 @@ def atualizar_multiplos_pctl(ticker: str, pctl: dict):
         logger.warning(f"[db] falha ao atualizar percentil de {ticker}: {e}")
 
 
-_FUNDAMENTALS_EXTENDED_OK: bool | None = None  # None=ainda não testado, True=ok, False=falha conhecida
-
-
 @_st_cache(ttl=1800, show_spinner=False)
 def get_todos_fundamentos_cache() -> dict:
     """
-    Lê fundamentals_cache. Combina o JSON legado (dados_json) com as colunas
-    novas do ETL (data_quality_pct, updated_at, source) para que o app enxergue
-    os dois fluxos de gravação.
+    Lê fundamentals_cache. Combina o JSON (dados_json) com as colunas do ETL
+    (data_quality_pct, updated_at, data_source).
 
-    CACHEADO (30 min) — crítico para EGRESS: puxa o dados_json de ~475 tickers
-    (~2 MB) e é chamado em 17 pontos da UI, alguns no topo de módulo (reexecutados
-    a CADA rerun do Streamlit, isto é, a cada clique). Sem cache, uma sessão ativa
-    consumia GBs/mês sozinha. Os fundamentos mudam ~2x/dia (ETL), então 30 min de
-    TTL não atrasa nada perceptível.
-
-    Memoiza o resultado de schema (existência das colunas ETL): após a 1ª falha,
-    as chamadas seguintes vão direto ao fallback sem re-logar — evita spam quando
-    o ALTER TABLE ainda não foi aplicado e a função é chamada N vezes (ETL).
+    CACHEADO (30 min): é chamado em 17 pontos da UI, alguns no topo de módulo, isto
+    é, a cada clique. Os fundamentos mudam ~2x/dia (ETL), o TTL não atrasa nada.
     """
-    global _FUNDAMENTALS_EXTENDED_OK
-    sb = get_supabase()
-
-    rows = None
-    if _FUNDAMENTALS_EXTENDED_OK is not False:
-        try:
-            rows = sb.table('fundamentals_cache').select(
-                'ticker, dados_json, data_quality_pct, updated_at, source'
-            ).execute().data
-            _FUNDAMENTALS_EXTENDED_OK = True
-        except Exception as e:
-            if _FUNDAMENTALS_EXTENDED_OK is None:
-                logger.warning(
-                    f"[db] colunas estendidas (data_quality_pct/updated_at/source) "
-                    f"indisponíveis em fundamentals_cache: {e}. Usando fallback. "
-                    f"Rode os ALTER TABLE do supabase_setup.sql para habilitar."
-                )
-            _FUNDAMENTALS_EXTENDED_OK = False
-
-    if rows is None:
-        try:
-            rows = sb.table('fundamentals_cache').select('ticker, dados_json').execute().data
-        except Exception as e2:
-            logger.warning(f"[db] falha ao carregar cache de fundamentos: {e2}")
-            return {}
+    try:
+        rows = get_supabase().table('fundamentals_cache').select(
+            'ticker, dados_json, data_quality_pct, updated_at, data_source'
+        ).execute().data
+    except Exception as e:
+        logger.warning(f"[db] falha ao carregar cache de fundamentos: {e}")
+        return {}
 
     out: dict = {}
     for r in rows:
@@ -489,8 +423,8 @@ def get_todos_fundamentos_cache() -> dict:
             dados.setdefault('qualidade_dados', r['data_quality_pct'])
         if r.get('updated_at'):
             dados.setdefault('updated_at', r['updated_at'])
-        if r.get('source'):
-            dados.setdefault('data_source', r['source'])
+        if r.get('data_source'):
+            dados.setdefault('data_source', r['data_source'])
         out[ticker] = dados
     return out
 
@@ -931,7 +865,7 @@ def salvar_peso(ticker, peso, preco_medio=None, quantidade=None, portfolio_id=No
     if portfolio_id is None:
         portfolio_id = get_portfolio_padrao()
     sb = get_supabase()
-    # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+    # Sanitiza NaN/Inf para evitar erro no json.dumps da base local
     import math as _mt
     def _sn(v):
         if v is None: return None
@@ -1063,9 +997,6 @@ def get_health_scores():
     return rows
 
 
-_HEALTH_DATA_QUALITY_OK: bool | None = None  # None=desconhecido, True=ok, False=coluna ausente
-
-
 def salvar_health_score(ticker, score, alertas_payload, data_quality_pct=None):
     """
     Guarda o score no banco de dados.
@@ -1075,32 +1006,13 @@ def salvar_health_score(ticker, score, alertas_payload, data_quality_pct=None):
     indisponível em vez do legado fallback silencioso=50.
 
     data_quality_pct: % de campos críticos preenchidos no cálculo (0-100), opcional.
-    Memoiza ausência da coluna após 1ª falha — evita spam de WARNING em ETL.
     """
-    global _HEALTH_DATA_QUALITY_OK
     if not isinstance(alertas_payload, str):
         alertas_payload = json.dumps(alertas_payload)
     payload = {'ticker': ticker, 'score': score, 'alertas_venda': alertas_payload}
-    if data_quality_pct is not None and _HEALTH_DATA_QUALITY_OK is not False:
+    if data_quality_pct is not None:
         payload['data_quality_pct'] = data_quality_pct
-    sb = get_supabase()
-    try:
-        sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
-        if 'data_quality_pct' in payload:
-            _HEALTH_DATA_QUALITY_OK = True
-    except Exception as e:
-        # Coluna nova pode não existir ainda; tenta novamente sem ela
-        if data_quality_pct is not None and 'data_quality_pct' in str(e):
-            if _HEALTH_DATA_QUALITY_OK is None:
-                logger.warning(
-                    f"[db] coluna health_scores.data_quality_pct ausente — "
-                    f"continuando sem ela. Rode os ALTER TABLE do supabase_setup.sql."
-                )
-            _HEALTH_DATA_QUALITY_OK = False
-            payload.pop('data_quality_pct', None)
-            sb.table('health_scores').upsert(payload, on_conflict='ticker').execute()
-        else:
-            raise
+    get_supabase().table('health_scores').upsert(payload, on_conflict='ticker').execute()
 
 
 # ==========================================
@@ -1509,7 +1421,7 @@ def deletar_config_alerta(user_id: int, ticker: str):
 
 def salvar_earnings_date(ticker: str, data_str: str | None, fonte: str = '') -> None:
     """
-    Salva a próxima data de resultado no cache Supabase.
+    Salva a próxima data de resultado no cache local.
     data_str: formato 'dd/mm/yyyy' ou None.
     Tabela esperada: earnings_dates (ticker PK, proxima_data DATE, fonte TEXT, updated_at TIMESTAMPTZ)
     """
@@ -1641,32 +1553,14 @@ def get_earnings_dates(tickers: list[str]) -> dict:
 
 
 # ==========================================
-# LOCAL SQLITE STORE (chat portfolio + kv settings)
+# CHAT DO PORTFÓLIO + PREFERÊNCIAS KV
 # ==========================================
 
-_LOCAL_DB_PATH = _os.path.join(_os.path.dirname(__file__), 'local_store.db')
-
-
 def _get_local_conn():
-    conn = _sqlite3.connect(_LOCAL_DB_PATH)
+    """Conexão própria: os chamadores abaixo fecham a conexão ao terminar."""
+    get_connection()  # garante o schema antes do primeiro acesso
+    conn = _sqlite3.connect(db_path(), timeout=30)
     conn.row_factory = _sqlite3.Row
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS chat_portfolio_historico (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      INTEGER NOT NULL,
-            portfolio_id INTEGER NOT NULL,
-            role         TEXT NOT NULL,
-            conteudo     TEXT NOT NULL,
-            criado_em    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS user_kv (
-            user_id INTEGER NOT NULL,
-            chave   TEXT NOT NULL,
-            valor   TEXT NOT NULL,
-            PRIMARY KEY (user_id, chave)
-        );
-    """)
-    conn.commit()
     return conn
 
 
@@ -1818,6 +1712,19 @@ def get_all_macro_cache() -> dict:
 # ==========================================
 # ETL LOG — auditoria das sincronizacoes
 # ==========================================
+
+
+def get_execucoes_etl(dias: int = 30) -> list[dict]:
+    """Execuções recentes do ETL, da mais nova para a mais antiga."""
+    try:
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+        return (get_supabase().table("etl_log")
+                .select("job_name, status, started_at, finished_at, error_msg")
+                .gte("started_at", cutoff).order("started_at", desc=True).execute().data)
+    except Exception as e:
+        logger.warning(f"[db] get_execucoes_etl: {e}")
+        return []
 
 
 def get_ultimo_etl(job_name: str, dias: int = 7) -> dict | None:

@@ -1,6 +1,6 @@
 """
 utils/api_cache.py
-Camada de cache persistente via Supabase para dados de APIs externas.
+Camada de cache persistente (base local) para dados de APIs externas.
 
 Resolve dois problemas do Streamlit Community Cloud:
 1. Rate limits de APIs gratuitas (Alpha Vantage: 25 req/dia)
@@ -32,23 +32,10 @@ MAX_AGE = {
 }
 
 
-@st.cache_resource
 def _get_supabase_client():
-    """
-    Retorna cliente Supabase. Cache de resource (singleton por sessao).
-    Retorna None se nao configurado — o cache fica desabilitado
-    e o app funciona normalmente sem Supabase.
-    """
-    try:
-        from supabase import create_client
-        url      = st.secrets.get("supabase", {}).get("url", "")
-        anon_key = st.secrets.get("supabase", {}).get("anon_key", "")
-        if not url or not anon_key:
-            return None
-        return create_client(url, anon_key)
-    except Exception as e:
-        logger.warning(f"[api_cache] Supabase nao configurado: {e}")
-        return None
+    """Client da base local. Os chamadores toleram None por compatibilidade."""
+    from database.local_db import get_client
+    return get_client()
 
 
 def _periodo_from_date(date_str: str) -> str:
@@ -89,9 +76,9 @@ def get_from_cache(
     max_age_days: int | None = None,
 ) -> dict | list | None:
     """
-    Busca dado no cache Supabase.
+    Busca dado no cache local.
     Retorna o dado (dict/list) se existir e estiver dentro do max_age.
-    Retorna None se nao existir, expirado ou Supabase offline.
+    Retorna None se nao existir, expirado ou banco indisponível.
     """
     sb = _get_supabase_client()
     if sb is None:
@@ -147,7 +134,7 @@ def save_to_cache(
     periodo:  str | None = None,
 ) -> bool:
     """
-    Salva dado no cache Supabase via upsert.
+    Salva dado no cache local via upsert.
     Retorna True se salvou com sucesso.
     """
     sb = _get_supabase_client()
@@ -162,6 +149,13 @@ def save_to_cache(
             "periodo":  periodo,
             "data":     data,
         }
+        if periodo is None:
+            # NULL não colide no UNIQUE: o upsert criaria uma linha nova a cada save
+            # e a leitura (limit 1, sem ordem) podia devolver um snapshot antigo.
+            (sb.table("api_cache").delete().eq("ticker", payload["ticker"])
+             .eq("provider", provider).eq("endpoint", endpoint).is_("periodo", "null").execute())
+            sb.table("api_cache").insert(payload).execute()
+            return True
         sb.table("api_cache").upsert(
             payload,
             on_conflict="ticker,provider,endpoint,periodo"
@@ -182,7 +176,7 @@ def fetch_with_cache(
 ) -> Any:
     """
     Busca dado com cache-aside pattern:
-    1. Tenta cache Supabase
+    1. Tenta cache local
     2. Se miss/expirado: chama fetch_func()
     3. Salva resultado no cache
     4. Retorna dado
@@ -215,7 +209,7 @@ def get_todos_do_provider(
 ) -> list[dict]:
     """
     Busca TODOS os periodos trimestrais de um ativo/provider/endpoint
-    do cache Supabase.
+    do cache local.
 
     Retorna lista de {periodo, data} ordenada do mais antigo ao mais recente.
     """
@@ -245,7 +239,7 @@ def get_todos_do_provider(
 class AlphaVantageKeyRotator:
     """
     Gerencia rotacao de chaves Alpha Vantage respeitando limite de 25 req/dia.
-    Usa Supabase para persistir contagem entre sessoes.
+    Usa a base local para persistir contagem entre sessoes.
     """
 
     LIMITE_DIARIO = 25

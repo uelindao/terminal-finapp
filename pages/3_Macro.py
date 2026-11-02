@@ -157,27 +157,27 @@ def puxar_historico_mestre():
     Busca séries históricas macro (BCB Brasil + FRED Global + yfinance Commodities).
 
     Padrão cache-first com fallback live:
-      1. Tenta carregar snapshot recente do Supabase (< 6h)
+      1. Tenta carregar snapshot recente da base local (< 6h)
       2. Se cache válido → retorna imediatamente (evita APIs lentas)
       3. Se cache expirado/ausente → chama APIs ao vivo → salva novo snapshot
          (resolve "sem dados" em fins de semana, cold-start, manutenção BCB/FRED)
 
-    TTL: 1h (st.cache_data) + 6h (Supabase) — cache entre sessões e deploys.
+    TTL: 1h (st.cache_data) + 6h (cache local) — cache entre sessões e deploys.
     """
     from utils.macro_supabase import salvar_snapshot, carregar_snapshot
 
     hoje      = datetime.datetime.today()
     inicio_10a = hoje - datetime.timedelta(days=365 * 10)
 
-    MAX_CACHE_HORAS = 6  # horas de validade do cache Supabase
+    MAX_CACHE_HORAS = 6  # horas de validade do cache local
 
     # ── 1. Brasil — BCB SGS ───────────────────────────────────────────────────
     df_br = None
-    # Cache-first: tenta carregar do Supabase
+    # Cache-first: tenta carregar da base local
     _cache_br = carregar_snapshot("bcb_br", max_age_days=MAX_CACHE_HORAS / 24)
     if _cache_br is not None and not _cache_br.empty:
         df_br = _cache_br
-        logger.info("[macro] BCB: servindo do cache Supabase (cache-first).")
+        logger.info("[macro] BCB: servindo do cache local (cache-first).")
     else:
         # Cache miss → busca ao vivo
         series_bcb = {
@@ -222,7 +222,7 @@ def puxar_historico_mestre():
                 ausentes = anterior.columns.difference(df_br.columns)
                 df_br = pd.concat([df_br, anterior[ausentes]], axis=1).sort_index()
             salvar_snapshot("bcb_br", df_br)
-            logger.info("[macro] BCB: dados ao vivo OK, snapshot Supabase atualizado.")
+            logger.info("[macro] BCB: dados ao vivo OK, snapshot local atualizado.")
         else:
             # Live API failed → emergency fallback to stale cache (up to 7 days)
             _stale = carregar_snapshot("bcb_br", max_age_days=7)
@@ -230,11 +230,11 @@ def puxar_historico_mestre():
                 df_br = _stale
                 logger.warning("[macro] BCB: servindo cache expirado (fallback emergencial).")
             else:
-                logger.error("[macro] BCB: sem dados ao vivo e sem snapshot Supabase disponível.")
+                logger.error("[macro] BCB: sem dados ao vivo e sem snapshot local disponível.")
 
     # ── 2. Global — FRED ─────────────────────────────────────────────────────
     df_global = pd.DataFrame()
-    # Cache-first: tenta carregar do Supabase. Valida que colunas críticas
+    # Cache-first: tenta carregar da base local. Valida que colunas críticas
     # estão presentes — snapshots antigos podem ter sido salvos sem CPIAUCSL
     # quando a série ainda não estava no series_fred, e o cache de 6h
     # mantinha o snapshot incompleto servindo até expirar.
@@ -247,10 +247,10 @@ def puxar_historico_mestre():
     )
     if _cache_ok:
         df_global = _cache_global
-        logger.info("[macro] FRED: servindo do cache Supabase (cache-first).")
+        logger.info("[macro] FRED: servindo do cache local (cache-first).")
     elif _cache_global is not None and not _cache_global.empty:
         logger.warning(
-            "[macro] FRED: snapshot Supabase incompleto (sem CPIAUCSL) — "
+            "[macro] FRED: snapshot local incompleto (sem CPIAUCSL) — "
             "forçando refetch ao vivo."
         )
 
@@ -299,7 +299,7 @@ def puxar_historico_mestre():
 
             if not df_global.empty:
                 salvar_snapshot("fred_global", df_global)
-                logger.info("[macro] FRED: dados ao vivo OK, snapshot Supabase atualizado.")
+                logger.info("[macro] FRED: dados ao vivo OK, snapshot local atualizado.")
             else:
                 # Live API failed → emergency fallback to stale cache (up to 7 days)
                 _stale_g = carregar_snapshot("fred_global", max_age_days=7)
@@ -320,11 +320,11 @@ def puxar_historico_mestre():
     # ── 3. Commodities — yfinance (cache-first) ────────────────────────────────
     df_commodities = pd.DataFrame()
     try:
-        # Cache-first: tenta Supabase (6h TTL), senão baixa live
+        # Cache-first: tenta o cache local (6h TTL), senão baixa live
         _cached_comm = carregar_snapshot("commodities_yf", max_age_days=1)
         if _cached_comm is not None and not _cached_comm.empty:
             df_commodities = _cached_comm
-            logger.info("[macro] commodities: servindo do cache Supabase.")
+            logger.info("[macro] commodities: servindo do cache local.")
         else:
             df_commodities = yf.download(
                 ['CL=F', 'GC=F'], start=inicio_10a, progress=False
@@ -3385,7 +3385,7 @@ if _secao == "🧠 sentimento":
     )
 
     with st.spinner("calculando índices de sentimento..."):
-        # Cache-first: tenta Supabase (4h TTL), senão calcula live
+        # Cache-first: tenta o cache local (4h TTL), senão calcula live
         _fg_eua = carregar_fear_greed("us", max_age_hours=4)
         if _fg_eua is None:
             _fg_eua = calcular_fear_greed()

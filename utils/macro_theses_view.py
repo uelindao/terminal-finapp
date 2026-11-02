@@ -1,4 +1,4 @@
-"""Bancada pessoal de hipóteses macro; persistência Supabase via decision_log."""
+"""Bancada pessoal de hipóteses macro; persistência local via decision_log."""
 from datetime import date, timedelta
 import streamlit as st
 from utils.components import section_title, portfolio_kpis

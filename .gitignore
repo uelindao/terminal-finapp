@@ -19,3 +19,9 @@ env/
 
 # Logs gerados em runtime (manter pasta, ignorar arquivos)
 logs/*.log
+logs/*.json
+
+# Ferramentas locais
+.reasonix/
+.claude/worktrees/
+.pytest_cache/

@@ -1144,6 +1144,7 @@ if _secao_c == "👑 administração":
     section_title("informações do sistema")
 
     try:
+        from database.local_db import db_path
         from database.supabase_client import get_supabase
         import pandas as pd
         sb = get_supabase()
@@ -1186,7 +1187,7 @@ if _secao_c == "👑 administração":
             f'<thead><tr>{_hdrs_db}</tr></thead><tbody>{_rows_db}</tbody></table></div>',
             unsafe_allow_html=True,
         )
-        st.caption("banco: **Supabase (PostgreSQL)**")
+        st.caption(f"banco: **SQLite local** ({db_path()})")
     except Exception as e:
         st.warning(f"não foi possível carregar informações do banco: {e}")
 

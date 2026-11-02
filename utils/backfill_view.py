@@ -593,11 +593,11 @@ def _processar_ticker_st(
                 precos=precos, data_ref=data_str,
                 macro=macro, is_br=is_br,
             )
-            # Usa somente a data (sem timezone) — mais compatível com Supabase
+            # Usa somente a data (sem timezone) — data sem hora
             registros.append({
                 "ticker":       ticker_yf,
                 "score":        int(score),
-                "calculado_em": data_str,   # "YYYY-MM-DD" — Supabase converte para TIMESTAMPTZ
+                "calculado_em": data_str,   # "YYYY-MM-DD" — o banco normaliza para TIMESTAMPTZ
             })
         except Exception as e:
             calc_erros += 1
@@ -612,9 +612,9 @@ def _processar_ticker_st(
         )
         return 0, skipped, diag, fonte_usada
 
-    # ── Salva no Supabase ─────────────────────────────────────────────────────
+    # ── Salva na base local ─────────────────────────────────────────────────────
     status_placeholder.write(
-        f"💾 `{tk_fmp}` — inserindo {len(registros)} pontos no Supabase…"
+        f"💾 `{tk_fmp}` — inserindo {len(registros)} pontos na base local…"
     )
     try:
         n = registrar_historico_score_batch(registros, ignorar_existentes=False)
@@ -1117,7 +1117,7 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Diagnóstico rápido ────────────────────────────────────────────────────────
-    with st.expander("🔍 diagnóstico (testar FMP + Supabase antes de rodar)", expanded=False):
+    with st.expander("🔍 diagnóstico (testar FMP + cache local antes de rodar)", expanded=False):
         ticker_teste = st.text_input("ticker de teste:", value="AAPL",
                                      help="EUA sem sufixo. Para BR: PETR4 (sem .SA)")
         if st.button("🧪 testar agora", key="btn_diag"):
@@ -1141,9 +1141,9 @@ def render():
                 except Exception as e:
                     st.error(f"❌ exceção: {e}")
 
-            # Teste Supabase insert
+            # Teste do banco insert
             with col_d2:
-                st.markdown("**Supabase — insert de teste**")
+                st.markdown("**Banco — insert de teste**")
                 try:
                     sb = get_supabase()
                     payload = [{
@@ -1154,7 +1154,7 @@ def render():
                     sb.table("health_score_history").insert(payload).execute()
                     # Limpa o registro de teste
                     sb.table("health_score_history").delete().eq("ticker", "_BACKFILL_TEST_").execute()
-                    st.success("✅ insert + delete OK — Supabase funcionando")
+                    st.success("✅ insert + delete OK — banco funcionando")
                 except Exception as e:
                     st.error(f"❌ insert falhou: {e}")
 

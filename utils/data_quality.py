@@ -10,6 +10,8 @@ etc. e por quê" — e medir o ganho do derivador de múltiplos (P2-1).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 # Campos críticos avaliados (mesma base do health_engine/scrapers).
 CAMPOS_CRITICOS = ["p/l", "p/vp", "roe%", "dy%", "margem%", "ev/ebitda"]
 
@@ -100,3 +102,29 @@ def calcular_cobertura(fund_cache: dict, top_piores: int = 20) -> dict:
         "por_mercado": por_mercado,
         "piores": piores[:top_piores],
     }
+
+
+def avaliar_frescor_etl(execucoes: list[dict], agora: datetime | None = None,
+                        limite_dias: int = 3) -> str | None:
+    """Aviso para a Home quando os dados estão parados; None se está tudo em dia.
+
+    `execucoes`: linhas do etl_log, da mais nova para a mais antiga. O limite de 3
+    dias atravessa um fim de semana prolongado sem alarme falso.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    if not execucoes:
+        return ("Nenhuma coleta de dados registrada. Rode `python scripts/etl_local.py diario` "
+                "ou agende com `scripts/agendar_etl.ps1`.")
+    sucessos = [e for e in execucoes if e.get("status") == "success" and e.get("finished_at")]
+    if not sucessos:
+        return "Nenhuma coleta terminou com sucesso. Veja os arquivos em logs/."
+    ultimo = datetime.fromisoformat(max(e["finished_at"] for e in sucessos))
+    dias = (agora - ultimo).total_seconds() / 86400
+    if dias >= limite_dias:
+        return (f"Dados parados há {int(dias)} dias: a última coleta com sucesso foi em "
+                f"{ultimo:%d/%m}. Confira o Agendador de Tarefas e os arquivos em logs/.")
+    ultima = execucoes[0]
+    if ultima.get("status") == "error":
+        detalhe = (ultima.get("error_msg") or "sem detalhe")[:120]
+        return f"A última coleta ({ultima.get('job_name')}) falhou: {detalhe}. Veja os arquivos em logs/."
+    return None

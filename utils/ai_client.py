@@ -281,7 +281,7 @@ def chamar_ia(
     Se thinking=True, ativa o modo de raciocínio profundo (budget: 2 000 tokens).
     Use apenas quando a qualidade justificar o custo extra de output.
     """
-    # Define o modo com base em session_state ou na presença de chave no Supabase
+    # Define o modo com base em session_state ou na presença de chave na base local
     _ai_modo = st.session_state.get('ai_modo_atual')
     if _ai_modo is None:
         try:

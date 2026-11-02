@@ -1,7 +1,7 @@
 """
 scripts/backtest_divergencias.py — resultado prático das divergências (PLANO_MACRO M3-1).
 
-Roda OFFLINE com os dados reais (Supabase price_history + SGS/yfinance) e imprime
+Roda OFFLINE com os dados reais (price_history + SGS/yfinance) e imprime
 o que cada quadrante de divergência rendeu no passado: forward RS 4/13/26 semanas,
 agregado por episódio. É o portão de validação — os números aqui decidem o que
 sobe para a UI.
@@ -9,7 +9,7 @@ sobe para a UI.
 Uso:
     python scripts/backtest_divergencias.py [--anos 8] [--min-persist 2]
 
-Requer as credenciais Supabase em .streamlit/secrets.toml (como os demais ETLs).
+Requer as base local populada (rode antes: python scripts/etl_local.py precos).
 """
 import argparse
 import os
@@ -53,7 +53,7 @@ def main():
                     help="numero de semanas observadas antes da confirmacao/entrada")
     ap.add_argument("--janela-rs", type=int, default=13)
     ap.add_argument("--save", action="store_true",
-                    help="persiste a estatistica no Supabase p/ a UI ler (rapido/robusto)")
+                    help="persiste a estatistica na base local p/ a UI ler (rapido/robusto)")
     args = ap.parse_args()
 
     _p("[1/3] carregando retornos setoriais BR (price_history)...")
@@ -126,7 +126,7 @@ def main():
             if salvo is False:
                 raise RuntimeError("Gravacao do resultado nao confirmada")
             _p("")
-            _p("  [save] estatistica persistida no Supabase (backtest_div_v1) — a UI")
+            _p("  [save] estatistica persistida na base local (backtest_div_v1) — a UI")
             _p("         (Discovery > divergencias) e a IA vao LER isto, sem recomputar.")
 
             # SNAPSHOT DE RS + BREADTH (custo de EGRESS zero: reusa o ret_diario ja

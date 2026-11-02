@@ -64,8 +64,8 @@ busca_global_sidebar()
 
 
 if not init_db():
-    st.error("🔌 serviço de dados indisponível (banco fora do ar ou cota do Supabase "
-             "excedida). o app volta sozinho quando o serviço for restabelecido.")
+    st.error("🔌 base local indisponível: não foi possível abrir o arquivo do banco em "
+             "data/. veja o log no terminal onde o app foi iniciado.")
     st.stop()
 CACHE_FUNDAMENTOS = get_todos_fundamentos_cache()
 
@@ -1330,7 +1330,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
 
             _cache_key_analise = f"{_cache_key_ia}_analise"
 
-            # ── Tenta cache do Supabase (TTL 1 dia, por modo+universo) ──────────
+            # ── Tenta cache da base local (TTL 1 dia, por modo+universo) ──────────
             if not st.session_state.get(_cache_key_analise) and not _btn_rodar_ia:
                 try:
                     from database.db import get_ai_analysis as _get_ai_disc
@@ -1343,7 +1343,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                     if _db_cache_disc:
                         st.session_state[_cache_key_analise] = _db_cache_disc['conteudo']
                         st.caption(
-                            f"⚡ análise via cache supabase — gerada em "
+                            f"⚡ análise via cache local — gerada em "
                             f"{str(_db_cache_disc.get('created_at',''))[:16].replace('T',' ')}"
                         )
                 except Exception:
@@ -1437,7 +1437,7 @@ if _secao_d == "🧠 ia: oportunidades do dia":
                         user_settings  = _us_ia_disc,
                     )
 
-                    # ── Persiste no Supabase (TTL 1 dia) ──────────────────
+                    # ── Persiste na base local (TTL 1 dia) ──────────────────
                     if _resposta_ia_disc:
                         try:
                             from database.db import save_ai_analysis

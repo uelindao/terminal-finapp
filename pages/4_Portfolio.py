@@ -64,7 +64,7 @@ from utils.components import page_jump_links
 @st.cache_data(ttl=3600, show_spinner=False)
 def calcular_betas(tickers_tuple: tuple) -> dict:
     """Calcula beta de cada ativo contra IBOV e S&P500 usando 1 ano de dados.
-    Lê preços do cache Supabase (price_history); cai para yfinance se vazio."""
+    Lê preços do cache local (price_history); cai para yfinance se vazio."""
     tickers = list(tickers_tuple)
     betas = {}
     try:
@@ -369,7 +369,7 @@ def buscar_score_historico_externo(
 ) -> tuple[pd.Series | None, str]:
     """
     Busca score histórico de fontes externas na ordem:
-    1. Alpha Vantage (via Supabase cache)
+    1. Alpha Vantage (via cache local)
     2. FMP (somente para ativos EUA)
     3. BRAPI snapshot (apenas BR — para calibrar proxy)
 
@@ -377,7 +377,7 @@ def buscar_score_historico_externo(
     """
     _av_snap = None
 
-    # ── Opção 1: Alpha Vantage + Supabase ────────────────────────
+    # ── Opção 1: Alpha Vantage + cache local ────────────────────────
     try:
         from utils.alpha_vantage_client import calcular_score_historico_av
         _av = calcular_score_historico_av(ticker)
@@ -1444,7 +1444,7 @@ with st.container():
                         pm = row['preço médio']
                         v_total = row['valor total']
                         peso_real = (v_total / patrimonio_total) * 100 if (patrimonio_total > 0 and qtd > 0) else 0.0
-                        # Sanitiza NaN/Inf para evitar erro no json.dumps do Supabase
+                        # Sanitiza NaN/Inf para evitar erro no json.dumps da base local
                         import math as _mt
                         def _sn(v):
                             if v is None: return None
@@ -1918,7 +1918,7 @@ with st.container():
                                         f'border-left:3px solid var(--accent); border-radius:6px; padding:12px 16px; margin-bottom:12px;">'
                                         f'<div style="font-family:var(--font-ui,sans-serif); font-size:0.78rem; '
                                         f'color:var(--text-muted); margin-bottom:8px;">'
-                                        f'⚡ análise via cache supabase '
+                                        f'⚡ análise via cache local '
                                         f'— gerada em {str(_db_cache_pf.get("created_at",""))[:16].replace("T"," ")}'
                                         f'</div>'
                                         f'<div style="font-family:var(--font-data,monospace); font-size:0.82rem; '
@@ -1989,7 +1989,7 @@ with st.container():
                                     stream=True,
                                     user_settings=_us_perf,
                                 )
-                                # ── Persiste no Supabase (TTL 1 dia, por user_id+periodo) ──
+                                # ── Persiste na base local (TTL 1 dia, por user_id+periodo) ──
                                 if _resposta_perf:
                                     try:
                                         from database.db import save_ai_analysis
@@ -4151,8 +4151,8 @@ if _secao_pf == "📊 backtesting":
                     ),
                     'alpha_vantage': (
                         _cc_bt_badge["info"], '📊',
-                        'alpha vantage — dre/balanço histórico (supabase)',
-                        'fundamentais trimestrais reais desde 2010 via alpha vantage + cache supabase'
+                        'alpha vantage — dre/balanço histórico (cache local)',
+                        'fundamentais trimestrais reais desde 2010 via alpha vantage + cache local'
                     ),
                     'fmp': (
                         _cc_bt_badge["info"], '📈',
@@ -4184,11 +4184,10 @@ if _secao_pf == "📊 backtesting":
                     _fonte, _fonte_configs['proxy_tecnico']
                 )
 
-                # Adiciona info de Supabase se fonte é AV
+                # Adiciona info do cache se fonte é AV
                 if _fonte == 'alpha_vantage':
                     try:
-                        from utils.api_cache import _get_supabase_client
-                        _sb_info = " | cache supabase ativo" if _get_supabase_client() else " | sem supabase"
+                        _sb_info = " | cache local ativo"
                     except Exception:
                         _sb_info = ""
                     _f_desc += _sb_info

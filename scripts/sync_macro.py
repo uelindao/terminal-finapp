@@ -3,7 +3,7 @@ sync_macro.py — ETL de dados macroeconomicos
 Fontes: BCB SGS (Brasil), FRED (EUA), yfinance (VIX, Treasury)
 
 Execucao:
-  SUPABASE_URL=... SUPABASE_SERVICE_KEY=... FRED_API_KEY=... python scripts/sync_macro.py
+  python scripts/etl_local.py macro
 
 O que este script faz:
   1. Busca valores atuais (pontuais) → salva em macro_cache (upsert_macro)
@@ -93,13 +93,8 @@ def _persistir_versionado(origem: str, df: pd.DataFrame):
 # ── helper de serialização / upsert de snapshots históricos ──────────────────
 
 def _get_sb_client():
-    """Cliente Supabase standalone (usa env vars, não st.secrets)."""
-    from supabase import create_client
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
-    if not url or not key:
-        raise ValueError("SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar definidas.")
-    return create_client(url, key)
+    from database.local_db import get_client
+    return get_client()
 
 
 def _carregar_snapshot_historico(origem: str) -> pd.DataFrame:

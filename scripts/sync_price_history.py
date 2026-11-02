@@ -9,7 +9,7 @@ Para cada ticker:
     recalibram todos os10anos. Primeiro domingo do mês reconcilia10anos também.
 
 Execucao:
-  SUPABASE_URL=... SUPABASE_SERVICE_KEY=... python scripts/sync_price_history.py
+  python scripts/etl_local.py precos
 
 Frequência recomendada: semanal (domingo). Sync incremental é leve (~5 barras
 por ticker), cold-start inicial é pesado (~2.500 barras por ticker, ~1M linhas

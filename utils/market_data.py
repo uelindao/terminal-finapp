@@ -369,14 +369,14 @@ def fundamentos(ticker: str, *, allow_live: bool = True) -> dict:
     Substitui as ~123 chamadas cruas a `yfinance.Ticker().info` espalhadas.
 
     Cascata:
-      1. cache Supabase (fundamentals_cache)  ← páginas param aqui (allow_live=False)
+      1. cache local (fundamentals_cache)  ← páginas param aqui (allow_live=False)
       2. provedor primário por mercado: BRAPI (.SA) / FMP (US)
       3. yfinance.info (via disjuntor) — completa lacunas / último recurso
 
     A escolha BR-vs-US e o fallback ficam DENTRO da fachada; o chamador nunca
     precisa saber a fonte. Nunca levanta — devolve dict de chaves None em falha.
     """
-    # 1. cache Supabase
+    # 1. cache local
     try:
         from database.db import get_todos_fundamentos_cache
         d = get_todos_fundamentos_cache().get(ticker)

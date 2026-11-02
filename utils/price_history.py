@@ -1,7 +1,7 @@
 """
 utils/price_history.py — leitura centralizada de histórico de preços.
 
-Tenta primeiro o cache Supabase (price_history populado pelo sync_price_history).
+Tenta primeiro o cache local (price_history populado pelo sync_price_history).
 Se vazio (ETL ainda não rodou ou ticker não está no screener), cai para
 yfinance ao vivo. Isso desacopla o app dos rate-limits de yfinance assim que
 o cache estiver populado, mantendo compatibilidade enquanto isso.
@@ -34,7 +34,7 @@ def obter_close_carteira(
 ) -> pd.DataFrame:
     """
     Retorna DataFrame de Close ajustado (índice=data, colunas=tickers) para o
-    conjunto de tickers solicitado. Tenta cache Supabase primeiro; cai para
+    conjunto de tickers solicitado. Tenta cache local primeiro; cai para
     yfinance se cache vazio.
 
     `tickers_tuple` é tuple (não list) por causa do @st.cache_data — listas
@@ -46,7 +46,7 @@ def obter_close_carteira(
 
     dias = _PERIODO_PARA_DIAS.get(periodo, 252)
 
-    # 1ª tentativa: cache Supabase
+    # 1ª tentativa: cache local
     df_cache = _buscar_do_cache(tickers, dias)
     cobertura = _calcular_cobertura(df_cache, tickers, dias)
 
@@ -77,7 +77,7 @@ def obter_close_carteira(
 
 
 def _buscar_do_cache(tickers: list[str], dias: int) -> pd.DataFrame:
-    """Lê do Supabase price_history. Retorna DataFrame ou vazio se erro."""
+    """Lê da base local price_history. Retorna DataFrame ou vazio se erro."""
     try:
         from database.db import get_price_history_batch
         # Para mapear adequadamente: o cache guarda os tickers exatamente como
@@ -110,7 +110,7 @@ def _calcular_cobertura(df: pd.DataFrame, tickers: list[str], dias_alvo: int) ->
 def obter_ohlcv_ativo(ticker: str, periodo: str = "10y") -> pd.DataFrame:
     """
     Retorna DataFrame OHLCV de um único ticker (colunas: Open/High/Low/Close/Volume,
-    índice de datas). Tenta cache Supabase price_history; cai para yfinance se vazio.
+    índice de datas). Tenta cache local price_history; cai para yfinance se vazio.
 
     Mantém o formato esperado pelo Research/Charts: colunas com capitalização
     Open/High/Low/Close/Volume (compat yfinance).

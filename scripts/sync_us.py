@@ -5,7 +5,7 @@ FMP free tier: ~500 req/dia (2 chaves × 250). Usa 1 call/ticker (profile) = ~23
 Múltiplos (P/L, P/VP, DY, ROE, margem, EV/EBITDA) vêm via yfinance.info no enrichment.
 
 Execucao:
-  SUPABASE_URL=... SUPABASE_SERVICE_KEY=... FMP_API_KEY=... python scripts/sync_us.py
+  python scripts/etl_local.py us
 """
 
 import os

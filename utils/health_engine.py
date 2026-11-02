@@ -33,6 +33,7 @@ MULTIPLOS_SETOR: dict[str, tuple] = {
 
 
 # safe_float consolidado em utils/formatters (era duplicado em 3 lugares).
+from utils.derive_multiples import _valor_anual
 from utils.formatters import safe_float
 
 
@@ -938,9 +939,13 @@ def _calc_crescimento_do_historico(historico: list[dict]) -> tuple[int, dict]:
 
 def _calc_nd_do_historico(historico: list[dict], is_br: bool) -> tuple[int, float | None]:
     """
-    Net Debt / EBITDA a partir do trimestre mais recente do cache.
-    Usa (divida_total − cash) / ebitda quando há cash; cai para
+    Net Debt / EBITDA a partir do cache: dívida do período mais recente sobre o
+    EBITDA ANUAL. Usa (divida_total − cash) / ebitda quando há cash; cai para
     divida_total / ebitda (gross debt — conservador) quando ausente.
+
+    O EBITDA vem de _valor_anual: CVM já é anualizado, yfinance é por trimestre.
+    Dividir pelo trimestre inflava o múltiplo em ~4x e penalizava ações US saudáveis.
+    Com menos de 4 trimestres yfinance não há base anual e o pilar fica sem dado.
 
     Fallback: CVM não publica EBITDA — quando ausente, usa EBIT como
     denominador (mais conservador, sobreestima alavancagem em ~15-20%).
@@ -950,9 +955,9 @@ def _calc_nd_do_historico(historico: list[dict], is_br: bool) -> tuple[int, floa
     t0 = historico[0]
     divida = _safe_g(t0, "divida_total")
     cash = _safe_g(t0, "cash")
-    ebitda = _safe_g(t0, "ebitda")
+    ebitda = _valor_anual(historico, "ebitda")
     if ebitda is None or ebitda <= 0:
-        ebitda = _safe_g(t0, "ebit")
+        ebitda = _valor_anual(historico, "ebit")
     if divida is None or ebitda is None or ebitda <= 0:
         return 0, None
     net_debt = divida - cash if cash is not None else divida

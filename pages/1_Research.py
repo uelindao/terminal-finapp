@@ -79,8 +79,8 @@ except Exception:
 # Pesquisa de ativos fica no próprio escopo da análise; a busca global permanece na barra superior.
 garantir_macro_context()
 if not init_db():
-    st.error("🔌 serviço de dados indisponível (banco fora do ar ou cota do Supabase "
-             "excedida). o app volta sozinho quando o serviço for restabelecido.")
+    st.error("🔌 base local indisponível: não foi possível abrir o arquivo do banco em "
+             "data/. veja o log no terminal onde o app foi iniciado.")
     st.stop()
 
 # Carrega configurações pessoais do usuário (chave de IA, provider, etc.)
@@ -711,7 +711,7 @@ def carregar_dados_ativo(tk):
     acao = yf.Ticker(tk)
 
     # ── histórico: bloco isolado — falha aqui é fatal ──────────────────────
-    # Lê do cache Supabase (price_history); cai pra yfinance ao vivo se vazio.
+    # Lê do cache local (price_history); cai pra yfinance ao vivo se vazio.
     hist = pd.DataFrame()
     try:
         from utils.price_history import obter_ohlcv_ativo
@@ -2203,7 +2203,7 @@ if _secao_r == "🧠 análise & ia":
     _foco_ia = section_selector(["Síntese & tese", "Indicadores & proventos", "Valuation implícito", "Notícias"], key="research_ia_foco")
 
     if _foco_ia == "Síntese & tese":
-        # ── Tenta cache do Supabase (compartilhado entre sessões) ────────────
+        # ── Tenta cache da base local (compartilhado entre sessões) ────────────
         _cache_ia = st.session_state.get(f"ia_cache_{t_base}")
         if not _cache_ia:
             try:
@@ -2228,7 +2228,7 @@ if _secao_r == "🧠 análise & ia":
                         'texto':     _db_cache['conteudo'],
                         'timestamp': _ts_fmt,
                         'score':     _db_cache.get('health_score_snapshot') or '—',
-                        'macro':     'cache supabase',
+                        'macro':     'cache local',
                         'fonte':     'db',
                     }
                     st.session_state[f"ia_cache_{t_base}"] = _cache_ia
@@ -2268,7 +2268,7 @@ if _secao_r == "🧠 análise & ia":
         with _col_ia1:
             st.markdown(
                 '<div style="font-family:var(--font-ui,sans-serif); font-size:0.72rem; color:var(--text-muted); line-height:1.5;">'
-                'deepseek v4 pro — análise com base em fundamentos, health score e macro. '
+                'análise de ia com base em fundamentos, health score e macro. '
                 'não é recomendação.</div>',
                 unsafe_allow_html=True,
             )
@@ -2345,7 +2345,7 @@ if _secao_r == "🧠 análise & ia":
             except Exception:
                 _peer_payload = None
 
-            # Análise ANTERIOR (tracking): busca a última salva no Supabase SEM
+            # Análise ANTERIOR (tracking): busca a última salva na base local SEM
             # invalidar por threshold/hash — é justamente quando os números mudam que a
             # comparação importa. Alimenta o prompt p/ a IA rastrear a evolução.
             _analise_ant = None
@@ -2421,7 +2421,7 @@ if _secao_r == "🧠 análise & ia":
                     'score':     health_result.get('score', 50),
                     'macro':     macro_ctx.get('label', '—'),
                 }
-                # ── Persiste no Supabase (compartilhado, TTL 7 dias) ─────────
+                # ── Persiste na base local (compartilhado, TTL 7 dias) ─────────
                 try:
                     from database.db import save_ai_analysis, _hash_contexto
                     _hash_ctx = _hash_contexto(
@@ -2479,7 +2479,7 @@ if _secao_r == "🧠 análise & ia":
             })
             _preco_pdf = float(df_hist['Close'].iloc[-1]) if not df_hist.empty else 0.0
 
-            with st.spinner("deepseek v4 pro redigindo tese..."):
+            with st.spinner("ia redigindo tese..."):
                 _prompt_pdf = (
                     f"ativo: {t_base.upper()}\n"
                     f"nome: {_fund_pdf.get('nome', nome_exibicao)}\n"
@@ -2550,7 +2550,7 @@ if _secao_r == "🧠 análise & ia":
                     st.error(f"erro ao gerar pdf: {_e_pdf}")
 
         st.markdown("---")
-        section_title("📋 tese de investimento — deepseek v4 pro")
+        section_title("📋 tese de investimento")
 
         if st.button(
             "Gerar tese de longo prazo",

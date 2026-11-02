@@ -70,8 +70,7 @@ _TRANSMISSAO_US: dict[str, dict] = {
 # ── Leitura do snapshot de inflação (resiliente: app streamlit OU ETL env) ───
 
 def _carregar_inflacao_df(origem: str):
-    """Carrega o snapshot de inflação. Tenta camada streamlit, depois env (ETL)."""
-    # 1. via macro_supabase (app / st.secrets)
+    """Carrega o snapshot de inflação."""
     try:
         from utils.macro_supabase import carregar_snapshot
         df = carregar_snapshot(origem, max_age_days=45)
@@ -79,26 +78,6 @@ def _carregar_inflacao_df(origem: str):
             return df
     except Exception as e:
         logger.debug(f"[inflation_sectoral] carregar_snapshot('{origem}') falhou: {e}")
-    # 2. fallback ETL: SUPABASE_URL/SERVICE_KEY via os.environ
-    try:
-        import os
-        import json as _json
-        url = os.environ.get("SUPABASE_URL", "")
-        key = (os.environ.get("SUPABASE_SERVICE_KEY", "")
-               or os.environ.get("SUPABASE_ANON_KEY", ""))
-        if url and key:
-            from supabase import create_client
-            from utils.macro_supabase import _json_to_df
-            sb = create_client(url, key)
-            resp = (sb.table("macro_snapshots")
-                    .select("payload").eq("origem", origem).limit(1).execute())
-            if resp.data:
-                payload = resp.data[0]["payload"]
-                if isinstance(payload, dict):
-                    payload = _json.dumps(payload)
-                return _json_to_df(payload)
-    except Exception as e:
-        logger.debug(f"[inflation_sectoral] fallback env para '{origem}' falhou: {e}")
     return None
 
 

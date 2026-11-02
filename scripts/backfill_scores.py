@@ -1,7 +1,7 @@
 """
 scripts/backfill_scores.py
 ==========================
-Backfill de 10 anos de health scores históricos no Supabase.
+Backfill de 10 anos de health scores históricos na base local.
 
 Estratégia de dados:
   - FMP /ratios?period=quarter&limit=40    → fundamentos trimestrais (ROE, P/L, D/E…)
@@ -25,7 +25,6 @@ Rate limits com 2 chaves FMP:
   EUA (~250 tickers): ~1 dia | BR (~130 tickers): ~1 dia
 
 Execução:
-  SUPABASE_URL=...  SUPABASE_KEY=...
   FMP_API_KEY=...   FMP_API_KEY_2=...
   python scripts/backfill_scores.py [--mercado eua|br|todos] [--ticker AAPL]
 

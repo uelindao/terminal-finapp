@@ -125,7 +125,7 @@ def gerar_tese_pdf(
     ))
     conteudo.append(Paragraph(
         f"gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} "
-        f"| deepseek v4 pro",
+        f"| analise assistida por ia",
         st_subtitulo,
     ))
     conteudo.append(HRFlowable(
@@ -240,7 +240,7 @@ def gerar_tese_pdf(
 
     # ── Análise IA ───────────────────────────────────────────────────────────
 
-    conteudo.append(Paragraph("ANALISE — DEEPSEEK V4 PRO", st_secao))
+    conteudo.append(Paragraph("ANALISE DE IA", st_secao))
 
     for linha in (analise_ia or "análise não disponível.").split("\n"):
         linha = linha.strip()
@@ -304,7 +304,7 @@ def gerar_tese_pdf(
     conteudo.append(Spacer(1, 0.2 * cm))
     conteudo.append(Paragraph(
         "este documento foi gerado automaticamente pelo finterminal "
-        "com auxilio de inteligencia artificial (deepseek v4 pro). "
+        "com auxilio de inteligencia artificial. "
         "nao constitui recomendacao de investimento. "
         "as informacoes tem carater exclusivamente informativo e educacional. "
         "consulte um profissional habilitado antes de tomar decisoes de investimento.",

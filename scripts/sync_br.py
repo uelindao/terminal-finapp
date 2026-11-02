@@ -4,7 +4,7 @@ Fonte primaria: BRAPI (brapi.dev) — 15.000 req/mes free
 Fallback precos: yfinance (batch)
 
 Execucao:
-  SUPABASE_URL=https://xxx.supabase.co SUPABASE_SERVICE_KEY=eyJ... BRAPI_TOKEN=xxx python scripts/sync_br.py
+  python scripts/etl_local.py br
 """
 
 import os

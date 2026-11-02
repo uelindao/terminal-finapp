@@ -22,8 +22,9 @@ textColor                = "#EDF2EE"
 gatherUsageStats = false
 
 [server]
-# Streamlit Cloud já lida com upload limit; este é o default local
 maxUploadSize = 50
+# Só este PC acessa. Para abrir no celular via Tailscale, troque pelo IP do Tailscale.
+address = "localhost"
 
 [client]
 # showErrorDetails: erros visíveis ajudam debug (memo: erros silenciosos = risco crítico)

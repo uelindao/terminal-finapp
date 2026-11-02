@@ -1,6 +1,6 @@
 """
 utils/alpha_vantage_client.py
-Cliente Alpha Vantage com cache Supabase e rotacao de chaves.
+Cliente Alpha Vantage com cache local e rotacao de chaves.
 
 Free tier: 25 req/dia por chave.
 Cache Supabase: dados trimestrais historicos permanentes (3650 dias).
@@ -51,7 +51,7 @@ def get_quarterly_fundamentals_yfinance(ticker: str) -> list[dict]:
     """
     Busca dados fundamentalistas trimestrais via yfinance.
     Fallback quando AV não tem quota disponível.
-    Salva resultado no Supabase (provider='yfinance') para evitar buscas repetidas.
+    Salva resultado na base local (provider='yfinance') para evitar buscas repetidas.
     Retorna ~4-5 anos de dados para large caps B3; campos inconsistentes para small caps.
     """
     try:
@@ -132,7 +132,7 @@ def get_quarterly_fundamentals_yfinance(ticker: str) -> list[dict]:
                 "capitalExpenditures": _val(cf_df, col, "Capital Expenditure"),
             }
 
-            # Salva no Supabase para uso futuro
+            # Salva na base local para uso futuro
             if inc_row.get("totalRevenue") or inc_row.get("netIncome"):
                 save_to_cache(ticker, "yfinance", "INCOME_STATEMENT", inc_row, periodo)
                 save_to_cache(ticker, "yfinance", "BALANCE_SHEET",    bal_row, periodo)
@@ -148,7 +148,7 @@ def get_quarterly_fundamentals_yfinance(ticker: str) -> list[dict]:
     if not cached_yf_income:
         return []
 
-    logger.info(f"[yf] {ticker}: {len(cached_yf_income)} trimestres salvos no Supabase")
+    logger.info(f"[yf] {ticker}: {len(cached_yf_income)} trimestres salvos na base local")
     return _consolidar_trimestres(cached_yf_income, cached_yf_balance, cached_yf_cashflow)
 
 
@@ -195,9 +195,9 @@ def get_quarterly_fundamentals_cached(ticker: str) -> list[dict]:
     Busca dados fundamentalistas trimestrais completos.
     Estrategia de cache por trimestre:
     1. Verifica sentinel "NO_COVERAGE" (30 dias) — se existir, usa yfinance direto
-    2. Le todos os trimestres ja no Supabase (AV)
+    2. Le todos os trimestres ja na base local (AV)
     3. Busca AV apenas para trimestres ausentes ou recentes
-    4. Salva novos trimestres no Supabase
+    4. Salva novos trimestres na base local
     5. Fallback yfinance se AV sem cobertura; salva sentinel para evitar re-tentativas
 
     Retorna lista de dicts por trimestre, do mais recente ao mais antigo.
@@ -415,7 +415,7 @@ def sync_progressivo(
 def calcular_score_historico_av(ticker: str) -> pd.Series | None:
     """
     Calcula serie de scores fundamentalistas historicos usando
-    dados trimestrais do Alpha Vantage (com cache Supabase).
+    dados trimestrais do Alpha Vantage (com cache local).
     """
     trimestres = get_quarterly_fundamentals_cached(ticker)
     if not trimestres or len(trimestres) < 4:

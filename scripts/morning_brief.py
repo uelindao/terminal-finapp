@@ -9,10 +9,8 @@ email HTML com 4 blocos:
 3. Earnings reportando hoje (se houver tabela earnings_calendar)
 4. Alertas inteligentes das últimas 24h (utils/alertas_mudanca)
 
-Env vars necessárias:
-    SUPABASE_URL, SUPABASE_SERVICE_KEY
-    EMAIL_REMETENTE, EMAIL_APP_PASSWORD, EMAIL_DESTINATARIO
-    FRED_API_KEY (opcional, alimenta regime_classifier)
+Credenciais: [email] e FRED_API_KEY (opcional) do secrets.toml, ou as env vars
+EMAIL_REMETENTE, EMAIL_APP_PASSWORD, EMAIL_DESTINATARIO e FRED_API_KEY.
 """
 import os
 import sys

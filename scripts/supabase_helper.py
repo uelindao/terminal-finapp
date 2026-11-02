@@ -1,49 +1,49 @@
 """
 supabase_helper.py
-Helpers de conexao Supabase para scripts standalone (fora do Streamlit).
-Lê SUPABASE_URL e SUPABASE_SERVICE_KEY de variáveis de ambiente; quando
-ausentes, cai para .streamlit/secrets.toml (uso local).
+Helpers de banco e de segredos para scripts standalone (fora do Streamlit).
+Grava na base local; o nome é herança da época do Supabase.
+Segredos vêm de variáveis de ambiente e, quando ausentes, de .streamlit/secrets.toml.
 """
 
 import os
 import json
+import tomllib
 from datetime import datetime, timezone
-from typing import Any
+from functools import lru_cache
+from pathlib import Path
+
+from database.local_db import get_client
+
+_SECRETS_TOML = Path(__file__).resolve().parent.parent / ".streamlit" / "secrets.toml"
+# Segredos que o app guarda aninhados em seções do secrets.toml.
+_ALIASES = {"BRAPI_TOKEN": ("brapi", "token")}
+
+
+@lru_cache(maxsize=1)
+def _secrets_toml() -> dict:
+    """Lido direto, sem st.secrets: o ETL roda pelo Agendador, fora do Streamlit."""
+    try:
+        with _SECRETS_TOML.open("rb") as arquivo:
+            return tomllib.load(arquivo)
+    except FileNotFoundError:
+        return {}
 
 
 def _get_secret(*nomes: str) -> str:
-    """Resolve uma chave em env vars, depois em st.secrets (top-level e [supabase])."""
+    """Resolve uma chave em env vars, depois no secrets.toml (raiz e aliases)."""
     for nome in nomes:
         val = os.environ.get(nome, "")
         if val:
             return val
-    try:
-        import streamlit as st
-        for nome in nomes:
-            val = st.secrets.get(nome) or ""
-            if val:
-                return val
-        sub = st.secrets.get("supabase") or {}
-        for nome in nomes:
-            val = sub.get(nome) or ""
-            if val:
-                return val
-    except Exception:
-        pass
+    segredos = _secrets_toml()
+    for nome in nomes:
+        val = segredos.get(nome)
+        if not val and nome in _ALIASES:
+            secao, chave = _ALIASES[nome]
+            val = (segredos.get(secao) or {}).get(chave)
+        if val:
+            return val
     return ""
-
-
-def get_client():
-    from supabase import create_client
-
-    url = _get_secret("SUPABASE_URL")
-    key = _get_secret("SUPABASE_SERVICE_KEY", "SUPABASE_KEY")
-    if not url or not key:
-        raise ValueError(
-            "SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar definidas "
-            "como variaveis de ambiente ou em .streamlit/secrets.toml"
-        )
-    return create_client(url, key)
 
 
 def upsert_fundamentals(ticker: str, dados: dict, source: str = "brapi",
