@@ -1064,7 +1064,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             hist = hist_externo if isinstance(hist_externo, pd.DataFrame) else pd.DataFrame({'Close': hist_externo})
         else:
             acao_temp = yf.Ticker(ticker)
-            hist = acao_temp.history(period="1y", auto_adjust=True)
+            hist = acao_temp.history(period="2y", auto_adjust=True)  # momentum 12-1 pede 252+ barras
             # yfinance recente pode retornar MultiIndex mesmo para único ticker
             if isinstance(hist.columns, pd.MultiIndex):
                 hist.columns = hist.columns.get_level_values(0)

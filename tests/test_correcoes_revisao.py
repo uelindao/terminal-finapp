@@ -170,3 +170,40 @@ def test_excecao_no_orquestrador_vira_falha_registrada(tmp_path, monkeypatch):
     assert etl_local.executar("macro") == 1
     linha = LocalClient().table("etl_log").select("status, error_msg").execute().data[0]
     assert linha["status"] == "error" and "macro" in linha["error_msg"]
+
+
+def test_fetch_brapi_nao_pede_dividendos_nem_vaza_token(monkeypatch, capsys):
+    import requests
+    from scripts import sync_br
+
+    chamadas = {}
+
+    class Resposta:
+        status_code = 403
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403 for url: https://brapi.dev?token=SEGREDO", response=self)
+
+    def get_falso(url, params, timeout):
+        chamadas.update(params)
+        return Resposta()
+
+    monkeypatch.setattr(sync_br.requests, "get", get_falso)
+    monkeypatch.setattr(sync_br, "BRAPI_TOKEN", "SEGREDO")
+    assert sync_br.fetch_brapi("AALR3.SA") is None
+    assert "dividends" not in chamadas
+    saida = capsys.readouterr().out
+    assert "SEGREDO" not in saida and "403" in saida
+
+
+def test_momentum_pontua_com_a_janela_do_etl():
+    import numpy as np
+    import pandas as pd
+    from scripts.sync_br import PERIODO_PRECOS
+    from utils.health_engine import calcular_momentum
+
+    assert PERIODO_PRECOS == "2y"
+    # 494 pregões, como 2 anos de B3, em alta de ~1,2x ao ano.
+    precos = 10 * np.cumprod(np.full(494, 1.0012))
+    pontos, _, _ = calcular_momentum(pd.DataFrame({"Close": precos}))
+    assert pontos > 0

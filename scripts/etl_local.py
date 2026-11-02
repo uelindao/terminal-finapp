@@ -2,7 +2,7 @@
 etl_local.py — orquestra o ETL no PC, no lugar do GitHub Actions.
 
 Uso:
-  python scripts/etl_local.py diario     macro + fundamentos BR + fundamentos EUA
+  python scripts/etl_local.py diario     macro + setores + fundamentos BR e EUA
   python scripts/etl_local.py semanal    histórico OHLCV + setores + backtest
   python scripts/etl_local.py macro|br|us|precos|brief
 
@@ -38,7 +38,8 @@ JOBS = {
     "us": ["us"],
     "precos": ["precos"],
     "brief": ["brief"],
-    "diario": ["macro", "br", "us"],
+    # setores antes de br: o score usa o setor no pilar macro-setorial.
+    "diario": ["macro", "setores", "br", "us"],
     "semanal": ["precos", "setores", "backtest"],
 }
 # Etapa que, se falhar, invalida as seguintes do mesmo job.

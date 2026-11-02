@@ -58,7 +58,6 @@ def get_quote(ticker: str) -> dict:
             params={
                 "token":         token,
                 "fundamental":   "true",
-                "dividends":     "true",
             },
             timeout=10,
         )
@@ -102,7 +101,7 @@ def get_quote(ticker: str) -> dict:
         }
 
     except Exception as e:
-        logger.warning(f"[brapi] falha para {t}: {e}")
+        logger.warning(f"[brapi] falha para {t}: {type(e).__name__}")
         return {}
 
 
@@ -143,7 +142,7 @@ def get_historico_precos(
         return hist
 
     except Exception as e:
-        logger.warning(f"[brapi] historico para {t}: {e}")
+        logger.warning(f"[brapi] historico para {t}: {type(e).__name__}")
         return []
 
 

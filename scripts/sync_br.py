@@ -25,6 +25,9 @@ from scripts.supabase_helper import (
 from utils.tickers import SCREENER_B3, FII_TODOS, BR_INDICES, BRASIL_TODOS
 
 BRAPI_BASE = "https://brapi.dev/api"
+# Dois anos: "1y" rende ~247 pregões na B3, abaixo dos 250 que o momentum 12-1 exige,
+# e o pilar ficava zerado em silêncio. var_12m também precisa de 252 barras.
+PERIODO_PRECOS = "2y"
 # BRAPI_TOKEN: inicializado em _init_brapi_token() para permitir fallback ao secrets.toml
 BRAPI_TOKEN = ""
 
@@ -126,15 +129,21 @@ def fetch_brapi(ticker: str) -> dict | None:
     try:
         resp = requests.get(
             f"{BRAPI_BASE}/quote/{t}",
-            params={"token": BRAPI_TOKEN, "fundamental": "true", "dividends": "true"},
+            # Sem dividends=true: no plano gratuito ele devolve 403 para quase todo ticker
+            # (só tickers de demonstração passam). DY vem do yfinance.
+            params={"token": BRAPI_TOKEN, "fundamental": "true"},
             timeout=20,
         )
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results", [])
         return results[0] if results else None
+    except requests.HTTPError as e:
+        # A URL da exceção carrega o token: nunca logar `e` inteira.
+        print(f"  [ERRO] BRAPI {ticker}: HTTP {e.response.status_code}")
+        return None
     except Exception as e:
-        print(f"  [ERRO] BRAPI {ticker}: {e}")
+        print(f"  [ERRO] BRAPI {ticker}: {type(e).__name__}")
         return None
 
 
@@ -265,7 +274,7 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
         print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch_full)} ativos...")
 
         try:
-            hist = yf.download(batch_full, period="1y", auto_adjust=True, progress=False)
+            hist = yf.download(batch_full, period=PERIODO_PRECOS, auto_adjust=True, progress=False)
         except Exception as e:
             print(f"  [yfinance] lote falhou download: {e}")
             total_fail += len(batch_full)
@@ -299,8 +308,8 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                     "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
                     "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
                     "volume": None,
-                    "max_52s": round(float(s.max()), 2),
-                    "min_52s": round(float(s.min()), 2),
+                    "max_52s": round(float(s.tail(252).max()), 2),
+                    "min_52s": round(float(s.tail(252).min()), 2),
                 }
 
                 try:

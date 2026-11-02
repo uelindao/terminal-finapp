@@ -46,6 +46,11 @@ def calcular_data_quality(fundamentals: dict) -> float:
     return round(100.0 * preenchidos / len(CAMPOS_CRITICOS), 1)
 
 
+# Dois anos: "1y" rende ~247 pregões na B3, abaixo dos 250 que o momentum 12-1 exige,
+# e o pilar ficava zerado em silêncio. var_12m também precisa de 252 barras.
+PERIODO_PRECOS = "2y"
+
+
 def _init_keys():
     from scripts.supabase_helper import _get_secret
     global FMP_KEYS
@@ -232,7 +237,7 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
         print(f"  [yfinance] lote {batch_start//batch_size + 1}/{(len(tickers)-1)//batch_size + 1} — {len(batch)} ativos...")
 
         try:
-            hist = yf.download(batch, period="1y", auto_adjust=True, progress=False)
+            hist = yf.download(batch, period=PERIODO_PRECOS, auto_adjust=True, progress=False)
         except Exception as e:
             print(f"  [yfinance] lote falhou download: {e}")
             total_fail += len(batch)
@@ -266,8 +271,8 @@ def sync_prices_batch_yfinance(tickers: list[str], batch_size: int = 20):
                     "var_1m": round(((preco / float(s.iloc[-21])) - 1) * 100, 2) if len(s) >= 21 else None,
                     "var_12m": round(((preco / float(s.iloc[-252])) - 1) * 100, 2) if len(s) >= 252 else None,
                     "volume": None,
-                    "max_52s": round(float(s.max()), 2),
-                    "min_52s": round(float(s.min()), 2),
+                    "max_52s": round(float(s.tail(252).max()), 2),
+                    "min_52s": round(float(s.tail(252).min()), 2),
                 }
 
                 try:
