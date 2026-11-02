@@ -26,6 +26,9 @@ import pandas as pd
 _JANELA_PADRAO = 63     # ~3 meses de pregões
 _MIN_TICKERS = 3        # setor precisa de >= N tickers válidos no dia
 _MIN_COBERTURA = 0.8    # janela precisa de >= 80% de dias válidos
+# Acima disso um retorno diário é evento corporativo mal ajustado, não mercado:
+# o AZUL3 do Yahoo salta 141.000% num dia e uma barra dessas destrói a média do setor.
+_SALTO_DIARIO_MAXIMO = 0.5
 
 
 def retorno_diario_setorial(
@@ -49,6 +52,7 @@ def retorno_diario_setorial(
     # fill_method=None: gaps viram NaN (correto — a média EW ignora NaN e min_tickers
     # trata), em vez do pad deprecado que fabricava retorno 0 em dias sem cotação.
     rets = precos.pct_change(fill_method=None)
+    rets = rets.where(rets.abs() <= _SALTO_DIARIO_MAXIMO)
 
     grupos: dict[str, list] = {}
     for tk in rets.columns:

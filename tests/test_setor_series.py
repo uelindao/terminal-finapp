@@ -135,3 +135,14 @@ def test_breadth_misto_50pct():
 
 def test_breadth_vazio():
     assert breadth_setorial(pd.DataFrame()).empty
+
+
+def test_salto_impossivel_de_um_ticker_nao_contamina_o_setor():
+    import pandas as pd
+    from utils.setor_series import retorno_diario_setorial
+    precos = pd.DataFrame({
+        "A": [10.0, 10.1, 10.2], "B": [20.0, 20.2, 20.4],
+        "SUJO": [30.0, 4_000_000.0, 40.0],
+    }, index=pd.date_range("2026-01-01", periods=3))
+    setorial = retorno_diario_setorial(precos, dict.fromkeys(precos, "x"), min_tickers=2)["x"]
+    assert setorial.dropna().abs().max() < 0.02
