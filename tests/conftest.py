@@ -11,6 +11,12 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(autouse=True)
+def _base_isolada(tmp_path, monkeypatch):
+    """data/finterminal_local.db é a única cópia dos dados: teste nunca escreve nele."""
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+
+
 @pytest.fixture
 def mock_streamlit():
     """Mock do Streamlit para testes fora do contexto de execução."""

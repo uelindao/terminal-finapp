@@ -166,7 +166,7 @@ def test_excecao_no_orquestrador_vira_falha_registrada(tmp_path, monkeypatch):
 
     monkeypatch.setattr(etl_local, "_rodar_etapa", explode)
     monkeypatch.setattr(etl_local, "RAIZ", tmp_path)
-    monkeypatch.setattr(etl_local, "fazer_backup", lambda: "ok")
+    monkeypatch.setattr(etl_local, "fazer_backup", lambda **_: "ok")
     assert etl_local.executar("macro") == 1
     linha = LocalClient().table("etl_log").select("status, error_msg").execute().data[0]
     assert linha["status"] == "error" and "macro" in linha["error_msg"]
@@ -250,3 +250,40 @@ def test_backup_diario_nao_consome_a_rotacao(tmp_path, monkeypatch):
     primeiro = fazer_backup(tmp_path / "bk", uma_vez_por_dia=True)
     assert fazer_backup(tmp_path / "bk", uma_vez_por_dia=True) == primeiro
     assert len(list((tmp_path / "bk").glob("*.db"))) == 1
+
+
+def _zip_cvm(arquivos: dict) -> bytes:
+    import io
+    import zipfile
+    saida = io.BytesIO()
+    with zipfile.ZipFile(saida, "w") as zf:
+        for nome, conteudo in arquivos.items():
+            zf.writestr(nome, conteudo.encode("latin-1"))
+    return saida.getvalue()
+
+
+def test_cvm_le_dfc_dos_metodos_direto_e_indireto(monkeypatch):
+    from utils import cvm_client
+    cabecalho = "CD_CVM;CD_CONTA;DS_CONTA;DT_REFER;ORDEM_EXERC;VERSAO;VL_CONTA;ESCALA_MOEDA\n"
+    linha = "{};6.01;Caixa Operacional;2026-09-30;ÚLTIMO;1;{};MIL\n"
+    conteudo = _zip_cvm({
+        "itr_cia_aberta_DFC_MD_con_2026.csv": cabecalho + linha.format("000111", "10"),
+        "itr_cia_aberta_DFC_MI_con_2026.csv": cabecalho + linha.format("005410", "500"),
+    })
+    monkeypatch.setattr(cvm_client, "_get", lambda url, timeout=0: conteudo)
+    monkeypatch.setattr(cvm_client, "_zip_mem", {})
+    dfs = cvm_client._parse_zip("http://teste/{year}.zip", 2026)
+    assert cvm_client._extrair(dfs["DFC"], "5410", "6.01", "2026-09-30") == 500_000.0
+    assert cvm_client._extrair(dfs["DFC"], "111", "6.01", "2026-09-30") == 10_000.0
+
+
+def test_jobs_do_etl_entram_em_fila(tmp_path, monkeypatch):
+    import sqlite3
+    import pytest
+    from scripts import etl_local
+    monkeypatch.setattr(etl_local, "RAIZ", tmp_path)
+    primeiro = etl_local._aguardar_vez()
+    with pytest.raises(sqlite3.OperationalError):
+        etl_local._aguardar_vez(espera_max_s=0.1)
+    primeiro.close()
+    etl_local._aguardar_vez(espera_max_s=0.1).close()

@@ -2,9 +2,9 @@
 importar_supabase.py — copia os dados do projeto Supabase para a base local.
 
 Uso único, depois de restaurar o projeto no painel do Supabase:
-  python scripts/importar_supabase.py                tudo, inclusive preços
-  python scripts/importar_supabase.py --sem-precos   sem price_history (~860 mil
-                                                     linhas; o ETL reconstrói)
+  python scripts/importar_supabase.py                tudo, menos price_history
+  python scripts/importar_supabase.py --com-precos   inclui as ~860 mil linhas de
+                                                     preços (o ETL já as reconstruiu)
   python scripts/importar_supabase.py --so users,portfolios
 
 Lê as credenciais antigas de .streamlit/secrets.toml e usa só leitura via REST.
@@ -222,7 +222,7 @@ def conectar() -> Supabase:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    parser.add_argument("--sem-precos", action="store_true", help="pula price_history")
+    parser.add_argument("--com-precos", action="store_true", help="importa também price_history")
     parser.add_argument("--so", default="", help="lista de tabelas separadas por vírgula")
     args = parser.parse_args(argv)
 
@@ -235,7 +235,7 @@ def main(argv=None) -> int:
     alvo = [t.strip() for t in args.so.split(",") if t.strip()]
     ordem = PESSOAIS + list(MESCLAR) + sorted(set(tabelas) - set(PESSOAIS) - set(MESCLAR) - IGNORAR)
     ordem = [t for t in ordem if t in tabelas and (not alvo or t in alvo)]
-    if args.sem_precos:
+    if not args.com_precos and "price_history" not in alvo:
         ordem = [t for t in ordem if t != "price_history"]
 
     print(f"[importar] backup local em {fazer_backup()}")

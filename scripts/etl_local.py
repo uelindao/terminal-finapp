@@ -12,6 +12,7 @@ alguma etapa falhou: o resultado aparece no histórico do Agendador e na Home.
 """
 import argparse
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime
@@ -82,7 +83,28 @@ def _rodar_etapa(nome: str, log) -> bool:
     return codigo == 0
 
 
+def _aguardar_vez(espera_max_s: float = 6 * 3600) -> sqlite3.Connection:
+    """Fila entre jobs. Mantenha a conexão aberta durante o trabalho.
+
+    Horários perdidos com o PC desligado disparam juntos ao ligar. Rodar tudo ao mesmo
+    tempo derrubaria a cobertura do yfinance. O lock é do SQLite porque o sistema o
+    solta sozinho se o processo morrer, sem arquivo órfão.
+    """
+    (RAIZ / "data").mkdir(exist_ok=True)
+    trava = sqlite3.connect(RAIZ / "data" / "etl.lock", timeout=espera_max_s, isolation_level=None)
+    trava.execute("BEGIN EXCLUSIVE")
+    return trava
+
+
 def executar(job: str) -> int:
+    trava = _aguardar_vez()
+    try:
+        return _executar_job(job)
+    finally:
+        trava.close()
+
+
+def _executar_job(job: str) -> int:
     pasta_logs = RAIZ / "logs"
     pasta_logs.mkdir(exist_ok=True)
     falhas: list[str] = []

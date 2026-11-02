@@ -272,6 +272,22 @@ def _download_cad() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _ler_csv_cvm(zf: zipfile.ZipFile, nome: str) -> pd.DataFrame | None:
+    raw = zf.read(nome)
+    for enc in ("utf-8", "latin-1"):
+        try:
+            df = pd.read_csv(io.BytesIO(raw), sep=";", encoding=enc, dtype=str,
+                             usecols=lambda c: c.strip() in _USECOLS)
+        except Exception:
+            continue
+        df.columns = [c.strip() for c in df.columns]
+        # CVM armazena CD_CVM como "001023"; nosso mapa usa "1023"
+        if "CD_CVM" in df.columns:
+            df["CD_CVM"] = df["CD_CVM"].str.strip().str.lstrip("0").replace("", "0")
+        return df
+    return None
+
+
 def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
     """
     Baixa o ZIP CVM de um ano e retorna {tipo: DataFrame}.
@@ -305,31 +321,13 @@ def _parse_zip(url_tmpl: str, year: int) -> dict[str, pd.DataFrame]:
                 if not matched:
                     logger.debug(f"[cvm] {tipo} não encontrado em {url}")
                     continue
-                fname = matched[0]
-                raw   = zf.read(fname)
-                for enc in ("utf-8", "latin-1"):
-                    try:
-                        df = pd.read_csv(
-                            io.BytesIO(raw),
-                            sep=";",
-                            encoding=enc,
-                            dtype=str,
-                            usecols=lambda c: c.strip() in _USECOLS,
-                        )
-                        df.columns = [c.strip() for c in df.columns]
-                        # Normaliza CD_CVM: remove zeros à esquerda
-                        # CVM armazena como "001023"; nosso mapa usa "1023"
-                        if "CD_CVM" in df.columns:
-                            df["CD_CVM"] = (
-                                df["CD_CVM"].str.strip()
-                                            .str.lstrip("0")
-                                            .replace("", "0")
-                            )
-                        dfs[tipo] = df
-                        logger.info(f"[cvm] {tipo} {year}: {len(df)} linhas")
-                        break
-                    except Exception:
-                        continue
+                # A DFC vem em dois arquivos (método direto e indireto) e cada empresa
+                # publica em um só. Ler apenas o primeiro deixava quase todas sem fluxo
+                # de caixa, porque o direto é raro.
+                quadros = [q for q in (_ler_csv_cvm(zf, nome) for nome in matched) if q is not None]
+                if quadros:
+                    dfs[tipo] = pd.concat(quadros, ignore_index=True)
+                    logger.info(f"[cvm] {tipo} {year}: {len(dfs[tipo])} linhas")
     except Exception as e:
         logger.warning(f"[cvm] erro ao parsear ZIP {url}: {e}")
 

@@ -59,7 +59,7 @@ py -3.11 scripts/etl_local.py diario
 
 | Job | Conteúdo | Agendamento |
 |-----|----------|-------------|
-| `diario` | macro, fundamentos BR e EUA, health scores | todo dia, 07:00 |
+| `diario` | macro, setores, fundamentos BR e EUA, health scores | todo dia, 07:00 |
 | `macro` | Selic, VIX, câmbio, Focus, inflação | 12:00 e 18:00 |
 | `semanal` | histórico OHLCV, setores, backtest de divergências | domingo, 09:00 |
 | `brief` | morning brief por email | dias úteis, 08:00 |
@@ -70,8 +70,8 @@ Para registrar os horários no Agendador de Tarefas do Windows:
 powershell -ExecutionPolicy Bypass -File scripts\agendar_etl.ps1
 ```
 
-Horário perdido com o PC desligado roda ao ligar. Para remover, repita o comando
-com `-Remover`. A saída de cada execução vai para `logs/etl_AAAA-MM-DD.log`, e a Home
+Horário perdido com o PC desligado roda ao ligar, um job por vez. Para remover, repita
+o comando com `-Remover`. A saída de cada execução vai para `logs/etl_AAAA-MM-DD.log`, e a Home
 mostra um aviso se os dados ficarem parados ou se a última coleta falhar.
 
 ### Migrar do Supabase (uma vez)
@@ -83,8 +83,9 @@ py -3.11 scripts/importar_supabase.py
 ```
 
 Login, carteiras, watchlists e diário substituem o conteúdo local. O resto é mesclado
-por chave natural, sem pisar no que o ETL local já coletou. Com `--sem-precos`, pula as
-~860 mil linhas de `price_history`, que o job `semanal` reconstrói.
+por chave natural, sem pisar no que o ETL local já coletou. `price_history` fica de fora,
+porque o ETL já o reconstruiu; use `--com-precos` para trazer as ~860 mil linhas mesmo assim.
+O relatório fica em `logs/importacao_supabase.json`.
 
 ## Arquitetura
 
