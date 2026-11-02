@@ -692,7 +692,7 @@ def inject_ui_enhancements():
     }}
 
     /* ── RENDER ── */
-    var POPULAR = ['PETR4','VALE3','ITUB4','BBAS3','WEGE3','ELET3','AAPL','NVDA','MSFT','TSLA'];
+    var POPULAR = ['PETR4','VALE3','ITUB4','BBAS3','WEGE3','AXIA3','AAPL','NVDA','MSFT','TSLA'];
 
     function renderResults(q) {{
         q = q.trim();

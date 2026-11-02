@@ -126,3 +126,47 @@ def test_serie_de_inflacao_que_falha_mantem_a_coluna_anterior(monkeypatch):
     monkeypatch.setattr(m, "FRED_API_KEY", "")
     m.fetch_inflacao_setorial()
     assert salvos["inflacao_br"][alvo].iloc[-1] == 0.5
+
+
+def test_universo_nao_tem_codigo_morto_nem_duplicado():
+    from utils.tickers import (BR_INDICES, FII_TODOS, SCREENER_B3, SCREENER_US,
+                               TICKERS_EXTINTOS, TICKERS_RENOMEADOS)
+    for lista in (SCREENER_B3, FII_TODOS, BR_INDICES, SCREENER_US):
+        assert len(lista) == len(set(lista))
+        assert not set(lista) & (TICKERS_EXTINTOS | set(TICKERS_RENOMEADOS))
+    assert {"AXIA3.SA", "EMBJ3.SA", "MBRF3.SA"} <= set(SCREENER_B3)
+    # Destino de renomeação não pode ser, ele mesmo, um código morto.
+    assert not set(TICKERS_RENOMEADOS.values()) & (TICKERS_EXTINTOS | set(TICKERS_RENOMEADOS))
+
+
+def test_console_cp1252_nao_derruba_o_orquestrador(monkeypatch):
+    import io
+    import sys
+    from scripts import etl_local
+    bruto = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(bruto, encoding="cp1252"))
+    etl_local._console_utf8()
+    print("cobertura → ok", flush=True)
+    assert "→".encode("utf-8") in bruto.getvalue()
+
+
+def test_sem_console_nao_quebra(monkeypatch):
+    import sys
+    from scripts import etl_local
+    monkeypatch.setattr(sys, "stdout", None)
+    etl_local._console_utf8()
+
+
+def test_excecao_no_orquestrador_vira_falha_registrada(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+    from scripts import etl_local
+
+    def explode(nome, log):
+        raise RuntimeError("quebrou")
+
+    monkeypatch.setattr(etl_local, "_rodar_etapa", explode)
+    monkeypatch.setattr(etl_local, "RAIZ", tmp_path)
+    monkeypatch.setattr(etl_local, "fazer_backup", lambda: "ok")
+    assert etl_local.executar("macro") == 1
+    linha = LocalClient().table("etl_log").select("status, error_msg").execute().data[0]
+    assert linha["status"] == "error" and "macro" in linha["error_msg"]

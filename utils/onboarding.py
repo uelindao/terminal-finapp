@@ -15,7 +15,7 @@ SUGESTOES_ONBOARDING = {
     'dividendos_br': {
         'label':   '💰 Dividendos Brasil',
         'descr':   'Pagadores históricos de proventos',
-        'tickers': ['TAEE11.SA', 'EGIE3.SA', 'BBSE3.SA', 'TRPL4.SA', 'VIVT3.SA'],
+        'tickers': ['TAEE11.SA', 'EGIE3.SA', 'BBSE3.SA', 'ISAE4.SA', 'VIVT3.SA'],
     },
     'fiis_diversificados': {
         'label':   '🏢 FIIs Diversificados',

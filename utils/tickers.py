@@ -29,6 +29,37 @@ XSTOCKS_INDICES = [
 ]
 
 # =====================================================================
+# manutenção do universo
+# =====================================================================
+
+# Verificado no Yahoo em nov/2026. Código novo da MESMA empresa, ou da sucessora em
+# fusão: nos casos de fusão a proporção de ações mudou, então a posição de carteira
+# não pode ser só renomeada.
+TICKERS_RENOMEADOS = {
+    "ELET3.SA": "AXIA3.SA", "ELET6.SA": "AXIA7.SA", "EMBR3.SA": "EMBJ3.SA",
+    "CCRO3.SA": "MOTV3.SA", "TRPL4.SA": "ISAE4.SA", "RRRP3.SA": "BRAV3.SA",
+    "NTCO3.SA": "NATU3.SA", "IRDM11.SA": "IRIM11.SA", "CPLE6.SA": "CPLE3.SA",
+    "ASAI4.SA": "ASAI3.SA", "AZUL4.SA": "AZUL3.SA", "JBSS3.SA": "JBSS32.SA",
+    "BTOW3.SA": "AMER3.SA", "FI": "FISV", "MMC": "MRSH", "BK": "BNY",
+    # fusões
+    "BRFS3.SA": "MBRF3.SA", "MRFG3.SA": "MBRF3.SA", "ARZZ3.SA": "AZZA3.SA",
+    "SOMA3.SA": "AZZA3.SA", "BRML3.SA": "ALOS3.SA", "SULA11.SA": "RDOR3.SA",
+    "PARD3.SA": "FLRY3.SA", "PETZ3.SA": "AUAU3.SA",
+}
+# Sem negociação e sem sucessora no universo.
+TICKERS_EXTINTOS = {
+    "CCEE3.SA", "CIEL3.SA", "CRFB3.SA", "DMMO3.SA", "FOBJ3.SA", "GOLL4.SA", "NASH11.SA",
+    "ODPV3.SA", "STBP3.SA", "ZAMP3.SA", "ANSS", "DFS", "DISH", "HES", "K", "MRO",
+}
+
+
+def _universo_vigente(tickers: list[str]) -> list[str]:
+    """Aplica renomeações, tira extintos e remove duplicatas mantendo a ordem."""
+    atuais = (TICKERS_RENOMEADOS.get(t, t) for t in tickers if t not in TICKERS_EXTINTOS)
+    return list(dict.fromkeys(atuais))
+
+
+# =====================================================================
 # mercado brasileiro (b3)
 # =====================================================================
 
@@ -106,8 +137,7 @@ SCREENER_B3 = [
     "CBAV3.SA", "CMIN3.SA",
 ]
 
-# Remove duplicatas mantendo ordem
-SCREENER_B3 = list(dict.fromkeys(SCREENER_B3))
+SCREENER_B3 = _universo_vigente(SCREENER_B3)
 
 # Os ~70 fundos imobiliários mais líquidos do IFIX
 FII_TODOS = [
@@ -123,7 +153,9 @@ FII_TODOS = [
     "XPIN11.SA", "XPLG11.SA", "XPML11.SA", "XPPR11.SA", "XPSF11.SA"
 ]
 
-BR_INDICES = ["BOVA11.SA", "SMAL11.SA", "IVVB11.SA", "HASH11.SA", "NASH11.SA", "DIVO11.SA"]
+FII_TODOS = _universo_vigente(FII_TODOS)
+
+BR_INDICES = _universo_vigente(["BOVA11.SA", "SMAL11.SA", "IVVB11.SA", "HASH11.SA", "NASH11.SA", "DIVO11.SA"])
 
 BRASIL_TODOS = sorted(list(set(SCREENER_B3 + BR_INDICES + FII_TODOS)))
 BR_LABELS = [f"{t} — b3 (brasil)" for t in BRASIL_TODOS]
@@ -190,8 +222,7 @@ SCREENER_US = [
     "KIM", "O", "PSA", "PLD", "SBAC", "SPG", "WELL", "WY",
 ]
 
-# Remove duplicatas
-SCREENER_US = list(dict.fromkeys(SCREENER_US))
+SCREENER_US = _universo_vigente(SCREENER_US)
 
 # =====================================================================
 # utilitários

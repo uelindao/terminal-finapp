@@ -10,7 +10,7 @@ def test_acoes_excluem_fii_mal_catalogado_sem_excluir_units():
     acoes = set(tickers_oportunidades_ia("BR_ACOES"))
     fiis = set(tickers_oportunidades_ia("FII"))
     assert acoes.isdisjoint(fiis)
-    assert "IRDM11.SA" in fiis and "IRDM11.SA" not in acoes
+    assert "IRIM11.SA" in fiis and "IRIM11.SA" not in acoes
     assert {"TAEE11.SA", "BPAC11.SA", "KLBN11.SA", "IGTI11.SA"} <= acoes
     assert {"RECR11.SA", "VGIP11.SA"} <= fiis
 

@@ -182,6 +182,15 @@ _STATIC: dict[str, str] = {
     "PARD3":  "21806",                     # IHPardini
     "QUAL3":  "20613",                     # Qualicorp
     "RAIL3":  "22276",                     # Rumo
+    # Códigos novos: mesma companhia na CVM.
+    "AXIA3":  "2437",   "AXIA7": "2437",   # AXIA Energia (era Eletrobras)
+    "EMBJ3":  "7351",                      # Embraer
+    "MOTV3":  "18910",                     # Motiva (era CCR)
+    "ISAE4":  "18112",                     # ISA Energia (era ISA CTEEP)
+    "NATU3":  "21952",                     # Natura
+    "MBRF3":  "20664",                     # MBRF (era Marfrig, incorporou a BRF)
+    "AZZA3":  "23329",                     # Azzas 2154 (era Arezzo)
+    "AZUL3":  "24015",                     # Azul
 }
 
 

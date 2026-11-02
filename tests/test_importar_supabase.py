@@ -101,3 +101,17 @@ def test_projeto_pausado_explica_o_que_fazer(monkeypatch):
     monkeypatch.setattr(imp.socket, "getaddrinfo", sem_dns)
     with pytest.raises(SystemExit, match="Restore"):
         imp.conectar()
+
+
+def test_ticker_renomeado_muda_na_watchlist_mas_nao_na_carteira(sb):
+    linha = {"user_id": 1, "watchlist_id": 1}
+    sb.table("watchlist_items").insert([{**linha, "ticker": "ELET3.SA"},
+                                        {**linha, "ticker": "BRFS3.SA"},
+                                        {**linha, "ticker": "MBRF3.SA"}]).execute()
+    sb.table("portfolio_positions").insert(
+        {"ticker": "BRFS3.SA", "quantidade": 100, "user_id": 1, "portfolio_id": 1}).execute()
+    pendentes = imp.atualizar_tickers_renomeados()
+    tickers = {l["ticker"] for l in sb.table("watchlist_items").select("ticker").execute().data}
+    assert tickers == {"AXIA3.SA", "MBRF3.SA"}
+    assert [(p["ticker"], p["quantidade"]) for p in pendentes] == [("BRFS3.SA", 100)]
+    assert sb.table("portfolio_positions").select("ticker").execute().data == [{"ticker": "BRFS3.SA"}]

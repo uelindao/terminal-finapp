@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from database.local_db import (colunas_da_tabela, fazer_backup, get_client, get_connection,
                                limpar_cache_colunas)
 from scripts.supabase_helper import _get_secret
+from utils.tickers import TICKERS_RENOMEADOS
 
 # Ordem importa: o que não dá para reconstruir vem primeiro.
 PESSOAIS = ["users", "user_settings", "watchlists", "watchlist_items", "portfolios",
@@ -187,6 +188,21 @@ def importar_tabela(remoto: Supabase, tabela: str, colunas: list[str]) -> int:
     return total
 
 
+def atualizar_tickers_renomeados() -> list[dict]:
+    """Watchlist muda sozinha; carteira não, e as posições voltam para revisão manual.
+
+    Em fusão a proporção de ações muda, então renomear quantidade e preço médio
+    produziria uma posição errada sem nenhum aviso.
+    """
+    sb = get_client()
+    conn = get_connection()
+    for antigo, novo in TICKERS_RENOMEADOS.items():
+        conn.execute("UPDATE OR IGNORE watchlist_items SET ticker = ? WHERE ticker = ?", (novo, antigo))
+    sb.table("watchlist_items").delete().in_("ticker", list(TICKERS_RENOMEADOS)).execute()
+    return (sb.table("portfolio_positions").select("ticker, quantidade, preco_medio, portfolio_id")
+            .in_("ticker", list(TICKERS_RENOMEADOS)).execute().data)
+
+
 def conectar() -> Supabase:
     url = _get_secret("SUPABASE_URL")
     chave = _get_secret("SUPABASE_KEY", "SUPABASE_SERVICE_KEY")
@@ -232,6 +248,12 @@ def main(argv=None) -> int:
         except Exception as exc:
             falhas.append(tabela)
             print(f"  {tabela}: ERRO {type(exc).__name__}: {exc}", flush=True)
+
+    pendentes = atualizar_tickers_renomeados()
+    for posicao in pendentes:
+        novo = TICKERS_RENOMEADOS[posicao["ticker"]]
+        print(f"  [carteira] {posicao['ticker']} agora negocia como {novo}: ajuste à mão "
+              f"(qtd {posicao['quantidade']}, PM {posicao['preco_medio']}; em fusão a proporção muda)")
 
     caminho = Path(__file__).resolve().parent.parent / "logs" / "importacao_supabase.json"
     caminho.write_text(json.dumps({"linhas": relatorio, "falhas": falhas}, indent=2), encoding="utf-8")

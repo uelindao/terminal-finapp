@@ -56,6 +56,13 @@ def _ambiente() -> dict:
     return env
 
 
+def _console_utf8() -> None:
+    """O console do Windows usa cp1252 e quebraria no primeiro caractere fora dele."""
+    # Sob pythonw (Agendador) não há console: sys.stdout é None.
+    if sys.stdout is not None:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 def _rodar_etapa(nome: str, log) -> bool:
     comando = [sys.executable, *ETAPAS[nome]]
     inicio = datetime.now()
@@ -85,7 +92,13 @@ def executar(job: str) -> int:
                 falhas.append(etapa)
                 log.write(f"=== {etapa}: pulada, depende de {_PRE_REQUISITOS[etapa]}\n")
                 continue
-            if not _rodar_etapa(etapa, log):
+            try:
+                sucesso = _rodar_etapa(etapa, log)
+            except Exception as exc:
+                # Sem isto, o etl_log ficaria em 'running' para sempre.
+                log.write(f"=== {etapa}: ERRO no orquestrador: {exc!r}\n")
+                sucesso = False
+            if not sucesso:
                 falhas.append(etapa)
         try:
             arquivo = fazer_backup()
@@ -101,6 +114,7 @@ def executar(job: str) -> int:
 
 
 def main() -> int:
+    _console_utf8()
     parser = argparse.ArgumentParser(description="ETL local do FinTerminal")
     parser.add_argument("job", choices=sorted(JOBS))
     return executar(parser.parse_args().job)
