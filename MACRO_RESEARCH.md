@@ -17,17 +17,16 @@ Stress não representa recuperação. “Vale” exige melhora sequencial observ
 
 O fiscal usa **saldo primário = −[NFSP primário SGS 5793](https://dadosabertos.bcb.gov.br/pt_BR/dataset/5793-nfsp-sem-desvalorizacao-cambial--pib---fluxo-acumulado-em-12-meses---resultado-primario---tota)**, com superávit positivo e déficit negativo; o nominal utiliza [SGS 5727](https://dadosabertos.bcb.gov.br/pt_BR/dataset/5727-nfsp-sem-desvalorizacao-cambial--pib---fluxo-acumulado-em-12-meses---resultado-nominal---total) (NFSP consolidado em 12 meses, %PIB). SGS 4192 é PIB em USD e foi retirado dessa interpretação. Colunas novas evitam consumir o sinal/unidade dos caches legados. Variação da dívida em seis meses requer sete referências mensais sem lacunas. O semáforo é uma heurística descritiva; dados insuficientes não indicam estabilidade e a referência visual de 60% não é limite de sustentabilidade.
 
-## Dados e Community Cloud
+## Dados e atualização
 
-O aplicativo lê snapshots e históricos preparados pelo GitHub Actions. A consulta pública de séries na bancada é uma ação explícita e conserva dados de cache quando uma fonte falha. Leituras de preços ficam limitadas aos proxies escolhidos; a interface não baixa o universo inteiro de constituintes.
+O aplicativo lê snapshots e históricos preparados pelo ETL local. A consulta pública de séries na bancada é uma ação explícita e conserva dados de cache quando uma fonte falha. Leituras de preços ficam limitadas aos proxies escolhidos; a interface não baixa o universo inteiro de constituintes.
 
 O ETL grava IBC-Br, INDPRO, DFII10, Focus e proxies de classes/setores. Um push na main inicia a atualização macro e dos 26 proxies, sem recarregar os constituintes BR/EUA. No fluxo semanal/manual, o backtest de divergências depende da conclusão do histórico OHLCV. A reconciliação periódica regrava preços ajustados para refletir eventos corporativos. Fontes que falham não são contabilizadas como sucesso.
 
-Novas observações têm referência, disponibilidade, coleta, fonte e unidade. Backfill coletado hoje não inventa vintages anteriores. A tabela dedicada `macro_observations` é opcional: sem ela, o adapter preserva versões em snapshots `vintage_*` existentes. A migração `scripts/migrations/create_macro_observations.sql` permite armazenamento dedicado e imutável. Nenhuma migração é exigida para o diário de teses.
+Novas observações têm referência, disponibilidade, coleta, fonte e unidade. Backfill coletado hoje não inventa vintages anteriores. A tabela `macro_observations` é append-only: triggers no banco recusam alteração e exclusão. Snapshots `vintage_*` importados do Supabase seguem legíveis.
 
-Após o push, a atualização leve inicia automaticamente. Para recalcular também as estatísticas descritivas, execute o workflow **ETL Financeiro** no GitHub com escopo **pesquisa** (macro + proxies + backtest). **macro**, **precos** e **tudo** permitem escolher os demais escopos. A interface mostra indisponibilidade enquanto não houver histórico suficiente. A coleta SGS é isolada por série, com tempo limite, tentativas limitadas e janelas menores para históricos diários. Falhas preservam as séries válidas anteriores e ficam identificadas no diagnóstico. A normalização Focus é compartilhada com o ETL; uma pesquisa parcial conserva os demais horizontes. O breakeven T10YIE é lido do snapshot de expectativas dos EUA, com a sua própria referência e coleta.
+Para recalcular as estatísticas descritivas, rode `py -3.11 scripts/etl_local.py semanal` (preços + setores + backtest); `macro`, `precos` e `diario` cobrem os demais escopos. A interface mostra indisponibilidade enquanto não houver histórico suficiente. A coleta SGS é isolada por série, com tempo limite, tentativas limitadas e janelas menores para históricos diários. Falhas preservam as séries válidas anteriores e ficam identificadas no diagnóstico. A normalização Focus é compartilhada com o ETL; uma pesquisa parcial conserva os demais horizontes. O breakeven T10YIE é lido do snapshot de expectativas dos EUA, com a sua própria referência e coleta.
 
-A atualização da aplicação depende do deploy da branch configurada no Community Cloud; alterações locais não chegam ao serviço sem push.
 
 ## Fontes
 

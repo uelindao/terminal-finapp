@@ -101,3 +101,28 @@ def test_chat_e_preferencias_ficam_no_banco_unico(tmp_path, monkeypatch):
     assert db.get_historico_chat(1, 2)[0]["conteudo"] == "olá"
     assert db.get_user_setting(1, "tema") == "carbon"
     assert not (tmp_path.parent / "local_store.db").exists()
+
+
+def test_serie_de_inflacao_que_falha_mantem_a_coluna_anterior(monkeypatch):
+    """A API do BCB oscila em séries diferentes a cada rodada: sem isso, a coluna sumia."""
+    import pandas as pd
+    from scripts import sync_macro as m
+
+    meses = pd.date_range("2024-01-01", periods=24, freq="MS")
+    alvo = next(iter(m._IPCA_GRUPOS_BR))
+
+    def buscar(codigo, nome, inicio, fim):
+        if nome == alvo:
+            raise TimeoutError("BCB fora")
+        return pd.Series(0.3, index=meses, name=nome)
+
+    salvos = {}
+    monkeypatch.setattr(m, "_buscar_serie_bcb", buscar)
+    monkeypatch.setattr(m, "_carregar_snapshot_historico",
+                        lambda origem: pd.DataFrame({alvo: [0.5] * 24}, index=meses))
+    monkeypatch.setattr(m, "_salvar_snapshot_historico",
+                        lambda origem, df: salvos.__setitem__(origem, df.copy()))
+    monkeypatch.setattr(m, "upsert_macro", lambda *a, **k: None)
+    monkeypatch.setattr(m, "FRED_API_KEY", "")
+    m.fetch_inflacao_setorial()
+    assert salvos["inflacao_br"][alvo].iloc[-1] == 0.5

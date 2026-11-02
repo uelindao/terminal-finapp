@@ -1,148 +1,123 @@
 # FinTerminal
 
-Terminal de análise financeira construído em Python/Streamlit.  
-Analise ações B3, FIIs e ações EUA com fundamentos, health score e IA.
+Terminal pessoal de análise financeira em Python/Streamlit: macro, rotação setorial,
+ações B3, FIIs e ações EUA, com health score, carteira e IA.
 
-A interface usa o tema Carbon, navegação por tarefas e layouts adaptados ao celular.
-Veja [as decisões de interface e os fluxos de UX](UI_DESIGN.md).
+Roda inteiro no seu PC, sobre um único arquivo SQLite. Não depende de banco na nuvem
+nem tem cota. A interface usa o tema Carbon, descrito em [UI_DESIGN.md](UI_DESIGN.md).
 
----
+## Como usar
 
-## Stack
+Requer Python 3.11 (`py -3.11`).
 
-| Camada | Tecnologia |
-|--------|-----------|
-| Frontend | Streamlit |
-| Banco de dados | Supabase (PostgreSQL) |
-| Dados fundamentalistas | Fundamentus + yfinance |
-| Dados de preço | yfinance |
-| IA | Google Gemini (google-genai) |
-| Dados macro | FRED API + python-bcb |
-
----
-
-## Configuração Supabase
-
-### 1. Criar projeto no Supabase
-
-1. Acesse [supabase.com](https://supabase.com) e crie um novo projeto.
-2. Anote a **Project URL** e a **service_role key** (em Settings → API).
-
-> ⚠️ Use a `service_role` key (não a `anon` key) — ela ignora RLS e é necessária
-> para operações server-side. Nunca exponha essa chave no frontend.
-
-### 2. Executar o schema inicial
-
-No Supabase Dashboard → **SQL Editor**, cole e execute o conteúdo de:
-
-```
-database/migrations/001_initial_schema.sql
+```bash
+py -3.11 -m pip install -r requirements.txt
 ```
 
-Isso cria todas as tabelas, índices e triggers de `updated_at`.
-
-### 3. Configurar credenciais no Streamlit
-
-Crie o arquivo `.streamlit/secrets.toml` (não commitado pelo `.gitignore`):
+Crie `.streamlit/secrets.toml` (fora do git):
 
 ```toml
-SUPABASE_URL = "https://xxxxxxxxxxxx.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."   # service_role key
+APP_SECRET = "texto longo e aleatorio"   # criptografa chaves de IA salvas no banco
+FMP_API_KEY = "..."
+FMP_API_KEY_2 = "..."
+FRED_API_KEY = "..."
+GEMINI_API_KEY = "..."
+DEEPSEEK_API_KEY = "..."
 
 [admin]
-password = "sua_senha_admin_aqui"
+password = "senha do usuario admin, criado no primeiro boot"
+
+[brapi]
+token = "..."
 
 [email]
-remetente    = "seu@gmail.com"
+remetente = "seu@gmail.com"
 app_password = "xxxx xxxx xxxx xxxx"
 destinatario = "destino@gmail.com"
-
-# Opcional — para dados macro via FRED
-FRED_API_KEY = "sua_chave_fred"
 ```
 
-### 4. Instalar dependências
+Abra o app com dois cliques em `iniciar_terminal.bat`, ou:
 
 ```bash
-pip install -r requirements.txt
+py -3.11 -m streamlit run streamlit_app.py
 ```
 
-### 5. Rodar localmente
+## Dados
+
+Tudo fica em `data/finterminal_local.db`, com backups em `data/backups/` (7 últimos).
+Essa é a única cópia da sua carteira e do histórico de scores. Para ter uma cópia
+fora do disco, defina a variável de ambiente `FINTERMINAL_BACKUP_DIR` apontando para
+uma pasta sincronizada (OneDrive, Google Drive). Não coloque o banco em si nela.
+
+O schema está em `database/schema.sql` e é aplicado automaticamente.
+
+### Atualização (ETL)
 
 ```bash
-streamlit run Home.py
+py -3.11 scripts/etl_local.py diario
 ```
 
-O admin padrão é criado automaticamente no primeiro boot (username: `admin`).
+| Job | Conteúdo | Agendamento |
+|-----|----------|-------------|
+| `diario` | macro, fundamentos BR e EUA, health scores | todo dia, 07:00 |
+| `macro` | Selic, VIX, câmbio, Focus, inflação | 12:00 e 18:00 |
+| `semanal` | histórico OHLCV, setores, backtest de divergências | domingo, 09:00 |
+| `brief` | morning brief por email | dias úteis, 08:00 |
 
----
+Para registrar os horários no Agendador de Tarefas do Windows:
 
-## Mapeamento de tabelas (SQLite → Supabase)
-
-| SQLite (legado) | Supabase (PostgreSQL) |
-|-----------------|----------------------|
-| `usuarios` | `users` |
-| `watchlist` (itens) | `watchlist_items` |
-| `portfolio_pesos` | `portfolio_positions` |
-| `fundamentos_cache` | `fundamentals_cache` |
-| `decisoes` | `decision_log` |
-| `relatorios_enviados` | `report_history` |
-| `cache_analise_ia` | `ai_analysis_cache` |
-| `alertas` | `alerts` |
-| `comparacoes_salvas` | `saved_comparisons` |
-
-A interface pública de `database/db.py` é **idêntica** ao legado SQLite —
-nenhuma página precisou ser alterada.
-
----
-
-## Deploy no Streamlit Cloud
-
-1. Faça push do repositório para o GitHub (o `finterminal.db` e `*.log` são ignorados).
-2. Em [share.streamlit.io](https://share.streamlit.io), conecte o repositório.
-3. Em **Secrets**, adicione o conteúdo do `secrets.toml` acima.
-4. O Streamlit Cloud usa o `requirements.txt` automaticamente.
-
----
-
-## Rollback para SQLite
-
-O arquivo `database/db_sqlite_legacy.py` contém a implementação SQLite original.
-Para reverter, substitua os imports:
-
-```python
-# de:
-from database.db import ...
-# para:
-from database.db_sqlite_legacy import ...
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\agendar_etl.ps1
 ```
 
----
+Horário perdido com o PC desligado roda ao ligar. Para remover, repita o comando
+com `-Remover`. A saída de cada execução vai para `logs/etl_AAAA-MM-DD.log`, e a Home
+mostra um aviso se os dados ficarem parados ou se a última coleta falhar.
 
-## Estrutura do projeto
+### Migrar do Supabase (uma vez)
+
+Restaure o projeto no painel do Supabase e rode:
+
+```bash
+py -3.11 scripts/importar_supabase.py
+```
+
+Login, carteiras, watchlists e diário substituem o conteúdo local. O resto é mesclado
+por chave natural, sem pisar no que o ETL local já coletou. Com `--sem-precos`, pula as
+~860 mil linhas de `price_history`, que o job `semanal` reconstrói.
+
+## Arquitetura
 
 ```
-├── Home.py                         # Página principal
-├── pages/
-│   ├── 2_Discovery.py              # Scanner de oportunidades
-│   ├── 4_Portfolio.py              # Gestão de portfólio
-│   └── 6_Configuracoes.py          # Configurações e admin
-├── utils/
-│   ├── health_engine.py            # Motor de scoring
-│   ├── scrapers.py                 # Dados fundamentalistas
-│   ├── email_sender.py             # Alertas por email
-│   ├── logger.py                   # Logger centralizado
-│   └── tickers.py                  # Universo de ativos
-├── database/
-│   ├── db.py                       # Camada de dados (Supabase)
-│   ├── db_sqlite_legacy.py         # Implementação SQLite (referência)
-│   ├── supabase_client.py          # Client singleton
-│   └── migrations/
-│       └── 001_initial_schema.sql  # Schema PostgreSQL
-├── logs/                           # Logs runtime (ignorados pelo git)
-└── requirements.txt
+streamlit_app.py            navegação (Home + pages/)
+pages/                      Macro, Discovery, Research, Portfolio, Configurações
+utils/                      motores e telas (health_engine, macro_state, market_data...)
+database/
+  local_db.py               SQLite com a API fluente do Supabase (select/eq/upsert...)
+  schema.sql                schema único
+  db.py                     funções de acesso usadas pelo app
+scripts/
+  etl_local.py              orquestra os sync_*.py, log e backup
+  sync_br.py, sync_us.py    fundamentos e scores
+  sync_macro.py             macro e histórico versionado
+  sync_price_history.py     OHLCV
 ```
+
+`get_supabase()`, `utils/macro_supabase.py` e `scripts/supabase_helper.py` mantêm o nome
+antigo, mas falam apenas com a base local.
+
+## Testes
+
+```bash
+py -3.11 -m pip install -r requirements-dev.txt
+py -3.11 -m pytest tests -q
+```
+
+`tests/test_local_db.py` é o contrato do adaptador SQLite. Ao adicionar uma tabela ou
+um `on_conflict`, atualize `database/schema.sql`: esse teste acusa o que faltar.
 
 ## Pesquisa macro e rotação
 
-A bancada de Cenário macro reúne transições, revisões Focus, matriz de classes/setores, laboratório retrospectivo e diário de teses. Carteira inclui cenários manuais de preços e câmbio. Consulte [MACRO_RESEARCH.md](MACRO_RESEARCH.md) para hipóteses, cobertura, fontes e atualização no Community Cloud.
+A bancada de Cenário macro reúne transições, revisões Focus, matriz de classes/setores,
+laboratório retrospectivo e diário de teses. A Carteira inclui cenários manuais de preços
+e câmbio. Consulte [MACRO_RESEARCH.md](MACRO_RESEARCH.md) para hipóteses, cobertura e fontes.

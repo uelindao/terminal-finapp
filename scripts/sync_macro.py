@@ -481,17 +481,15 @@ def fetch_inflacao_setorial():
     """
     # ── Brasil ────────────────────────────────────────────────────────────────
     try:
-        from bcb import sgs
-        inicio_10a = (dt.date.today() - dt.timedelta(days=365 * 10)).isoformat()
+        hoje = dt.date.today()
+        inicio_10a = hoje - dt.timedelta(days=365 * 10)
         todos = {**_IPCA_GRUPOS_BR, **_IPCA_CATEGORIAS_BR, **_IPCA_NUCLEOS_BR, **_PPI_BR}
 
         cols = {}
         for nome, codigo in todos.items():
             try:
-                _df = sgs.get({nome: codigo}, start=inicio_10a)
-                if _df is not None and not _df.empty:
-                    cols[nome] = _df[nome]
-                    print(f"  [infl BR] {nome} ({codigo}): {len(_df)} pts")
+                cols[nome] = _buscar_serie_bcb(codigo, nome, inicio_10a, hoje)
+                print(f"  [infl BR] {nome} ({codigo}): {len(cols[nome])} pts")
             except Exception as _e:
                 _registrar_falha("fetch_inflacao_setorial", _e)
                 print(f"  [infl BR] {nome} ({codigo}): {type(_e).__name__}")
@@ -508,6 +506,8 @@ def fetch_inflacao_setorial():
                 except Exception as e:
                     _registrar_falha("fetch_inflacao_setorial", e)
                     logger.debug(f"falha run-rate {nome}: {type(e).__name__}")
+            # Série que falhou nesta rodada mantém a coluna anterior em vez de sumir.
+            df_infl_br = _preservar_colunas_snapshot("inflacao_br", df_infl_br)
             _salvar_snapshot_historico("inflacao_br", df_infl_br)
 
             def _last(nome, suf):
