@@ -55,6 +55,20 @@ def test_mesclar_mantem_linha_local_e_traz_a_que_falta(sb):
     assert linhas == {"A": "{\"novo\": 1}", "B": "{\"so_remoto\": 1}"}
 
 
+def test_cache_de_ticker_morto_nao_volta_mas_o_historico_sim(sb):
+    remoto = RemotoFalso({
+        "health_scores": [[{"id": 1, "ticker": "ELET3.SA", "score": 50},
+                           {"id": 2, "ticker": "ANSS", "score": 50},
+                           {"id": 3, "ticker": "SPY", "score": 50}]],
+        "health_score_history": [[{"id": 1, "ticker": "ELET3.SA", "score": 50,
+                                   "calculado_em": "2026-06-14T00:00:00+00:00"}]],
+    })
+    imp.importar_tabela(remoto, "health_scores", ["id", "ticker", "score"])
+    imp.importar_tabela(remoto, "health_score_history", ["id", "ticker", "score", "calculado_em"])
+    assert sb.table("health_scores").select("ticker").execute().data == [{"ticker": "SPY"}]
+    assert sb.table("health_score_history").select("ticker").execute().data == [{"ticker": "ELET3.SA"}]
+
+
 def test_historico_de_score_nao_duplica_ao_repetir(sb):
     lote = [{"id": 1, "ticker": "A", "score": 70, "calculado_em": "2026-07-01T00:00:00+00:00"},
             {"id": 2, "ticker": "A", "score": 71, "calculado_em": "2026-07-02T00:00:00+00:00"}]

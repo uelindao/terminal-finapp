@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from database.local_db import (colunas_da_tabela, fazer_backup, get_client, get_connection,
                                limpar_cache_colunas)
 from scripts.supabase_helper import _get_secret
-from utils.tickers import TICKERS_RENOMEADOS
+from utils.tickers import TICKERS_EXTINTOS, TICKERS_RENOMEADOS
 
 # Ordem importa: o que não dá para reconstruir vem primeiro.
 PESSOAIS = ["users", "user_settings", "watchlists", "watchlist_items", "portfolios",
@@ -60,6 +60,10 @@ MESCLAR = {
 }
 # Efêmeras ou de uso interno do projeto antigo.
 IGNORAR = {"user_sessions", "etl_log"}
+# O radar e a média dos setores leem estas tabelas inteiras: ticker morto voltaria com
+# número de meses atrás. O histórico dele continua em health_score_history.
+SEM_TICKERS_MORTOS = {"health_scores", "fundamentals_cache", "price_cache"}
+TICKERS_MORTOS = set(TICKERS_RENOMEADOS) | TICKERS_EXTINTOS
 
 ORDEM_PAGINACAO = {
     "price_history": "ticker,data",
@@ -178,6 +182,8 @@ def importar_tabela(remoto: Supabase, tabela: str, colunas: list[str]) -> int:
     chave = MESCLAR.get(tabela)
     total = 0
     for lote in remoto.paginas(tabela, colunas):
+        if tabela in SEM_TICKERS_MORTOS:
+            lote = [linha for linha in lote if linha.get("ticker") not in TICKERS_MORTOS]
         if chave:
             total += mesclar_lote(tabela, chave, lote)
         else:
