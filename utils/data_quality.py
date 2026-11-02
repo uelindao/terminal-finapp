@@ -109,9 +109,12 @@ def avaliar_frescor_etl(execucoes: list[dict], agora: datetime | None = None,
     """Aviso para a Home quando os dados estão parados; None se está tudo em dia.
 
     `execucoes`: linhas do etl_log, da mais nova para a mais antiga. O limite de 3
-    dias atravessa um fim de semana prolongado sem alarme falso.
+    dias atravessa um fim de semana prolongado sem alarme falso. Só contam as linhas
+    do orquestrador: sync_br marca "error" quando poucos tickers falham, o que é
+    normal e deixaria o aviso sempre aceso.
     """
     agora = agora or datetime.now(timezone.utc)
+    execucoes = [e for e in execucoes if str(e.get("job_name", "")).startswith("etl_local:")]
     if not execucoes:
         return ("Nenhuma coleta de dados registrada. Rode `python scripts/etl_local.py diario` "
                 "ou agende com `scripts/agendar_etl.ps1`.")

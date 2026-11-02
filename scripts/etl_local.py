@@ -102,7 +102,7 @@ def executar(job: str) -> int:
             if not sucesso:
                 falhas.append(etapa)
         try:
-            arquivo = fazer_backup()
+            arquivo = fazer_backup(uma_vez_por_dia=True)
             log.write(f"=== backup: {arquivo}\n")
         except Exception as exc:
             falhas.append("backup")

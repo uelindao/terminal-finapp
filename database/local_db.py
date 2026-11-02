@@ -440,8 +440,12 @@ def get_client() -> LocalClient:
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 
-def fazer_backup(destino: Path | None = None, manter: int = 7) -> Path:
+def fazer_backup(destino: Path | None = None, manter: int = 7,
+                 uma_vez_por_dia: bool = False) -> Path:
     """Cópia consistente (API de backup do SQLite) e rotação dos arquivos antigos.
+
+    Com `uma_vez_por_dia`, devolve a cópia de hoje se ela já existe: o ETL roda várias
+    vezes ao dia e, sem isso, as 7 cópias cobririam só dois dias.
 
     Por padrão grava em data/backups. FINTERMINAL_BACKUP_DIR aponta para fora do
     disco principal (ex.: pasta do OneDrive): o banco agora é o único lar da
@@ -449,6 +453,10 @@ def fazer_backup(destino: Path | None = None, manter: int = 7) -> Path:
     """
     pasta = destino or Path(os.environ.get("FINTERMINAL_BACKUP_DIR", "") or db_path().parent / "backups")
     pasta.mkdir(parents=True, exist_ok=True)
+    if uma_vez_por_dia:
+        de_hoje = sorted(pasta.glob(f"finterminal_{datetime.now():%Y%m%d}_*.db"))
+        if de_hoje:
+            return de_hoje[-1]
     arquivo = pasta / f"finterminal_{datetime.now():%Y%m%d_%H%M%S}.db"
     copia = sqlite3.connect(arquivo)
     try:

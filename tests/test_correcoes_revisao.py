@@ -231,3 +231,22 @@ def test_fundamentos_gravados_aparecem_na_mesma_execucao(tmp_path, monkeypatch):
     assert db.get_todos_fundamentos_cache() == {}
     db.salvar_fundamento_cache("A", {"preco": 1})
     assert db.get_todos_fundamentos_cache()["A"]["preco"] == 1
+
+
+def test_falha_parcial_de_subetapa_nao_acende_o_aviso():
+    agora = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+    fim = (agora - timedelta(hours=2)).isoformat()
+    execucoes = [
+        {"job_name": "sync_br", "status": "error", "started_at": fim, "finished_at": fim,
+         "error_msg": "precos: 8 falha"},
+        {"job_name": "etl_local:br", "status": "success", "started_at": fim, "finished_at": fim},
+    ]
+    assert avaliar_frescor_etl(execucoes, agora) is None
+
+
+def test_backup_diario_nao_consome_a_rotacao(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+    from database.local_db import fazer_backup
+    primeiro = fazer_backup(tmp_path / "bk", uma_vez_por_dia=True)
+    assert fazer_backup(tmp_path / "bk", uma_vez_por_dia=True) == primeiro
+    assert len(list((tmp_path / "bk").glob("*.db"))) == 1
