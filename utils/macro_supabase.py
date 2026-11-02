@@ -1,14 +1,14 @@
 """
 utils/macro_supabase.py
-Persistência de séries históricas macro no Supabase.
+Persistência de séries históricas macro na base local.
 
 Resolve o problema de "sem dados" em fins de semana / cold-start:
   1. Em dias úteis, puxar_historico_mestre() busca ao vivo (BCB / FRED)
      e salva o resultado nesta camada (cache-aside).
   2. Se a API falhar (fim de semana, timeout, manutenção), o app lê
-     o último snapshot bem-sucedido do Supabase.
+     o último snapshot bem-sucedido da base local.
 
-Tabela necessária (rodar 1x no SQL Editor do Supabase):
+Tabela necessária (rodar 1x no SQL Editor da base local):
   → veja scripts/migrations/create_macro_snapshots.sql
 
 Formato de armazenamento:
@@ -75,7 +75,7 @@ def _json_to_df(payload: str) -> pd.DataFrame:
 
 def salvar_snapshot(origem: str, df: pd.DataFrame) -> bool:
     """
-    Salva o DataFrame de uma origem (ex.: 'bcb_br', 'fred_global') no Supabase.
+    Salva o DataFrame de uma origem (ex.: 'bcb_br', 'fred_global') na base local.
     Faz upsert por 'origem' — substitui o snapshot anterior da mesma origem.
     Retorna True em sucesso, False em falha silenciosa.
     """
@@ -109,7 +109,7 @@ def salvar_snapshot(origem: str, df: pd.DataFrame) -> bool:
 
 def carregar_snapshot(origem: str, max_age_days: int = 7) -> Optional[pd.DataFrame]:
     """
-    Carrega o snapshot mais recente de uma origem do Supabase.
+    Carrega o snapshot mais recente de uma origem da base local.
     Retorna None se não encontrar, expirado (> max_age_days) ou Supabase offline.
     """
     sb = _sb()
@@ -146,7 +146,7 @@ def carregar_snapshot(origem: str, max_age_days: int = 7) -> Optional[pd.DataFra
         df.attrs["coletado_em"] = updated
         df.attrs["origem"] = origem
         logger.info(
-            f"[macro_supabase] snapshot '{origem}' carregado do Supabase "
+            f"[macro_supabase] snapshot '{origem}' carregado da base local "
             f"({row['n_linhas']} linhas, atualizado: {updated[:10]})."
         )
         return df
@@ -199,7 +199,7 @@ def listar_snapshots() -> list[dict]:
 
 def salvar_fear_greed(market: str, score: int, label: str, componentes: dict) -> bool:
     """
-    Salva o resultado do Fear & Greed Index no Supabase.
+    Salva o resultado do Fear & Greed Index na base local.
     market: 'us' ou 'br'
     Retorna True em sucesso, False em falha silenciosa.
     """
@@ -226,7 +226,7 @@ def salvar_fear_greed(market: str, score: int, label: str, componentes: dict) ->
 
 def carregar_fear_greed(market: str, max_age_hours: int = 4) -> dict | None:
     """
-    Carrega o Fear & Greed Index do cache do Supabase.
+    Carrega o Fear & Greed Index do cache da base local.
     Retorna None se não encontrar, expirado (> max_age_hours) ou Supabase offline.
     """
     sb = _sb()
