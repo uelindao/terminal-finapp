@@ -360,3 +360,27 @@ def test_sem_contexto_o_motor_usa_a_macro_do_banco(tmp_path, monkeypatch):
     ]).execute()
     assert _macro_context_do_banco() == {"selic": 13.75, "vix": 15.0, "ipca": 4.58,
                                          "treasury_10y": 4.89}
+
+
+def test_lucro_de_banco_vem_da_conta_3_09(monkeypatch):
+    import pandas as pd
+    from utils import cvm_client
+
+    def linha(conta, valor):
+        return {"CD_CVM": "19348", "CD_CONTA": conta, "DS_CONTA": "x", "DT_REFER": "2026-06-30",
+                "ORDEM_EXERC": "ÚLTIMO", "VERSAO": "1", "VL_CONTA": str(valor), "ESCALA_MOEDA": "MIL"}
+    dre = pd.DataFrame([linha("3.01", 200), linha("3.05", 27), linha("3.09", 24)])
+    monkeypatch.setattr(cvm_client, "get_cvm_code", lambda _: "19348")
+    monkeypatch.setattr(cvm_client, "_parse_zip",
+                        lambda url, ano: {"DRE": dre} if url == cvm_client._ITR_URL and ano == 2026 else {})
+    historico = cvm_client.get_historico_trimestral_cvm("ITUB4.SA", anos=0)
+    assert historico[0]["lucro"] == 24_000 * 2   # semestre anualizado
+
+
+def test_piotroski_de_banco_ignora_fluxo_de_caixa():
+    from utils.health_engine import calcular_piotroski_do_historico
+    trimestre = {"receita": 100.0, "lucro": 10.0, "ativos_totais": 1000.0, "cfo": -50.0, "gross": 40.0}
+    _, det = calcular_piotroski_do_historico([dict(trimestre) for _ in range(5)], "financial services")
+    assert det["F2 FCF positivo"] == "n/a (financeiro)"
+    assert det["F4 qualidade lucro (FCF>ROA)"] == "n/a (financeiro)"
+    assert det["F1 ROA positivo"] == 1

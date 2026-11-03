@@ -281,10 +281,6 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
         except Exception as e:
             logger.debug(f"[health_engine] falha ao avaliar F1 (ROA): {e}")
 
-        try:
-            f2 = 1 if (op_cashflow is not None and op_cashflow > 0) else 0
-        except Exception as e:
-            logger.debug(f"[health_engine] falha ao avaliar F2 (FCF): {e}")
 
         try:
             f3 = 1 if (roa_atual and roa_ant and roa_atual > roa_ant) else 0
@@ -308,9 +304,13 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
         )
 
         if _is_financial:
-            f5 = None
-            f6 = None
+            # CFO de banco reflete depósitos e crédito: F2 e F4 não medem qualidade.
+            f2 = f4 = f5 = f6 = None
         else:
+            try:
+                f2 = 1 if (op_cashflow is not None and op_cashflow > 0) else 0
+            except Exception as e:
+                logger.debug(f"[health_engine] falha ao avaliar F2 (FCF): {e}")
             try:
                 _lev_atual = (debt_atual / total_assets_atual) if debt_atual is not None and total_assets_atual is not None and total_assets_atual > 0 else None
                 _lev_ant   = (debt_ant / total_assets_ant) if debt_ant is not None and total_assets_ant is not None and total_assets_ant > 0 else None
@@ -354,9 +354,9 @@ def calcular_piotroski(acao, setor: str = "", is_br: bool = False):
 
         detalhamento = {
             "F1 ROA positivo":               f1,
-            "F2 FCF positivo":               f2,
+            "F2 FCF positivo":               f2 if f2 is not None else "n/a (financeiro)",
             "F3 ROA crescendo":              f3,
-            "F4 qualidade lucro (FCF>ROA)":  f4,
+            "F4 qualidade lucro (FCF>ROA)":  f4 if f4 is not None else "n/a (financeiro)",
             "F5 dívida reduzindo":           f5 if f5 is not None else "n/a (financeiro)",
             "F6 liquidez melhorando":        f6 if f6 is not None else "n/a (financeiro)",
             "F7 sem diluição":               f7 if f7 is not None else "n/a (sem dado de ações)",
@@ -462,12 +462,13 @@ def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_b
 
         # F1: ROA > 0
         f1 = 1 if (roa_0 is not None and roa_0 > 0) else 0
-        # F2: CFO > 0
-        f2 = 1 if (cfo_0 is not None and cfo_0 > 0) else 0
+        # F2: CFO > 0. Em banco o CFO é dominado por depósitos e crédito: não mede caixa.
+        f2 = None if is_financial else (1 if (cfo_0 is not None and cfo_0 > 0) else 0)
         # F3: ΔROA > 0
         f3 = 1 if (roa_0 is not None and roa_4 is not None and roa_0 > roa_4) else 0
         # F4: CFO > Lucro (accruals saudáveis)
-        f4 = 1 if (cfo_0 is not None and lucro_0 is not None and cfo_0 > lucro_0) else 0
+        f4 = None if is_financial else (
+            1 if (cfo_0 is not None and lucro_0 is not None and cfo_0 > lucro_0) else 0)
         # F5: ΔAlavancagem < 0 (não aplicável a financeiras)
         if is_financial:
             f5 = None
@@ -497,9 +498,9 @@ def calcular_piotroski_do_historico(historico: list[dict], setor: str = "", is_b
 
         detalhamento = {
             "F1 ROA positivo":              f1,
-            "F2 FCF positivo":              f2,
+            "F2 FCF positivo":              f2 if f2 is not None else "n/a (financeiro)",
             "F3 ROA crescendo":             f3,
-            "F4 qualidade lucro (FCF>ROA)": f4,
+            "F4 qualidade lucro (FCF>ROA)": f4 if f4 is not None else "n/a (financeiro)",
             "F5 dívida reduzindo":          f5 if f5 is not None else "n/a (financeiro)",
             "F6 liquidez melhorando":       f6 if f6 is not None else "n/a (financeiro)",
             "F7 sem diluição":              f7 if f7 is not None else "n/a (sem dado de ações)",
@@ -803,6 +804,9 @@ def _beta_vs_indice(close: pd.Series, indice: str) -> float | None:
         _RETORNOS_INDICE[indice] = _datas_sem_fuso(bench).pct_change().dropna()
     ret_bench = _RETORNOS_INDICE[indice]
     ret_ativo = _datas_sem_fuso(close.dropna()).pct_change().dropna()
+    # Barra corrompida do Yahoo (AZUL3 tem R$ 30 milhões) dava beta de 40 mil;
+    # mesmo corte de utils/setor_series.
+    ret_ativo = ret_ativo[ret_ativo.abs() <= 0.5]
     if len(ret_ativo.index.intersection(ret_bench.index)) < 30:
         return None
     return _beta_fn(ret_ativo, ret_bench)
@@ -1579,7 +1583,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                     score_v_rel = int(max(-4, min(4,
                         _aj_pctl(_mh_pctl.get('pe'))
                         + _aj_pctl(_mh_pctl.get('pb'))
-                        + _aj_pctl(_mh_pctl.get('ev_ebitda'))
+                        + (0 if _is_financial_acao else _aj_pctl(_mh_pctl.get('ev_ebitda')))
                     )))
                 except Exception as e:
                     logger.debug(f"[health_engine] percentil histórico falhou: {e}")

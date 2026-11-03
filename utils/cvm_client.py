@@ -48,6 +48,7 @@ _C_LUC_BRUTO = "3.03"   # Resultado Bruto
 _C_EBIT      = "3.05"   # Resultado Antes do Resultado Financeiro e dos Tributos
 _C_RES_FIN   = "3.06"   # Resultado Financeiro (líquido)
 _C_LUC_LIQ   = "3.11"   # Lucro ou Prejuízo do Período
+_C_LUC_LIQ_IF = "3.09"  # Mesmo lucro na DRE de instituição financeira (bancos não têm 3.11)
 
 # BPA (Balanço Patrimonial — Ativo)
 _C_ATIVO_TOT  = "1"        # Ativo Total
@@ -583,6 +584,8 @@ def _get_dfp_series(
                 ("DFC", _C_INV_CF,     "inv_cf"),
             ]:
                 linha[chave] = _extrair(dfs.get(tipo), cd_cvm, cd, dt)
+            if linha["luc_liq"] is None:
+                linha["luc_liq"] = _extrair(dfs.get("DRE"), cd_cvm, _C_LUC_LIQ_IF, dt)
 
             # Dívida via keywords (mais confiável que código fixo)
             linha["divida"] = _extrair_divida(dfs.get("BPP"), cd_cvm, dt)
@@ -808,6 +811,8 @@ def _get_itr_series(
                     ("DFC", _C_INV_CF,     "inv_cf"),
                 ]:
                     linha[chave] = _extrair(dfs.get(tipo), cd_cvm, cd, dt)
+                if linha["luc_liq"] is None:
+                    linha["luc_liq"] = _extrair(dfs.get("DRE"), cd_cvm, _C_LUC_LIQ_IF, dt)
 
                 linha["divida"]      = _extrair_divida(dfs.get("BPP"), cd_cvm, dt)
                 linha["is_q4_dfp"]   = is_q4  # True = dado já é anual; False = trimestral
@@ -1157,6 +1162,8 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
                     ("DFC", _C_INV_CF,     "inv_cf"),
                 ]:
                     linha[chave] = _extrair(dfs.get(tipo), cd_cvm, cd, dt)
+                if linha["luc_liq"] is None:
+                    linha["luc_liq"] = _extrair(dfs.get("DRE"), cd_cvm, _C_LUC_LIQ_IF, dt)
                 linha["divida"]    = _extrair_divida(dfs.get("BPP"), cd_cvm, dt)
                 linha["is_anual"]  = is_q4_source
                 dados_por_data[dt] = linha
