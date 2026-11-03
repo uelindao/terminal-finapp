@@ -301,3 +301,62 @@ def test_sem_login_o_app_usa_o_primeiro_admin(tmp_path, monkeypatch):
     ]).execute()
     dono = db.get_usuario_dono()
     assert dono["username"] == "dono" and "senha_hash" not in dono
+
+
+def test_roic_do_yfinance_usa_ebit_anual():
+    from utils.health_engine import _calc_roic_do_historico
+    trimestre = {"ebit": 25.0, "ativos_totais": 1000.0, "passivos_circ": 200.0}
+    _, roic = _calc_roic_do_historico([dict(trimestre) for _ in range(5)], False,
+                                      {"treasury_10y": 4.5})
+    assert round(roic, 3) == round(100 * 0.79 / 800 * 100, 3)
+
+
+def test_beta_alinha_indice_com_fuso_e_historico_sem(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from utils import health_engine as he
+    datas = pd.bdate_range("2026-01-02", periods=120)
+    ret = np.random.default_rng(1).normal(0, 0.01, len(datas))
+    indice = pd.Series(100 * np.cumprod(1 + ret), index=datas.tz_localize("America/New_York"))
+    ativo = pd.Series(100 * np.cumprod(1 + 2 * ret), index=datas)
+
+    class Indice:
+        def history(self, **_):
+            return pd.DataFrame({"Close": indice})
+
+    monkeypatch.setattr(he.yf, "Ticker", lambda _: Indice())
+    monkeypatch.setattr(he, "_RETORNOS_INDICE", {})
+    assert abs(he._beta_vs_indice(ativo, "^GSPC") - 2.0) < 0.01
+
+
+def test_ntnb_vem_do_tesouro_ipca_mais_perto_de_10_anos(monkeypatch):
+    import requests
+    from utils import health_engine as he
+    csv = "\n".join([
+        "Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha",
+        "Tesouro IPCA+;15/05/2035;30/10/2026;7,88;8,00",
+        "Tesouro IPCA+;15/05/2045;30/10/2026;7,32;7,44",
+        "Tesouro IPCA+;15/05/2035;29/10/2026;7,70;7,82",
+        "Tesouro Selic;01/03/2031;30/10/2026;0,10;0,11",
+    ]).encode("latin-1")
+
+    class Resposta:
+        content = csv
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Resposta())
+    monkeypatch.setattr(he, "_NTNB_CACHE", {})
+    assert he._buscar_yield_ntnb() == 7.88
+
+
+def test_sem_contexto_o_motor_usa_a_macro_do_banco(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+    from database.local_db import get_client
+    from utils.health_engine import _macro_context_do_banco
+    get_client().table("macro_cache").insert([
+        {"indicator": "selic", "value": 13.75}, {"indicator": "ipca_12m", "value": 4.58},
+        {"indicator": "treasury_10y", "value": 4.89},
+    ]).execute()
+    assert _macro_context_do_banco() == {"selic": 13.75, "vix": 15.0, "ipca": 4.58,
+                                         "treasury_10y": 4.89}

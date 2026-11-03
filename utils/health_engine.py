@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 from database.db import (
     salvar_health_score, get_todos_fundamentos_cache, registrar_historico_score,
-    get_health_scores, get_all_price_cache,
+    get_health_scores, get_all_price_cache, get_all_macro_cache,
 )
 from utils.tickers import FII_TODOS
 from utils.logger import get_logger
@@ -697,7 +697,7 @@ def calcular_momentum(hist: pd.DataFrame) -> tuple[int, dict, list]:
     """
     Fator Momentum 12-1 meses (evita reversão de curto prazo).
     Retorno = preço há 1 mês / preço há 12 meses − 1.
-    Máx +10pts / mín −8pts.
+    Máx +8pts / mín −6pts.
     Retorna (score_mom, detalhes_dict, alertas_list).
     """
     if hist is None or len(hist) < 250:
@@ -738,28 +738,74 @@ def calcular_momentum(hist: pd.DataFrame) -> tuple[int, dict, list]:
     return score_mom, detalhes, alertas_mom
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+_URL_TAXAS_TESOURO = (
+    "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3"
+    "/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/PrecoTaxaTesouroDireto.csv"
+)
+_NTNB_CACHE: dict = {}
+
+
 def _buscar_yield_ntnb() -> float:
     """
-    Busca o yield atual da NTN-B 2035 (IPCA+spread) via BCB SGS.
-    Série 12466 = taxa indicativa NTN-B Principal 2035.
-    Fallback: 6.5% (valor conservador de longo prazo).
-    Retorna o yield REAL anualizado em percentual (ex: 6.8).
+    Juro real do Tesouro IPCA+ com vencimento mais próximo de 10 anos (hoje, o 2035).
+    Fonte: arquivo oficial de preços e taxas do Tesouro Direto (~15 MB), lido no
+    máximo a cada 12h por processo. A série SGS 12466 usada antes é um índice, não
+    uma taxa: o fallback de 6,5% valia sempre e inflava o spread dos FIIs.
+    Retorna o yield REAL anualizado em percentual (ex: 7.88).
     """
+    import time as _time
+    if _NTNB_CACHE and _time.time() - _NTNB_CACHE["em"] < 12 * 3600:
+        return _NTNB_CACHE["taxa"]
+    taxa = 6.5   # fallback conservador
     try:
-        import datetime
-        from bcb import sgs
-        inicio = (
-            datetime.datetime.today() - datetime.timedelta(days=30)
-        ).strftime('%Y-%m-%d')
-        df = sgs.get({'ntnb': 12466}, start=inicio)
-        if not df.empty and 'ntnb' in df.columns:
-            val = float(df['ntnb'].dropna().iloc[-1])
-            if 3.0 <= val <= 15.0:   # sanidade
-                return round(val, 2)
+        import io
+        import requests
+        resp = requests.get(_URL_TAXAS_TESOURO, timeout=120)
+        resp.raise_for_status()
+        df = pd.read_csv(io.BytesIO(resp.content), sep=";", decimal=",", encoding="latin-1")
+        df = df[df["Tipo Titulo"].str.strip() == "Tesouro IPCA+"]
+        base = pd.to_datetime(df["Data Base"], dayfirst=True)
+        df = df[base == base.max()]
+        venc = pd.to_datetime(df["Data Vencimento"], dayfirst=True)
+        alvo = base.max() + pd.DateOffset(years=10)
+        val = float(df.iloc[int((venc - alvo).abs().argmin())]["Taxa Compra Manha"])
+        if 3.0 <= val <= 15.0:   # sanidade
+            taxa = round(val, 2)
     except Exception as e:
-        logger.debug(f"[health_engine] falha ao buscar yield NTN-B via BCB: {e}")
-    return 6.5   # fallback conservador
+        logger.warning(f"[health_engine] taxa do Tesouro IPCA+ indisponível, usando {taxa}%: {e}")
+    _NTNB_CACHE.update(taxa=taxa, em=_time.time())
+    return taxa
+
+
+_RETORNOS_INDICE: dict[str, pd.Series] = {}
+
+
+def _datas_sem_fuso(serie: pd.Series) -> pd.Series:
+    idx = pd.DatetimeIndex(serie.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    return pd.Series(serie.to_numpy(), index=idx.normalize())
+
+
+def _beta_vs_indice(close: pd.Series, indice: str) -> float | None:
+    """
+    Beta de 1 ano contra o índice, que é baixado uma vez por processo.
+    O yfinance devolve o índice com fuso e o histórico do banco vem sem: sem alinhar
+    as datas o concat falhava e todo ativo ficava com beta 1.0, sem penalidade de VIX.
+    """
+    from utils.indicators import beta as _beta_fn
+    if indice not in _RETORNOS_INDICE:
+        try:
+            bench = yf.Ticker(indice).history(period="1y", auto_adjust=True)["Close"]
+        except Exception as e:
+            logger.debug(f"[health_engine] índice {indice} indisponível para beta: {e}")
+            bench = pd.Series(dtype=float)
+        _RETORNOS_INDICE[indice] = _datas_sem_fuso(bench).pct_change().dropna()
+    ret_bench = _RETORNOS_INDICE[indice]
+    ret_ativo = _datas_sem_fuso(close.dropna()).pct_change().dropna()
+    if len(ret_ativo.index.intersection(ret_bench.index)) < 30:
+        return None
+    return _beta_fn(ret_ativo, ret_bench)
 
 
 def _detectar_segmento_fii(ticker: str, dados: dict) -> str:
@@ -829,14 +875,15 @@ def _safe_g(d, k):
 def _calc_roic_do_historico(historico: list[dict], is_br: bool,
                             macro_context: dict) -> tuple[int, float | None]:
     """
-    Calcula ROIC vs WACC a partir do trimestre mais recente do cache.
-    Espelha calcular_roic() mas sem depender de yfinance.Ticker.
-    NOPAT = EBIT × (1 − tax); Capital Investido = Ativos − Passivos Circ.
+    Calcula ROIC vs WACC a partir do cache. Espelha calcular_roic() sem yfinance.Ticker.
+    NOPAT = EBIT anual × (1 − tax); Capital Investido = Ativos − Passivos Circ do
+    período mais recente. No yfinance o EBIT é por trimestre: usá-lo direto
+    subestimava o ROIC em ~4x (mediana de 3% no universo).
     """
     if not historico:
         return 0, None
     t0 = historico[0]
-    ebit = _safe_g(t0, "ebit")
+    ebit = _valor_anual(historico, "ebit")
     ativos = _safe_g(t0, "ativos_totais")
     passivos_circ = _safe_g(t0, "passivos_circ")
     if ebit is None or ativos is None or passivos_circ is None:
@@ -1007,6 +1054,21 @@ def _calc_icr_do_historico(historico: list[dict]) -> tuple[int, float | None]:
     return -8, icr
 
 
+def _macro_context_do_banco() -> dict:
+    """Mesmo contexto que o ETL monta. Sem ele, o recálculo pela Home usava Selic 10,5."""
+    ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5, 'treasury_10y': 4.5}
+    try:
+        mc = get_all_macro_cache() or {}
+        for chave, indicador in (('selic', 'selic'), ('vix', 'vix'),
+                                 ('ipca', 'ipca_12m'), ('treasury_10y', 'treasury_10y')):
+            valor = safe_float((mc.get(indicador) or {}).get('value'))
+            if valor is not None:
+                ctx[chave] = valor
+    except Exception as e:
+        logger.debug(f"[health_engine] macro_cache indisponível, usando padrão: {e}")
+    return ctx
+
+
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None, force: bool = False) -> dict:
     """
     Motor quantitativo institucional (Dynamic Scoring).
@@ -1014,7 +1076,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
     Contém motores distintos para FIIs, Ações B3 e Ações EUA.
     """
     if macro_context is None:
-        macro_context = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
+        macro_context = _macro_context_do_banco()
     
     juros_altos_br = macro_context.get('selic', 10.5) > 10.0
     vix_alto = macro_context.get('vix', 15.0) > 20.0
@@ -1152,29 +1214,9 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             
         penalidade_vix = 0
         if vix_alto:
-            beta_val = info.get('beta')
-
+            beta_val = safe_float(info.get('beta')) or safe_float(dados_base.get('beta'))
             if beta_val is None and hist is not None and len(hist) >= 60:
-                try:
-                    bench_ticker = "^BVSP" if is_br or is_fii else "^GSPC"
-                    import yfinance as _yf
-                    bench_hist = _yf.Ticker(bench_ticker).history(
-                        period="1y", auto_adjust=True
-                    )
-                    if not bench_hist.empty:
-                        _ret_ativo = hist['Close'].pct_change().dropna()
-                        _ret_bench = bench_hist['Close'].pct_change().dropna()
-                        _df_beta   = pd.concat(
-                            [_ret_ativo, _ret_bench], axis=1
-                        ).dropna()
-                        if len(_df_beta) >= 30:
-                            from utils.indicators import beta as _beta_fn
-                            beta_val = _beta_fn(_ret_ativo, _ret_bench)
-                            if beta_val is None:
-                                beta_val = 1.0
-                except Exception as e:
-                    logger.debug(f"[health_engine] falha ao calcular beta para {ticker}: {e}")
-                    beta_val = 1.0
+                beta_val = _beta_vs_indice(hist['Close'], "^BVSP" if is_br or is_fii else "^GSPC")
 
             beta_val = float(beta_val) if beta_val is not None else 1.0
 
@@ -1266,13 +1308,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 try:
                     dy_f = float(dy)
 
-                    ipca_atual = 4.5
-                    try:
-                        ipca_atual = st.session_state.get(
-                            "macro_context", {}
-                        ).get("ipca", 4.5)
-                    except Exception as e:
-                        logger.debug(f"[health_engine] falha ao ler ipca do session_state: {e}")
+                    ipca_atual = safe_float(macro_context.get('ipca')) or 4.5
 
                     dy_real = ((1 + dy_f/100) / (1 + ipca_atual/100) - 1) * 100
                     spread = dy_real - yield_ntnb
@@ -1443,7 +1479,17 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             raw_margem = safe_float(info.get('profitMargins'))
             margem = safe_float(dados_base.get('margem%')) or (raw_margem * 100 if raw_margem is not None else None)
             ev_ebitda = safe_float(dados_base.get('ev/ebitda')) or safe_float(info.get('enterpriseToEbitda'))
-            debt_equity = safe_float(info.get('debtToEquity'))
+            # Cache primeiro: com cache, info vem vazio e o pilar caía no EV/EBITDA,
+            # que mede preço, não dívida (WEG com caixa líquido levava "alavancagem alta").
+            debt_equity = safe_float(dados_base.get('debt_equity'))
+            if debt_equity is None:
+                debt_equity = safe_float(info.get('debtToEquity'))
+            if debt_equity is None and isinstance(historico_trim, list) and historico_trim:
+                # Mesma unidade do yfinance (%): dívida bruta / patrimônio do último balanço.
+                _div_de = _safe_g(historico_trim[0], "divida_total")
+                _pl_de = _safe_g(historico_trim[0], "patrimonio")
+                if _div_de is not None and _pl_de and _pl_de > 0:
+                    debt_equity = _div_de / _pl_de * 100
 
             # Bancos e financeiras não têm EBIT/EBITDA convencional —
             # ROIC, Net Debt/EBITDA e ICR ficam zerados. Detecta para aplicar

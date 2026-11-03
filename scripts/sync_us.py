@@ -436,6 +436,7 @@ def main():
             'selic':  _mc.get('selic', {}).get('value', 10.5),
             'vix':    _mc.get('vix', {}).get('value', 15.0),
             'ipca':   _mc.get('ipca_12m', {}).get('value', 4.5),
+            'treasury_10y': _mc.get('treasury_10y', {}).get('value', 4.5),
         }
     except Exception as e:
         logger.debug(f"macro context usando padrão: {e}")

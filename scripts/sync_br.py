@@ -464,7 +464,7 @@ def main():
         from scripts.supabase_helper import get_client
         _sb = get_client()
         _res = _sb.table("macro_cache").select("indicator,value").in_(
-            "indicator", ["selic", "vix", "ipca_12m"]
+            "indicator", ["selic", "vix", "ipca_12m", "treasury_10y"]
         ).execute()
         for row in (_res.data or []):
             _k = row["indicator"]
@@ -475,6 +475,8 @@ def main():
                 macro_ctx["vix"] = _v
             elif _k == "ipca_12m":
                 macro_ctx["ipca"] = _v
+            elif _k == "treasury_10y":
+                macro_ctx["treasury_10y"] = _v
         print(f"[sync_br] macro context: {macro_ctx}")
     except Exception as e:
         print(f"[sync_br] macro context usando padrão — {e}")
