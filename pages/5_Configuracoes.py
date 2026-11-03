@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.auth   import require_auth, get_current_user, render_user_badge, logout
+from utils.auth   import require_auth, get_current_user, render_user_badge, logout, login_obrigatorio
 from utils.style  import aplicar_tema
 from utils.components import (
     page_header, section_title, section_selector, metric_card, status_card, empty_state, topbar,
@@ -156,7 +156,8 @@ if _secao_c == "👤 minha conta":
     ])
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("Encerrar sessão", type="secondary"):
+    # Sem login, encerrar a sessão só a reabriria no rerun seguinte.
+    if login_obrigatorio() and st.button("Encerrar sessão", type="secondary"):
         logout()  # revoga token no banco e limpa session_state
 
 

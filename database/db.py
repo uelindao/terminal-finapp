@@ -125,6 +125,20 @@ def criar_usuario(username: str, senha: str, nome: str = "", email: str = "", is
         return False
 
 
+def get_usuario_dono() -> dict | None:
+    """Primeiro admin cadastrado: é quem usa o app quando o login está desligado."""
+    rows = (
+        get_supabase().table('users')
+        .select('id, username, nome, email, is_admin')
+        .eq('is_admin', True)
+        .order('id')
+        .limit(1)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else None
+
+
 def autenticar_usuario(username: str, senha: str) -> dict | None:
     """
     Autentica e auto-migra hash SHA-256 legado para bcrypt no primeiro login

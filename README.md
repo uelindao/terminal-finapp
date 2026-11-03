@@ -42,6 +42,9 @@ Abra o app com dois cliques em `iniciar_terminal.bat`, ou:
 py -3.11 -m streamlit run streamlit_app.py
 ```
 
+O app abre direto na conta do primeiro administrador, sem tela de login. Para voltar
+com ela, adicione `LOGIN_OBRIGATORIO = true` ao `secrets.toml`.
+
 ## Dados
 
 Tudo fica em `data/finterminal_local.db`, com backups em `data/backups/` (7 últimos).

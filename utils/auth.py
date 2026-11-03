@@ -4,13 +4,36 @@ from utils.style import aplicar_tema
 from utils.components import page_header, empty_state
 from database.db import (
     autenticar_usuario, criar_usuario, listar_usuarios, alterar_senha, deletar_usuario,
-    criar_sessao, validar_sessao, revogar_sessao,
+    criar_sessao, validar_sessao, revogar_sessao, get_usuario_dono,
 )
 
 _SESSION_PARAM = "s"   # query param que carrega o token de sessão
 # Reduzido de 7 dias para 24h — token vaza em URL/screenshots/Referer,
 # janela curta + sliding window (estende a cada uso) limita exposição.
 _SESSION_HOURS = 24
+
+
+def login_obrigatorio() -> bool:
+    """O app roda só neste PC, então o login fica desligado.
+
+    Para voltar com a tela de login: LOGIN_OBRIGATORIO = true no secrets.toml.
+    """
+    try:
+        return bool(st.secrets.get("LOGIN_OBRIGATORIO", False))
+    except Exception:
+        return False
+
+
+def _entrar_como_dono() -> bool:
+    user = get_usuario_dono()
+    if not user:
+        return False
+    st.session_state['autenticado'] = True
+    st.session_state['user_id']     = user['id']
+    st.session_state['username']    = user['username']
+    st.session_state['nome']        = user.get('nome') or user['username']
+    st.session_state['is_admin']    = True
+    return True
 
 
 def _login_por_sessao(token: str) -> bool:
@@ -80,7 +103,11 @@ def require_auth() -> bool:
     """
     # 1. Já autenticado nesta aba — garante token na URL para links cross-tab
     if st.session_state.get('autenticado', False):
-        _fixar_token_na_url(st.session_state.get('session_token', ''))
+        if st.session_state.get('session_token'):
+            _fixar_token_na_url(st.session_state['session_token'])
+        return True
+
+    if not login_obrigatorio() and _entrar_como_dono():
         return True
 
     # 2. Token na URL (nova aba aberta via link ou cópia de URL)
@@ -168,10 +195,11 @@ def render_user_badge():
         role = "Administrador" if user.get("is_admin") else "Conta pessoal"
         st.markdown(f'<div class="ft-account"><span class="ft-account-avatar">{escape(name[:1].upper())}</span>'
                     f'<div><div class="ft-account-name">{escape(name)}</div><div class="ft-account-role">{role}</div></div></div>', unsafe_allow_html=True)
-        with st.expander("Minha sessão", expanded=False):
-            st.caption(f"Conectado como {user['username']}.")
-            if st.button("Encerrar sessão", key="btn_logout", use_container_width=True):
-                logout()
+        if login_obrigatorio():
+            with st.expander("Minha sessão", expanded=False):
+                st.caption(f"Conectado como {user['username']}.")
+                if st.button("Encerrar sessão", key="btn_logout", use_container_width=True):
+                    logout()
 
 
 def render_painel_admin():

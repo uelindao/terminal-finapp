@@ -287,3 +287,17 @@ def test_jobs_do_etl_entram_em_fila(tmp_path, monkeypatch):
         etl_local._aguardar_vez(espera_max_s=0.1)
     primeiro.close()
     etl_local._aguardar_vez(espera_max_s=0.1).close()
+
+
+def test_sem_login_o_app_usa_o_primeiro_admin(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINTERMINAL_DB_PATH", str(tmp_path / "teste.db"))
+    from database import db
+    from database.local_db import get_client
+    assert db.get_usuario_dono() is None
+    get_client().table("users").insert([
+        {"id": 5, "username": "visita", "senha_hash": "x", "is_admin": False},
+        {"id": 7, "username": "segundo", "senha_hash": "x", "is_admin": True},
+        {"id": 3, "username": "dono", "senha_hash": "x", "is_admin": True},
+    ]).execute()
+    dono = db.get_usuario_dono()
+    assert dono["username"] == "dono" and "senha_hash" not in dono
