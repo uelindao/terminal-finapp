@@ -50,6 +50,11 @@ TICKERS_RENOMEADOS = {
 TICKERS_EXTINTOS = {
     "CCEE3.SA", "CIEL3.SA", "CRFB3.SA", "DMMO3.SA", "FOBJ3.SA", "GOLL4.SA", "NASH11.SA",
     "ODPV3.SA", "STBP3.SA", "ZAMP3.SA", "ANSS", "DFS", "DISH", "HES", "K", "MRO",
+    # FIIs sem cotação no Yahoo nem na BRAPI desde out/2026 (incorporados/encerrados)
+    "BARI11.SA", "BCFF11.SA", "CVBI11.SA", "FEXC11.SA", "MALL11.SA", "MCHF11.SA",
+    "VTLG11.SA", "XPPR11.SA",
+    # fusão AvalonBay + Equity Residential (anunciada em mai/2026); sem cotação desde 22/09/2026
+    "EQR", "AVB",
 }
 
 
