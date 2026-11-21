@@ -1111,8 +1111,9 @@ def _penalidade_vix(macro_context: dict, beta: float) -> int:
 # Antes era 72/58/40 para tudo, e em nov/2026 83 dos 132 ativos BR caíam em
 # "VENDA DEFINITIVA": Selic de 13,75% e alavancagem derrubam o nível de toda a
 # B3, então o mesmo número não significa o mesmo nos três mercados. Os cortes
-# saíram da distribuição de 20/11/2026 (≈15-20% no topo, ≈15-25% em venda) e
-# devem ser revistos se o nível dos scores mudar de novo.
+# saíram da distribuição de 20/11/2026 e devem ser revistos se o nível dos scores
+# mudar de novo. No recálculo daquela noite: BR 28% em venda (37 de 131, muitos
+# zeros de empresas de fato fracas), FII 14%, EUA 20% (VIX do dia em 36).
 LIMIARES_ROTULO = {
     'br':  (55, 42, 18),
     'fii': (65, 52, 30),
