@@ -352,10 +352,18 @@ def fetch_yfinance_macro():
 
         for t in tickers:
             try:
-                hist = yf.Ticker(t).history(period="5d")
+                hist = yf.Ticker(t).history(period="1mo" if t == "^VIX" else "5d")
                 if hist.empty:
                     continue
                 v = float(hist["Close"].dropna().iloc[-1])
+                if t == "^VIX":
+                    # Média de 10 pregões: o health score usa esta, para um pico de
+                    # um dia não mudar a penalidade de centenas de ativos.
+                    media = float(hist["Close"].dropna().tail(10).mean())
+                    if __import__("math").isfinite(media) and media > 0:
+                        upsert_macro("vix_media_10d", round(media, 4),
+                                     label="VIX (média 10 pregões)", unit="pts", source="yfinance")
+                        print(f"  [yfinance] vix_media_10d = {media:.4f}")
                 if not __import__("math").isfinite(v) or v <= 0:
                     raise ValueError("Valor Yahoo não finito/positivo")
                 if t == "^TNX" and v > 20:

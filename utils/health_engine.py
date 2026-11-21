@@ -1035,12 +1035,20 @@ def _calc_icr_do_historico(historico: list[dict]) -> tuple[int, float | None]:
     Aceita interest_expense com qualquer sinal (yfinance traz negativo do DRE;
     CVM traz positivo via abs(res_fin)). Mesma tabela de pontuação de
     calcular_health_score: ≥5x = 5, ≥3x = 3, ≥1.5x = 1, ≥1x = 0, <1x = −8.
+
+    Resultado financeiro líquido positivo (CVM: `res_fin` ≥ 0, sem despesa de juros
+    líquida) com EBIT positivo leva a nota máxima: não há juros a cobrir. Antes
+    caía no "sem dado" e recebia 0, punindo justamente as empresas de caixa líquido.
     """
     if not historico:
         return 0, None
     t0 = historico[0]
     ebit = _safe_g(t0, "ebit")
     int_exp = _safe_g(t0, "interest_expense")
+    if int_exp is None and ebit is not None and ebit > 0:
+        res_fin = _safe_g(t0, "res_fin")
+        if res_fin is not None and res_fin >= 0:
+            return 5, None
     if ebit is None or int_exp is None:
         return 0, None
     int_exp = abs(int_exp)
@@ -1058,19 +1066,127 @@ def _calc_icr_do_historico(historico: list[dict]) -> tuple[int, float | None]:
     return -8, icr
 
 
-def _macro_context_do_banco() -> dict:
-    """Mesmo contexto que o ETL monta. Sem ele, o recálculo pela Home usava Selic 10,5."""
+def macro_context_do_banco() -> dict:
+    """Contexto macro do motor, lido do macro_cache.
+
+    Único lugar que monta o contexto: o app (recálculo pela Home), sync_br, sync_us
+    e recalc_health_scores usam esta função. Antes cada um tinha a sua cópia, com
+    padrões diferentes (Selic 10,5 aqui, 14,75 no sync_br) e chaves faltando.
+    """
     ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5, 'treasury_10y': 4.5}
     try:
         mc = get_all_macro_cache() or {}
         for chave, indicador in (('selic', 'selic'), ('vix', 'vix'),
-                                 ('ipca', 'ipca_12m'), ('treasury_10y', 'treasury_10y')):
+                                 ('ipca', 'ipca_12m'), ('treasury_10y', 'treasury_10y'),
+                                 ('vix_media_10d', 'vix_media_10d')):
             valor = safe_float((mc.get(indicador) or {}).get('value'))
             if valor is not None:
                 ctx[chave] = valor
     except Exception as e:
         logger.debug(f"[health_engine] macro_cache indisponível, usando padrão: {e}")
     return ctx
+
+
+_macro_context_do_banco = macro_context_do_banco
+
+
+# Penalidade de VIX: começa em zero com o VIX (média de 10 pregões) em 20 e chega
+# ao máximo em 30. Antes era um degrau em VIX > 20 com o valor do dia: em nov/2026,
+# com o VIX oscilando em torno de 21, ~110 ativos mudavam de score de um dia para o
+# outro sem nada mudar neles.
+VIX_PENALIDADE_INICIO = 20.0
+VIX_PENALIDADE_CHEIA = 30.0
+
+
+def _penalidade_vix(macro_context: dict, beta: float) -> int:
+    """Pontos a descontar (≤ 0) pelo estresse de mercado, conforme o beta do ativo."""
+    vix_ref = safe_float(macro_context.get('vix_media_10d')) or safe_float(macro_context.get('vix')) or 15.0
+    intensidade = (vix_ref - VIX_PENALIDADE_INICIO) / (VIX_PENALIDADE_CHEIA - VIX_PENALIDADE_INICIO)
+    intensidade = min(max(intensidade, 0.0), 1.0)
+    base = 8 if beta > 1.5 else (5 if beta > 1.2 else 0)
+    return -int(round(base * intensidade))
+
+
+# Cortes dos rótulos por mercado: (acumulação, manutenção, venda abaixo de).
+# Antes era 72/58/40 para tudo, e em nov/2026 83 dos 132 ativos BR caíam em
+# "VENDA DEFINITIVA": Selic de 13,75% e alavancagem derrubam o nível de toda a
+# B3, então o mesmo número não significa o mesmo nos três mercados. Os cortes
+# saíram da distribuição de 20/11/2026 (≈15-20% no topo, ≈15-25% em venda) e
+# devem ser revistos se o nível dos scores mudar de novo.
+LIMIARES_ROTULO = {
+    'br':  (55, 42, 18),
+    'fii': (65, 52, 30),
+    'us':  (68, 55, 30),
+}
+
+
+def status_do_score(score: float, mercado: str, rsi: float = 50,
+                    abaixo_mm200: bool = False) -> str:
+    """Rótulo de ação do score, com cortes do mercado ('br', 'fii' ou 'us')."""
+    acumulacao, manutencao, venda = LIMIARES_ROTULO.get(mercado, LIMIARES_ROTULO['us'])
+    rsi = 50 if rsi is None else rsi
+    if score >= acumulacao:
+        if rsi < 35:
+            return "🟢 ACUMULAÇÃO FORTE: Ativo sólido com desconto e sobrevendido."
+        if rsi > 70:
+            return "🟡 ATENÇÃO: Fundamentos sólidos mas sobrecomprado no curto prazo."
+        return "🟢 ACUMULAÇÃO: Ativo sólido. Bom ponto de entrada."
+    if score >= manutencao:
+        return "🟡 MANUTENÇÃO: Saudável, sem desconto gritante. Aporte neutro."
+    if score >= venda:
+        if abaixo_mm200:
+            return "🟠 REDUZIR EXPOSIÇÃO: Fundamentos fracos e tendência de baixa."
+        return "🟠 AGUARDAR: Fundamentos medianos. Sem catalisador claro."
+    return "🔴 VENDA DEFINITIVA: Quebra de tese (Score Crítico)."
+
+
+# Faixas de P/VP por segmento de FII: (piso do desconto saudável, valor justo, teto
+# do ágio aceitável). Papel/FoF negociam colados no VP (carteira marcada a mercado);
+# tijolo tolera ágio maior porque o laudo do imóvel costuma ficar defasado.
+PVP_FII_SEGMENTO = {
+    'papel':       (0.85, 0.95, 1.05),
+    'logistica':   (0.90, 1.00, 1.15),
+    'lajes':       (0.80, 0.95, 1.10),
+    'shopping':    (0.85, 1.00, 1.20),
+    'fof':         (0.85, 0.95, 1.05),
+    'residencial': (0.88, 1.00, 1.15),
+    'hibrido':     (0.88, 1.00, 1.12),
+    'desconhecido': (0.88, 1.00, 1.12),
+}
+
+
+def _pontuar_pvp_fii(pvp, segmento: str) -> tuple[int, str | None]:
+    """Pilar P/VP do FII (máx 40) com as faixas do segmento.
+
+    Antes as faixas por segmento eram montadas e ignoradas: todo FII usava
+    0,80–0,95 como desconto saudável, o que premiava papel a 0,80 (risco de crédito)
+    igual a logística a 0,80.
+    """
+    if pvp is None:
+        return 15, None
+    try:
+        p = float(pvp)
+    except (TypeError, ValueError):
+        return 15, None
+    if p <= 0:
+        return 15, None
+    piso, justo, teto = PVP_FII_SEGMENTO.get(segmento, PVP_FII_SEGMENTO['desconhecido'])
+    seg = segmento if segmento in PVP_FII_SEGMENTO else 'desconhecido'
+    if piso <= p <= justo:
+        return 40, f"✅ p/vp {p:.2f} — desconto saudável para {seg} (faixa {piso:.2f}–{justo:.2f})."
+    if justo < p <= teto:
+        return 28, None
+    if teto < p <= teto + 0.15:
+        return 15, f"⚠️ p/vp {p:.2f} — ágio moderado vs patrimônio."
+    if p > teto + 0.15:
+        return 5, (f"🚨 p/vp {p:.2f} — ágio elevado. "
+                   f"exige crescimento forte dos proventos para justificar.")
+    if p >= piso - 0.10:
+        return 30, f"✅ p/vp {p:.2f} — desconto relevante. verificar fundamentos do fundo."
+    if p >= piso - 0.20:
+        return 12, (f"⚠️ p/vp {p:.2f} — desconto grande. "
+                    f"mercado pode estar precificando vacância ou má gestão.")
+    return 3, f"🚨 p/vp {p:.2f} — desconto crítico. alto risco de deterioração do patrimônio."
 
 
 def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=None, force: bool = False) -> dict:
@@ -1083,7 +1199,7 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         macro_context = _macro_context_do_banco()
     
     juros_altos_br = macro_context.get('selic', 10.5) > 10.0
-    vix_alto = macro_context.get('vix', 15.0) > 20.0
+    vix_alto = _penalidade_vix(macro_context, beta=2.0) < 0   # há estresse que penalize alguém
     
     # Detecção de Mercado
     is_fii = _is_fii(ticker)
@@ -1224,17 +1340,16 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
             beta_val = float(beta_val) if beta_val is not None else 1.0
 
-            if beta_val > 1.5:
-                penalidade_vix = -8
+            penalidade_vix = _penalidade_vix(macro_context, beta_val)
+            if penalidade_vix <= -5:
                 alertas.append(
                     f"⚠️ ativo de alto beta ({beta_val:.2f}) "
                     f"em stress global (VIX alto). risco elevado."
                 )
-            elif beta_val > 1.2:
-                penalidade_vix = -5
+            elif penalidade_vix < 0:
                 alertas.append(
                     f"⚠️ ativo volátil (beta {beta_val:.2f}) "
-                    f"em cenário de stress (VIX alto)."
+                    f"em cenário de stress (VIX elevado)."
                 )
 
             if not is_fii:
@@ -1248,63 +1363,9 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
             yield_ntnb = _buscar_yield_ntnb()   # yield REAL NTN-B (ex: 6.8%)
 
             # ── P/VP por segmento ──────────────────────────────────────────
-            pvp_thresholds = {
-                'papel':       (0.85, 0.95, 1.05),
-                'logistica':   (0.90, 1.00, 1.15),
-                'lajes':       (0.80, 0.95, 1.10),
-                'shopping':    (0.85, 1.00, 1.20),
-                'fof':         (0.85, 0.95, 1.05),
-                'residencial': (0.88, 1.00, 1.15),
-                'hibrido':     (0.88, 1.00, 1.12),
-                'desconhecido':(0.88, 1.00, 1.12),
-            }
-            pvp_lim = pvp_thresholds.get(segmento, (0.88, 1.00, 1.12))
-
-            score_pvp = 0
-            if pvp is not None and pvp > 0:
-                try:
-                    pvp_f = float(pvp)
-                    if 0.80 <= pvp_f <= 0.95:
-                        score_pvp = 40
-                        alertas.append(
-                            f"✅ p/vp {pvp_f:.2f} — desconto saudável, "
-                            f"melhor ponto de entrada."
-                        )
-                    elif 0.75 <= pvp_f < 0.80:
-                        score_pvp = 30
-                        alertas.append(
-                            f"✅ p/vp {pvp_f:.2f} — desconto relevante. "
-                            f"verificar fundamentos do fundo."
-                        )
-                    elif 0.95 < pvp_f <= 1.05:
-                        score_pvp = 28
-                    elif 1.05 < pvp_f <= 1.20:
-                        score_pvp = 15
-                        alertas.append(
-                            f"⚠️ p/vp {pvp_f:.2f} — ágio moderado vs patrimônio."
-                        )
-                    elif pvp_f > 1.20:
-                        score_pvp = 5
-                        alertas.append(
-                            f"🚨 p/vp {pvp_f:.2f} — ágio elevado. "
-                            f"exige crescimento forte dos proventos para justificar."
-                        )
-                    elif 0.65 <= pvp_f < 0.75:
-                        score_pvp = 12
-                        alertas.append(
-                            f"⚠️ p/vp {pvp_f:.2f} — desconto grande. "
-                            f"mercado pode estar precificando vacância ou má gestão."
-                        )
-                    else:
-                        score_pvp = 3
-                        alertas.append(
-                            f"🚨 p/vp {pvp_f:.2f} — desconto crítico. "
-                            f"alto risco de deterioração do patrimônio."
-                        )
-                except (TypeError, ValueError):
-                    score_pvp = 15
-            else:
-                score_pvp = 15
+            score_pvp, _alerta_pvp = _pontuar_pvp_fii(pvp, segmento)
+            if _alerta_pvp:
+                alertas.append(_alerta_pvp)
 
             # ── Yield vs NTN-B (benchmark correto para FII) ───────────────
             score_y = 0
@@ -1670,7 +1731,6 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
 
             # --- Solvência e Risco (máx 12pts, D/E mais rigoroso em B3 com juros altos) ---
             score_r = 0
-            penalizacao_divida = 2 if (is_br and juros_altos_br) else 1
 
             if debt_equity is not None:
                 limite_de_bom   = 30 if (is_br and juros_altos_br) else 50
@@ -1680,18 +1740,22 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                 elif debt_equity < limite_de_medio: score_r += 6
                 elif debt_equity > 150:
                     alertas.append(f"🚨 risco de solvência (dívida alta, d/e: {debt_equity:.0f}).")
-                    score_r -= (6 * penalizacao_divida)
+                    # −6 fixo: com juros altos os limites de D/E já ficam mais duros, e a
+                    # dívida também pesa no ND/EBITDA (−6) e na cobertura de juros (−8).
+                    # O −12 de antes (×2 com Selic > 10) contava a mesma dívida três vezes.
+                    score_r -= 6
             elif ev_ebitda is not None and ev_ebitda > 0:
                 limite_ev_bom   = 12 if is_us else 8
                 limite_ev_medio = 20 if is_us else 14
 
+                # EV/EBITDA mede preço, não dívida: só serve de aproximação sem o D/E,
+                # e por isso não penaliza (ação cara não é ação endividada).
                 if ev_ebitda <= limite_ev_bom: score_r += 12
                 elif ev_ebitda <= limite_ev_medio: score_r += 6
-                elif ev_ebitda > limite_ev_medio:
-                    alertas.append(f"🚨 alavancagem alta (ev/ebitda: {ev_ebitda:.1f}).")
-                    score_r -= (3 * penalizacao_divida)
-            
-            score_r_final = max(0, score_r)
+
+            # Sem piso em zero: o max(0, ·) de antes anulava a penalidade de dívida
+            # alta (D/E > 150) — o alerta aparecia, mas o score não caía.
+            score_r_final = score_r
 
             # ── Interest Coverage Ratio (EBIT / Despesas Financeiras) ────────
             # Prefere cache; fallback yfinance live.
@@ -1704,6 +1768,8 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
                     breakdown['Interest Coverage (EBIT/JurosExp)'] = "n/a (banco/financeira)"
                 elif isinstance(historico_trim, list) and len(historico_trim) >= 1:
                     score_icr, icr_val = _calc_icr_do_historico(historico_trim)
+                    if icr_val is None and score_icr > 0:
+                        alertas.append("✅ resultado financeiro positivo — sem juros líquidos a cobrir.")
                 elif acao is not None:
                     _fin_icr = acao.financials
                     if _fin_icr is not None and not _fin_icr.empty:
@@ -1889,29 +1955,11 @@ def calcular_health_score(ticker: str, macro_context: dict = None, hist_externo=
         # ==========================================
         score = min(max(int(score), 0), 100)
 
-        # RSI como qualificador adicional, não como gate exclusivo
-        rsi_sobrevendido  = rsi < 35
-        rsi_sobrecomprado = rsi > 70
+        # RSI e MM200 qualificam o rótulo; os cortes dependem do mercado
+        mercado = 'fii' if is_fii else ('br' if is_br else 'us')
+        status_acao = status_do_score(score, mercado, rsi=rsi,
+                                      abaixo_mm200=bool(preco_atual < mm200))
 
-        if score >= 72:
-            if rsi_sobrevendido:
-                status_acao = "🟢 ACUMULAÇÃO FORTE: Ativo sólido com desconto e sobrevendido."
-            elif rsi_sobrecomprado:
-                status_acao = "🟡 ATENÇÃO: Fundamentos sólidos mas sobrecomprado no curto prazo."
-            else:
-                status_acao = "🟢 ACUMULAÇÃO: Ativo sólido. Bom ponto de entrada."
-        elif score >= 58:
-            status_acao = "🟡 MANUTENÇÃO: Saudável, sem desconto gritante. Aporte neutro."
-        elif score >= 40:
-            if preco_atual < mm200:
-                status_acao = "🟠 REDUZIR EXPOSIÇÃO: Fundamentos fracos e tendência de baixa."
-            else:
-                status_acao = "🟠 AGUARDAR: Fundamentos medianos. Sem catalisador claro."
-        elif score < 40:
-            status_acao = "🔴 VENDA DEFINITIVA: Quebra de tese (Score Crítico)."
-        else:
-            status_acao = "⚪ AGUARDAR: Zona indefinida."
-            
         alertas.insert(0, status_acao)
 
         payload = {

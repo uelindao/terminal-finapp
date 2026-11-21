@@ -429,18 +429,9 @@ def main():
     # Health scores — usa hist já baixado, sem chamadas extras ao Yahoo
     print("[sync_us] calculando health scores...")
     tickers_com_hist = [t for t in SCREENER_US if t in hist_dict]
-    try:
-        from database.db import get_all_macro_cache
-        _mc = get_all_macro_cache()
-        macro_ctx = {
-            'selic':  _mc.get('selic', {}).get('value', 10.5),
-            'vix':    _mc.get('vix', {}).get('value', 15.0),
-            'ipca':   _mc.get('ipca_12m', {}).get('value', 4.5),
-            'treasury_10y': _mc.get('treasury_10y', {}).get('value', 4.5),
-        }
-    except Exception as e:
-        logger.debug(f"macro context usando padrão: {e}")
-        macro_ctx = {'selic': 10.5, 'vix': 15.0, 'ipca': 4.5}
+    from utils.health_engine import macro_context_do_banco
+    macro_ctx = macro_context_do_banco()
+    print(f"[sync_us] macro context: {macro_ctx}")
 
     sync_health_scores(tickers_com_hist, hist_dict, macro_ctx, quality_map=quality_map)
 

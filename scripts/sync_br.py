@@ -458,28 +458,12 @@ def main():
 
     # Health scores — usa hist já baixado, sem chamadas extras ao Yahoo
     print("[sync_br] calculando health scores...")
-    tickers_com_hist = [t for t in BRASIL_TODOS if t in hist_dict]
-    macro_ctx = {'selic': 14.75, 'vix': 15.0, 'ipca': 5.5}
-    try:
-        from scripts.supabase_helper import get_client
-        _sb = get_client()
-        _res = _sb.table("macro_cache").select("indicator,value").in_(
-            "indicator", ["selic", "vix", "ipca_12m", "treasury_10y"]
-        ).execute()
-        for row in (_res.data or []):
-            _k = row["indicator"]
-            _v = float(row["value"])
-            if _k == "selic":
-                macro_ctx["selic"] = _v
-            elif _k == "vix":
-                macro_ctx["vix"] = _v
-            elif _k == "ipca_12m":
-                macro_ctx["ipca"] = _v
-            elif _k == "treasury_10y":
-                macro_ctx["treasury_10y"] = _v
-        print(f"[sync_br] macro context: {macro_ctx}")
-    except Exception as e:
-        print(f"[sync_br] macro context usando padrão — {e}")
+    # ETFs de índice (BOVA11, IVVB11...) ficam de fora: não têm balanço, e o motor
+    # os zerava pela penalidade de dados, poluindo radar e rótulos.
+    tickers_com_hist = [t for t in BRASIL_TODOS if t in hist_dict and t not in BR_INDICES]
+    from utils.health_engine import macro_context_do_banco
+    macro_ctx = macro_context_do_banco()
+    print(f"[sync_br] macro context: {macro_ctx}")
 
     sync_health_scores(tickers_com_hist, hist_dict, macro_ctx, quality_map=quality_map)
 

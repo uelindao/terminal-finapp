@@ -29,7 +29,7 @@
     "ntnb_yield": 6.8
   },
   "expected": {
-    "score": 4,
+    "score": 14,
     "tolerancia": 2
   }
 }

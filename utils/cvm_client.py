@@ -1214,6 +1214,9 @@ def get_historico_trimestral_cvm(ticker: str, anos: int = 3) -> list[dict]:
             "gross":            luc_bruto,
             "opex":             None,
             "interest_expense": int_exp,
+            # Resultado financeiro líquido anualizado. Positivo = a empresa ganha mais
+            # com aplicações do que paga de juros (ex.: WEG); o ICR usa isso.
+            "res_fin":          res_fin,
             "ativos_totais":    d.get("ativo_tot"),
             "passivos_totais":  None,
             "patrimonio":       d.get("pl"),

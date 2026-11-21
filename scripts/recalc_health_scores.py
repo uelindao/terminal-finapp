@@ -29,22 +29,8 @@ logger = get_logger(__name__)
 
 
 def _macro_context():
-    sb = get_client()
-    ctx = {'selic': 14.75, 'vix': 15.0, 'ipca': 5.5, 'treasury_10y': 4.5}
-    try:
-        res = sb.table("macro_cache").select("indicator,value").in_(
-            "indicator", ["selic", "vix", "ipca_12m", "treasury_10y"]
-        ).execute()
-        for row in (res.data or []):
-            k = row["indicator"]
-            v = float(row["value"])
-            if k == "selic":     ctx["selic"] = v
-            elif k == "vix":     ctx["vix"] = v
-            elif k == "ipca_12m":ctx["ipca"] = v
-            elif k == "treasury_10y": ctx["treasury_10y"] = v
-    except Exception as e:
-        print(f"[recalc] macro context fallback — {e}")
-    return ctx
+    from utils.health_engine import macro_context_do_banco
+    return macro_context_do_banco()
 
 
 def main():
