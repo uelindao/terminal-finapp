@@ -242,6 +242,42 @@ def test_backup_gera_copia_integra_e_roda_rotacao(sb, tmp_path):
     copia.close()
 
 
+def test_rotacao_guarda_uma_copia_por_semana_alem_das_diarias(tmp_path):
+    from database.local_db import _backups_a_manter
+    dias = ["20261020", "20261021", "20261027", "20261103", "20261110",
+            "20261116", "20261117", "20261118", "20261119", "20261120"]
+    arquivos = [tmp_path / f"finterminal_{d}_070000.db" for d in dias]
+    guardar = {a.name for a in _backups_a_manter(arquivos, manter=3, semanas=4)}
+    # 3 diárias mais novas + a última de cada uma das 4 semanas mais recentes
+    assert guardar == {"finterminal_20261118_070000.db", "finterminal_20261119_070000.db",
+                       "finterminal_20261120_070000.db", "finterminal_20261103_070000.db",
+                       "finterminal_20261110_070000.db", "finterminal_20261027_070000.db"}
+
+
+def test_backup_com_banco_corrompido_falha_sem_apagar_copias(sb, tmp_path, monkeypatch):
+    import database.local_db as local_db
+    pasta = tmp_path / "bk"
+    pasta.mkdir()
+    antigas = [pasta / f"finterminal_202611{d:02d}_070000.db" for d in range(1, 12)]
+    for a in antigas:
+        a.write_bytes(b"x")
+    monkeypatch.setattr(local_db, "verificar_integridade", lambda conn=None: ["Tree 68 page 3485"])
+    with pytest.raises(local_db.BancoCorrompido):
+        local_db.fazer_backup(pasta, manter=2)
+    assert all(a.exists() for a in antigas)
+
+
+def test_backup_interrompido_nao_conta_como_copia_do_dia(sb, tmp_path):
+    from datetime import datetime
+    pasta = tmp_path / "bk"
+    pasta.mkdir()
+    sobra = pasta / f"finterminal_{datetime.now():%Y%m%d}_000001.parcial"
+    sobra.write_bytes(b"pela metade")
+    arquivo = fazer_backup(pasta, uma_vez_por_dia=True)
+    assert arquivo.suffix == ".db" and not sobra.exists()
+    assert sqlite3.connect(arquivo).execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
 def test_todo_on_conflict_do_codigo_tem_indice_unico(sb):
     """Sem UNIQUE correspondente o SQLite recusa o upsert só em tempo de execução."""
     raiz = Path(__file__).resolve().parent.parent

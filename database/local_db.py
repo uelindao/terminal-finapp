@@ -440,17 +440,53 @@ def get_client() -> LocalClient:
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 
+class BancoCorrompido(RuntimeError):
+    """O quick_check do SQLite não voltou 'ok'."""
+
+
+def verificar_integridade(conn: sqlite3.Connection | None = None) -> list[str]:
+    """Problemas que o quick_check encontrou; lista vazia quando o banco está são."""
+    resultado = [r[0] for r in (conn or get_connection()).execute("PRAGMA quick_check(20)").fetchall()]
+    return [] if resultado == ["ok"] else resultado
+
+
+def _backups_a_manter(arquivos: list[Path], manter: int, semanas: int) -> set[Path]:
+    """As `manter` cópias mais novas, mais a mais nova de cada uma das últimas `semanas`.
+
+    As semanais existem porque em nov/2026 o banco ficou corrompido por 15 dias sem
+    ninguém notar, e a rotação de 7 dias já tinha apagado toda cópia sã.
+    """
+    ordenados = sorted(arquivos)
+    guardar = set(ordenados[-manter:]) if manter > 0 else set()
+    por_semana: dict[tuple[int, int], Path] = {}
+    for arquivo in ordenados:
+        try:
+            dia = datetime.strptime(arquivo.stem.split("_")[1], "%Y%m%d")
+        except (IndexError, ValueError):
+            continue
+        por_semana[dia.isocalendar()[:2]] = arquivo  # o último da semana vence
+    guardar.update(sorted(por_semana.values())[-semanas:] if semanas > 0 else [])
+    return guardar
+
+
 def fazer_backup(destino: Path | None = None, manter: int = 7,
-                 uma_vez_por_dia: bool = False) -> Path:
+                 uma_vez_por_dia: bool = False, semanas: int = 6) -> Path:
     """Cópia consistente (API de backup do SQLite) e rotação dos arquivos antigos.
 
+    Antes de copiar roda o quick_check: com o banco corrompido levanta
+    BancoCorrompido e não apaga nenhuma cópia antiga, que pode ser a última sã.
+
     Com `uma_vez_por_dia`, devolve a cópia de hoje se ela já existe: o ETL roda várias
-    vezes ao dia e, sem isso, as 7 cópias cobririam só dois dias.
+    vezes ao dia e, sem isso, as 7 cópias cobririam só dois dias. Além das `manter`
+    diárias, guarda uma cópia por semana nas últimas `semanas`.
 
     Por padrão grava em data/backups. FINTERMINAL_BACKUP_DIR aponta para fora do
     disco principal (ex.: pasta do OneDrive): o banco agora é o único lar da
     carteira e do histórico de scores.
     """
+    problemas = verificar_integridade()
+    if problemas:
+        raise BancoCorrompido("banco corrompido, backup não feito: " + "; ".join(problemas[:3]))
     pasta = destino or Path(os.environ.get("FINTERMINAL_BACKUP_DIR", "") or db_path().parent / "backups")
     pasta.mkdir(parents=True, exist_ok=True)
     if uma_vez_por_dia:
@@ -458,11 +494,22 @@ def fazer_backup(destino: Path | None = None, manter: int = 7,
         if de_hoje:
             return de_hoje[-1]
     arquivo = pasta / f"finterminal_{datetime.now():%Y%m%d_%H%M%S}.db"
-    copia = sqlite3.connect(arquivo)
+    # Grava com outro nome e só renomeia no fim: uma cópia interrompida (PC
+    # desligado no meio) não pode passar por backup do dia.
+    parcial = arquivo.with_suffix(".parcial")
+    copia = sqlite3.connect(parcial)
     try:
         get_connection().backup(copia)
     finally:
         copia.close()
-    for antigo in sorted(pasta.glob("finterminal_*.db"))[:-manter]:
-        antigo.unlink()
+    parcial.replace(arquivo)
+    for sobra in pasta.glob("finterminal_*.parcial*"):
+        if sobra != parcial:
+            sobra.unlink(missing_ok=True)
+    existentes = sorted(pasta.glob("finterminal_*.db"))
+    guardar = _backups_a_manter(existentes, manter, semanas)
+    for antigo in existentes:
+        if antigo not in guardar:
+            antigo.unlink()
+            Path(f"{antigo}-journal").unlink(missing_ok=True)
     return arquivo
