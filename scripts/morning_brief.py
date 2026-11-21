@@ -1,8 +1,8 @@
 """
 scripts/morning_brief.py — relatório matinal automatizado.
 
-Roda via GitHub Action às 11:00 UTC (8:00 BRT, dias úteis). Gera e envia
-email HTML com 4 blocos:
+Roda pelo Agendador do Windows às 8:00 (dias úteis; tarefa FinTerminal\MorningBrief). Gera e envia
+email HTML com a saúde dos dados no topo e 4 blocos:
 
 1. Regime macro atual (utils/regime_classifier)
 2. Top 5 altas / Top 5 quedas overnight (S&P 500 sample via yfinance)
@@ -184,6 +184,28 @@ def bloco_alertas(client) -> str:
         return ""
 
 
+# ── Bloco 0: Saúde dos dados ─────────────────────────────────────────────────
+def bloco_saude_dados() -> str:
+    """Faixa vermelha no topo quando o ETL falhou ou o banco está doente; uma linha discreta se não."""
+    try:
+        from utils.saude_dados import diagnosticar
+        problemas = diagnosticar()
+    except Exception as e:
+        logger.error(f"bloco_saude_dados falhou: {e}", exc_info=True)
+        problemas = [f"Diagnóstico dos dados falhou: {type(e).__name__}: {e}"]
+    if not problemas:
+        return ("<p style='margin:0 0 14px 0; color:#2e7d32; font-size:0.85rem;'>"
+                "Dados em dia: ETL de macro, BR e EUA concluído nas últimas 36h e banco íntegro.</p>")
+    itens = "".join(f"<li>{_html.escape(p)}</li>" for p in problemas)
+    return f"""
+<div style="border-left:4px solid #e74c3c; background:#fdecea; padding:10px 16px;
+            border-radius:4px; margin-bottom:18px; color:#7f1d1d;">
+  <strong>⚠️ Problemas na atualização dos dados</strong>
+  <ul style="margin:6px 0 0 18px; padding:0; font-size:0.9rem;">{itens}</ul>
+</div>
+"""
+
+
 # ── Montagem final ───────────────────────────────────────────────────────────
 def montar_html(client) -> str:
     data_str = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%d/%m/%Y")
@@ -195,6 +217,7 @@ def montar_html(client) -> str:
              margin:0 0 18px 0;">
     ⚡ Finterminal — Morning Brief &middot; {data_str}
   </h1>
+  {bloco_saude_dados()}
   {bloco_regime()}
   {bloco_movimentos_overnight()}
   {bloco_earnings_hoje(client)}
